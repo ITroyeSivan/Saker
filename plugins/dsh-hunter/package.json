@@ -1,0 +1,41 @@
+{
+  "name": "@dsh-external/dsh-hunter",
+  "version": "1.0.0",
+  "description": "DSH hunter plugin: FOFA / Hunter(qianxin) / Quake(360) aggregated asset search with unified DSL → per-platform syntax conversion, quota-aware pagination/export, API-key settings panel, and the code-audit live-verification pipeline (L0 fingerprint check on internet assets, L1 minimal-impact EXP only on user-authorized assets).",
+  "keywords": [
+    "deepseek",
+    "deepseek-harness",
+    "dsh-plugin",
+    "dsh-bundle",
+    "asset-hunting",
+    "fofa",
+    "hunter",
+    "quake"
+  ],
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "*",
+    "@dsh-external/dsh-redteam-results": "*"
+  },
+  "license": "MIT",
+  "author": "Saker contributors",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  }
+}

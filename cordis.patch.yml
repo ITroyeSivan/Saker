@@ -1,0 +1,7 @@
+# Saker 模式包 bundle patch：把 preset/pentest 与 preset/code-audit 两个 agent 模式
+# 作为只读预设根注册进宿主。整个包自包含 —— 安装时随包携带 preset/ 与 shared/，
+# 不向 DSH_HOME 拷贝任何文件（更新 = 替换包，数据零残留）。
+
+- insert:
+    - id: saker-preset-root
+      name: 'dsh-saker/preset-root'

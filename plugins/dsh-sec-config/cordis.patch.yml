@@ -1,0 +1,9 @@
+# One installable bundle row mounts the Host service and publishes its Web client.
+- insert:
+    - id: dsh-sec-config
+      name: '@dsh-external/dsh-sec-config'
+      config:
+        tools: {}
+        services: {}
+        dnslog: {}
+        apiKeys: {}

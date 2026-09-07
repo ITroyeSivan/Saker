@@ -1,0 +1,24 @@
+# dependencies / build
+node_modules/
+.pnpm-store/
+*.tgz
+*.tar.gz
+dist/
+lib/**/*.map
+
+# runtime data (never publish)
+.dsh/
+sessions/
+attachments/
+*.credentials.yaml
+settings.yaml
+
+# os / editor noise
+Thumbs.db
+.DS_Store
+*.log
+.idea/
+.vscode/
+
+# local archives
+archive/

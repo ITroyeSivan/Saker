@@ -1,0 +1,47 @@
+{
+  "name": "dsh-saker",
+  "version": "0.1.0",
+  "description": "Saker 模式包 — 基于 DeepSeek Harness 的攻防平台：渗透测试 / 代码审计 双 agent 模式（含领域知识库、技能 playbook、协作子代理），自包含 bundle，随包只读注册、不污染 DSH_HOME。",
+  "type": "module",
+  "main": "./lib/preset-root.js",
+  "exports": {
+    ".": "./lib/preset-root.js",
+    "./preset-root": "./lib/preset-root.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "preset",
+    "shared",
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "license": "MIT",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-bundle",
+    "dsh-plugin",
+    "pentest",
+    "code-audit",
+    "redteam",
+    "security"
+  ],
+  "engines": {
+    "node": ">=22.5"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
