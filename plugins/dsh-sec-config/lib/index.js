@@ -184,57 +184,86 @@ function resolveBurpProxyPath() {
 }
 
 /**
- * 原生目录选择器（「工具库」行「选择目录」按钮用）——用 PowerShell STA 拉起
- * System.Windows.Forms.FolderBrowserDialog，把选中绝对路径经 UTF-8 stdout 回传。
- * 仅当平台 UI 与宿主进程同机（典型 localhost 部署）时可用；取消/远程/非 Windows
- * 返回空串。3 分钟无人响应强制 kill，防对话框残留在别的窗口后面。
- * 不用 <input webkitdirectory>——浏览器安全模型只给相对路径，拿不到本机绝对路径。
+ * 原生目录选择器（「工具库」行「选择目录」按钮用）。
+ *
+ * 体验设计（对比技能页上传的浏览器原生 file input）：浏览器拿不到本机绝对路径，
+ * 目录选择只能由宿主弹原生对话框。为避免每次点击都冷启动一个 PowerShell 进程
+ * （首弹 ~1-3s、观感"卡"），这里维护一个**常驻 worker**：首次使用时 spawn 一个
+ * -STA PowerShell 进程跑 tools/pick-worker.ps1，之后每次 pick 只是往 stdin 写一行、
+ * 等 stdout 回一行——第二次起接近即时。
+ *
+ * Worker 输出行：`PICK:<abs path>` / `CANCEL` / `ERR:<msg>`；宿主退出（stdin EOF）
+ * worker 自动 break 退出，不留僵尸。取消/超时/非 Windows 返回空串。
  */
-function pickDirectoryWindows() {
-  return new Promise((resolve) => {
-    const ps = [
-      '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
-      'Add-Type -AssemblyName System.Windows.Forms | Out-Null',
-      '$f = New-Object System.Windows.Forms.FolderBrowserDialog',
-      '$f.Description = "选择工具所在目录"',
-      '$f.ShowNewFolderButton = $false',
-      '$r = $f.ShowDialog()',
-      'if ($r -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.WriteLine($f.SelectedPath) }',
-    ].join('; ')
-    let child
-    let settled = false
-    const finish = (val) => {
-      if (settled) return
-      settled = true
-      try { child && child.kill() } catch { /* 已退出 */ }
-      resolve(val)
+class ResidentDirectoryPicker {
+  constructor(scriptPath) {
+    this.scriptPath = scriptPath
+    this.child = null
+    this.lineBuf = ''
+    this.queue = [] // { resolve, timer }
+  }
+
+  /** 惰性 spawn（幂等）；失败则清空并在下一次 pick 重试。 */
+  ensure() {
+    if (this.child && this.child.exitCode === null && this.child.stdin && this.child.stdin.writable) return
+    this.child = null
+    const child = spawn('powershell.exe',
+      ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', this.scriptPath],
+      { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, POWERSHELL_TELEMETRY_OPTOUT: '1' } })
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', (chunk) => this.onData(chunk))
+    child.stderr.on('data', () => { /* 诊断需要时透出 */ })
+    child.on('error', () => { this.onExit() })
+    child.on('close', () => { this.onExit() })
+    this.child = child
+  }
+
+  onData(chunk) {
+    this.lineBuf += chunk
+    let idx
+    while ((idx = this.lineBuf.indexOf('\n')) >= 0) {
+      const line = this.lineBuf.slice(0, idx).replace(/\r$/, '')
+      this.lineBuf = this.lineBuf.slice(idx + 1)
+      if (!line) continue
+      const item = this.queue.shift()
+      if (!item) continue
+      clearTimeout(item.timer)
+      item.resolve(line.startsWith('PICK:') ? line.slice(5) : '')
     }
-    try {
-      child = spawn('powershell.exe', ['-NoProfile', '-STA', '-Command', ps], {
-        windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, POWERSHELL_TELEMETRY_OPTOUT: '1' },
-      })
-    } catch (err) {
-      finish('')
-      return
-    }
-    let stdout = ''
-    let stderr = ''
-    const killTimer = setTimeout(() => finish(''), 180000)
-    child.stdout.on('data', (b) => { stdout += b.toString('utf8') })
-    child.stderr.on('data', (b) => { stderr += b.toString('utf8') })
-    child.on('error', () => { clearTimeout(killTimer); finish('') })
-    child.on('close', (code) => {
-      clearTimeout(killTimer)
-      // PowerShell 5.1 的 [Console]::Out 默认走系统 ANSI/OEM 代码页，中文路径
-      // 可能被转成 ????——这里接受非 ASCII 丢字风险由 ps 侧转 UTF-8 规避：
-      // 上面输出经 [Console]::Out.WriteLine 走进程 stdout，Node 按 utf8 读。
-      // 兜底：若 code!=0 或空串，检查 stderr 仅在调试需要时透出。
-      if (code !== 0 && !stderr.includes('System.Windows.Forms')) finish('')
-      else finish(stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).pop() ?? '')
+  }
+
+  onExit() {
+    const rest = this.queue
+    this.queue = []
+    this.child = null
+    for (const item of rest) { clearTimeout(item.timer); item.resolve('') }
+  }
+
+  /** 弹一次目录选择。@returns Promise<string> 绝对路径；取消/失败=空串。 */
+  pick(timeoutMs = 180000) {
+    return new Promise((resolve) => {
+      if (process.platform !== 'win32') return resolve('')
+      try { this.ensure() } catch { return resolve('') }
+      const item = {
+        resolve,
+        timer: setTimeout(() => {
+          const i = this.queue.indexOf(item)
+          if (i >= 0) this.queue.splice(i, 1)
+          resolve('')
+        }, timeoutMs),
+      }
+      this.queue.push(item)
+      try { this.child.stdin.write('pick\r\n') } catch { this.onExit() }
     })
-  })
+  }
+
+  /** 宿主退出时优雅关闭。 */
+  dispose() {
+    if (this.child && this.child.exitCode === null && this.child.stdin && this.child.stdin.writable) {
+      try { this.child.stdin.write('quit\r\n') } catch { /* ignore */ }
+      setTimeout(() => { try { this.child && this.child.kill() } catch { /* ignore */ } }, 500)
+    }
+  }
 }
 
 /**
@@ -457,6 +486,18 @@ export function apply(ctx, config = {}) {
   let scope = null
   const base = { tools: {}, services: {}, dnslog: {}, apiKeys: {}, ...(config ?? {}) }
 
+  // 常驻目录选择 worker：首次 pick 惰性 spawn，之后复用（免每次冷启动 PowerShell）。
+  // worker 脚本随插件包 tools/ 分发（package.json files 已含 tools）。
+  const picker = new ResidentDirectoryPicker(fileURLToPath(new URL('../tools/pick-worker.ps1', import.meta.url)))
+  const disposePicker = () => { try { picker.dispose() } catch { /* ignore */ } }
+  try {
+    if (typeof ctx.effect === 'function') {
+      ctx.effect(disposePicker, 'dsh-sec-config: picker')
+    } else if (typeof ctx.on === 'function') {
+      ctx.on('dispose', disposePicker)
+    }
+  } catch { /* 无生命周期钩子：worker 依赖 stdin EOF 自退，可接受 */ }
+
   try {
     scope = ctx.settings.register(NAMESPACE, Config, { base })
     current = () => scope.get()
@@ -513,11 +554,10 @@ export function apply(ctx, config = {}) {
         if (endpoint === 'pick-directory') {
           // Native folder picker for the 工具库 row. Returns { path } where
           // path is the absolute path string, or empty string on cancel /
-          // non-Windows host. Powershell is spawned in STA mode and the
-          // dialog is force-killed after 3 min if left orphaned.
-          if (process.platform !== 'win32') return ok({ path: '' })
+          // non-Windows host. A resident PowerShell worker (spawned once,
+          // kept warm) drives FolderBrowserDialog so repeat clicks are fast.
           try {
-            const path = await pickDirectoryWindows()
+            const path = await picker.pick()
             return ok({ path: typeof path === 'string' ? path.trim() : '' })
           } catch (err) {
             return failure(err && err.message ? err.message : String(err))
