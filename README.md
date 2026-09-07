@@ -17,14 +17,7 @@
 
 </div>
 
-<!--
-  HERO 截图：保存为 docs/images/saker-overview.png，然后删除下方占位文字并取消图片注释。
-  建议 1600×900，展示真实会话 + 攻击面矩阵或成果页；务必隐藏目标、Cookie、Token 和本地路径。
--->
-<!-- ![Saker 工作台总览](./docs/images/saker-overview.png) -->
-
-> 📷 **主视觉预留**：这里放一张能同时看到会话、当前阶段和安全工作台入口的全景图。
-
+![Saker 工作台总览](./docs/images/saker-overview.png)
 ## Saker 是什么
 
 Saker 是一套安装在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 上的安全测试模式与插件集合。它提供 **渗透测试**、**代码审计** 两种专业模式，并把本机扫描器、MCP 服务、子代理、攻击面台账和漏洞成果串进同一个会话。
@@ -54,27 +47,14 @@ flowchart LR
 
 两个模式各带独立 persona、playbook 和离线参考资料。安全方法不会一次性塞满上下文，而是按当前任务读取相关内容。
 
-<!--
-  模式截图：docs/images/modes.png
-  建议左右拼图：左侧模式选择器，右侧代码审计中一条 entry → sink 调用链。
--->
-<!-- ![Saker 的渗透测试与代码审计模式](./docs/images/modes.png) -->
-
-> 📷 **模式截图预留**：模式选择器 + 一段真实任务过程，比空白欢迎页更有说服力。
-
+![Saker 的渗透测试与代码审计模式](./docs/images/modes.png)
 ### 攻击面不再靠记忆
 
 AttackAtlas 按目标记录每个攻击面的状态：已测有发现、已测未命中、不适用、预算耗尽或尚未测试。你可以打开格子查看依据，也可以从矩阵继续派发任务。
 
 对于重复使用的测试流程，还可以把主类、子项、工具和 MCP 服务编排成方法模板，检查断链、孤立节点和循环后再运行。
 
-<!--
-  动图：docs/images/attack-atlas.gif
-  建议 15–20 秒：切换目标 → 打开格子 → 派发任务 → 状态回写。不要录入真实资产。
--->
-<!-- ![AttackAtlas 按目标记录安全测试覆盖](./docs/images/attack-atlas.gif) -->
-
-> 📷 **AttackAtlas 演示预留**：展示“从矩阵发现空白，再派发下一项测试”。
+![AttackAtlas 按目标记录安全测试覆盖](./docs/images/attack-atlas.png)
 
 ### 工具归工具，判断归判断
 
@@ -84,13 +64,10 @@ AttackAtlas 按目标记录每个攻击面的状态：已测有发现、已测�
 
 MCP Studio 支持 stdio 和 streamable HTTP 服务，可导入常见 MCP JSON、查看连接状态与工具列表、执行握手诊断并查看调用记录。Burp 的 legacy SSE 接入由安全配置插件内置桥接，Yakit 可通过 MCP 地址接入。
 
-<!--
-  工具截图：docs/images/tooling.png
-  建议拼图：安全配置页 + MCP Studio 工具预览。隐藏 env、headers、API Key、Token 和绝对路径。
--->
-<!-- ![本机工具配置与 MCP Studio](./docs/images/tooling.png) -->
+![本机工具配置与 MCP Studio](./docs/images/tool1.png)
 
-> 📷 **工具接入截图预留**：一边是本机工具状态，一边是已连接的 MCP 工具列表。
+![本机工具配置与 MCP Studio](./docs/images/tool2.png)
+
 
 ### 从“可能有问题”到“可以交付”
 
@@ -98,28 +75,14 @@ Redteam Results 按会话保存发现，区分严重度、验证状态和证据�
 
 关键发现可以交给本机 Claude Code 或 Codex CLI 进行第二路径复核；没有外部 CLI 时仍可使用 dsh 原生子代理。工具调用过程由 Trace Vault 记录，长任务的目标、待办与阶段状态可以跨上下文恢复。
 
-<!--
-  成果截图：docs/images/findings.png
-  建议展示成果列表和一条展开详情，画面里必须出现证据、复核状态和修复建议。
--->
-<!-- ![Saker 漏洞成果、证据与复核状态](./docs/images/findings.png) -->
-
-> 📷 **成果截图预留**：用一条完整的脱敏发现展示“结论为什么可信”。
+![Saker 漏洞成果、证据与复核状态](./docs/images/findings.png)
 
 ### 知识库随包，来源清晰可维护
 
 离线资料随包即用：内置 [PayloadsAllTheThings](https://github.com/swisskyrepo/PayloadsAllTheThings) 全量文本快照（66 个漏洞章节的 README 与 payload 清单，commit `3ac2790`，MIT），加上渗透与代码审计两套手册和 Semgrep 规则，都不依赖外网。
 
 “设置 → 知识库”按来源和主题分类展示这些资料：随包 PATT、随包手册、用户积累与导入源各自分组，每个分类带文件数徽章、可折叠展开。关键词检索先定位到文件与行号，再点开读原文；文档可以存放在用户层持续修订，也可以从 Git 仓库或本机文件夹整库导入（离线后仍可检索）。不同来源与许可证在目录内各有声明。
-
-<!--
-  知识库截图：docs/images/knowledge.png
-  建议展示左侧分类分组 + 计数徽章 + 右侧打开的一篇随包 PATT 章节。
--->
-<!-- ![知识库的分类分组浏览与随包 PATT](./docs/images/knowledge.png) -->
-
-> 📷 **知识库截图预留**：分类分组视图 + 一篇展开的随包 PATT 文档，最好再带上一次检索命中。
-
+![知识库的分类分组浏览与随包 PATT](./docs/images/knowledge.png)
 ## 一次完整任务怎样推进
 
 1. 在新会话选择 `pentest` 或 `code-audit`，写清目标、授权范围和限制。
