@@ -27,4 +27,12 @@ Saker 本体（模式/提示词/插件源码/文档）以 MIT 授权（见根目
 - `preset/*/refs/` 下其余知识库文档为团队自研方法论或整理自公开安全资料，README 已声明"仅用于授权测试学习"；其中引用到的外部检测模式（如私钥正则等）均属公开安全知识。
 - `preset/code-audit/refs/lang/*/semgrep-rules/` 为用户自建规则，无第三方许可负担。
 
+## 5. PayloadsAllTheThings — `preset/shared/refs/PayloadsAllTheThings/`
+
+- 来源：https://github.com/swisskyrepo/PayloadsAllTheThings（swisskyrepo）
+- 许可证：**MIT**（该目录内随附上游 `LICENSE` 原文）
+- 快照：commit `3ac2790`（master，浅克隆，2026-09-07 收录）
+- 收录范围：仅 `md/txt/yaml/yml` 文本（各章节 README、Intruder payload 清单、方法论），不含图片/二进制/脚本
+- 约束要点：MIT 允许自由使用与再分发，需保留版权声明与本声明；用途限定授权测试与学习（详见该目录 `_PATT_SOURCE_NOTICE.md`）
+
 如你是上述任一内容的权利人并认为本仓库的收录方式不妥，欢迎提 Issue 联系移除。

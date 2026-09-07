@@ -45,6 +45,7 @@ function badge(bg, fg, text, title) {
 }
 var SOURCE_META = {
   bundle: { label: '包内', bg: '#e4e4e7', fg: '#6e6e73' },
+  patt: { label: 'PATT', bg: '#fff7ed', fg: '#c2410c' },
   user: { label: '用户', bg: '#dbeafe', fg: '#1d4ed8' },
   import: { label: '导入', bg: '#f3e8ff', fg: '#7c3aed' },
 };
@@ -72,14 +73,26 @@ function TextArea(props) {
 }
 
 // ── Directory tree section ──────────────────────────────────────────────────
+// Each source is shown as "category groups" — the top-level directories are
+// rendered as bold category headers carrying a recursive file-count badge,
+// so a large knowledge base (e.g. the bundled PATT chapters) reads as tidy
+// grouped sections instead of one piled-up indented list.
 
 function TreeRow(props) {
-  var indent = { paddingLeft: 8 + props.depth * 14, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: props.item.kind === 'dir' ? 'pointer' : 'pointer', borderRadius: 4, paddingTop: 2, paddingBottom: 2 };
+  var item = props.item;
+  var isCat = item.kind === 'dir' && props.depth === 0;
+  var indent = { paddingLeft: 8 + props.depth * 14, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, borderRadius: 4, paddingTop: 2, paddingBottom: 2 };
+  if (isCat) { indent.marginTop = 2; indent.background = 'var(--dsw-alias-bg-fill,#f4f4f5)'; indent.fontWeight = 600; }
   var active = props.active ? { background: 'var(--dsw-alias-bg-fill, #f0f2f5)' } : null;
-  var arrow = props.item.kind === 'dir' ? (props.item.expanded ? '▾ ' : '▸ ') : '  ';
-  var name = React.createElement('span', { style: { color: props.item.kind === 'dir' ? 'var(--dsw-alias-label-primary,#1a1a1a)' : 'var(--dsw-alias-label-secondary,#3f3f46)', fontWeight: props.item.kind === 'dir' ? 600 : 400 } }, props.item.name);
-  var meta = props.item.kind === 'file' && props.item.size > 0 ? React.createElement('span', { style: { fontSize: 11, color: '#9a9aa0', marginLeft: 'auto' } }, (props.item.size / 1024).toFixed(1) + ' KB') : null;
-  return React.createElement('div', { style: Object.assign(indent, active), onClick: props.onClick },
+  var arrow = item.kind === 'dir' ? (item.expanded ? '▾ ' : '▸ ') : '  ';
+  var name = React.createElement('span', { style: { color: item.kind === 'dir' ? 'var(--dsw-alias-label-primary,#1a1a1a)' : 'var(--dsw-alias-label-secondary,#3f3f46)', fontWeight: item.kind === 'dir' ? (isCat ? 600 : 600) : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, item.name);
+  var meta = null;
+  if (item.kind === 'file' && item.size > 0) {
+    meta = React.createElement('span', { style: { fontSize: 11, color: '#9a9aa0', marginLeft: 'auto', flex: '0 0 auto' } }, (item.size / 1024).toFixed(1) + ' KB');
+  } else if (item.kind === 'dir' && typeof item.fileCount === 'number') {
+    meta = badge('#eef2ff', '#4338ca', String(item.fileCount) + ' 文件', '分类内文本文件数');
+  }
+  return React.createElement('div', { style: Object.assign(indent, active), onClick: props.onClick, title: isCat ? '分类：' + item.name : undefined },
     React.createElement('span', { style: { color: '#9a9aa0', fontSize: 11 } }, arrow),
     name, meta);
 }
@@ -134,12 +147,15 @@ function TreeSection(props) {
     var keyOf = function (x) { return prefix ? prefix + '/' + x.name : x.name; };
     children.dirs.forEach(function (d) {
       var key = keyOf(d);
-      var node = { kind: 'dir', name: d.name, rel: key, expanded: !!expanded[key] };
+      var node = { kind: 'dir', name: d.name, rel: key, expanded: !!expanded[key], fileCount: d.fileCount };
       rows.push(React.createElement(TreeRow, { key: 'd' + key, item: node, depth: depth, onClick: function () { toggleDir(node); } }));
       if (expanded[key] && cache[key]) {
         rows = rows.concat(renderChildren(cache[key], depth + 1, key));
       }
     });
+    if (depth === 0 && children.files.length > 0) {
+      rows.push(React.createElement('div', { key: '_rootfiles', style: { fontSize: 11, color: '#9a9aa0', margin: '4px 0 2px 24px' } }, '根目录文件'));
+    }
     children.files.forEach(function (f) {
       var key = keyOf(f);
       var node = { kind: 'file', name: f.name, rel: key, size: f.size };
@@ -149,11 +165,20 @@ function TreeSection(props) {
     return rows;
   }
 
+  var summary = null;
+  if (rootChildren) {
+    var dirSum = (rootChildren.dirs || []).reduce(function (a, d) { return a + (d.fileCount || 0); }, 0);
+    var fileSum = (rootChildren.files || []).length;
+    summary = React.createElement('span', { style: { fontSize: 11, color: '#9a9aa0', marginLeft: 'auto' } },
+      rootChildren.dirs.length + ' 分类 · ' + (dirSum + fileSum) + ' 文件');
+  }
+
   return React.createElement('div', { style: { marginBottom: 6 } },
     React.createElement('div', { style: { display: 'flex', alignItems: 'center', padding: '3px 4px' } },
       React.createElement('span', { style: { fontWeight: 600, fontSize: 13 } }, props.title),
       badge(meta.bg, meta.fg, meta.label),
-      props.writable ? badge('#e6ffed', '#1a7f37', '可写') : null),
+      props.writable ? badge('#e6ffed', '#1a7f37', '可写') : null,
+      summary),
     React.createElement('div', { style: { marginTop: 2 } }, renderChildren(nodes, 0, '')),
     msg ? React.createElement('div', { style: msgStyle(false) }, msg) : null);
 }
@@ -162,7 +187,7 @@ function TreeSection(props) {
 
 function Editor(props) {
   var meta = SOURCE_META[props.file ? props.file.source : 'bundle'];
-  var writable = props.file && props.file.source !== 'bundle';
+  var writable = props.file && (props.file.source === 'user' || props.file.source === 'import');
   var [content, setContent] = useState('');
   var [dirty, setDirty] = useState(false);
   var [busy, setBusy] = useState(false);
@@ -180,14 +205,14 @@ function Editor(props) {
 
   if (!props.file) {
     return React.createElement('div', { style: { color: '#9a9aa0', fontSize: 13, padding: 40, textAlign: 'center', border: '1px dashed var(--dsw-alias-border-l1,#e4e4e7)', borderRadius: 8 } },
-      '左侧选择文件。包内文件只读预览；用户 / 导入层可编辑、新建与删除。');
+      '左侧选择文件。随包手册 / 随包 PATT 只读预览；用户 / 导入层可编辑、新建与删除。');
   }
 
   function save() {
     setBusy(true); setMsg(null);
     rpc(props.connection, 'write', { source: props.file.source, mode: props.file.mode, path: props.file.path, content: content }).then(function (r) {
       setBusy(false);
-      if (isOk(r)) { setDirty(false); setMsg({ ok: true, text: '已保存（用户层，下次检索/会话即生效）' }); props.onChanged(); }
+      if (isOk(r)) { setDirty(false); setMsg({ ok: true, text: '已保存（下一次检索/会话即生效）' }); props.onChanged(); }
       else setMsg({ ok: false, text: errText(r) });
     });
   }
@@ -340,7 +365,8 @@ function Page(props) {
   if (statsV) {
     statsLine = React.createElement('div', { style: { display: 'flex', gap: 10, margin: '2px 0 10px', fontSize: 12, color: '#6e6e73', flexWrap: 'wrap' } },
       React.createElement('span', null, '随包手册 ' + statsV.bundleMd + ' 篇'),
-      React.createElement('span', null, '随包规则 ' + statsV.bundleRules + ' 条'),
+      React.createElement('span', null, '规则 ' + statsV.bundleRules + ' 条'),
+      React.createElement('span', { style: { color: '#c2410c', fontWeight: 600 } }, '随包 PATT ' + statsV.patt + ' 篇'),
       React.createElement('span', null, '用户 ' + statsV.user + ' 篇'),
       React.createElement('span', null, '导入 ' + statsV.imports + ' 篇'),
       React.createElement('span', null, '合计 ' + statsV.total + ''));
@@ -376,7 +402,9 @@ function Page(props) {
       React.createElement('button', { type: 'button', style: btn(false, { padding: '5px 10px', fontSize: 12 }), onClick: newDoc }, '+ 新建（用户层）')),
     statsLine,
     React.createElement('div', { style: { display: 'flex', gap: 16, alignItems: 'flex-start' } },
-      React.createElement('div', { style: { flex: '0 0 300px', minWidth: 240, maxHeight: 520, overflowY: 'auto', borderRight: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', paddingRight: 8 } },
+      React.createElement('div', { style: { flex: '0 0 330px', minWidth: 260, maxHeight: 580, overflowY: 'auto', borderRight: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', paddingRight: 10 } },
+        React.createElement(TreeSection, { connection: conn, source: 'patt', mode: mode, title: '随包 PATT', writable: false, activeFile: activeFile, onOpen: openFile, reloadTick: reloadTick }),
+        React.createElement('hr', { style: { border: 'none', borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', margin: '8px 0' } }),
         React.createElement(TreeSection, { connection: conn, source: 'bundle', mode: mode, title: '随包手册', writable: false, activeFile: activeFile, onOpen: openFile, reloadTick: reloadTick }),
         React.createElement('hr', { style: { border: 'none', borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', margin: '8px 0' } }),
         React.createElement(TreeSection, { connection: conn, source: 'user', mode: mode, title: '用户积累', writable: true, activeFile: activeFile, onOpen: openFile, reloadTick: reloadTick }),

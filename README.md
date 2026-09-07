@@ -259,6 +259,7 @@ Saker 当前包含 18 个独立插件。多数用户不需要逐个理解它们�
 
 - 渗透测试资料索引当前记录 106 篇。
 - 代码审计资料索引当前记录 226 篇 Markdown，并包含自建及第三方 Semgrep 规则。
+- 内置 [PayloadsAllTheThings](https://github.com/swisskyrepo/PayloadsAllTheThings) 全量文本（各漏洞章节 README 与 Intruder payload 清单，commit `3ac2790`，MIT），随包离线可用；可在「知识库 → 随包 PATT」浏览、编辑区检索。
 - Semgrep OSS 快照、自建规则和其他资料具有不同许可，数量与来源以各目录 README 为准。
 
 Saker 自有代码采用 MIT License；随附第三方资料不自动转为 MIT。再分发前请阅读 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。

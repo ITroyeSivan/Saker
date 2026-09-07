@@ -41,6 +41,29 @@ let r = await run('stats')
 check('stats ok', r.ok === true)
 check('stats user/imports = 0 baseline', r.ok && r.value.user === 0 && r.value.imports === 0)
 
+// ── bundled PATT source layer (root package preset/shared/refs/PayloadsAllTheThings)
+r = await run('stats')
+check('stats.patt shipped (>=200 text files)', r.ok && typeof r.value.patt === 'number' && r.value.patt >= 200, r.ok ? 'patt=' + r.value.patt : '')
+
+r = await run('browse', { source: 'patt', mode: 'pentest', dir: '' })
+check('browse patt lists chapters', r.ok && r.value.dirs.length > 30, r.ok ? 'chapters=' + r.value.dirs.length : '')
+check('browse patt has SQL Injection + XSS chapters', r.ok && r.value.dirs.some((d) => d.name === 'SQL Injection') && r.value.dirs.some((d) => d.name === 'XSS Injection'))
+check('browse patt dirs carry fileCount', r.ok && r.value.dirs.every((d) => typeof d.fileCount === 'number'))
+
+r = await run('browse', { source: 'patt', mode: 'pentest', dir: 'SQL Injection' })
+check('browse patt SQL Injection has Intruder + readme', r.ok && r.value.dirs.some((d) => d.name === 'Intruder') && r.value.files.some((f) => f.name === 'README.md'))
+
+r = await run('read', { source: 'patt', mode: 'pentest', path: 'SQL Injection/README.md' })
+check('read patt SQL Injection README', r.ok && r.value.content.length > 500)
+
+r = await run('search', { query: 'order by', mode: 'pentest' })
+check('search finds patt source hits', r.ok && r.value.hits.some((h) => h.source === 'patt'))
+
+r = await run('write', { source: 'patt', mode: 'pentest', path: 'x.md', content: 'no' })
+check('patt layer write refused (read-only)', r.ok === false)
+r = await run('remove', { source: 'patt', mode: 'pentest', path: 'SQL Injection' })
+check('patt layer remove refused (read-only)', r.ok === false)
+
 // import_local: happy path
 r = await run('import_local', { path: srcRoot, name: 'payloads-test' })
 check('import_local ok', r.ok === true, r.ok ? r.value.path + ' files=' + r.value.files : JSON.stringify(r))

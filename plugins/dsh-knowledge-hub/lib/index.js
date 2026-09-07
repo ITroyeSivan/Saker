@@ -65,6 +65,23 @@ function bundleRefsRoots() {
   return bundleRefs
 }
 
+/** PATT snapshot shipped in the root package (read-only, mode-agnostic). */
+const PATT_SNAPSHOT = '3ac2790'
+let pattRef = null
+function pattRoot() {
+  if (pattRef !== null) return pattRef
+  pattRef = ''
+  try {
+    const req = createRequire(import.meta.url)
+    const pkgRoot = path.dirname(req.resolve('dsh-saker/package.json'))
+    const dir = path.join(pkgRoot, 'preset', 'shared', 'refs', 'PayloadsAllTheThings')
+    if (fs.existsSync(dir)) pattRef = fs.realpathSync(dir)
+  } catch {
+    /* root package not installed */
+  }
+  return pattRef
+}
+
 /**
  * Resolve `rel` under `base` and refuse any escape. Returns null when the path
  * leaves the base. Existence is NOT checked here — callers stat as needed.
@@ -93,6 +110,7 @@ function readRootOf(source, mode) {
     const hit = bundleRefsRoots().find((b) => b.mode === mode)
     return hit ? hit.root : null
   }
+  if (source === 'patt') return pattRoot()
   return writeBaseOf(source, mode)
 }
 
@@ -112,8 +130,17 @@ function listEntries(root, dir) {
   const files = []
   for (const it of items.sort((a, b) => (a.name < b.name ? -1 : 1))) {
     const rel = dir ? `${dir}/${it.name}` : it.name
-    if (it.isDirectory()) dirs.push({ name: it.name, rel })
-    else if (it.isFile() && isTextFile(it.name)) {
+    if (it.isDirectory()) {
+      // fileCount = recursive count of searchable text files inside (for the
+      // category badge in the UI). Bundled PATT chapters make this worthwhile.
+      let fileCount = 0
+      try {
+        fileCount = countByExt(path.join(abs, it.name), TEXT_EXTS)
+      } catch {
+        fileCount = 0
+      }
+      dirs.push({ name: it.name, rel, fileCount })
+    } else if (it.isFile() && isTextFile(it.name)) {
       let size = 0
       try {
         size = fs.statSync(path.join(abs, it.name)).size
@@ -201,12 +228,14 @@ function searchLayer(dir, query, maxFiles, sourceLabel, mode) {
   return hits
 }
 
-/** Unified search across bundle(mode) + user(mode) + all imports. */
+/** Unified search across bundled PATT + bundle(mode) + user(mode) + all imports. */
 function searchAll(query, mode) {
   if (!query || !query.trim()) return []
   const hits = []
   const bRoot = readRootOf('bundle', mode)
   if (bRoot && fs.existsSync(bRoot)) hits.push(...searchLayer(bRoot, query, MAX_SEARCH_FILES, 'bundle', mode))
+  const pRoot = pattRoot()
+  if (pRoot && fs.existsSync(pRoot)) hits.push(...searchLayer(pRoot, query, MAX_SEARCH_FILES, 'patt', ''))
   const uRoot = writeBaseOf('user', mode)
   if (uRoot && fs.existsSync(uRoot)) hits.push(...searchLayer(uRoot, query, MAX_SEARCH_FILES, 'user', mode))
   const iRoot = importsRoot()
@@ -244,11 +273,12 @@ function stats() {
     bundleRules += countByExt(b.root, new Set(['.yaml', '.yml']))
   }
   const textExts = new Set(['.md', '.txt', '.yaml', '.yml'])
+  const patt = countByExt(pattRoot(), textExts)
   // user layer counts the two mode dirs only — imports/ lives beside them and is counted separately
   let user = 0
   for (const mode of MODE_IDS) user += countByExt(userModeDir(mode), textExts)
   const imports = countByExt(importsRoot(), textExts)
-  return { bundleMd, bundleRules, user, imports, total: bundleMd + bundleRules + user + imports }
+  return { bundleMd, bundleRules, patt, user, imports, total: bundleMd + bundleRules + patt + user + imports }
 }
 
 // ── git import ──────────────────────────────────────────────────────────────
@@ -505,17 +535,18 @@ export function apply(ctx, config = {}) {
     console.error('[dsh-knowledge-hub] RPC unavailable: %s', error && error.message ? error.message : String(error))
   }
 
-  // Model tools: extension-layer lookup only; bundled refs keep being read
-  // directly at their preset paths by the playbooks.
-  const describeScope = '两层知识库（扩展层）：个人/团队积累与导入源（如 PayloadsAllTheThings）。包内随包手册仍在预设 refs 路径直接读，不重复经此工具。'
+  // Model tools: extension-layer lookup plus the bundled PATT payload library;
+  // the other bundled handbook docs keep being read directly at their preset
+  // paths by the playbooks.
+  const describeScope = `分层知识库：随包 PATT(payload 库，commit ${PATT_SNAPSHOT}) + 个人/团队积累 + 导入源（如本地/Git 导入的外部资产）。包内随包手册仍在预设 refs 路径直接读。`
   try {
     ctx.tools.register(
       defineTool({
         name: 'knowledge_search',
-        description: `在扩展知识库中按关键词定位文档（先定位到文件/行，再 knowledge_read 原文）。${describeScope}返回命中的来源（bundle/user/import）、相对路径、行号与预览行。`,
+        description: `按关键词定位知识库文档（先定位到文件/行，再 knowledge_read 原文）。${describeScope}返回命中的来源（patt/bundle/user/import）、相对路径、行号与预览行。`,
         parameters: {
           query: { type: 'string', required: true, description: '检索关键词（大小写不敏感子串）' },
-          mode: { type: 'string', enum: MODE_IDS, description: '预设模式：pentest / code-audit（缺省 pentest）' },
+          mode: { type: 'string', enum: MODE_IDS, description: '预设模式：pentest / code-audit（缺省 pentest；patt/import 为通用内容不受 mode 限制）' },
         },
         output: {
           schema: {
@@ -544,10 +575,10 @@ export function apply(ctx, config = {}) {
     ctx.tools.register(
       defineTool({
         name: 'knowledge_read',
-        description: `按来源与相对路径读取扩展知识库文档片段（禁整读大文件，按需给 offset/limit）。${describeScope}`,
+        description: `按来源与相对路径读取知识库文档片段（禁整读大文件，按需给 offset/limit）。${describeScope}`,
         parameters: {
-          source: { type: 'string', required: true, enum: ['bundle', 'user', 'import'], description: '来源层' },
-          mode: { type: 'string', enum: MODE_IDS, description: 'bundle/user 层需要（import 忽略）' },
+          source: { type: 'string', required: true, enum: ['bundle', 'patt', 'user', 'import'], description: '来源层' },
+          mode: { type: 'string', enum: MODE_IDS, description: 'bundle/user 层需要（patt/import 忽略）' },
           path: { type: 'string', required: true, description: '相对路径（/ 分隔），如 web/web-injection-ssrf.md' },
           offset: { type: 'number', description: '起始行（1 起）' },
           limit: { type: 'number', description: '读多少行（默认 120，最大 400）' },
@@ -594,10 +625,10 @@ export function apply(ctx, config = {}) {
     ctx.tools.register(
       defineTool({
         name: 'knowledge_list',
-        description: `列出扩展知识库目录结构（含来源徽章），先摸清有什么再决定检索/读取。${describeScope}`,
+        description: `列出知识库目录结构（含来源），先摸清有什么再决定检索/读取。${describeScope}`,
         parameters: {
           mode: { type: 'string', enum: MODE_IDS, description: 'pentest / code-audit（缺省 pentest）' },
-          area: { type: 'string', enum: ['user', 'import', 'all'], description: '只看用户层/导入层/全部（缺省 all）' },
+          area: { type: 'string', enum: ['patt', 'user', 'import', 'all'], description: '只看随包 PATT/用户层/导入层/全部（缺省 all）' },
         },
         output: {
           schema: {
@@ -616,13 +647,14 @@ export function apply(ctx, config = {}) {
             const top = listEntries(root, '')
             const dirs = top.dirs.map((d) => d.name).join(', ')
             const files = top.files.map((f) => f.name).join(', ')
-            lines.push(`- ${label}：目录 [${dirs || '无'}] 文件 [${files || '无'}]`)
+            lines.push(`- ${label}：分类目录 [${dirs || '无'}] 文件 [${files || '无'}]`)
           }
           lines.push(`模式：${mode}（${MODE_LABELS[mode]}）`)
+          if (area === 'all' || area === 'patt') dump(`随包 PATT（commit ${PATT_SNAPSHOT}，MIT）`, pattRoot())
           if (area === 'all' || area === 'user') dump('用户层', userModeDir(mode))
           if (area === 'all' || area === 'import') dump('导入层', importsRoot())
           const s = stats()
-          lines.push(`统计：随包手册 ${s.bundleMd} 篇 + 规则 ${s.bundleRules} 条 / 用户 ${s.user} / 导入 ${s.imports}`)
+          lines.push(`统计：随包手册 ${s.bundleMd} 篇 + 规则 ${s.bundleRules} 条 / PATT ${s.patt} / 用户 ${s.user} / 导入 ${s.imports}`)
           return { ok: true, value: { summary: lines.join('\n') } }
         },
       }),
@@ -639,8 +671,8 @@ export function apply(ctx, config = {}) {
       order: 560,
       text: () => {
         const s = stats()
-        if (s.user === 0 && s.imports === 0) return ''
         const parts = []
+        if (s.patt > 0) parts.push(`随包 PayloadsAllTheThings payload 库 ${s.patt} 篇（commit ${PATT_SNAPSHOT}，MIT，离线）`)
         if (s.user > 0) parts.push(`个人/团队知识 ${s.user} 篇`)
         if (s.imports > 0) {
           const names = topImportNames()
@@ -649,7 +681,8 @@ export function apply(ctx, config = {}) {
               (names.length ? `（来源：${names.slice(0, 8).join('、')}${names.length > 8 ? ' 等' : ''}）` : ''),
           )
         }
-        return `<dsh-knowledge-hub>扩展知识库：${parts.join('，')}。用 knowledge_search / knowledge_read / knowledge_list 定位与读取（包内随包手册仍在 preset refs 路径直接读）。</dsh-knowledge-hub>`
+        if (parts.length === 0) return ''
+        return `<dsh-knowledge-hub>知识库：${parts.join('，')}。用 knowledge_search / knowledge_read / knowledge_list 检索与读取（知识库含随包 PATT 时，source 用 patt；包内随包手册仍在 preset refs 路径直接读）。</dsh-knowledge-hub>`
       },
     })
   } catch (error) {
