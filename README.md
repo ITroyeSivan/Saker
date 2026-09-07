@@ -11,7 +11,7 @@
 [快速开始](#快速开始) · [看看它能做什么](#看看它能做什么) · [插件清单](#插件清单) · [联系与反馈](#联系与反馈)
 
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek-Harness-111827?style=flat-square)](https://github.com/deepseek-ai/deepseek-harness)
-[![Saker](https://img.shields.io/badge/Saker-v0.2.0-4f46e5?style=flat-square)](https://github.com/ITroyeSivan/Saker)
+[![Saker](https://img.shields.io/badge/Saker-v0.2.2-4f46e5?style=flat-square)](https://github.com/ITroyeSivan/Saker)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.5-339933?style=flat-square&logo=node.js&logoColor=white)](./package.json)
 [![License](https://img.shields.io/badge/code-MIT-2563eb?style=flat-square)](./LICENSE)
 
@@ -78,7 +78,7 @@ AttackAtlas 按目标记录每个攻击面的状态：已测有发现、已测�
 
 ### 工具归工具，判断归判断
 
-安全配置中心统一管理本机工具路径和服务地址。当前可配置 sqlmap、nuclei、dirsearch、fscan、subfinder、httpx、katana、afrog、ffuf、jwt_tool、nmap；模型运行时通过 `DSH_TOOL_<NAME>` 找到你本机的真实工具，未配置时回退到系统 `PATH`。
+安全配置中心统一管理本机工具路径和服务地址。当前可配置 sqlmap、nuclei、dirsearch、fscan、subfinder、httpx、katana、afrog、ffuf、jwt_tool、nmap；配置页会自动扫描已配工具所在目录，把同目录/同大类的工具路径列成候选，点一下即可填入，也可手动粘贴；模型运行时通过 `DSH_TOOL_<NAME>` 找到你本机的真实工具，未配置时回退到系统 `PATH`。
 
 渗透模式提供 nuclei、httpx、ffuf 封装，代码审计模式提供本地 Semgrep 封装。扫描命中先进入待核对记录，不会直接写成已确认漏洞。
 
@@ -147,7 +147,7 @@ Redteam Results 按会话保存发现，区分严重度、验证状态和证据�
 git clone https://github.com/ITroyeSivan/Saker.git
 cd Saker
 
-# 生成根模式包和 19 个插件包
+# 生成根模式包和 20 个插件包
 node scripts/pack-all.mjs
 
 # 按顺序安装到 web profile
@@ -171,10 +171,10 @@ dsh web
 每个目录都是独立的 dsh bundle。先安装根模式包，再按需要添加插件：
 
 ```powershell
-dsh plugin --profile web add "file:C:/packages/dsh-saker-0.2.1.tgz"
-dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-sec-config-1.0.8.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-saker-0.2.2.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-sec-config-1.0.12.tgz"
 dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-knowledge-hub-0.1.5.tgz"
-dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-skill-browse-1.0.0.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-skill-browse-1.1.1.tgz"
 dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-stage-gate-1.5.0.tgz"
 ```
 
@@ -193,7 +193,7 @@ dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-semgrep-audit-1.
 发布 Release 后，可以直接安装对应 `.tgz`：
 
 ```powershell
-dsh plugin --profile web add "https://github.com/ITroyeSivan/Saker/releases/download/v0.2.0/dsh-saker-0.2.0.tgz"
+dsh plugin --profile web add "https://github.com/ITroyeSivan/Saker/releases/download/v0.2.2/dsh-saker-0.2.2.tgz"
 ```
 
 根包只包含两种模式、共享技能和参考资料。可视化页面、工具连接和治理能力位于独立插件包中，需要按 Release 资产清单分别安装。
@@ -239,7 +239,7 @@ Saker 当前包含 20 个独立插件。多数用户不需要逐个理解它们�
 | 模块 | 插件 | 做什么 |
 |---|---|---|
 | 界面与配置 | `dsh-mode-group` | 在新会话页集中展示安全模式 |
-| 界面与配置 | `dsh-sec-config` | 管理工具路径、Burp/Yakit、DNSLog 与改密入口（API Key 由「平台设置」统一维护）；工具按分类呈现，可自定义与删除 |
+| 界面与配置 | `dsh-sec-config` | 管理工具路径、Burp/Yakit、DNSLog 与改密入口（API Key 由「平台设置」统一维护）；工具按分类呈现、支持自动探测候选路径一键填入，可自定义与删除 |
 | 界面与配置 | `dsh-mcp-studio` | 管理、诊断和预览 MCP 服务及工具 |
 | 界面与配置 | `dsh-knowledge-hub` | 知识库管理：随包 PATT 与手册、用户积累、Git/本机文件夹导入；按主题分类浏览与检索 |
 | 界面与配置 | `dsh-skill-browse` | 设置页「技能」：列出共享 / 模式专属 / 已安装技能；上传 zip/tgz 安装到 `~/.dsh/skills` 并热载、可卸载用户层技能；一键复制宿主引用串 `/技能名`（模型侧经 `skill` 工具加载，用户侧输入框打 `/` 或直接贴 `/name` 注入正文） |
@@ -293,7 +293,7 @@ Saker/
 │   └── code-audit/         # 代码审计模式、playbook 与规则集
 ├── shared/skills/          # 两种模式共享的协作与复核技能
 ├── shared/refs/            # 共享参考资料与随包 PayloadsAllTheThings（MIT）
-├── plugins/                # 19 个独立功能插件
+├── plugins/                # 20 个独立功能插件
 ├── scripts/                # 全量打包与安装脚本
 ├── lib/preset-root.js      # 模式注册入口
 ├── cordis.patch.yml        # bundle 加载配置

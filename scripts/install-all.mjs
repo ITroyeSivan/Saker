@@ -2,8 +2,8 @@
 // install-all.mjs — one-shot install of the saker root bundle + all plugins.
 //
 // For a fresh deployment this does exactly what the README describes, in the
-// right order (root bundle first, then the 18 feature plugins), so you do not
-// have to type 19 `dsh plugin add` commands. Already-installed packages are
+// right order (root bundle first, then the 20 feature plugins), so you do not
+// have to type 21 `dsh plugin add` commands. Already-installed packages are
 // skipped (detected via the profile package.json), so re-runs are safe.
 //
 // Prerequisites:
