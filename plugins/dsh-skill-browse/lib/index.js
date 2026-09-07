@@ -17,6 +17,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
 import { randomBytes } from 'node:crypto'
 import z from '@deepseek-ai/schemastery'
 
@@ -31,7 +32,28 @@ const Config = z.object({
   dshHome: z.string().default(''),
 })
 
-const BUNDLE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..')
+// 数据源解析：随包技能（shared / preset）位于「已安装的 dsh-saker 根包」里，
+// 而不是本插件自己的目录——本插件是独立 bundle，装进 profile node_modules 后
+// 相对自身路径找不到 preset/shared。用 createRequire 沿 node_modules 向上解析
+// `dsh-saker/package.json`（profile 的 dsh-saker 是顶层依赖）；解析不到
+// （仅手工装了本插件没装 dsh-saker）时 shared/preset 段返回空，只剩 user 段。
+const require2 = createRequire(import.meta.url)
+function sakerRoot() {
+  try {
+    return path.dirname(require2.resolve('dsh-saker/package.json'))
+  } catch {
+    // 源码仓库/手工布局回退：本插件位于 <repo>/plugins/<name>/lib → 四级上跳到 repo 根
+    return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
+  }
+}
+function sakerRootCache() {
+  let cached = ''
+  return function () {
+    if (!cached) cached = sakerRoot()
+    return cached
+  }
+}
+const sakerRootOf = sakerRootCache()
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---/
 const NAME_RE = /^name:\s*([a-z0-9][a-z0-9-]*)\s*$/m
 const DESC_RE = /^description:\s*(.+?)\s*$/m
@@ -83,23 +105,24 @@ function listSkills(presetId, config) {
     seen.add(meta.name)
     out.push({ ...meta, origin })
   }
-  // shared
+  const root = sakerRootOf()
+  // shared（随 dsh-saker 根包）
   try {
-    for (const e of fs.readdirSync(path.join(BUNDLE_ROOT, 'shared', 'skills'), { withFileTypes: true })) {
+    for (const e of fs.readdirSync(path.join(root, 'shared', 'skills'), { withFileTypes: true })) {
       if (!e.isDirectory()) continue
-      add(readSkillMd(path.join(BUNDLE_ROOT, 'shared', 'skills', e.name, 'SKILL.md')), 'shared')
+      add(readSkillMd(path.join(root, 'shared', 'skills', e.name, 'SKILL.md')), 'shared')
     }
   } catch { /* 缺 shared 目录时忽略 */ }
-  // preset/<mode>
+  // preset/<mode>（随 dsh-saker 根包）
   if (presetId) {
     try {
-      for (const e of fs.readdirSync(path.join(BUNDLE_ROOT, 'preset', presetId, 'skills'), { withFileTypes: true })) {
+      for (const e of fs.readdirSync(path.join(root, 'preset', presetId, 'skills'), { withFileTypes: true })) {
         if (!e.isDirectory()) continue
-        add(readSkillMd(path.join(BUNDLE_ROOT, 'preset', presetId, 'skills', e.name, 'SKILL.md')), 'preset')
+        add(readSkillMd(path.join(root, 'preset', presetId, 'skills', e.name, 'SKILL.md')), 'preset')
       }
     } catch { /* 该模式无 skills */ }
   }
-  // user
+  // user（$DSH_HOME/skills）
   for (const s of readUserSkills(userSkillRoot(config))) add(s, 'user')
   return out
 }
@@ -238,10 +261,11 @@ function bundledSkillNames() {
       if (meta) names.add(meta.name)
     }
   }
-  scan(path.join(BUNDLE_ROOT, 'shared', 'skills'))
+  const root = sakerRootOf()
+  scan(path.join(root, 'shared', 'skills'))
   try {
-    for (const p of fs.readdirSync(path.join(BUNDLE_ROOT, 'preset'), { withFileTypes: true })) {
-      if (p.isDirectory()) scan(path.join(BUNDLE_ROOT, 'preset', p.name, 'skills'))
+    for (const p of fs.readdirSync(path.join(root, 'preset'), { withFileTypes: true })) {
+      if (p.isDirectory()) scan(path.join(root, 'preset', p.name, 'skills'))
     }
   } catch { /* 无 preset 目录 */ }
   return names

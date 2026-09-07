@@ -58,6 +58,47 @@ function Group(props) {
 // Category groups of preset tools (fill a path to "add" it), an operator-custom
 // add form, and per-row remove. All edits stay local until 保存配置 commits.
 
+// 「选择目录」：通过 host loopback RPC 弹原生文件夹对话框（Windows
+// FolderBrowserDialog，同机部署可用；远程/LAN 或非 Windows 返回空，退手动粘贴）。
+// 之所以不走 <input webkitdirectory>——浏览器为安全只给 webkitRelativePath，
+// 拿不到本机绝对路径；host 原生对话框才能把真实路径填回表单。
+function PickButton(props) {
+  var [busy, setBusy] = useState(false);
+  var [err, setErr] = useState('');
+  function pick() {
+    if (busy) return;
+    setErr('');
+    setBusy(true);
+    rpc(props.connection, 'pick-directory', {}).then(function (res) {
+      setBusy(false);
+      if (res && res.ok && res.value && typeof res.value.path === 'string' && res.value.path) {
+        props.onPicked && props.onPicked(res.value.path);
+      } else if (res && !res.ok) {
+        setErr((res.error && res.error.message) || '选择失败');
+        setTimeout(function () { setErr(''); }, 3000);
+      }
+      // 取消/空路径：静默，不覆盖用户已输入内容
+    }).catch(function (e) {
+      setBusy(false);
+      setErr('目录对话框不可用（远程部署？）——请手动粘贴路径');
+      setTimeout(function () { setErr(''); }, 4000);
+    });
+  }
+  return React.createElement(React.Fragment, null,
+    React.createElement('button', {
+      type: 'button',
+      title: '打开本机目录选择框（同机部署可用）',
+      disabled: busy,
+      style: {
+        padding: '6px 10px', borderRadius: 6, fontSize: 12, cursor: busy ? 'wait' : 'pointer',
+        border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: 'transparent',
+        color: 'var(--dsw-alias-label-primary,#1a1a1a)', whiteSpace: 'nowrap', flex: '0 0 auto',
+      },
+      onClick: pick,
+    }, busy ? '…' : '选择目录'),
+    err ? React.createElement('span', { style: { fontSize: 11, color: '#d1242f' } }, err) : null);
+}
+
 function ToolRow(props) {
   var badge = props.kind === 'custom' ? CUSTOM_LABEL : PRESET_LABEL;
   var label = props.label;
@@ -73,6 +114,7 @@ function ToolRow(props) {
         placeholder: has ? '已配置' : (props.placeholder || '工具路径，留空=未添加'),
         onChange: props.onChange,
       })),
+    props.connection ? React.createElement(PickButton, { connection: props.connection, onPicked: function (p) { props.onChange && props.onChange(p); } }) : null,
     React.createElement('button', {
       type: 'button',
       title: has ? '从配置中移除该工具（空路径不注入、不进提示词）' : '',
@@ -151,6 +193,7 @@ function ToolGroup(props) {
     var customRows = customKeys.map(function (k) {
       return React.createElement(ToolRow, {
         key: k, kind: 'custom', label: k, value: tools[k], has: true,
+        connection: props.connection,
         onChange: function (v) { setTool(k, v); },
         onRemove: function () { removeTool(k); },
       });
@@ -161,6 +204,7 @@ function ToolGroup(props) {
       React.createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 } },
         React.createElement('div', { style: { flex: '0 0 150px' } }, React.createElement(Input, { value: newName, placeholder: '名称（如 ksubdomain）', onChange: setNewName })),
         React.createElement('div', { style: { flex: 1 } }, React.createElement(Input, { value: newPath, placeholder: '工具路径（保存后进提示词，PATH 内可用）', onChange: setNewPath })),
+        React.createElement(PickButton, { connection: props.connection, onPicked: function (p) { setNewPath(p); } }),
         React.createElement('button', { type: 'button', style: btnStyle(false), onClick: addCustom }, '添加')),
       msg ? React.createElement('div', { style: msgStyle(false) }, msg) : null);
   }

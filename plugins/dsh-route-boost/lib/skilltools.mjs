@@ -6,8 +6,29 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 
-const MODES_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../modes");
+// 数据源解析：preset/<mode>/skills 与 shared/skills 都在「已安装的 dsh-saker
+// 根包」里。本插件是独立 bundle，装进 profile node_modules 后相对自身路径
+// 找不到 preset/shared——用 createRequire 沿 node_modules 向上解析
+// `dsh-saker/package.json`（profile 的 dsh-saker 是顶层依赖）。
+// 解析失败（只手工装了本插件没装 dsh-saker）时回退源码仓库布局。
+const require2 = createRequire(import.meta.url);
+function sakerRoot() {
+	try {
+		return path.dirname(require2.resolve("dsh-saker/package.json"));
+	} catch {
+		// 源码仓库布局：<repo>/plugins/<name>/lib/skilltools.mjs → 四级上跳 = repo 根
+		return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+	}
+}
+let _rootCache = "";
+function sakerRootOf() {
+	if (!_rootCache) _rootCache = sakerRoot();
+	return _rootCache;
+}
+// 扫描技能目录：preset/<mode>/skills
+const presetRootOf = () => path.join(sakerRootOf(), "preset");
 const SCAN_TTL = 60_000;
 const CHECK_TTL = 600_000;
 const TOOL_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -20,7 +41,7 @@ export function scanSkillDeps(presetId, now = Date.now()) {
 	const hit = scanCache.get(presetId);
 	if (hit && now - hit.at < SCAN_TTL) return hit.deps;
 	const deps = new Set();
-	const root = path.join(MODES_ROOT, presetId, "skills");
+	const root = path.join(presetRootOf(), presetId, "skills");
 	try {
 		for (const dir of fs.readdirSync(root, { withFileTypes: true })) {
 			if (!dir.isDirectory()) continue;
@@ -68,7 +89,7 @@ export function toolsStatus(presetId, now = Date.now()) {
  * envelope 的 `skills:` 行投递，让模型在 prompt 装配期就知道当前可用的
  * 技能指针。
  */
-const BUNDLE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+const BUNDLE_ROOT = sakerRootOf();
 const skillNameCache = new Map(); // presetId|"shared" → { at, names: string[] }
 const SKILL_NAME_TTL = 60_000;
 const FRONTMATTER_NAME_RE = /^name:\s*([A-Za-z0-9][A-Za-z0-9._-]{0,63})\s*$/m;
@@ -95,12 +116,21 @@ export function listSkillNames(presetId, now = Date.now()) {
 	if (hit && now - hit.at < SKILL_NAME_TTL) return hit.names.slice();
 	const names = [];
 	const seen = new Set();
-	for (const n of readSkillNamesFromDir(path.join(BUNDLE_ROOT, "shared", "skills"))) {
-		if (!seen.has(n)) { seen.add(n); names.push(n); }
-	}
-	if (presetId) {
-		for (const n of readSkillNamesFromDir(path.join(BUNDLE_ROOT, "preset", presetId, "skills"))) {
+	const addAll = (dir) => {
+		for (const n of readSkillNamesFromDir(dir)) {
 			if (!seen.has(n)) { seen.add(n); names.push(n); }
+		}
+	};
+	// shared/skills 对所有模式可见；security 预设的 skill-filesystem customSkillDirs
+	// 会把「本模式 + 兄弟模式」的 skills 一并挂进会话目录——因此这里扫全部
+	// preset/*/skills（不仅 presetId 自己），与真实会话目录一致。
+	addAll(path.join(BUNDLE_ROOT, "shared", "skills"));
+	if (presetId) {
+		let entries;
+		try { entries = fs.readdirSync(path.join(BUNDLE_ROOT, "preset"), { withFileTypes: true }); } catch { entries = [] }
+		for (const p of entries) {
+			if (!p.isDirectory()) continue
+			addAll(path.join(BUNDLE_ROOT, "preset", p.name, "skills"));
 		}
 	}
 	skillNameCache.set(cacheKey, { at: now, names: names.slice() });
