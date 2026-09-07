@@ -1,7 +1,7 @@
 {
   "name": "@dsh-external/dsh-skill-browse",
-  "version": "1.0.0",
-  "description": "技能浏览与引用：设置页「技能」列出当前可用技能（shared + 当前预设），一键复制 @skill:<name> 到剪贴板；host 侧扫描 SKILL.md frontmatter 提供清单。",
+  "version": "1.1.0",
+  "description": "技能浏览、上传安装与引用：设置页「技能」列出当前可见技能（shared 共享 / preset 模式专属 / user 已安装三层），支持上传 zip/tgz 压缩包安装到 ~/.dsh/skills（宿主热载）、卸载用户层技能、一键复制宿主真实引用串 /<name>；调用语义对齐 dsh-skill/tool-skill/ui-skill——模型经 skill 工具按名加载，用户输入框打 / 弹出候选或直接贴 /name 注入。",
   "type": "module",
   "main": "./lib/index.js",
   "exports": {

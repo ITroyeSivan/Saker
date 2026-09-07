@@ -1,12 +1,20 @@
 ---
 name: browser-recon
-description: 浏览器/网页交互作战技能：JS 抓取、SPA 渲染、登录口人机交互、指纹确认、动态 API 触发、客户端富应用下的入口面盘点。默认通道 Chrome MCP（无 webdriver、真实浏览器指纹），无则降级 webdriver 消指纹链；登录后改包走 burp/yakit MCP（保会话态）；抓到的 JS/接口补全 pentest 的 JS 盘点与 API 入口表。
+description: 浏览器/网页交互作战技能：JS 抓取、SPA 渲染、登录口人机交互、指纹确认、动态 API 触发、客户端富应用下的入口面盘点。默认通道为浏览器类 MCP（真实浏览器指纹，无 webdriver 标记），无则降级 webdriver 消指纹链；登录后改包走 burp/yakit MCP（保会话态）；抓到的 JS/接口补全 pentest 的 JS 盘点与 API 入口表。
 ---
 
 # 浏览器侦察（browser-recon）
 
 > 位置：Saker 模式包 `shared/skills/`，各预设（pentest / code-audit）共同加载。
 > 适用：SPA / 客户端富应用 / 复杂登录口 / 需人机交互的页面（验证码、短信、扫码、OAuth 跳转）。
+
+## 通道前提（浏览器运行时不由本技能提供）
+
+本技能是**操作指令文本**，本身不含浏览器运行时。真实浏览器自动化需要先在本机
+挂载一个**浏览器类 MCP 服务**（例如 ChromeDevTools MCP、Playwright MCP、或 Burp
+的内置浏览器），让平台出现 `mcp__<server>__*` 工具后本技能才有可用通道。若会话
+没有可用的浏览器 MCP，按「通道阶梯」降级到静态/CLI 抓取（curl/httpx/接口枚举），
+不得谎称"打开了浏览器"。
 
 ## 通道阶梯
 

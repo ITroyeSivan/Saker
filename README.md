@@ -242,7 +242,7 @@ Saker 当前包含 20 个独立插件。多数用户不需要逐个理解它们�
 | 界面与配置 | `dsh-sec-config` | 管理工具路径、Burp/Yakit、DNSLog 与改密入口（API Key 由「平台设置」统一维护）；工具按分类呈现，可自定义与删除 |
 | 界面与配置 | `dsh-mcp-studio` | 管理、诊断和预览 MCP 服务及工具 |
 | 界面与配置 | `dsh-knowledge-hub` | 知识库管理：随包 PATT 与手册、用户积累、Git/本机文件夹导入；按主题分类浏览与检索 |
-| 界面与配置 | `dsh-skill-browse` | 设置页「技能」面板：列出当前可用技能（共享 + 当前模式），一键复制 `@skill:<name>` 引用串到剪贴板 |
+| 界面与配置 | `dsh-skill-browse` | 设置页「技能」：列出共享 / 模式专属 / 已安装技能；上传 zip/tgz 安装到 `~/.dsh/skills` 并热载、可卸载用户层技能；一键复制宿主引用串 `/技能名`（模型侧经 `skill` 工具加载，用户侧输入框打 `/` 或直接贴 `/name` 注入正文） |
 | 工具 | `dsh-scanner-tools` | 将 nuclei、httpx、ffuf 封装为模型工具 |
 | 工具 | `dsh-semgrep-audit` | 使用本地 Semgrep 和随包规则集进行代码扫描 |
 | 工具 | `dsh-hunter` | 聚合 FOFA、Hunter、Quake 资产检索 |

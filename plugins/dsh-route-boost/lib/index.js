@@ -233,6 +233,10 @@ export function buildEnvelopeDetailed({ presetId, mode, phase, refsHits, evidenc
 	if (tools && tools.total > 0) {
 		lines.splice(2, 0, `tools: 技能依赖 ${tools.ok}/${tools.total} 就绪${tools.missing.length > 0 ? `——缺 ${tools.missing.join("、")}（先走兜底：已装同类 → MCP → 询问批准后安装）` : ""}`);
 	}
+	const skills = listSkillNames(presetId);
+	if (skills.length > 0) {
+		lines.splice(2, 0, `skills: 可用技能（会话目录已注入，任务匹配描述时用 skill 工具按名加载正文，勿凭摘要推断；用户侧输入 /<name> 直调）—— ${skills.join("、")}`);
+	}
 	if (operation) {
 		const op = operation;
 		const gateKeys = Object.keys(op.gates ?? {});
