@@ -11,7 +11,7 @@
 [快速开始](#快速开始) · [看看它能做什么](#看看它能做什么) · [插件清单](#插件清单) · [联系与反馈](#联系与反馈)
 
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek-Harness-111827?style=flat-square)](https://github.com/deepseek-ai/deepseek-harness)
-[![Saker](https://img.shields.io/badge/Saker-v0.1.0-4f46e5?style=flat-square)](https://github.com/ITroyeSivan/Saker)
+[![Saker](https://img.shields.io/badge/Saker-v0.2.0-4f46e5?style=flat-square)](https://github.com/ITroyeSivan/Saker)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.5-339933?style=flat-square&logo=node.js&logoColor=white)](./package.json)
 [![License](https://img.shields.io/badge/code-MIT-2563eb?style=flat-square)](./LICENSE)
 
@@ -106,6 +106,20 @@ Redteam Results 按会话保存发现，区分严重度、验证状态和证据�
 
 > 📷 **成果截图预留**：用一条完整的脱敏发现展示“结论为什么可信”。
 
+### 知识库随包，来源清晰可维护
+
+离线资料随包即用：内置 [PayloadsAllTheThings](https://github.com/swisskyrepo/PayloadsAllTheThings) 全量文本快照（66 个漏洞章节的 README 与 payload 清单，commit `3ac2790`，MIT），加上渗透与代码审计两套手册和 Semgrep 规则，都不依赖外网。
+
+“设置 → 知识库”按来源和主题分类展示这些资料：随包 PATT、随包手册、用户积累与导入源各自分组，每个分类带文件数徽章、可折叠展开。关键词检索先定位到文件与行号，再点开读原文；文档可以存放在用户层持续修订，也可以从 Git 仓库或本机文件夹整库导入（离线后仍可检索）。不同来源与许可证在目录内各有声明。
+
+<!--
+  知识库截图：docs/images/knowledge.png
+  建议展示左侧分类分组 + 计数徽章 + 右侧打开的一篇随包 PATT 章节。
+-->
+<!-- ![知识库的分类分组浏览与随包 PATT](./docs/images/knowledge.png) -->
+
+> 📷 **知识库截图预留**：分类分组视图 + 一篇展开的随包 PATT 文档，最好再带上一次检索命中。
+
 ## 一次完整任务怎样推进
 
 1. 在新会话选择 `pentest` 或 `code-audit`，写清目标、授权范围和限制。
@@ -133,7 +147,7 @@ Redteam Results 按会话保存发现，区分严重度、验证状态和证据�
 git clone https://github.com/ITroyeSivan/Saker.git
 cd Saker
 
-# 生成根模式包和 18 个插件包
+# 生成根模式包和 19 个插件包
 node scripts/pack-all.mjs
 
 # 按顺序安装到 web profile
@@ -143,7 +157,7 @@ node scripts/install-all.mjs
 dsh web
 ```
 
-`pack-all.mjs` 需要 `pnpm` 可用。`install-all.mjs` 默认安装到 `web` profile；自定义 profile 时设置 `SAKER_PROFILE`。脚本会跳过已经安装的包，适合首次安装和补装，不会覆盖升级已有版本。
+`pack-all.mjs` 需要 `pnpm` 可用。`install-all.mjs` 默认安装到 `web` profile；自定义 profile 时设置 `SAKER_PROFILE`。脚本跳过已安装的同版本包，仓库内包版本更高时自动升级，适合首次安装、补装与升级。
 
 启动后：
 
@@ -157,8 +171,9 @@ dsh web
 每个目录都是独立的 dsh bundle。先安装根模式包，再按需要添加插件：
 
 ```powershell
-dsh plugin --profile web add "file:C:/packages/dsh-saker-0.1.0.tgz"
-dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-sec-config-1.0.6.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-saker-0.2.0.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-sec-config-1.0.7.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-knowledge-hub-0.1.5.tgz"
 dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-stage-gate-1.5.0.tgz"
 ```
 
@@ -177,7 +192,7 @@ dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-semgrep-audit-1.
 发布 Release 后，可以直接安装对应 `.tgz`：
 
 ```powershell
-dsh plugin --profile web add "https://github.com/ITroyeSivan/Saker/releases/download/v0.1.0/dsh-saker-0.1.0.tgz"
+dsh plugin --profile web add "https://github.com/ITroyeSivan/Saker/releases/download/v0.2.0/dsh-saker-0.2.0.tgz"
 ```
 
 根包只包含两种模式、共享技能和参考资料。可视化页面、工具连接和治理能力位于独立插件包中，需要按 Release 资产清单分别安装。
@@ -187,7 +202,7 @@ dsh plugin --profile web add "https://github.com/ITroyeSivan/Saker/releases/down
 <details>
 <summary><b>更新与卸载</b></summary>
 
-更新时重新打包并对需要升级的包执行 `dsh plugin add`，然后重启 dsh。`install-all.mjs` 会跳过已安装项，因此不承担覆盖升级。
+更新时重新打包并对需要升级的包执行 `dsh plugin add`，然后重启 dsh。`install-all.mjs` 会跳过同版本项，仓库包版本更高时自动升级。
 
 ```powershell
 dsh plugin --profile web add "file:C:/packages/dsh-saker-新版本.tgz"
@@ -218,13 +233,14 @@ dsh plugin --profile web remove dsh-saker
 
 ## 插件清单
 
-Saker 当前包含 18 个独立插件。多数用户不需要逐个理解它们；`pack-all` + `install-all` 会完成整套安装。
+Saker 当前包含 19 个独立插件。多数用户不需要逐个理解它们；`pack-all` + `install-all` 会完成整套安装。
 
 | 模块 | 插件 | 做什么 |
 |---|---|---|
 | 界面与配置 | `dsh-mode-group` | 在新会话页集中展示安全模式 |
-| 界面与配置 | `dsh-sec-config` | 管理工具路径、Burp/Yakit、DNSLog、API Key，以及宿主支持时的改密入口 |
+| 界面与配置 | `dsh-sec-config` | 管理工具路径、Burp/Yakit、DNSLog、API Key，以及宿主支持时的改密入口；工具按分类呈现，可自定义与删除 |
 | 界面与配置 | `dsh-mcp-studio` | 管理、诊断和预览 MCP 服务及工具 |
+| 界面与配置 | `dsh-knowledge-hub` | 知识库管理：随包 PATT 与手册、用户积累、Git/本机文件夹导入；按主题分类浏览与检索 |
 | 工具 | `dsh-scanner-tools` | 将 nuclei、httpx、ffuf 封装为模型工具 |
 | 工具 | `dsh-semgrep-audit` | 使用本地 Semgrep 和随包规则集进行代码扫描 |
 | 工具 | `dsh-hunter` | 聚合 FOFA、Hunter、Quake 资产检索 |
@@ -259,7 +275,7 @@ Saker 当前包含 18 个独立插件。多数用户不需要逐个理解它们�
 
 - 渗透测试资料索引当前记录 106 篇。
 - 代码审计资料索引当前记录 226 篇 Markdown，并包含自建及第三方 Semgrep 规则。
-- 内置 [PayloadsAllTheThings](https://github.com/swisskyrepo/PayloadsAllTheThings) 全量文本（各漏洞章节 README 与 Intruder payload 清单，commit `3ac2790`，MIT），随包离线可用；可在「知识库 → 随包 PATT」浏览、编辑区检索。
+- 内置 [PayloadsAllTheThings](https://github.com/swisskyrepo/PayloadsAllTheThings) 全量文本（66 个漏洞章节 README 与 payload 清单，commit `3ac2790`，MIT），随包离线可用；与其余资料一起在「设置 → 知识库」按主题分类浏览、检索。
 - Semgrep OSS 快照、自建规则和其他资料具有不同许可，数量与来源以各目录 README 为准。
 
 Saker 自有代码采用 MIT License；随附第三方资料不自动转为 MIT。再分发前请阅读 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。
@@ -274,7 +290,8 @@ Saker/
 │   ├── pentest/            # 渗透测试模式、playbook 与参考资料
 │   └── code-audit/         # 代码审计模式、playbook 与规则集
 ├── shared/skills/          # 两种模式共享的协作与复核技能
-├── plugins/                # 18 个独立功能插件
+├── shared/refs/            # 共享参考资料与随包 PayloadsAllTheThings（MIT）
+├── plugins/                # 19 个独立功能插件
 ├── scripts/                # 全量打包与安装脚本
 ├── lib/preset-root.js      # 模式注册入口
 ├── cordis.patch.yml        # bundle 加载配置
