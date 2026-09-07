@@ -1,7 +1,7 @@
 {
-  "name": "@dsh-external/dsh-sec-config",
-  "version": "1.0.7",
-  "description": "DSH security platform configuration: local tool paths, service endpoints (Burp/Yakit), DNSLog, API keys, and password change — one settings section with a loopback RPC and shellEnv injection for agent tool discovery.",
+  "name": "@dsh-external/dsh-knowledge-hub",
+  "version": "0.1.2",
+  "description": "Saker knowledge hub: two-layer refs (bundle read-only + DSH_HOME/refs user-writable with imports for external sources like PayloadsAllTheThings), a layered tree/search/read RPC for the settings page, and knowledge_search/read/list model tools.",
   "type": "module",
   "main": "./lib/index.js",
   "exports": {
@@ -11,7 +11,6 @@
   },
   "files": [
     "lib",
-    "tools",
     "cordis.patch.yml",
     "README.md"
   ],
@@ -23,7 +22,9 @@
     "dsh",
     "dsh-plugin",
     "dsh-bundle",
-    "security"
+    "security",
+    "knowledge-base",
+    "payloads"
   ],
   "engines": {
     "node": ">=22"
@@ -43,7 +44,6 @@
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-settings": "^0.1.0-rc.6"
+    "@deepseek-ai/cordis": "^4.0.1"
   }
 }

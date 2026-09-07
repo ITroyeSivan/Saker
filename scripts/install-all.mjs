@@ -28,11 +28,17 @@ const cli = process.env.DSH_CLI || 'dsh'
 // profile home: honour DSH_HOME like the harness does, else ~/.dsh
 const homeRoot = process.env.DSH_HOME || join(process.env.USERPROFILE || process.env.HOME || '', '.dsh')
 const profilePkgPath = join(homeRoot, 'profiles', profile, 'package.json')
-const installed = new Set()
+// installed: package name -> installed version (read from the profile's node_modules)
+const installed = new Map()
 if (existsSync(profilePkgPath)) {
   try {
     const p = JSON.parse(readFileSync(profilePkgPath, 'utf8'))
-    Object.keys(p.dependencies || {}).forEach((k) => installed.add(k))
+    for (const name of Object.keys(p.dependencies || {})) {
+      try {
+        const pkg = JSON.parse(readFileSync(join(homeRoot, 'profiles', profile, 'node_modules', name, 'package.json'), 'utf8'))
+        installed.set(name, String(pkg.version || ''))
+      } catch { installed.set(name, '') }
+    }
   } catch { /* profile not readable -> assume empty */ }
 }
 
@@ -40,22 +46,47 @@ function fileSpec(absPath) {
   return 'file:' + absPath.replace(/\\/g, '/')
 }
 
+/** Quote-aware tokenizer so DSH_CLI entries like
+ *  `"C:/x/node.exe" "E:/d/apps/cli/lib/bin.js"` survive cmd.exe (single quotes
+ *  are NOT quotes in cmd — only double quotes are). */
+function tokenize(s) {
+  const out = []
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g
+  let m
+  while ((m = re.exec(s)) !== null) out.push(m[1] ?? m[2] ?? m[3])
+  return out
+}
+
 function runAdd(spec) {
-  const cmd = `${cli} plugin --profile ${profile} add "${spec}"`
-  const r = spawnSync(cmd, { shell: true, encoding: 'utf8', env: { ...process.env, NODE_OPTIONS: '' } })
+  const base = tokenize(cli)
+  const first = base[0] || ''
+  const isShim = /\.(cmd|bat)$/i.test(first) || first === 'dsh'
+  if (isShim) {
+    // .cmd shims need a shell; wrap the spec in double quotes (cmd-safe)
+    const cmd = `${cli} plugin --profile ${profile} add "${spec}"`
+    const r = spawnSync(cmd, { shell: true, encoding: 'utf8', env: { ...process.env, NODE_OPTIONS: '' } })
+    return { status: r.status, out: String(r.stdout || '') + String(r.stderr || '') }
+  }
+  const args = [...base.slice(1), 'plugin', '--profile', profile, 'add', spec]
+  const r = spawnSync(first, args, { shell: false, encoding: 'utf8', env: { ...process.env, NODE_OPTIONS: '' } })
   return { status: r.status, out: String(r.stdout || '') + String(r.stderr || '') }
 }
 
-function addWithRetry(label, pkgName, spec) {
+function addWithRetry(label, pkgName, spec, version) {
+  const want = String(version || '')
   if (installed.has(pkgName)) {
-    console.log(`SKIP ${label}  (already installed: ${pkgName})`)
-    return true
+    const have = installed.get(pkgName)
+    if (have && want && have === want) {
+      console.log(`SKIP ${label}  (already installed: ${pkgName}@${have})`)
+      return true
+    }
+    console.log(`UPGRADE ${label}  ${pkgName}@${have || '?'} -> ${want || '?'}`)
   }
   for (let tryN = 1; tryN <= 5; tryN++) {
     const { status, out } = runAdd(spec)
     if (status === 0 && /Done in|Already up to date|Progress: resolved/i.test(out)) {
-      console.log(`OK   ${label}`)
-      installed.add(pkgName)
+      console.log(`OK   ${label}@${want}`)
+      installed.set(pkgName, want)
       return true
     }
     if (tryN < 5) {
@@ -78,7 +109,7 @@ if (!existsSync(rootTgz)) {
   console.error(`root tgz missing: ${rootTgz}\nrun \`node scripts/pack-all.mjs\` first`)
   process.exit(1)
 }
-if (addWithRetry('root dsh-saker', rootPkg.name, fileSpec(rootTgz))) ok++
+if (addWithRetry('root dsh-saker', rootPkg.name, fileSpec(rootTgz), rootPkg.version)) ok++
 else fail++
 
 // 2. feature plugins
@@ -94,7 +125,7 @@ for (const name of readdirSync(join(root, 'plugins')).sort()) {
     fail++
     continue
   }
-  if (addWithRetry(name, p.name, fileSpec(tgz))) ok++
+  if (addWithRetry(name, p.name, fileSpec(tgz), p.version)) ok++
   else fail++
 }
 

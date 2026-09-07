@@ -19,8 +19,41 @@ const NAMESPACE = 'sec-config'
 const CHANNEL = '/dsh-sec-config'
 const MCP_STUDIO_NAMESPACE = 'mcp-studio'
 
-/** Tool keys whose paths the settings page exposes and the shell receives. */
-const TOOL_KEYS = ['sqlmap', 'nuclei', 'dirsearch', 'fscan', 'subfinder', 'httpx', 'katana', 'afrog', 'ffuf', 'jwt_tool', 'nmap']
+/**
+ * Preset tool definitions shown in the 安全配置 page, grouped by category.
+ * The page lets the operator pick from this list, add their own custom tools
+ * (arbitrary key), or remove any entry — the manifest below always reflects the
+ * live tools object (preset keys + custom keys), and every preset key is
+ * injected into the shell as DSH_TOOL_<NAME>.
+ */
+export const TOOL_PRESETS = [
+  { key: 'subfinder', label: 'Subfinder', category: '信息收集' },
+  { key: 'httpx', label: 'Httpx', category: '信息收集' },
+  { key: 'nmap', label: 'Nmap', category: '信息收集' },
+  { key: 'nuclei', label: 'Nuclei', category: '漏洞扫描' },
+  { key: 'afrog', label: 'Afrog', category: '漏洞扫描' },
+  { key: 'fscan', label: 'Fscan', category: '漏洞扫描' },
+  { key: 'dirsearch', label: 'Dirsearch', category: '目录与接口' },
+  { key: 'katana', label: 'Katana', category: '目录与接口' },
+  { key: 'ffuf', label: 'Ffuf', category: '目录与接口' },
+  { key: 'sqlmap', label: 'SQLMap', category: '注入与利用' },
+  { key: 'jwt_tool', label: 'JWT Tool', category: '令牌与认证' },
+]
+
+export const TOOL_CATEGORIES = ['信息收集', '漏洞扫描', '目录与接口', '注入与利用', '令牌与认证']
+
+/** Preset tool keys whose paths the shell receives as DSH_TOOL_<NAME>. */
+const TOOL_KEYS = TOOL_PRESETS.map((t) => t.key)
+
+/** Custom (operator-defined) tool keys may also be configured; they are listed
+ * in the prompt manifest and callable via PATH, but are not declared as
+ * DSH_TOOL_* shell variables (the shell-env registry requires a static
+ * declaration set at registration time). */
+const TOOL_KEY_RE = /^[A-Za-z0-9_]+$/
+
+function isToolKey(key) {
+  return typeof key === 'string' && TOOL_KEY_RE.test(key) && key.length <= 40
+}
 
 /** Fields the client may write through settings/mutate. */
 const WRITABLE_FIELDS = new Set(['tools', 'services', 'dnslog', 'apiKeys'])
@@ -324,7 +357,16 @@ function scheduleSync(settings, services, logger) {
 export function renderManifest(section, listMountedMcpTools) {
   const lines = []
   const tools = section && section.tools ? section.tools : {}
-  const configured = TOOL_KEYS.filter((key) => typeof tools[key] === 'string' && tools[key].length > 0)
+  const byKey = new Map(TOOL_PRESETS.map((t) => [t.key, t]))
+  const configured = []
+  for (const t of TOOL_PRESETS) {
+    if (typeof tools[t.key] === 'string' && tools[t.key].length > 0) configured.push(t.key)
+  }
+  for (const key of Object.keys(tools)) {
+    if (!byKey.has(key) && isToolKey(key) && typeof tools[key] === 'string' && tools[key].length > 0) {
+      configured.push(key + '(自定义)')
+    }
+  }
   if (configured.length > 0) lines.push(`tools: ${configured.join(' ')}`)
   const services = section && section.services ? section.services : {}
   const serviceParts = []
@@ -372,6 +414,9 @@ export function apply(ctx, config = {}) {
 
     connection.rpc.handle(CHANNEL, async (endpoint, payload) => {
       try {
+        if (endpoint === 'tool-presets') {
+          return ok({ presets: TOOL_PRESETS, categories: TOOL_CATEGORIES })
+        }
         if (endpoint === 'settings/get') {
           return ok({
             status: 'ready',

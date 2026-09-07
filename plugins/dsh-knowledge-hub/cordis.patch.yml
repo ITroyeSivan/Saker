@@ -1,0 +1,7 @@
+# One installable bundle row mounts the Host service and publishes its Web client.
+- insert:
+    - id: dsh-knowledge-hub
+      name: '@dsh-external/dsh-knowledge-hub'
+      config:
+        priority: user-first
+        topics: {}

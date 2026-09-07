@@ -20,6 +20,15 @@
     "THIRD_PARTY_NOTICES.md"
   ],
   "license": "MIT",
+  "author": "ITroyeSivan <ITroyeSivan@users.noreply.github.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ITroyeSivan/Saker.git"
+  },
+  "homepage": "https://github.com/ITroyeSivan/Saker",
+  "bugs": {
+    "url": "https://github.com/ITroyeSivan/Saker/issues"
+  },
   "keywords": [
     "deepseek-harness",
     "dsh",

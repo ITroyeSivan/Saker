@@ -11,8 +11,25 @@ var useState = React.useState, useEffect = React.useEffect;
 
 var CHANNEL = '/dsh-sec-config';
 
-var TOOL_KEYS = ['sqlmap', 'nuclei', 'dirsearch', 'fscan', 'subfinder', 'httpx', 'katana', 'afrog', 'ffuf', 'jwt_tool', 'nmap'];
-var TOOL_LABELS = { sqlmap: 'SQLMap', nuclei: 'Nuclei', dirsearch: 'Dirsearch', fscan: 'Fscan', subfinder: 'Subfinder', httpx: 'Httpx', katana: 'Katana', afrog: 'Afrog', ffuf: 'Ffuf', jwt_tool: 'JWT Tool', nmap: 'Nmap' };
+// Preset tool catalog (mirror of host TOOL_PRESETS — fallback until the RPC
+// answers). Custom tools (arbitrary keys) are managed alongside them.
+var CATEGORY_ORDER = ['信息收集', '漏洞扫描', '目录与接口', '注入与利用', '令牌与认证'];
+var FALLBACK_PRESETS = [
+  { key: 'subfinder', label: 'Subfinder', category: '信息收集' },
+  { key: 'httpx', label: 'Httpx', category: '信息收集' },
+  { key: 'nmap', label: 'Nmap', category: '信息收集' },
+  { key: 'nuclei', label: 'Nuclei', category: '漏洞扫描' },
+  { key: 'afrog', label: 'Afrog', category: '漏洞扫描' },
+  { key: 'fscan', label: 'Fscan', category: '漏洞扫描' },
+  { key: 'dirsearch', label: 'Dirsearch', category: '目录与接口' },
+  { key: 'katana', label: 'Katana', category: '目录与接口' },
+  { key: 'ffuf', label: 'Ffuf', category: '目录与接口' },
+  { key: 'sqlmap', label: 'SQLMap', category: '注入与利用' },
+  { key: 'jwt_tool', label: 'JWT Tool', category: '令牌与认证' },
+];
+var TOOL_NAME_RE = /^[A-Za-z0-9_]+$/;
+var PRESET_LABEL = { key: 'preset', label: '预设', bg: '#e4e4e7', fg: '#6e6e73' };
+var CUSTOM_LABEL = { key: 'custom', label: '自定义', bg: '#dbeafe', fg: '#1d4ed8' };
 
 function rpc(connection, endpoint, payload) {
   return connection.rpc.call(CHANNEL, endpoint, payload);
@@ -36,6 +53,125 @@ function Group(props) {
     React.createElement('div', { style: groupTitleStyle() }, props.title),
     props.children);
 }
+
+// ── Tool library section ────────────────────────────────────────────────────
+// Category groups of preset tools (fill a path to "add" it), an operator-custom
+// add form, and per-row remove. All edits stay local until 保存配置 commits.
+
+function ToolRow(props) {
+  var badge = props.kind === 'custom' ? CUSTOM_LABEL : PRESET_LABEL;
+  var label = props.label;
+  var has = props.has;
+  return React.createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 } },
+    React.createElement('span', {
+      style: { display: 'inline-flex', alignItems: 'center', padding: '1px 7px', borderRadius: 999, fontSize: 11, fontWeight: 600, background: badge.bg, color: badge.fg, lineHeight: '16px', whiteSpace: 'nowrap', flex: '0 0 auto' },
+    }, badge.label),
+    React.createElement('div', { style: { flex: '0 0 140px', fontSize: 13, color: 'var(--dsw-alias-label-primary,#1a1a1a)' } }, label),
+    React.createElement('div', { style: { flex: 1, minWidth: 120 } },
+      React.createElement(Input, {
+        value: props.value || '',
+        placeholder: has ? '已配置' : (props.placeholder || '工具路径，留空=未添加'),
+        onChange: props.onChange,
+      })),
+    React.createElement('button', {
+      type: 'button',
+      title: has ? '从配置中移除该工具（空路径不注入、不进提示词）' : '',
+      disabled: !has,
+      style: {
+        padding: '6px 10px', borderRadius: 6, fontSize: 12, cursor: has ? 'pointer' : 'not-allowed',
+        border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: has ? 'transparent' : 'transparent',
+        color: has ? '#d1242f' : '#c8c8cc', opacity: has ? 1 : 0.6,
+      },
+      onClick: props.onRemove,
+    }, '移除'));
+}
+
+function ToolGroup(props) {
+  var [presets, setPresets] = useState(null);
+  var [newName, setNewName] = useState('');
+  var [newPath, setNewPath] = useState('');
+  var [msg, setMsg] = useState(null);
+
+  useEffect(function () {
+    rpc(props.connection, 'tool-presets', {}).then(function (res) {
+      if (res && res.ok && res.value && Array.isArray(res.value.presets)) {
+        setPresets({ presets: res.value.presets, categories: res.value.categories || CATEGORY_ORDER });
+      }
+    }).catch(function () { /* fall back to local copy */ });
+  }, []);
+
+  var catalog = presets ? presets.presets : FALLBACK_PRESETS;
+  var categoryOrder = presets ? presets.categories : CATEGORY_ORDER;
+  var byKey = {};
+  catalog.forEach(function (t) { byKey[t.key] = t; });
+  var tools = props.value || {};
+
+  function setTool(key, val) {
+    var next = JSON.parse(JSON.stringify(tools));
+    next[key] = val;
+    props.onChange(next);
+  }
+  function removeTool(key) {
+    var next = JSON.parse(JSON.stringify(tools));
+    delete next[key];
+    props.onChange(next);
+  }
+  function addCustom() {
+    var name = newName.trim();
+    var pathv = newPath.trim();
+    if (!TOOL_NAME_RE.test(name)) { setMsg('工具名只允许字母/数字/下划线（用于标识，也用于环境变量式引用）'); return; }
+    if (name.length > 40) { setMsg('工具名过长（≤40）'); return; }
+    if (byKey[name]) { setMsg('该名称与预设工具重复：' + name); return; }
+    if (!pathv) { setMsg('请填工具路径'); return; }
+    setTool(name, pathv);
+    setNewName(''); setNewPath(''); setMsg(null);
+  }
+
+  // Preset rows grouped by category (all shown — fill a path to add/select).
+  var presetGroups = categoryOrder.map(function (cat) {
+    var rows = catalog.filter(function (t) { return t.category === cat; });
+    if (rows.length === 0) return null;
+    var children = rows.map(function (t) {
+      var val = typeof tools[t.key] === 'string' ? tools[t.key] : '';
+      return React.createElement(ToolRow, {
+        key: t.key, kind: 'preset', label: t.label, value: val, has: val.length > 0,
+        placeholder: '选择添加：填路径即可',
+        onChange: function (v) { setTool(t.key, v); },
+        onRemove: function () { removeTool(t.key); },
+      });
+    });
+    return React.createElement(Group, { key: cat, title: cat }, children);
+  });
+
+  // Operator-defined tools (keys outside the preset catalog) with a value.
+  var customKeys = Object.keys(tools).filter(function (k) { return !byKey[k] && TOOL_NAME_RE.test(k) && typeof tools[k] === 'string' && tools[k].length > 0; }).sort();
+  var customGroup = null;
+  if (customKeys.length > 0 || true) {
+    var customRows = customKeys.map(function (k) {
+      return React.createElement(ToolRow, {
+        key: k, kind: 'custom', label: k, value: tools[k], has: true,
+        onChange: function (v) { setTool(k, v); },
+        onRemove: function () { removeTool(k); },
+      });
+    });
+    customGroup = React.createElement('div', { style: { marginBottom: 4 } },
+      React.createElement('div', { style: { fontSize: 13, fontWeight: 600, margin: '14px 0 6px' } }, '自定义工具'),
+      customRows.length > 0 ? customRows : React.createElement('div', { style: { fontSize: 12, color: '#9a9aa0' } }, '还没有自定义工具——在下方添加你本地有、预设里没有的工具。'),
+      React.createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 } },
+        React.createElement('div', { style: { flex: '0 0 150px' } }, React.createElement(Input, { value: newName, placeholder: '名称（如 ksubdomain）', onChange: setNewName })),
+        React.createElement('div', { style: { flex: 1 } }, React.createElement(Input, { value: newPath, placeholder: '工具路径（保存后进提示词，PATH 内可用）', onChange: setNewPath })),
+        React.createElement('button', { type: 'button', style: btnStyle(false), onClick: addCustom }, '添加')),
+      msg ? React.createElement('div', { style: msgStyle(false) }, msg) : null);
+  }
+
+  return React.createElement('div', null,
+    React.createElement('div', { style: groupTitleStyle() }, '本地工具库'),
+    React.createElement('div', { style: hintStyle() }, '预设按分类列出，填路径即启用（保存后以 DSH_TOOL_<NAME> 注入 shell）；没有的工具可自定义添加（进提示词与检索，经 PATH 调用）。留空的预设不启用；「移除」从配置中删除该工具。'),
+    presetGroups,
+    customGroup);
+}
+
+function hintStyle() { return { fontSize: 12, color: 'var(--dsw-alias-label-tertiary, #6e6e73)', marginBottom: 6, lineHeight: 1.6 }; }
 
 function ConfigForm(props) {
   var v = props.value || {};
@@ -99,12 +235,7 @@ function ConfigForm(props) {
   }
 
   return React.createElement('div', null,
-    React.createElement(Group, { title: '本地工具路径（供渗透/审计 playbook 定位，留空表示未安装）' },
-      TOOL_KEYS.map(function (k) {
-        return React.createElement('div', { key: k },
-          React.createElement('label', { style: labelStyle() }, TOOL_LABELS[k] || k),
-          React.createElement(Input, { value: tools[k] || '', placeholder: '例如 E:\\tools\\' + k + '.exe', onChange: function (val) { setPath(['tools', k], val); } }));
-      })),
+    React.createElement(ToolGroup, { connection: props.connection, value: v.tools || {}, onChange: function (next) { setPath(['tools'], next); } }),
     React.createElement(Group, { title: '服务连接地址（保存后自动同步到 MCP 工作台，模型立即可见）' },
       React.createElement(ServiceRow, { connection: props.connection, name: 'burp', label: 'Burp Suite 地址', placeholder: 'http://127.0.0.1:9876', value: services.burpUrl || '', status: mountStatus.burp, mounting: mountingName === 'burp', onChange: function (val) { setPath(['services', 'burpUrl'], val); }, onMount: mountOne.bind(null, 'burp') }),
       React.createElement(ServiceRow, { connection: props.connection, name: 'yakit', label: 'Yakit 地址', placeholder: 'http://127.0.0.1:11432', value: services.yakitUrl || '', status: mountStatus.yakit, mounting: mountingName === 'yakit', onChange: function (val) { setPath(['services', 'yakitUrl'], val); }, onMount: mountOne.bind(null, 'yakit') })),
