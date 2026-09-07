@@ -9,8 +9,7 @@
 // registry (mcp__burp__* / mcp__yakit__*) — saves the operator a second trip
 // to the "MCP 工作台" for the same source-of-truth data.
 import z from '@deepseek-ai/schemastery'
-import { existsSync } from 'node:fs'
-import { spawn } from 'node:child_process'
+import { existsSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 export const name = 'dsh-sec-config'
@@ -57,7 +56,7 @@ function isToolKey(key) {
 }
 
 /** Fields the client may write through settings/mutate. */
-const WRITABLE_FIELDS = new Set(['tools', 'services', 'dnslog', 'apiKeys'])
+const WRITABLE_FIELDS = new Set(['tools', 'services', 'dnslog', 'apiKeys', 'scanRoots'])
 
 /** Secret-bearing fields: redacted on read; an empty/`***` write is ignored. */
 const SECRET_FIELDS = new Set(['dnslog.token', 'apiKeys.deepseekKey'])
@@ -127,6 +126,8 @@ const Config = z.object({
   apiKeys: z.object({
     deepseekKey: z.string().default(''),
   }),
+  /** 供「工具自动探测」扫描的候选根（用户可选填；留空则用已配工具父目录）。 */
+  scanRoots: z.array(z.string()).default([]),
 })
 
 function ok(value) { return { ok: true, value } }
@@ -184,86 +185,86 @@ function resolveBurpProxyPath() {
 }
 
 /**
- * 原生目录选择器（「工具库」行「选择目录」按钮用）。
+ * 工具路径"自动探测"（替代原生目录对话框——浏览器给不了绝对路径，而宿主弹窗
+ * 在无交互桌面/远程会话下会不可见甚至卡死，且无法自动化验证）。
  *
- * 体验设计（对比技能页上传的浏览器原生 file input）：浏览器拿不到本机绝对路径，
- * 目录选择只能由宿主弹原生对话框。为避免每次点击都冷启动一个 PowerShell 进程
- * （首弹 ~1-3s、观感"卡"），这里维护一个**常驻 worker**：首次使用时 spawn 一个
- * -STA PowerShell 进程跑 tools/pick-worker.ps1，之后每次 pick 只是往 stdin 写一行、
- * 等 stdout 回一行——第二次起接近即时。
- *
- * Worker 输出行：`PICK:<abs path>` / `CANCEL` / `ERR:<msg>`；宿主退出（stdin EOF）
- * worker 自动 break 退出，不留僵尸。取消/超时/非 Windows 返回空串。
+ * 方案：宿主在**候选根**（用户显式填的扫描根 + 所有已配工具路径的父目录 +
+ * 已知工具目录常量）里做深度受限的静默扫描，按工具名匹配出候选绝对路径，
+ * 前端渲染成"一键点选"列表——体验与技能上传一致，永不弹窗、永不冻结。
  */
-class ResidentDirectoryPicker {
-  constructor(scriptPath) {
-    this.scriptPath = scriptPath
-    this.child = null
-    this.lineBuf = ''
-    this.queue = [] // { resolve, timer }
-  }
+const TOOL_NAME_EXT_RE = /\.(exe|py|bat|cmd|ps1|go|sh|jar|rb|pl)$/i
 
-  /** 惰性 spawn（幂等）；失败则清空并在下一次 pick 重试。 */
-  ensure() {
-    if (this.child && this.child.exitCode === null && this.child.stdin && this.child.stdin.writable) return
-    this.child = null
-    const child = spawn('powershell.exe',
-      ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', this.scriptPath],
-      { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, POWERSHELL_TELEMETRY_OPTOUT: '1' } })
-    child.stdout.setEncoding('utf8')
-    child.stdout.on('data', (chunk) => this.onData(chunk))
-    child.stderr.on('data', () => { /* 诊断需要时透出 */ })
-    child.on('error', () => { this.onExit() })
-    child.on('close', () => { this.onExit() })
-    this.child = child
-  }
+function isToolCandidateFile(name, toolKey) {
+  const lower = name.toLowerCase()
+  const base = lower.replace(/\.[^.]+$/, '')
+  const extOk = TOOL_NAME_EXT_RE.test(lower) || !lower.includes('.')
+  if (!extOk) return false
+  // 排除安装包/构建残留（nmap-7.99-setup.exe 等）
+  if (/setup|install|uninstall|\.msi$|\.zip$/.test(lower)) return false
+  // 文件名主部 === 工具 key（jwt_tool.py / nuclei.exe / sqlmap 等）
+  if (base === toolKey.toLowerCase()) return true
+  // 工具目录常见命名：fscan_2.2.1_windows_x64.exe / sqlmap-dev 等前缀匹配
+  if (base.startsWith(toolKey.toLowerCase() + '_')) return true
+  if (base.startsWith(toolKey.toLowerCase() + '-')) return true
+  return false
+}
 
-  onData(chunk) {
-    this.lineBuf += chunk
-    let idx
-    while ((idx = this.lineBuf.indexOf('\n')) >= 0) {
-      const line = this.lineBuf.slice(0, idx).replace(/\r$/, '')
-      this.lineBuf = this.lineBuf.slice(idx + 1)
-      if (!line) continue
-      const item = this.queue.shift()
-      if (!item) continue
-      clearTimeout(item.timer)
-      item.resolve(line.startsWith('PICK:') ? line.slice(5) : '')
+/** 单层目录扫描（不递归，候选根一般已按工具分好层）。 */
+function scanDirForTool(root, toolKey, out, depth = 0, maxDepth = 2) {
+  if (depth > maxDepth) return
+  let entries
+  try { entries = readdirSync(root, { withFileTypes: true }) } catch { return }
+  for (const e of entries) {
+    if (e.name.startsWith('.')) continue
+    if (e.name === 'node_modules' || e.name === '__pycache__') continue
+    const full = path.join(root, e.name)
+    if (e.isDirectory()) {
+      scanDirForTool(full, toolKey, out, depth + 1, maxDepth)
+    } else if (e.isFile() && isToolCandidateFile(e.name, toolKey)) {
+      out.push(full)
     }
   }
+}
 
-  onExit() {
-    const rest = this.queue
-    this.queue = []
-    this.child = null
-    for (const item of rest) { clearTimeout(item.timer); item.resolve('') }
+/**
+ * 汇总候选根并扫描。同步执行（几十~几百目录，深度 ≤2，单次毫秒级）；
+ * 结果按"越靠前越可能"排序（父目录命中 > 深层）。超长扫描加保护上限。
+ */
+const SCAN_MAX_ROOTS = 32
+const SCAN_MAX_HITS = 64
+function findToolCandidates(section) {
+  const tools = (section && section.tools) || {}
+  const roots = []
+  const seen = new Set()
+  const addRoot = (r) => {
+    if (!r || seen.has(r)) return
+    seen.add(r)
+    roots.push(r)
   }
-
-  /** 弹一次目录选择。@returns Promise<string> 绝对路径；取消/失败=空串。 */
-  pick(timeoutMs = 180000) {
-    return new Promise((resolve) => {
-      if (process.platform !== 'win32') return resolve('')
-      try { this.ensure() } catch { return resolve('') }
-      const item = {
-        resolve,
-        timer: setTimeout(() => {
-          const i = this.queue.indexOf(item)
-          if (i >= 0) this.queue.splice(i, 1)
-          resolve('')
-        }, timeoutMs),
-      }
-      this.queue.push(item)
-      try { this.child.stdin.write('pick\r\n') } catch { this.onExit() }
-    })
+  // 1) 用户显式填的扫描根（顶层配置 scanRoots，UI 可编辑）
+  if (Array.isArray(section && section.scanRoots)) section.scanRoots.forEach(addRoot)
+  // 2) 所有已配工具路径的父目录及其上一级（Tools\04-...\sqlmap → 扫 04-... 与 Tools，
+  //    让同大类/同目录的 nuclei/ffuf 等互见；bin 型扁平目录自动覆盖）
+  for (const v of Object.values(tools)) {
+    if (typeof v !== 'string' || !v || v === '***') continue
+    addRoot(path.dirname(v))
+    addRoot(path.dirname(path.dirname(v)))
   }
-
-  /** 宿主退出时优雅关闭。 */
-  dispose() {
-    if (this.child && this.child.exitCode === null && this.child.stdin && this.child.stdin.writable) {
-      try { this.child.stdin.write('quit\r\n') } catch { /* ignore */ }
-      setTimeout(() => { try { this.child && this.child.kill() } catch { /* ignore */ } }, 500)
-    }
+  // 3) 随包常量里的工具根线索（mcp-proxy 父目录等）
+  for (const p of BURP_PROXY_DEFAULT_PATHS) {
+    try { if (existsSync(p)) addRoot(path.dirname(path.dirname(p))) } catch { /* ignore */ }
   }
+  if (roots.length === 0) return { roots: [], candidates: {} }
+  const candidates = {}
+  for (const t of TOOL_PRESETS) {
+    const hits = []
+    for (const root of roots.slice(0, SCAN_MAX_ROOTS)) scanDirForTool(root, t.key, hits)
+    if (hits.length > SCAN_MAX_HITS) hits.length = SCAN_MAX_HITS
+    // 排序：短路径优先（更接近工具根）；同长度按字母序稳定
+    hits.sort((a, b) => a.length - b.length || (a < b ? -1 : 1))
+    candidates[t.key] = hits.slice(0, 8)
+  }
+  return { roots, candidates }
 }
 
 /**
@@ -484,19 +485,7 @@ export function renderManifest(section, listMountedMcpTools) {
 export function apply(ctx, config = {}) {
   let current = () => config
   let scope = null
-  const base = { tools: {}, services: {}, dnslog: {}, apiKeys: {}, ...(config ?? {}) }
-
-  // 常驻目录选择 worker：首次 pick 惰性 spawn，之后复用（免每次冷启动 PowerShell）。
-  // worker 脚本随插件包 tools/ 分发（package.json files 已含 tools）。
-  const picker = new ResidentDirectoryPicker(fileURLToPath(new URL('../tools/pick-worker.ps1', import.meta.url)))
-  const disposePicker = () => { try { picker.dispose() } catch { /* ignore */ } }
-  try {
-    if (typeof ctx.effect === 'function') {
-      ctx.effect(disposePicker, 'dsh-sec-config: picker')
-    } else if (typeof ctx.on === 'function') {
-      ctx.on('dispose', disposePicker)
-    }
-  } catch { /* 无生命周期钩子：worker 依赖 stdin EOF 自退，可接受 */ }
+  const base = { tools: {}, services: {}, dnslog: {}, apiKeys: {}, scanRoots: [], ...(config ?? {}) }
 
   try {
     scope = ctx.settings.register(NAMESPACE, Config, { base })
@@ -551,14 +540,12 @@ export function apply(ctx, config = {}) {
             return failure(err && err.message ? err.message : String(err))
           }
         }
-        if (endpoint === 'pick-directory') {
-          // Native folder picker for the 工具库 row. Returns { path } where
-          // path is the absolute path string, or empty string on cancel /
-          // non-Windows host. A resident PowerShell worker (spawned once,
-          // kept warm) drives FolderBrowserDialog so repeat clicks are fast.
+        if (endpoint === 'scan-candidates') {
+          // 工具自动探测：静默扫描候选根（scanRoots + 已配工具父目录两级），
+          // 按预设工具名匹配返回候选绝对路径。无弹窗、毫秒级、可 headless 验证。
           try {
-            const path = await picker.pick()
-            return ok({ path: typeof path === 'string' ? path.trim() : '' })
+            const { roots, candidates } = findToolCandidates(current())
+            return ok({ roots: roots.slice(0, 12), candidates })
           } catch (err) {
             return failure(err && err.message ? err.message : String(err))
           }

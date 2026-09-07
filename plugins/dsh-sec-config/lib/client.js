@@ -57,75 +57,50 @@ function Group(props) {
 // ── Tool library section ────────────────────────────────────────────────────
 // Category groups of preset tools (fill a path to "add" it), an operator-custom
 // add form, and per-row remove. All edits stay local until 保存配置 commits.
-
-// 「选择目录」：通过 host loopback RPC 弹原生文件夹对话框（Windows
-// FolderBrowserDialog，同机部署可用；远程/LAN 或非 Windows 返回空，退手动粘贴）。
-// 之所以不走 <input webkitdirectory>——浏览器为安全只给 webkitRelativePath，
-// 拿不到本机绝对路径；host 原生对话框才能把真实路径填回表单。
-function PickButton(props) {
-  var [busy, setBusy] = useState(false);
-  var [err, setErr] = useState('');
-  function pick() {
-    if (busy) return;
-    setErr('');
-    setBusy(true);
-    rpc(props.connection, 'pick-directory', {}).then(function (res) {
-      setBusy(false);
-      if (res && res.ok && res.value && typeof res.value.path === 'string' && res.value.path) {
-        props.onPicked && props.onPicked(res.value.path);
-      } else if (res && !res.ok) {
-        setErr((res.error && res.error.message) || '选择失败');
-        setTimeout(function () { setErr(''); }, 3000);
-      }
-      // 取消/空路径：静默，不覆盖用户已输入内容
-    }).catch(function (e) {
-      setBusy(false);
-      setErr('目录对话框不可用（远程部署？）——请手动粘贴路径');
-      setTimeout(function () { setErr(''); }, 4000);
-    });
-  }
-  return React.createElement(React.Fragment, null,
-    React.createElement('button', {
-      type: 'button',
-      title: '打开本机目录选择框（同机部署可用）',
-      disabled: busy,
-      style: {
-        padding: '6px 10px', borderRadius: 6, fontSize: 12, cursor: busy ? 'wait' : 'pointer',
-        border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: 'transparent',
-        color: 'var(--dsw-alias-label-primary,#1a1a1a)', whiteSpace: 'nowrap', flex: '0 0 auto',
-      },
-      onClick: pick,
-    }, busy ? '…' : '选择目录'),
-    err ? React.createElement('span', { style: { fontSize: 11, color: '#d1242f' } }, err) : null);
-}
+//
+// 路径获取：不再弹系统对话框（浏览器拿不到绝对路径；宿主弹窗在无交互桌面/远程
+// 场景会不可见甚至卡死）。改为「自动探测」——宿主静默扫描候选根（已配工具父
+// 目录 + 可选 scanRoots），把每个工具按文件名匹配出的候选路径渲染成 chips，
+// 点一下即填入。与技能上传一样点选即得、永不弹窗。
 
 function ToolRow(props) {
   var badge = props.kind === 'custom' ? CUSTOM_LABEL : PRESET_LABEL;
   var label = props.label;
   var has = props.has;
-  return React.createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 } },
-    React.createElement('span', {
-      style: { display: 'inline-flex', alignItems: 'center', padding: '1px 7px', borderRadius: 999, fontSize: 11, fontWeight: 600, background: badge.bg, color: badge.fg, lineHeight: '16px', whiteSpace: 'nowrap', flex: '0 0 auto' },
-    }, badge.label),
-    React.createElement('div', { style: { flex: '0 0 140px', fontSize: 13, color: 'var(--dsw-alias-label-primary,#1a1a1a)' } }, label),
-    React.createElement('div', { style: { flex: 1, minWidth: 120 } },
-      React.createElement(Input, {
-        value: props.value || '',
-        placeholder: has ? '已配置' : (props.placeholder || '工具路径，留空=未添加'),
-        onChange: props.onChange,
-      })),
-    props.connection ? React.createElement(PickButton, { connection: props.connection, onPicked: function (p) { props.onChange && props.onChange(p); } }) : null,
-    React.createElement('button', {
-      type: 'button',
-      title: has ? '从配置中移除该工具（空路径不注入、不进提示词）' : '',
-      disabled: !has,
-      style: {
-        padding: '6px 10px', borderRadius: 6, fontSize: 12, cursor: has ? 'pointer' : 'not-allowed',
-        border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: has ? 'transparent' : 'transparent',
-        color: has ? '#d1242f' : '#c8c8cc', opacity: has ? 1 : 0.6,
-      },
-      onClick: props.onRemove,
-    }, '移除'));
+  var candidates = props.candidates || [];
+  var shown = (candidates || []).filter(function (p) { return p !== props.value; }).slice(0, 4);
+  return React.createElement('div', { style: { marginBottom: 6 } },
+    React.createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'center' } },
+      React.createElement('span', {
+        style: { display: 'inline-flex', alignItems: 'center', padding: '1px 7px', borderRadius: 999, fontSize: 11, fontWeight: 600, background: badge.bg, color: badge.fg, lineHeight: '16px', whiteSpace: 'nowrap', flex: '0 0 auto' },
+      }, badge.label),
+      React.createElement('div', { style: { flex: '0 0 140px', fontSize: 13, color: 'var(--dsw-alias-label-primary,#1a1a1a)' } }, label),
+      React.createElement('div', { style: { flex: 1, minWidth: 120 } },
+        React.createElement(Input, {
+          value: props.value || '',
+          placeholder: has ? '已配置' : (props.placeholder || '工具路径，留空=未添加'),
+          onChange: props.onChange,
+        })),
+      React.createElement('button', {
+        type: 'button',
+        title: has ? '从配置中移除该工具（空路径不注入、不进提示词）' : '',
+        disabled: !has,
+        style: {
+          padding: '6px 10px', borderRadius: 6, fontSize: 12, cursor: has ? 'pointer' : 'not-allowed',
+          border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: has ? 'transparent' : 'transparent',
+          color: has ? '#d1242f' : '#c8c8cc', opacity: has ? 1 : 0.6,
+        },
+        onClick: props.onRemove,
+      }, '移除')),
+    !has && shown.length > 0 ? React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 4, margin: '4px 0 2px 0', paddingLeft: 0 } },
+      React.createElement('span', { style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', lineHeight: '20px', marginRight: 4 } }, '自动探测到：'),
+      shown.map(function (p) {
+        return React.createElement('button', {
+          key: p, type: 'button', title: p,
+          style: { padding: '2px 8px', borderRadius: 999, fontSize: 11, cursor: 'pointer', border: '1px solid #2f81f7', background: 'transparent', color: '#2f81f7', maxWidth: 340, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+          onClick: function () { props.onChange && props.onChange(p); },
+        }, p);
+      })) : null);
 }
 
 function ToolGroup(props) {
@@ -133,13 +108,23 @@ function ToolGroup(props) {
   var [newName, setNewName] = useState('');
   var [newPath, setNewPath] = useState('');
   var [msg, setMsg] = useState(null);
+  var [cand, setCand] = useState(null); // { roots, candidates: {key:[paths]} }
+  var [scanning, setScanning] = useState(false);
 
+  function scan() {
+    setScanning(true);
+    rpc(props.connection, 'scan-candidates', {}).then(function (res) {
+      setScanning(false);
+      if (res && res.ok && res.value && res.value.candidates) setCand(res.value);
+    }).catch(function () { setScanning(false); });
+  }
   useEffect(function () {
     rpc(props.connection, 'tool-presets', {}).then(function (res) {
       if (res && res.ok && res.value && Array.isArray(res.value.presets)) {
         setPresets({ presets: res.value.presets, categories: res.value.categories || CATEGORY_ORDER });
       }
     }).catch(function () { /* fall back to local copy */ });
+    scan();
   }, []);
 
   var catalog = presets ? presets.presets : FALLBACK_PRESETS;
@@ -147,6 +132,7 @@ function ToolGroup(props) {
   var byKey = {};
   catalog.forEach(function (t) { byKey[t.key] = t; });
   var tools = props.value || {};
+  var candidatesOf = function (key) { return (cand && cand.candidates && cand.candidates[key]) || []; };
 
   function setTool(key, val) {
     var next = JSON.parse(JSON.stringify(tools));
@@ -178,6 +164,7 @@ function ToolGroup(props) {
       return React.createElement(ToolRow, {
         key: t.key, kind: 'preset', label: t.label, value: val, has: val.length > 0,
         placeholder: '选择添加：填路径即可',
+        candidates: candidatesOf(t.key),
         connection: props.connection,
         onChange: function (v) { setTool(t.key, v); },
         onRemove: function () { removeTool(t.key); },
@@ -204,14 +191,23 @@ function ToolGroup(props) {
       React.createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 } },
         React.createElement('div', { style: { flex: '0 0 150px' } }, React.createElement(Input, { value: newName, placeholder: '名称（如 ksubdomain）', onChange: setNewName })),
         React.createElement('div', { style: { flex: 1 } }, React.createElement(Input, { value: newPath, placeholder: '工具路径（保存后进提示词，PATH 内可用）', onChange: setNewPath })),
-        React.createElement(PickButton, { connection: props.connection, onPicked: function (p) { setNewPath(p); } }),
         React.createElement('button', { type: 'button', style: btnStyle(false), onClick: addCustom }, '添加')),
       msg ? React.createElement('div', { style: msgStyle(false) }, msg) : null);
   }
 
   return React.createElement('div', null,
-    React.createElement('div', { style: groupTitleStyle() }, '本地工具库'),
-    React.createElement('div', { style: hintStyle() }, '预设按分类列出，填路径即启用（保存后以 DSH_TOOL_<NAME> 注入 shell）；没有的工具可自定义添加（进提示词与检索，经 PATH 调用）。留空的预设不启用；「移除」从配置中删除该工具。'),
+      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 10 } },
+      React.createElement('div', { style: groupTitleStyle() }, '本地工具库'),
+      React.createElement('button', {
+        type: 'button', disabled: scanning,
+        style: { padding: '3px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer', border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: 'transparent', color: 'var(--dsw-alias-label-primary,#1a1a1a)' },
+        onClick: scan,
+      }, scanning ? '探测中…' : '重新探测')),
+    React.createElement('div', { style: hintStyle() },
+      '预设按分类列出，填路径即启用（保存后以 DSH_TOOL_<NAME> 注入 shell）。路径可手动粘贴，或在空行下点「自动探测到」的候选路径一键填入（宿主扫描已配工具目录自动发现同目录/同大类工具）。留空=不启用；「移除」从配置中删除。自定义工具名/路径经 PATH 或绝对路径调用。'),
+    cand && cand.roots && cand.roots.length > 0
+      ? React.createElement('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', marginBottom: 8 } },
+          '扫描根：' + cand.roots.join('  ·  ')) : null,
     presetGroups,
     customGroup);
 }
