@@ -184,6 +184,60 @@ function resolveBurpProxyPath() {
 }
 
 /**
+ * 原生目录选择器（「工具库」行「选择目录」按钮用）——用 PowerShell STA 拉起
+ * System.Windows.Forms.FolderBrowserDialog，把选中绝对路径经 UTF-8 stdout 回传。
+ * 仅当平台 UI 与宿主进程同机（典型 localhost 部署）时可用；取消/远程/非 Windows
+ * 返回空串。3 分钟无人响应强制 kill，防对话框残留在别的窗口后面。
+ * 不用 <input webkitdirectory>——浏览器安全模型只给相对路径，拿不到本机绝对路径。
+ */
+function pickDirectoryWindows() {
+  return new Promise((resolve) => {
+    const ps = [
+      '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
+      'Add-Type -AssemblyName System.Windows.Forms | Out-Null',
+      '$f = New-Object System.Windows.Forms.FolderBrowserDialog',
+      '$f.Description = "选择工具所在目录"',
+      '$f.ShowNewFolderButton = $false',
+      '$r = $f.ShowDialog()',
+      'if ($r -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.WriteLine($f.SelectedPath) }',
+    ].join('; ')
+    let child
+    let settled = false
+    const finish = (val) => {
+      if (settled) return
+      settled = true
+      try { child && child.kill() } catch { /* 已退出 */ }
+      resolve(val)
+    }
+    try {
+      child = spawn('powershell.exe', ['-NoProfile', '-STA', '-Command', ps], {
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, POWERSHELL_TELEMETRY_OPTOUT: '1' },
+      })
+    } catch (err) {
+      finish('')
+      return
+    }
+    let stdout = ''
+    let stderr = ''
+    const killTimer = setTimeout(() => finish(''), 180000)
+    child.stdout.on('data', (b) => { stdout += b.toString('utf8') })
+    child.stderr.on('data', (b) => { stderr += b.toString('utf8') })
+    child.on('error', () => { clearTimeout(killTimer); finish('') })
+    child.on('close', (code) => {
+      clearTimeout(killTimer)
+      // PowerShell 5.1 的 [Console]::Out 默认走系统 ANSI/OEM 代码页，中文路径
+      // 可能被转成 ????——这里接受非 ASCII 丢字风险由 ps 侧转 UTF-8 规避：
+      // 上面输出经 [Console]::Out.WriteLine 走进程 stdout，Node 按 utf8 读。
+      // 兜底：若 code!=0 或空串，检查 stderr 仅在调试需要时透出。
+      if (code !== 0 && !stderr.includes('System.Windows.Forms')) finish('')
+      else finish(stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).pop() ?? '')
+    })
+  })
+}
+
+/**
  * Build one mcp-studio server entry from a sec-config service endpoint. Returns
  * `null` when the entry cannot be built (e.g. Burp with no proxy jar available).
  */
