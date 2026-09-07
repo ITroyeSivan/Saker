@@ -8,6 +8,10 @@
 //
 // Prerequisites:
 //   - `dsh` CLI reachable (the DeepSeek Harness install), or point DSH_CLI at
+//     the CLI entry. When the harness lives in a source tree (no global `dsh`),
+//     pass a double-quoted node+entry pair, e.g. on Windows:
+//       DSH_CLI="\"C:/Program Files/nodejs/node.exe\" \"E:/harness/apps/cli/lib/bin.js\""
+//     (cmd treats only double quotes as quotes — that is what tokenize() handles.)
 //     the harness CLI entry, e.g.:
 //       DSH_CLI="node /abs/path/to/deepseek-harness/apps/cli/lib/bin.js"
 //   - tgz artifacts present (run `node scripts/pack-all.mjs` after a clone)

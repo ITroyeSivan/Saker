@@ -49,11 +49,26 @@ var SOURCE_META = {
   import: { label: '导入', bg: '#f3e8ff', fg: '#7c3aed' },
 };
 
+// Normalized inputs: strip onChange and re-attach a handler that forwards
+// e.target.value (same contract as sec-config). Consumers always receive the
+// plain string value, never the React event object.
 function Input(props) {
-  return React.createElement('input', Object.assign({ type: 'text', style: CSS.field }, props));
+  var rest = {};
+  for (var k in props) if (k !== 'onChange') rest[k] = props[k];
+  return React.createElement('input', Object.assign({ type: 'text', style: CSS.field }, rest, {
+    onChange: typeof props.onChange === 'function'
+      ? function (e) { props.onChange(e.target.value); }
+      : undefined,
+  }));
 }
 function TextArea(props) {
-  return React.createElement('textarea', Object.assign({ style: Object.assign({ minHeight: 260, fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', fontSize: 12, lineHeight: 1.55, resize: 'vertical' }, CSS.field) }, props));
+  var rest = {};
+  for (var k in props) if (k !== 'onChange') rest[k] = props[k];
+  return React.createElement('textarea', Object.assign({ style: Object.assign({ minHeight: 260, fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', fontSize: 12, lineHeight: 1.55, resize: 'vertical' }, CSS.field) }, rest, {
+    onChange: typeof props.onChange === 'function'
+      ? function (e) { props.onChange(e.target.value); }
+      : undefined,
+  }));
 }
 
 // ── Directory tree section ──────────────────────────────────────────────────
@@ -76,17 +91,19 @@ function TreeSection(props) {
 
   function refreshRoot() {
     rpc(props.connection, 'browse', { source: props.source, mode: props.mode, dir: '' }).then(function (r) {
-      if (isOk(r)) setRootChildren(r.value);
+      if (isOk(r)) { setRootChildren(r.value); if (msg) setMsg(''); }
       else setMsg(errText(r));
     });
   }
-  useEffect(refreshRoot, [props.source, props.mode]);
+  useEffect(refreshRoot, [props.source, props.mode, props.reloadTick]);
 
   // Expand cache: dirKey -> {dirs, files} | null(not loaded)
   var [cache, setCache] = useState({});
   var [expanded, setExpanded] = useState({});
 
-  // Mode switch must drop cached subtrees from the previous mode.
+  // Mode/source switch must drop cached subtrees from the previous layer.
+  // reloadTick intentionally does NOT clear these — an edit save should not
+  // collapse the tree; structural changes only re-browse the root (refreshRoot).
   useEffect(function () { setCache({}); setExpanded({}); }, [props.source, props.mode]);
 
   function toggleDir(node) {
@@ -205,60 +222,95 @@ function Editor(props) {
 function ImportBox(props) {
   var [url, setUrl] = useState('');
   var [name, setName] = useState('');
-  var [busy, setBusy] = useState(false);
+  var [dirPath, setDirPath] = useState('');
+  var [dirName, setDirName] = useState('');
+  var [busy, setBusy] = useState(''); // '' | 'git' | 'local'
   var [msg, setMsg] = useState(null);
-  function run() {
-    setBusy(true); setMsg(null);
+
+  function runGit() {
+    if (!url.trim() || !name.trim() || busy) return;
+    setBusy('git'); setMsg(null);
     rpc(props.connection, 'import_git', { url: url.trim(), name: name.trim() }).then(function (r) {
-      setBusy(false);
-      if (isOk(r)) { setMsg({ ok: true, text: '导入完成：' + r.value.path + '（离线可用；检索已覆盖导入层）' }); setUrl(''); setName(''); props.onChanged(); }
-      else setMsg({ ok: false, text: errText(r) });
+      setBusy('');
+      if (isOk(r)) {
+        var ref = r.value && r.value.ref ? '（snapshot ' + r.value.ref + '）' : '';
+        setMsg({ ok: true, text: '导入完成：' + r.value.path + ref + '，已离线可用，检索覆盖导入层。' });
+        setUrl(''); setName('');
+        props.onChanged();
+      } else setMsg({ ok: false, text: errText(r) });
     });
   }
+  function runLocal() {
+    if (!dirPath.trim() || !dirName.trim() || busy) return;
+    setBusy('local'); setMsg(null);
+    rpc(props.connection, 'import_local', { path: dirPath.trim(), name: dirName.trim() }).then(function (r) {
+      setBusy('');
+      if (isOk(r)) {
+        setMsg({ ok: true, text: '导入完成：' + r.value.path + '（' + r.value.files + ' 个文件，跳过 .git），已离线可用。' });
+        setDirPath(''); setDirName('');
+        props.onChanged();
+      } else setMsg({ ok: false, text: errText(r) });
+    });
+  }
+
   return React.createElement('div', { style: { borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', paddingTop: 12 } },
-    React.createElement('div', { style: CSS.groupTitle }, '导入外部知识源'),
-    React.createElement('div', { style: CSS.hint, marginBottom: 6 }, '把 Git 仓库（如 github.com/swisskyrepo/PayloadsAllTheThings）克隆到用户导入区，之后完全离线可用。需要本机可访问该 Git 地址。'),
+    React.createElement('div', { style: CSS.groupTitle }, '导入外部知识源（远程 Git）'),
+    React.createElement('div', { style: Object.assign({}, CSS.hint, { marginBottom: 6 }) },
+      '克隆公开 Git 仓库（如 github.com/swisskyrepo/PayloadsAllTheThings，MIT 协议）到导入区，之后完全离线可用。需要本机能访问该地址；成功后显示来源 commit。'),
     React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
       React.createElement('div', { style: { flex: 3 } }, React.createElement(Input, { value: url, placeholder: 'Git 仓库 URL（https://…）', onChange: setUrl })),
       React.createElement('div', { style: { flex: 1 } }, React.createElement(Input, { value: name, placeholder: '名称（如 payloads-all-the-things）', onChange: setName })),
-      React.createElement('button', { type: 'button', disabled: busy || !url || !name, style: btn(true), onClick: run }, busy ? '导入中…' : '导入')),
-    msg ? React.createElement('div', { style: msgStyle(msg.ok) }, msg.text) : null);
+      React.createElement('button', { type: 'button', disabled: !!busy || !url.trim() || !name.trim(), style: btn(true), onClick: runGit }, busy === 'git' ? '导入中…' : '导入')),
+    React.createElement('div', { style: { marginTop: 14 } },
+      React.createElement('div', { style: CSS.groupTitle }, '导入本机文件夹'),
+      React.createElement('div', { style: Object.assign({}, CSS.hint, { marginBottom: 6 }) },
+        '把运行 dsh 这台机器上的现有目录整体复制进导入区（自动跳过 .git）。例如本地已 clone 的 PayloadsAllTheThings，或团队共享的知识目录；离线最稳。'),
+      React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
+        React.createElement('div', { style: { flex: 3 } }, React.createElement(Input, { value: dirPath, placeholder: '本机文件夹绝对路径（如 D:\\kb\\PayloadsAllTheThings）', onChange: setDirPath })),
+        React.createElement('div', { style: { flex: 1 } }, React.createElement(Input, { value: dirName, placeholder: '名称（如 payloads-all-the-things）', onChange: setDirName })),
+        React.createElement('button', { type: 'button', disabled: !!busy || !dirPath.trim() || !dirName.trim(), style: btn(true), onClick: runLocal }, busy === 'local' ? '导入中…' : '导入'))),
+    msg ? React.createElement('div', { style: msgStyle(msg.ok), marginTop: 8 }, msg.text) : null);
 }
 
 function SearchBox(props) {
   var [query, setQuery] = useState('');
   var [busy, setBusy] = useState(false);
   var [hits, setHits] = useState(null);
+  var [err, setErr] = useState(null);
+  useEffect(function () { setHits(null); setErr(null); }, [props.mode]);
   function run() {
-    if (!query.trim()) return;
-    setBusy(true);
+    if (!query.trim() || busy) return;
+    setBusy(true); setErr(null);
     rpc(props.connection, 'search', { query: query.trim(), mode: props.mode }).then(function (r) {
       setBusy(false);
-      if (isOk(r)) setHits(r.value.hits);
-      else setHits([]);
+      if (isOk(r)) { setHits(r.value.hits); setErr(null); }
+      else { setHits([]); setErr(errText(r)); }
     });
   }
   var rows = null;
   if (hits) {
-    rows = hits.length === 0
-      ? React.createElement('div', { style: { color: '#9a9aa0', fontSize: 12, padding: 6 } }, '无命中')
-      : React.createElement('div', null, hits.map(function (h, i) {
-          var m = SOURCE_META[h.source] || SOURCE_META.bundle;
-          return React.createElement('div', {
-            key: i,
-            style: { display: 'flex', alignItems: 'flex-start', gap: 6, padding: '3px 4px', borderRadius: 4, cursor: 'pointer', fontSize: 12 },
-            onMouseEnter: function (e) { e.currentTarget.style.background = 'var(--dsw-alias-bg-fill,#f0f2f5)'; },
-            onMouseLeave: function (e) { e.currentTarget.style.background = 'transparent'; },
-            onClick: function () { props.onOpen({ source: h.source, mode: h.mode || props.mode, path: h.path, name: h.path.split('/').pop() }); },
-          },
-            badge(m.bg, m.fg, m.label),
-            React.createElement('span', { style: { color: '#3f3f46', whiteSpace: 'nowrap' } }, h.mode ? h.mode + '/' : '', h.path, h.line ? ':' + h.line : ''),
-            React.createElement('span', { style: { color: '#9a9aa0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 260 } }, h.preview || ''));
-        }));
+    rows = err
+      ? React.createElement('div', { style: { color: '#d1242f', fontSize: 12, padding: 6 } }, '检索失败：' + err)
+      : hits.length === 0
+        ? React.createElement('div', { style: { color: '#9a9aa0', fontSize: 12, padding: 6 } }, '无命中')
+        : React.createElement('div', null, hits.map(function (h, i) {
+            var m = SOURCE_META[h.source] || SOURCE_META.bundle;
+            return React.createElement('div', {
+              key: i,
+              style: { display: 'flex', alignItems: 'flex-start', gap: 6, padding: '3px 4px', borderRadius: 4, cursor: 'pointer', fontSize: 12 },
+              onMouseEnter: function (e) { e.currentTarget.style.background = 'var(--dsw-alias-bg-fill,#f0f2f5)'; },
+              onMouseLeave: function (e) { e.currentTarget.style.background = 'transparent'; },
+              onClick: function () { props.onOpen({ source: h.source, mode: h.mode || props.mode, path: h.path, name: h.path.split('/').pop() }); },
+            },
+              badge(m.bg, m.fg, m.label),
+              React.createElement('span', { style: { color: '#3f3f46', whiteSpace: 'nowrap' } }, h.mode ? h.mode + '/' : '', h.path, h.line ? ':' + h.line : ''),
+              React.createElement('span', { style: { color: '#9a9aa0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 260 } }, h.preview || ''));
+          }));
   }
   return React.createElement('div', { style: { borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', paddingTop: 12 } },
     React.createElement('div', { style: CSS.groupTitle }, '检索测试'),
-    React.createElement('div', { style: CSS.hint, marginBottom: 6 }, '关键词定位（覆盖包内 + 用户 + 导入三层；先定位再点开读原文）。'),
+    React.createElement('div', { style: Object.assign({}, CSS.hint, { marginBottom: 6 }) },
+      '关键词定位（包内 + 用户 + 导入三层；先定位到文件，点开读原文；Enter 或点检索）。'),
     React.createElement('div', { style: { display: 'flex', gap: 8 } },
       React.createElement('div', { style: { flex: 1 } }, React.createElement(Input, { value: query, placeholder: '如 fastjson / jwt / order-by 盲注', onChange: setQuery, onKeyDown: function (e) { if (e.key === 'Enter') run(); } })),
       React.createElement('button', { type: 'button', disabled: busy, style: btn(true), onClick: run }, busy ? '检索中…' : '检索')),
@@ -325,11 +377,11 @@ function Page(props) {
     statsLine,
     React.createElement('div', { style: { display: 'flex', gap: 16, alignItems: 'flex-start' } },
       React.createElement('div', { style: { flex: '0 0 300px', minWidth: 240, maxHeight: 520, overflowY: 'auto', borderRight: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', paddingRight: 8 } },
-        React.createElement(TreeSection, { connection: conn, source: 'bundle', mode: mode, title: '随包手册', writable: false, activeFile: activeFile, onOpen: openFile }),
+        React.createElement(TreeSection, { connection: conn, source: 'bundle', mode: mode, title: '随包手册', writable: false, activeFile: activeFile, onOpen: openFile, reloadTick: reloadTick }),
         React.createElement('hr', { style: { border: 'none', borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', margin: '8px 0' } }),
-        React.createElement(TreeSection, { connection: conn, source: 'user', mode: mode, title: '用户积累', writable: true, activeFile: activeFile, onOpen: openFile }),
+        React.createElement(TreeSection, { connection: conn, source: 'user', mode: mode, title: '用户积累', writable: true, activeFile: activeFile, onOpen: openFile, reloadTick: reloadTick }),
         React.createElement('hr', { style: { border: 'none', borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', margin: '8px 0' } }),
-        React.createElement(TreeSection, { connection: conn, source: 'import', mode: mode, title: '导入知识源', writable: true, activeFile: activeFile, onOpen: openFile })),
+        React.createElement(TreeSection, { connection: conn, source: 'import', mode: mode, title: '导入知识源', writable: true, activeFile: activeFile, onOpen: openFile, reloadTick: reloadTick })),
       React.createElement('div', { style: { flex: 1, minWidth: 0 } },
         React.createElement(Editor, { connection: conn, file: activeFile, onChanged: onChanged, onDeleted: onDeleted }))),
     React.createElement('div', { style: { marginTop: 10, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 } },

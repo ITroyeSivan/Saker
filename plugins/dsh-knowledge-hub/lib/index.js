@@ -16,7 +16,7 @@
 import path from 'node:path'
 import fs from 'node:fs'
 import os from 'node:os'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
@@ -289,10 +289,87 @@ function importGit(url, name) {
     })
     child.on('close', (code) => {
       clearTimeout(timer)
-      if (code === 0) resolve({ ok: true, path: `imports/${safeName}` })
-      else resolve({ ok: false, error: `git clone 失败（exit ${code}）：${err.trim().split('\n').slice(-2).join(' | ')}` })
+        if (code === 0) {
+          let ref = ''
+          try {
+            const r = spawnSync('git', ['-C', target, 'rev-parse', '--short', 'HEAD'], {
+              encoding: 'utf8',
+              windowsHide: true,
+              timeout: 10000,
+            })
+            if (r.status === 0) ref = String(r.stdout || '').trim().slice(0, 12)
+          } catch {
+            /* snapshot optional */
+          }
+          resolve({ ok: true, value: { path: `imports/${safeName}`, ref } })
+        } else {
+          resolve({ ok: false, error: `git clone 失败（exit ${code}）：${err.trim().split('\n').slice(-2).join(' | ')}` })
+        }
     })
   })
+}
+
+/** Copy a local folder (on the dsh machine) into the import layer. Skips .git. */
+function importLocal(srcPath, name) {
+  const safeName = String(name || '').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 60)
+  if (!safeName) {
+    return Promise.resolve({ ok: false, error: '需要名称' })
+  }
+  let src = ''
+  try {
+    src = path.resolve(String(srcPath || '').trim())
+  } catch {
+    return Promise.resolve({ ok: false, error: '路径不合法' })
+  }
+  let st = null
+  try {
+    st = fs.statSync(src)
+  } catch {
+    return Promise.resolve({ ok: false, error: `本机路径不存在：${srcPath}` })
+  }
+  if (!st.isDirectory()) {
+    return Promise.resolve({ ok: false, error: '源不是文件夹' })
+  }
+  const target = path.join(importsRoot(), safeName)
+  // Never copy a layer into itself (target inside src, incl. imports root).
+  if (target === src || target.startsWith(src + path.sep)) {
+    return Promise.resolve({ ok: false, error: '源目录不能是导入区或其子目录（换个名称或先移走内容）' })
+  }
+  try {
+    if (fs.existsSync(target)) {
+      return Promise.resolve({ ok: false, error: `目录已存在：imports/${safeName}（先删除或换名）` })
+    }
+    fs.mkdirSync(importsRoot(), { recursive: true })
+    fs.cpSync(src, target, {
+      recursive: true,
+      filter: (s) => path.basename(s) !== '.git',
+    })
+  } catch (e) {
+    return Promise.resolve({ ok: false, error: `导入失败：${e && e.message ? e.message : String(e)}` })
+  }
+  // Report how many text files are now searchable.
+  let textFiles = 0
+  try {
+    textFiles = walkFiles(target, 100000).length
+  } catch {
+    textFiles = 0
+  }
+  return Promise.resolve({ ok: true, value: { path: `imports/${safeName}`, files: textFiles } })
+}
+
+/** Top-level import package names, for provenance in the prompt manifest. */
+function topImportNames() {
+  const root = importsRoot()
+  if (!root || !fs.existsSync(root)) return []
+  try {
+    return fs
+      .readdirSync(root, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name)
+      .sort()
+  } catch {
+    return []
+  }
 }
 
 // ── RPC dispatch ────────────────────────────────────────────────────────────
@@ -386,6 +463,10 @@ async function dispatch(endpoint, payload) {
 
     case 'import_git': {
       return await importGit(String(p.url || ''), String(p.name || ''))
+    }
+
+    case 'import_local': {
+      return await importLocal(String(p.path || ''), String(p.name || ''))
     }
 
     default:
@@ -561,7 +642,13 @@ export function apply(ctx, config = {}) {
         if (s.user === 0 && s.imports === 0) return ''
         const parts = []
         if (s.user > 0) parts.push(`个人/团队知识 ${s.user} 篇`)
-        if (s.imports > 0) parts.push(`导入知识源 ${s.imports} 篇（含 PayloadsAllTheThings 等外部资产，可离线全量检索）`)
+        if (s.imports > 0) {
+          const names = topImportNames()
+          parts.push(
+            `导入知识源 ${s.imports} 篇` +
+              (names.length ? `（来源：${names.slice(0, 8).join('、')}${names.length > 8 ? ' 等' : ''}）` : ''),
+          )
+        }
         return `<dsh-knowledge-hub>扩展知识库：${parts.join('，')}。用 knowledge_search / knowledge_read / knowledge_list 定位与读取（包内随包手册仍在 preset refs 路径直接读）。</dsh-knowledge-hub>`
       },
     })
