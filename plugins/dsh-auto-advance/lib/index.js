@@ -119,6 +119,17 @@ async function apply(ctx, config) {
 		return null;
 	};
 
+	// 极短/常见试水消息不算深度任务——跳过开工提醒，避免用户敲一句"test"就被
+	// 灌入大段三登记。规则：trim 后 < 6 字符，或命中下方白名单（test/hi/中文招呼
+	// 等）。命中规则后仍按"每会话一次"纪律把 sid 标为已处理，不再补灌。
+	const TRIVIAL_KICKOFF_RE = /^(test|hi|hello|hey|ping|你好|您好|测试|试试|测试一下|ok|好的|收到|嗯|啊|哦|啊哈|👋|🙂|thx|thanks|ty)$/i;
+	function shouldSkipKickoff(message) {
+		const text = textOf(message).trim();
+		if (!text) return true;
+		if (text.length < 6) return true;
+		return TRIVIAL_KICKOFF_RE.test(text);
+	}
+
 	/** 开工提醒文案：模式化（本模式拆分理论+准则结构+分母语义）优先，降级通用三登记。 */
 	const kickoffText = (mode) => {
 		const d = theoryOf(mode);
@@ -137,6 +148,7 @@ async function apply(ctx, config) {
 		// 开工三登记——不硬拦（快任务可忽略），出口对账兜底。
 		if (cfg.kickoff && sid && !kickoffDone.has(sid)) {
 			kickoffDone.add(sid);
+			if (shouldSkipKickoff(message)) return;   // 试水消息不打搅（仍按每会话一次纪律，不再补灌）
 			const agent = info?.agent;
 			const cwd = agent?.session?.header?.cwd;
 			if (typeof cwd === "string" && cwd && !fs.existsSync(path.join(cwd, "operation-state.json")) && typeof agent.followup === "function") {

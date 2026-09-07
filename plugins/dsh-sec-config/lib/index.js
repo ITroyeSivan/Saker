@@ -10,6 +10,7 @@
 // to the "MCP 工作台" for the same source-of-truth data.
 import z from '@deepseek-ai/schemastery'
 import { existsSync } from 'node:fs'
+import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 export const name = 'dsh-sec-config'
@@ -451,6 +452,19 @@ export function apply(ctx, config = {}) {
           try {
             const result = await syncMcpServers(settings, services)
             return ok(result)
+          } catch (err) {
+            return failure(err && err.message ? err.message : String(err))
+          }
+        }
+        if (endpoint === 'pick-directory') {
+          // Native folder picker for the 工具库 row. Returns { path } where
+          // path is the absolute path string, or empty string on cancel /
+          // non-Windows host. Powershell is spawned in STA mode and the
+          // dialog is force-killed after 3 min if left orphaned.
+          if (process.platform !== 'win32') return ok({ path: '' })
+          try {
+            const path = await pickDirectoryWindows()
+            return ok({ path: typeof path === 'string' ? path.trim() : '' })
           } catch (err) {
             return failure(err && err.message ? err.message : String(err))
           }

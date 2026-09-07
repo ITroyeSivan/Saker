@@ -171,9 +171,10 @@ dsh web
 每个目录都是独立的 dsh bundle。先安装根模式包，再按需要添加插件：
 
 ```powershell
-dsh plugin --profile web add "file:C:/packages/dsh-saker-0.2.0.tgz"
-dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-sec-config-1.0.7.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-saker-0.2.1.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-sec-config-1.0.8.tgz"
 dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-knowledge-hub-0.1.5.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-skill-browse-1.0.0.tgz"
 dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-stage-gate-1.5.0.tgz"
 ```
 
@@ -233,22 +234,23 @@ dsh plugin --profile web remove dsh-saker
 
 ## 插件清单
 
-Saker 当前包含 19 个独立插件。多数用户不需要逐个理解它们；`pack-all` + `install-all` 会完成整套安装。
+Saker 当前包含 20 个独立插件。多数用户不需要逐个理解它们；`pack-all` + `install-all` 会完成整套安装。
 
 | 模块 | 插件 | 做什么 |
 |---|---|---|
 | 界面与配置 | `dsh-mode-group` | 在新会话页集中展示安全模式 |
-| 界面与配置 | `dsh-sec-config` | 管理工具路径、Burp/Yakit、DNSLog、API Key，以及宿主支持时的改密入口；工具按分类呈现，可自定义与删除 |
+| 界面与配置 | `dsh-sec-config` | 管理工具路径、Burp/Yakit、DNSLog 与改密入口（API Key 由「平台设置」统一维护）；工具按分类呈现，可自定义与删除 |
 | 界面与配置 | `dsh-mcp-studio` | 管理、诊断和预览 MCP 服务及工具 |
 | 界面与配置 | `dsh-knowledge-hub` | 知识库管理：随包 PATT 与手册、用户积累、Git/本机文件夹导入；按主题分类浏览与检索 |
+| 界面与配置 | `dsh-skill-browse` | 设置页「技能」面板：列出当前可用技能（共享 + 当前模式），一键复制 `@skill:<name>` 引用串到剪贴板 |
 | 工具 | `dsh-scanner-tools` | 将 nuclei、httpx、ffuf 封装为模型工具 |
 | 工具 | `dsh-semgrep-audit` | 使用本地 Semgrep 和随包规则集进行代码扫描 |
 | 工具 | `dsh-hunter` | 聚合 FOFA、Hunter、Quake 资产检索 |
 | 工具 | `dsh-webshell-mgr` | 管理已授权环境中的连接、文件和数据库操作 |
 | 过程 | `dsh-stage-gate` | 记录目标与意图，检查阶段产物是否齐全 |
 | 过程 | `dsh-sec-enforce` | 在工具执行前约束写入范围、报告门和高风险操作 |
-| 过程 | `dsh-route-boost` | 按当前阶段补充门禁、证据和知识资料指针 |
-| 过程 | `dsh-auto-advance` | 子代理返回后，在有限轮次内推进尚未收口的任务 |
+| 过程 | `dsh-route-boost` | 按当前阶段补充门禁、证据和知识资料指针；信封列出当前模式可引用技能名 |
+| 过程 | `dsh-auto-advance` | 子代理返回后，在有限轮次内推进尚未收口的任务；试水消息不触发开工提醒 |
 | 过程 | `dsh-refusal-guard` | 识别异常拒答并触发有记录的纠偏流程 |
 | 记录 | `dsh-redteam-results` | 保存发现、复核状态并导出 Markdown |
 | 记录 | `dsh-attack-atlas` | 按目标记录攻击面覆盖和攻击链 |

@@ -1,0 +1,7 @@
+# dsh-skill-browse：设置页「技能」面板（host 列技能清单 + 客户端 settings.section）
+# 单一安装行：host 通道 + web 客户端共用同一 bundle 入口。
+- insert:
+    - id: dsh-skill-browse
+      name: '@dsh-external/dsh-skill-browse'
+      config:
+        enable: true

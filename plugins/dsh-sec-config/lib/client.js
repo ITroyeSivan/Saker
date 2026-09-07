@@ -136,6 +136,7 @@ function ToolGroup(props) {
       return React.createElement(ToolRow, {
         key: t.key, kind: 'preset', label: t.label, value: val, has: val.length > 0,
         placeholder: '选择添加：填路径即可',
+        connection: props.connection,
         onChange: function (v) { setTool(t.key, v); },
         onRemove: function () { removeTool(t.key); },
       });
@@ -227,7 +228,9 @@ function ConfigForm(props) {
 
   function save() {
     setBusy(true); setMsg('');
-    rpc(props.connection, 'settings/mutate', { ops: [{ op: 'set', path: ['tools'], value: v.tools }, { op: 'set', path: ['services'], value: v.services }, { op: 'set', path: ['dnslog'], value: v.dnslog }, { op: 'set', path: ['apiKeys'], value: v.apiKeys }] }).then(function (res) {
+    // API 密钥（DeepSeek Key）已统一在「平台设置 → 模型/服务」中维护；本页面
+    // 不再读写 apiKeys，避免双源/覆盖。
+    rpc(props.connection, 'settings/mutate', { ops: [{ op: 'set', path: ['tools'], value: v.tools }, { op: 'set', path: ['services'], value: v.services }, { op: 'set', path: ['dnslog'], value: v.dnslog }] }).then(function (res) {
       setBusy(false);
       if (res && res.ok) { setMsg('已保存'); props.onSaved && props.onSaved(); refreshStatus(); }
       else setMsg('保存失败：' + ((res && res.error && res.error.message) || '未知错误'));
@@ -244,9 +247,8 @@ function ConfigForm(props) {
       React.createElement(Input, { value: dnslog.url || '', placeholder: 'http://ceye.io', onChange: function (val) { setPath(['dnslog', 'url'], val); } }),
       React.createElement('label', { style: labelStyle() }, 'Token（保存后仅显示 ***）'),
       React.createElement(Input, { type: 'password', value: dnslog.token || '', placeholder: dnslog.token === '***' ? '已设置，留空保持不变' : 'dnslog token', onChange: function (val) { setPath(['dnslog', 'token'], val); } })),
-    React.createElement(Group, { title: 'API 密钥' },
-      React.createElement('label', { style: labelStyle() }, 'DeepSeek API Key（保存后仅显示 ***）'),
-      React.createElement(Input, { type: 'password', value: apiKeys.deepseekKey || '', placeholder: apiKeys.deepseekKey === '***' ? '已设置，留空保持不变' : 'sk-...', onChange: function (val) { setPath(['apiKeys', 'deepseekKey'], val); } })),
+    React.createElement('div', { style: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', margin: '0 0 14px', padding: '8px 10px', borderRadius: 6, background: 'var(--dsw-alias-bg-layer-2,#f6f6f7)' } },
+      'DeepSeek API 密钥请到「平台设置 → 模型/服务」中维护，本页不再重复设置。'),
     React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
       React.createElement('button', { type: 'button', disabled: busy, style: btnStyle(true), onClick: save }, busy ? '保存中…' : '保存配置'),
       msg ? React.createElement('span', { style: msgStyle(msg === '已保存') }, msg) : null));

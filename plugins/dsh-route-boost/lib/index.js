@@ -18,7 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import z from "@deepseek-ai/schemastery";
 import { MODES, FALLBACK_GATES, NEGATION_TOKENS } from "./routes.mjs";
-import { toolsStatus } from "./skilltools.mjs";
+import { toolsStatus, listSkillNames } from "./skilltools.mjs";
 import { detectScope } from "./scope.mjs";
 export { detectScope };
 

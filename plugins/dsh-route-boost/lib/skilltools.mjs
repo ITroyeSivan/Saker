@@ -60,3 +60,49 @@ export function toolsStatus(presetId, now = Date.now()) {
 	const missing = deps.filter((n) => !checkTool(n, now));
 	return { total: deps.length, ok: deps.length - missing.length, missing };
 }
+
+/**
+ * 当前模式可引用的技能名集合（preset/<mode>/skills/* 与 shared/skills/* 的
+ * 并集，去重保序）。`presetId` 缺省时退到 shared；返回的每个名字是 SKILL.md
+ * frontmatter 的 `name:` 字段（与 `@skill:<name>` 引用键一致）。在
+ * envelope 的 `skills:` 行投递，让模型在 prompt 装配期就知道当前可用的
+ * 技能指针。
+ */
+const BUNDLE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+const skillNameCache = new Map(); // presetId|"shared" → { at, names: string[] }
+const SKILL_NAME_TTL = 60_000;
+const FRONTMATTER_NAME_RE = /^name:\s*([A-Za-z0-9][A-Za-z0-9._-]{0,63})\s*$/m;
+
+function readSkillNamesFromDir(dir) {
+	const names = [];
+	let entries;
+	try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return names; }
+	for (const e of entries) {
+		if (!e.isDirectory()) continue;
+		const md = path.join(dir, e.name, "SKILL.md");
+		try {
+			const text = fs.readFileSync(md, "utf8");
+			const m = FRONTMATTER_NAME_RE.exec(text);
+			if (m) names.push(m[1]);
+		} catch { /* 单文件读不到忽略 */ }
+	}
+	return names;
+}
+
+export function listSkillNames(presetId, now = Date.now()) {
+	const cacheKey = presetId || "shared";
+	const hit = skillNameCache.get(cacheKey);
+	if (hit && now - hit.at < SKILL_NAME_TTL) return hit.names.slice();
+	const names = [];
+	const seen = new Set();
+	for (const n of readSkillNamesFromDir(path.join(BUNDLE_ROOT, "shared", "skills"))) {
+		if (!seen.has(n)) { seen.add(n); names.push(n); }
+	}
+	if (presetId) {
+		for (const n of readSkillNamesFromDir(path.join(BUNDLE_ROOT, "preset", presetId, "skills"))) {
+			if (!seen.has(n)) { seen.add(n); names.push(n); }
+		}
+	}
+	skillNameCache.set(cacheKey, { at: now, names: names.slice() });
+	return names;
+}
