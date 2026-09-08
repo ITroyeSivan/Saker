@@ -1361,9 +1361,9 @@ function PasswordField(props) {
 			h("button", { type: "button", onClick: function () { setEditing(false); }, style: { padding: "2px 6px", fontSize: 11, cursor: "pointer", border: "none", background: "transparent", color: "#6e6e73" } }, "✕"));
 	}
 	return h("span", { style: { display: "inline-flex", gap: 6, alignItems: "center", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 6, padding: "2px 6px" } },
-		h("code", { style: Object.assign({}, wsMono, { fontSize: 12, color: "#c2410c", fontWeight: 600 }) }, val || "（无口令）"),
+		h("code", { style: Object.assign({}, wsMono, { fontSize: 12, color: "#c2410c", fontWeight: 600 }) }, val || (props.emptyText || "（无口令）")),
 		val ? h(CopyBtn, { text: val }) : null,
-		props.editable ? h("button", { type: "button", title: "修改口令", onClick: function () { setEditing(true); }, style: { padding: "2px 5px", fontSize: 11, cursor: "pointer", border: "none", background: "transparent", color: "#2f81f7" } }, "改密") : null);
+		props.editable ? h("button", { type: "button", title: props.emptyTitle || "修改口令", onClick: function () { setEditing(true); }, style: { padding: "2px 5px", fontSize: 11, cursor: "pointer", border: "none", background: "transparent", color: "#2f81f7" } }, props.emptyTitle || "改密") : null);
 }
 
 /** 内容编辑器：读取/修改上传马的源码。 */
@@ -1554,11 +1554,12 @@ function WebShellSettings(props) {
 							return h("div", { key: grp.obf },
 								h("div", { style: wsGroupTitle }, h("span", null, grp.label)),
 								grp.items.map(function (it) {
-									return h("div", { key: it.kind, style: { display: "flex", alignItems: "center", gap: 6, padding: "3px 0 3px 8px", borderBottom: "1px solid #f0f0f2" } },
-										h("div", { style: Object.assign({ flex: "0 0 150px", fontSize: 12, fontWeight: 600 }, wsMono) }, it.kind),
-										h("div", { style: { flex: 1, fontSize: 11, color: "#4a4a4f" } }, it.label),
-										it.customized ? h("span", { style: { fontSize: 10, padding: "1px 6px", borderRadius: 999, background: "#dafbe1", color: "#1a7f37", fontWeight: 600 } }, "已自定义") : null,
-										h("button", { type: "button", onClick: function () { setEditing(it); }, style: { padding: "3px 10px", borderRadius: 6, fontSize: 11, border: "1px solid #d9d9de", background: "#fff", cursor: "pointer" } }, "参数/口令"));
+							return h("div", { key: it.kind, style: { display: "flex", alignItems: "center", gap: 6, padding: "3px 0 3px 8px", borderBottom: "1px solid #f0f0f2", flexWrap: "wrap" } },
+								h("div", { style: Object.assign({ flex: "0 0 150px", fontSize: 12, fontWeight: 600 }, wsMono) }, it.kind),
+								h("div", { style: { flex: 1, fontSize: 11, color: "#4a4a4f", minWidth: 140 } }, it.label),
+								h(PasswordField, { value: (it.values && it.values.password) || "", emptyText: "生成时随机", emptyTitle: "设默认口令", editable: true, onChange: function (v) { wsRpc(props.connection, "tpl-set", { kind: it.kind, password: v }).then(function () { load(); }); } }),
+								it.customized ? h("span", { style: { fontSize: 10, padding: "1px 6px", borderRadius: 999, background: "#dafbe1", color: "#1a7f37", fontWeight: 600 } }, "已自定义") : null,
+								h("button", { type: "button", onClick: function () { setEditing(it); }, style: { padding: "3px 10px", borderRadius: 6, fontSize: 11, border: "1px solid #d9d9de", background: "#fff", cursor: "pointer" } }, "参数"));
 								}));
 						}) : null);
 				}),
