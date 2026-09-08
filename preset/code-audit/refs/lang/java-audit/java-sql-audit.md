@@ -16,7 +16,7 @@ description: Java Web 源码 SQL 注入漏洞审计工具。从源码中定位�
 
 ## 漏洞分级标准
 
-**详见 [SEVERITY_RATING.md](../java-shared/SEVERITY_RATING.md)**
+**详见 [SEVERITY_RATING.md](./java-severity-rating.md)**
 
 - 漏洞编号格式: `{C/H/M/L}-SQL-{序号}`
 - 严重等级 = f(可达性 R, 影响范围 I, 利用复杂度 C)
@@ -257,15 +257,15 @@ sql.append(" order by ").append(page.getOrderBy())  ← SQL 拼接点
 
 | 框架 | 识别特征 | 配置文件 | 参考资料 |
 |------|----------|----------|----------|
-| JDBC | `java.sql.*`, `Statement`, `PreparedStatement`, `DriverManager` | - | [JDBC.md](references/JDBC.md) |
-| MyBatis | `@Mapper`, `@Select`, `SqlSession`, `#{}`/`${}` | `mybatis-config.xml`, `*Mapper.xml` | [MYBATIS.md](references/MYBATIS.md) |
-| Hibernate | `@Entity`, `Session.createQuery()`, `HQL`, `Criteria` | `hibernate.cfg.xml`, `persistence.xml` | [HIBERNATE.md](references/HIBERNATE.md) |
+| JDBC | `java.sql.*`, `Statement`, `PreparedStatement`, `DriverManager` | - | JDBC.md |
+| MyBatis | `@Mapper`, `@Select`, `SqlSession`, `#{}`/`${}` | `mybatis-config.xml`, `*Mapper.xml` | MYBATIS.md |
+| Hibernate | `@Entity`, `Session.createQuery()`, `HQL`, `Criteria` | `hibernate.cfg.xml`, `persistence.xml` | HIBERNATE.md |
 
 ### 3. 反编译阶段（CRITICAL）
 
 **当源码不可用时，必须使用 CFR 反编译器反编译 SQL 相关类。**
 
-详细策略参见 [DECOMPILE_STRATEGY.md](references/DECOMPILE_STRATEGY.md)
+详细策略参见 [DECOMPILE_STRATEGY.md](./java-decompile-strategy.md)
 
 #### 3.1 反编译工具调用
 
@@ -389,16 +389,16 @@ public String getSql(QueryBean bean, List<Object> params) {
 | 数据流追踪 | 追踪任何 String 参数是否流入 SQL |
 | 多数据库覆盖 | 检测需覆盖 Oracle、MySQL、PostgreSQL、SQL Server 等 |
 
-**详细检测策略请参考：[SQL_DETECTION_RULES.md](references/SQL_DETECTION_RULES.md)**
+**详细检测策略请参考：SQL_DETECTION_RULES.md**
 
 ### 检测规则参考
 
 | 检测类型 | 说明 | 参考文档 |
 |:---------|:-----|:---------|
-| 通用行为检测 | SQL 关键字拼接、数据流追踪、分页排序 | [SQL_DETECTION_RULES.md](references/SQL_DETECTION_RULES.md) |
-| JDBC 框架 | Statement、PreparedStatement、参数化 | [JDBC.md](references/JDBC.md) |
-| MyBatis 框架 | `#{}` vs `${}`、动态 SQL | [MYBATIS.md](references/MYBATIS.md) |
-| Hibernate 框架 | HQL、Criteria、Native Query | [HIBERNATE.md](references/HIBERNATE.md) |
+| 通用行为检测 | SQL 关键字拼接、数据流追踪、分页排序 | SQL_DETECTION_RULES.md |
+| JDBC 框架 | Statement、PreparedStatement、参数化 | JDBC.md |
+| MyBatis 框架 | `#{}` vs `${}`、动态 SQL | MYBATIS.md |
+| Hibernate 框架 | HQL、Criteria、Native Query | HIBERNATE.md |
 
 ### 快速检测命令
 
@@ -429,7 +429,7 @@ grep -ri "limit\s|offset\s|rownum|row_number" --include="*.java"
 
 ---
 
-### JDBC 危险 vs 安全 → [详细规则](references/JDBC.md)
+### JDBC 危险 vs 安全 → 详细规则
 
 | 类型 | 危险模式 | 安全模式 |
 |------|----------|----------|
@@ -437,7 +437,7 @@ grep -ri "limit\s|offset\s|rownum|row_number" --include="*.java"
 | 拼接 | `+`, `StringBuilder`, `String.format` | `?` 占位符 |
 | **ORDER BY** | `" order by " + orderBy` | **白名单校验** |
 
-### MyBatis 危险 vs 安全 → [详细规则](references/MYBATIS.md)
+### MyBatis 危险 vs 安全 → 详细规则
 
 | 类型 | 危险模式 | 安全模式 |
 |------|----------|----------|
@@ -446,7 +446,7 @@ grep -ri "limit\s|offset\s|rownum|row_number" --include="*.java"
 | **order by** | `ORDER BY ${col}` | **白名单校验后使用** |
 | in | `IN (${ids})` | `<foreach>` 标签 |
 
-### Hibernate 危险 vs 安全 → [详细规则](references/HIBERNATE.md)
+### Hibernate 危险 vs 安全 → 详细规则
 
 | 类型 | 危险模式 | 安全模式 |
 |------|----------|----------|
@@ -639,12 +639,12 @@ java-sql-audit                    java-route-tracer
 
 ## 输出格式
 
-**严格按照 [references/OUTPUT_TEMPLATE.md](references/OUTPUT_TEMPLATE.md) 中的填充式模板生成输出文件。**
+**严格按照 references/OUTPUT_TEMPLATE.md 中的填充式模板生成输出文件。**
 
 - 文件名格式: `{project_name}_sql_audit_{YYYYMMDD_HHMMSS}.md`
 - 不得修改模板结构、不得增删章节、不得调整顺序
 - 所有【填写】占位符必须替换为实际内容
-- 通用规范来源: [java-shared/OUTPUT_STANDARD.md](../java-shared/OUTPUT_STANDARD.md)
+- 通用规范来源: [java-shared/OUTPUT_STANDARD.md](./java-output-standard.md)
 
 ---
 
@@ -674,8 +674,8 @@ java-sql-audit                    java-route-tracer
 
 ## 参考资料
 
-- [OUTPUT_TEMPLATE.md](references/OUTPUT_TEMPLATE.md) - 输出报告填充式模板
-- [JDBC.md](references/JDBC.md) - JDBC SQL 注入审计详解
-- [MYBATIS.md](references/MYBATIS.md) - MyBatis SQL 注入审计详解
-- [HIBERNATE.md](references/HIBERNATE.md) - Hibernate SQL 注入审计详解
-- [DECOMPILE_STRATEGY.md](references/DECOMPILE_STRATEGY.md) - 反编译策略指南
+- OUTPUT_TEMPLATE.md - 输出报告填充式模板
+- JDBC.md - JDBC SQL 注入审计详解
+- MYBATIS.md - MyBatis SQL 注入审计详解
+- HIBERNATE.md - Hibernate SQL 注入审计详解
+- [DECOMPILE_STRATEGY.md](./java-decompile-strategy.md) - 反编译策略指南

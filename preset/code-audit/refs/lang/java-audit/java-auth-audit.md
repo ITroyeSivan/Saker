@@ -11,7 +11,7 @@ description: Java Web 源码鉴权机制审计工具。从源码中识别所有�
 
 ## 漏洞分级标准
 
-**详见 [SEVERITY_RATING.md](../java-shared/SEVERITY_RATING.md)**
+**详见 [SEVERITY_RATING.md](./java-severity-rating.md)**
 
 - 漏洞编号格式: `{C/H/M/L}-AUTH-{序号}`
 - 严重等级 = f(可达性 R, 影响范围 I, 利用复杂度 C)
@@ -67,18 +67,18 @@ description: Java Web 源码鉴权机制审计工具。从源码中识别所有�
 
 | 框架 | 识别特征 | 配置文件 | 参考资料 |
 |------|----------|----------|----------|
-| Shiro | `shiro.ini`, `@RequiresAuthentication`, `SecurityUtils` | `shiro.ini`, `shiro-spring.xml` | [SHIRO.md](references/SHIRO.md) |
-| Spring Security | `@EnableWebSecurity`, `SecurityFilterChain`, `@PreAuthorize` | `SecurityConfig.java` | [SPRING_SECURITY.md](references/SPRING_SECURITY.md) |
-| JWT | `io.jsonwebtoken`, `JwtParser`, `Bearer Token` | - | [JWT.md](references/JWT.md) |
-| Filter | `implements Filter`, `doFilter()` | `web.xml` | [FILTER_INTERCEPTOR.md](references/FILTER_INTERCEPTOR.md) |
-| Interceptor | `implements HandlerInterceptor`, `preHandle()` | `WebMvcConfig` | [FILTER_INTERCEPTOR.md](references/FILTER_INTERCEPTOR.md) |
-| 注解鉴权 | `@RequiresRoles`, `@PreAuthorize`, 自定义注解 | - | [ANNOTATION_AUTH.md](references/ANNOTATION_AUTH.md) |
+| Shiro | `shiro.ini`, `@RequiresAuthentication`, `SecurityUtils` | `shiro.ini`, `shiro-spring.xml` | [SHIRO.md](../../components/shiro.md) |
+| Spring Security | `@EnableWebSecurity`, `SecurityFilterChain`, `@PreAuthorize` | `SecurityConfig.java` | SPRING_SECURITY.md |
+| JWT | `io.jsonwebtoken`, `JwtParser`, `Bearer Token` | - | JWT.md |
+| Filter | `implements Filter`, `doFilter()` | `web.xml` | FILTER_INTERCEPTOR.md |
+| Interceptor | `implements HandlerInterceptor`, `preHandle()` | `WebMvcConfig` | FILTER_INTERCEPTOR.md |
+| 注解鉴权 | `@RequiresRoles`, `@PreAuthorize`, 自定义注解 | - | ANNOTATION_AUTH.md |
 
 ### 2.1 组件版本检测（CRITICAL）
 
 **必须检测鉴权相关组件的版本，识别已知漏洞。**
 
-详细漏洞版本参见 [VERSION_VULNS.md](references/VERSION_VULNS.md)
+详细漏洞版本参见 VERSION_VULNS.md
 
 #### 版本识别方法
 
@@ -182,7 +182,7 @@ Host: {{host}}
 
 **当源码不可用时，必须使用 CFR 反编译器反编译鉴权相关类。**
 
-详细策略参见 [DECOMPILE_STRATEGY.md](references/DECOMPILE_STRATEGY.md)
+详细策略参见 [DECOMPILE_STRATEGY.md](./java-decompile-strategy.md)
 
 #### 3.1 反编译工具调用
 
@@ -290,7 +290,7 @@ http.authorizeHttpRequests(auth -> auth
 
 ### 6. 漏洞检测
 
-详细检测模式参见 [BYPASS_PATTERNS.md](references/BYPASS_PATTERNS.md)
+详细检测模式参见 BYPASS_PATTERNS.md
 
 #### 6.1 鉴权绕过检测
 
@@ -298,7 +298,7 @@ http.authorizeHttpRequests(auth -> auth
 
 **这是最常见的鉴权绕过根因，必须优先检测！**
 
-详细原理参见 [URI_PARSING_BYPASS.md](references/URI_PARSING_BYPASS.md)
+详细原理参见 URI_PARSING_BYPASS.md
 
 **检测要点：** 识别鉴权代码使用的 URI 获取方法
 
@@ -592,9 +592,9 @@ ls -la {project_name}_audit/auth_audit/
 
 | 文件 | 模板 | 命名格式 | 职责 |
 |------|------|---------|------|
-| 主报告 | [OUTPUT_TEMPLATE_MAIN.md](references/OUTPUT_TEMPLATE_MAIN.md) | `{project_name}_auth_audit_{YYYYMMDD_HHMMSS}.md` | 漏洞分析和修复建议 |
-| 映射表 | [OUTPUT_TEMPLATE_MAPPING.md](references/OUTPUT_TEMPLATE_MAPPING.md) | `{project_name}_auth_mapping_{YYYYMMDD_HHMMSS}.md` | 完整路由-鉴权对应关系 |
-| 说明文档 | [OUTPUT_TEMPLATE_README.md](references/OUTPUT_TEMPLATE_README.md) | `{project_name}_auth_README_{YYYYMMDD_HHMMSS}.md` | 审计方法论和局限性 |
+| 主报告 | OUTPUT_TEMPLATE_MAIN.md | `{project_name}_auth_audit_{YYYYMMDD_HHMMSS}.md` | 漏洞分析和修复建议 |
+| 映射表 | OUTPUT_TEMPLATE_MAPPING.md | `{project_name}_auth_mapping_{YYYYMMDD_HHMMSS}.md` | 完整路由-鉴权对应关系 |
+| 说明文档 | OUTPUT_TEMPLATE_README.md | `{project_name}_auth_README_{YYYYMMDD_HHMMSS}.md` | 审计方法论和局限性 |
 
 **关键规则：**
 - 必须生成 3 个文件（不是 1 个也不是 2 个）
@@ -602,7 +602,7 @@ ls -la {project_name}_audit/auth_audit/
 - 映射表不包含漏洞详细分析（放主报告中）
 - README 不包含具体漏洞内容
 - 三个文件间互相引用链接必须正确
-- 通用规范来源: [java-shared/OUTPUT_STANDARD.md](../java-shared/OUTPUT_STANDARD.md)
+- 通用规范来源: [java-shared/OUTPUT_STANDARD.md](./java-output-standard.md)
 
 ---
 
@@ -740,16 +740,16 @@ java-route-mapper              java-auth-audit-opencode
 
 ## 参考资料
 
-- [OUTPUT_TEMPLATE_MAIN.md](references/OUTPUT_TEMPLATE_MAIN.md) - 主报告填充式模板
-- [OUTPUT_TEMPLATE_MAPPING.md](references/OUTPUT_TEMPLATE_MAPPING.md) - 映射表填充式模板
-- [OUTPUT_TEMPLATE_README.md](references/OUTPUT_TEMPLATE_README.md) - 说明文档填充式模板
-- [SHIRO.md](references/SHIRO.md) - Apache Shiro 鉴权审计
-- [SPRING_SECURITY.md](references/SPRING_SECURITY.md) - Spring Security 鉴权审计
-- [JWT.md](references/JWT.md) - JWT Token 鉴权审计
-- [FILTER_INTERCEPTOR.md](references/FILTER_INTERCEPTOR.md) - Filter/Interceptor 鉴权审计
-- [ANNOTATION_AUTH.md](references/ANNOTATION_AUTH.md) - 注解式鉴权审计
-- [SESSION_AUTH.md](references/SESSION_AUTH.md) - Session 会话鉴权审计
-- [BYPASS_PATTERNS.md](references/BYPASS_PATTERNS.md) - 鉴权绕过模式
-- [URI_PARSING_BYPASS.md](references/URI_PARSING_BYPASS.md) - URI解析差异导致的鉴权绕过
-- [VULNERABILITY_CHECKLIST.md](references/VULNERABILITY_CHECKLIST.md) - 漏洞检查清单
-- [DECOMPILE_STRATEGY.md](references/DECOMPILE_STRATEGY.md) - 反编译策略指南
+- OUTPUT_TEMPLATE_MAIN.md - 主报告填充式模板
+- OUTPUT_TEMPLATE_MAPPING.md - 映射表填充式模板
+- OUTPUT_TEMPLATE_README.md - 说明文档填充式模板
+- [SHIRO.md](../../components/shiro.md) - Apache Shiro 鉴权审计
+- SPRING_SECURITY.md - Spring Security 鉴权审计
+- JWT.md - JWT Token 鉴权审计
+- FILTER_INTERCEPTOR.md - Filter/Interceptor 鉴权审计
+- ANNOTATION_AUTH.md - 注解式鉴权审计
+- SESSION_AUTH.md - Session 会话鉴权审计
+- BYPASS_PATTERNS.md - 鉴权绕过模式
+- URI_PARSING_BYPASS.md - URI解析差异导致的鉴权绕过
+- VULNERABILITY_CHECKLIST.md - 漏洞检查清单
+- [DECOMPILE_STRATEGY.md](./java-decompile-strategy.md) - 反编译策略指南

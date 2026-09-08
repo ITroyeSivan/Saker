@@ -17,7 +17,7 @@ lib/protocol/
   snippets.js           PHP 片段库（eval 通道的结构化操作：ls/读写/数据库 PDO…）
   capabilities.js       能力层：统一操作面（原生操作码 > eval 片段 > 命令翻译）
   cmd.js / dsh-aes.js / behinder.js / godzilla.js / behinder-mod.js / godzilla-mod.js
-lib/generators.js       生成器（10 种产物模板）
+lib/generators.js       生成器（16 种产物模板）
 lib/plugins-registry.js 载荷插件注册表（声明式 plugin.json + 模板渲染 + 通道执行）
 lib/client.js           会话标签页 UI（手写 CJS bundle，React.createElement，零构建）
 mcp/server.mjs          零依赖 stdio JSON-RPC 2.0 MCP 服务（与宿主同核同库）
@@ -53,7 +53,7 @@ Java 侧以编译载荷管线（反射式 .class + 常量池补丁）实现协�
 （冰蝎协议型）；URL 填任意存活路径（Filter/Module 全站劫持；Spring Controller 型填注入器
 返回的伪装路径）。自动识别命中无文件后缀的 URL 时按内存马形态预填。
 
-## 生成器（15 种）
+## 生成器（16 种）
 
 `php-oneliner / php-basic / php-aes1 / php-aes2 / php-behinder / php-godzilla / jsp-basic / jsp-aes1 / jsp-behinder / jsp-godzilla / jsp-mem-filter / aspx-basic / aspx-aes1 / aspx-behinder / aspx-godzilla / asp-basic`
 ——产物落 `~/.dsh/webshell-mgr/generated/` 并登记；「从文件导入」可登记免杀模式产物。

@@ -7,7 +7,7 @@
 > 即 `skills/audit-playbook/`）；refs/ 相对 base 目录 = `../../refs/`。
 > 覆盖面：六语言审计手册 / Java 与 PHP 专项审计技能集（含 semgrep 规则）/ 组件漏洞识别 /
 > 供应链与密钥 / 密码学实现审计 / 容器与 K8s 配置 / SAST·DAST 方法论 / AI 与 Agent 审计 /
-> 定级标准参照（内置 Fortify 分类学 + ChanziSAST 规则知识库 + 开源规则集）/ 趋势。共 226 篇 md + 1483 条 semgrep 规则（403 条自建[Java 402+PHP 1] + 1080 条开源）。
+> 定级标准参照（内置 Fortify 分类学 + ChanziSAST 规则知识库 + 开源规则集）/ 趋势。共 232 篇 md + 1499 条 semgrep 规则（403 条自建[Java 402+PHP 1] + 1096 条开源）。
 
 ## 快速路由（按任务类型找目录）
 
@@ -164,7 +164,7 @@ php-evidence-point-ids.md（证据点编号——调用链引用规范的同构�
 |---|---|---|
 | fortify-kingdom-reference.md | 内置标准参考实体：Fortify 分类学（八王国）→ CWE 映射 → 与本预设审计手册的对应表 → 证据化定级指南 → 使用 SOP。**不依赖本机/外部 Fortify 安装**（外部 Fortify 仅作增强参照）；persona Rule baseline 引用本文档 | 每次定级/分类时（audit-playbook「静态审计标准」章的标准参考） |
 | chanzi-rules/（122 条 + INDEX + 开发规范） | Java 生态漏洞规则知识库：SQLi/SSRF/SSTI/XXE/XSS/反序列化/代码执行/命令注入/越权/上传/弱口令/硬编码等 20 类，每条含关键 sink 清单 + 中文详解；提取自 ChanziSAST 规则库 | 按类别深审时（先读 INDEX.md 定位） |
-| semgrep-oss/（开源规则集，见其 README） | 1080 条可执行 semgrep 规则：semgrep-rules 788 条/10 语言（锁定 LGPL-2.1+Commons Clause 合规快照 f4b63d5，HEAD 已变专有禁止分发）+ trailofbits 120 条（AGPL-3.0，附 LICENSE）+ gitleaks 厂商密钥枚举 172 条；全量 validate 通过 | 扫描阶段直接 `semgrep --config` 挂载（audit-playbook「静态扫描」节：本地规则集优先） |
+| semgrep-oss/（开源规则集，见其 README） | 1096 条可执行 semgrep 规则：semgrep-rules 804 条/10 语言（锁定 LGPL-2.1+Commons Clause 合规快照 f4b63d5，HEAD 已变专有禁止分发）+ trailofbits 120 条（AGPL-3.0，附 LICENSE）+ gitleaks 厂商密钥枚举 172 条；全量 validate 通过 | 扫描阶段直接 `semgrep --config` 挂载（audit-playbook「静态扫描」节：本地规则集优先） |
 
 ## 来源与说明
 

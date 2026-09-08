@@ -10,9 +10,9 @@ description: >-
 
 ## 0. RELATED ROUTING
 
-- [jndi-injection](../jndi/SKILL.md) for JNDI protocol internals and LDAP/RMI server setup
-- [deserialization-insecure](../deserialization/SKILL.md) for gadget chains used in post-JDK 8u191 bypass
-- [fastjson-exploitation](../fastjson-exploitation/SKILL.md) when Fastjson is also in the target classpath
+- [jndi-injection](../../../pentest/refs/components/jndi-injection.md) for JNDI protocol internals and LDAP/RMI server setup
+- [deserialization-insecure](../../../pentest/refs/web/web-deserialization.md) for gadget chains used in post-JDK 8u191 bypass
+- [fastjson-exploitation](./fastjson.md) when Fastjson is also in the target classpath
 
 ---
 

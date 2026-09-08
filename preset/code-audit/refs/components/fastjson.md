@@ -10,9 +10,9 @@ description: >-
 
 ## 0. RELATED ROUTING
 
-- [deserialization-insecure](../deserialization/SKILL.md) for general Java deserialization concepts and gadget chains
-- [jndi-injection](../jndi/SKILL.md) when Fastjson exploitation leads to JNDI lookup
-- [shiro-exploitation](../shiro-exploitation/SKILL.md) when the target also runs Apache Shiro
+- [deserialization-insecure](../../../pentest/refs/web/web-deserialization.md) for general Java deserialization concepts and gadget chains
+- [jndi-injection](../../../pentest/refs/components/jndi-injection.md) when Fastjson exploitation leads to JNDI lookup
+- [shiro-exploitation](./shiro.md) when the target also runs Apache Shiro
 
 ---
 

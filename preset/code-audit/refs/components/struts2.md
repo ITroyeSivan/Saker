@@ -10,9 +10,9 @@ description: >-
 
 ## 0. RELATED ROUTING
 
-- [deserialization-insecure](../deserialization/SKILL.md) when deserialization chains are involved
-- [shiro-exploitation](../shiro-exploitation/SKILL.md) when Shiro is also present in the target
-- [ssti-injection](../ssti/SKILL.md) for general template injection concepts
+- [deserialization-insecure](../../../pentest/refs/web/web-deserialization.md) when deserialization chains are involved
+- [shiro-exploitation](./shiro.md) when Shiro is also present in the target
+- ssti-injection for general template injection concepts
 
 ---
 

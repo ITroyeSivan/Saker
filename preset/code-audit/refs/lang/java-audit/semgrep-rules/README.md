@@ -117,4 +117,4 @@ jobs:
 | Shiro | ≥ 1.13.0 | 认证绕过 |
 | Tomcat | ≥ 9.0.62 | Ghostcat |
 
-详见 [cve-offline-lookup.md](../../references/cve-offline-lookup.md)
+详见 [cve-offline-lookup.md](../cve-offline-lookup.md)

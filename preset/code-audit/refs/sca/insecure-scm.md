@@ -6,7 +6,7 @@ description: >-
 
 # SKILL: Insecure Source Code Management
 
-> **AI LOAD INSTRUCTION**: This skill covers detection and recovery of exposed version-control metadata, common backup artifacts, and related misconfigurations. Use only in **authorized** assessments. Treat recovered credentials and URLs as sensitive; do not exfiltrate real data beyond scope. For broad discovery workflow, cross-load [recon-for-sec](../recon-for-sec/SKILL.md) and [recon-and-methodology](../recon-for-sec/references/recon-and-methodology.md) when those skills exist in the workspace.
+> **AI LOAD INSTRUCTION**: This skill covers detection and recovery of exposed version-control metadata, common backup artifacts, and related misconfigurations. Use only in **authorized** assessments. Treat recovered credentials and URLs as sensitive; do not exfiltrate real data beyond scope. For broad discovery workflow, cross-load [recon-for-sec](../../../pentest/refs/web/recon-and-methodology.md) and [recon-and-methodology](../../../pentest/refs/web/recon-and-methodology.md) when those skills exist in the workspace.
 
 ## 0. QUICK START
 
@@ -155,7 +155,7 @@ Probe (adjust for app root and naming conventions):
 
 ## 6. RELATED ROUTING
 
-- From **[recon-for-sec](../recon-for-sec/SKILL.md)** — scope-safe discovery, crawling, and fingerprinting before deep VCS tests.
-- From **[recon-and-methodology](../recon-for-sec/references/recon-and-methodology.md)** — structured methodology and evidence handling.
+- From **[recon-for-sec](../../../pentest/refs/web/recon-and-methodology.md)** — scope-safe discovery, crawling, and fingerprinting before deep VCS tests.
+- From **[recon-and-methodology](../../../pentest/refs/web/recon-and-methodology.md)** — structured methodology and evidence handling.
 
 **Note**: coordinate with recon skills—set scope and request rate first, then run targeted VCS/backup validation.

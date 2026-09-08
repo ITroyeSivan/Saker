@@ -22,7 +22,7 @@ description: Java Web 源码任意文件读取漏洞审计工具。从源码中�
 
 ## 漏洞分级标准
 
-**详见 [SEVERITY_RATING.md](../java-shared/SEVERITY_RATING.md)**
+**详见 [SEVERITY_RATING.md](./java-severity-rating.md)**
 
 - 漏洞编号格式: `{C/H/M/L}-FILE-{序号}`
 - 严重等级 = f(可达性 R, 影响范围 I, 利用复杂度 C)
@@ -216,7 +216,7 @@ new FileInputStream(fullPath)  ← 文件读取点
 
 ## 文件读取方法识别
 
-详细规则参见 [FILE_READ_METHODS.md](references/FILE_READ_METHODS.md)
+详细规则参见 FILE_READ_METHODS.md
 
 | 方法类别 | 识别特征 | 风险点 |
 |---------|----------|--------|
@@ -231,7 +231,7 @@ new FileInputStream(fullPath)  ← 文件读取点
 
 **当源码不可用时，必须使用 CFR 反编译器反编译文件操作相关类。**
 
-详细策略参见 [DECOMPILE_STRATEGY.md](references/DECOMPILE_STRATEGY.md)
+详细策略参见 [DECOMPILE_STRATEGY.md](./java-decompile-strategy.md)
 
 #### 反编译工具调用
 
@@ -387,12 +387,12 @@ grep -r "download\|readFile\|getFile" --include="*.java"
 
 ## 输出格式
 
-**严格按照 [references/OUTPUT_TEMPLATE.md](references/OUTPUT_TEMPLATE.md) 中的填充式模板生成输出文件。**
+**严格按照 references/OUTPUT_TEMPLATE.md 中的填充式模板生成输出文件。**
 
 - 文件名格式: `{project_name}_file_read_audit_{YYYYMMDD_HHMMSS}.md`
 - 不得修改模板结构、不得增删章节、不得调整顺序
 - 所有【填写】占位符必须替换为实际内容
-- 通用规范来源: [java-shared/OUTPUT_STANDARD.md](../java-shared/OUTPUT_STANDARD.md)
+- 通用规范来源: [java-shared/OUTPUT_STANDARD.md](./java-output-standard.md)
 
 ---
 
@@ -423,7 +423,7 @@ grep -r "download\|readFile\|getFile" --include="*.java"
 
 ## 参考资料
 
-- [OUTPUT_TEMPLATE.md](references/OUTPUT_TEMPLATE.md) - 输出报告填充式模板
-- [FILE_READ_METHODS.md](references/FILE_READ_METHODS.md) - Java 文件读取方法详解
-- [PATH_TRAVERSAL.md](references/PATH_TRAVERSAL.md) - 路径遍历攻击详解
-- [DECOMPILE_STRATEGY.md](references/DECOMPILE_STRATEGY.md) - 反编译策略指南
+- OUTPUT_TEMPLATE.md - 输出报告填充式模板
+- FILE_READ_METHODS.md - Java 文件读取方法详解
+- PATH_TRAVERSAL.md - 路径遍历攻击详解
+- [DECOMPILE_STRATEGY.md](./java-decompile-strategy.md) - 反编译策略指南

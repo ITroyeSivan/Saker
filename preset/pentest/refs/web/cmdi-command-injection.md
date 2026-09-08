@@ -12,7 +12,7 @@ description: >-
 
 Before going deep, you can first load:
 
-- [upload insecure files](../upload-insecure-files/SKILL.md) when the shell sink is part of a broader upload, import, or conversion workflow
+- upload insecure files when the shell sink is part of a broader upload, import, or conversion workflow
 
 ### First-pass payload families
 

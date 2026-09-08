@@ -55,7 +55,7 @@ description: Java Web 源码路由多层级调用链追踪工具。根据用户�
 | Servlet | web.xml 或 `@WebServlet` |
 | JAX-RS | `@Path` 注解匹配 |
 
-**重要说明**：当入口类包含多个业务方法时（如 Web Service 有多个接口方法、Controller 有多个端点方法），技能会自动识别并追踪所有方法。详细实现策略请参考：[multi-method-tracing.md](references/multi-method-tracing.md)
+**重要说明**：当入口类包含多个业务方法时（如 Web Service 有多个接口方法、Controller 有多个端点方法），技能会自动识别并追踪所有方法。详细实现策略请参考：multi-method-tracing.md
 
 ### 2.1 多方法追踪执行流程（强制要求）
 
@@ -354,15 +354,15 @@ java -jar {CFR_JAR} /path/to/A.class /path/to/B.class --outputdir {output_path}/
 
 | 场景 | 模板 | 文件命名 |
 |------|------|---------|
-| 第 1 个接口（完整版） | [OUTPUT_TEMPLATE_FULL.md](references/OUTPUT_TEMPLATE_FULL.md) | `{project_name}_trace_{method_name}_{YYYYMMDD_HHMMSS}.md` |
-| 第 2+ 个接口（简化版） | [OUTPUT_TEMPLATE_SIMPLE.md](references/OUTPUT_TEMPLATE_SIMPLE.md) | `{project_name}_trace_{method_name}_{YYYYMMDD_HHMMSS}.md` |
-| 多方法索引 | [OUTPUT_TEMPLATE_INDEX.md](references/OUTPUT_TEMPLATE_INDEX.md) | `{project_name}_trace_all_methods_{YYYYMMDD_HHMMSS}.md` |
+| 第 1 个接口（完整版） | OUTPUT_TEMPLATE_FULL.md | `{project_name}_trace_{method_name}_{YYYYMMDD_HHMMSS}.md` |
+| 第 2+ 个接口（简化版） | OUTPUT_TEMPLATE_SIMPLE.md | `{project_name}_trace_{method_name}_{YYYYMMDD_HHMMSS}.md` |
+| 多方法索引 | OUTPUT_TEMPLATE_INDEX.md | `{project_name}_trace_all_methods_{YYYYMMDD_HHMMSS}.md` |
 
 **关键规则：**
 - 所有【填写】占位符必须替换为实际内容
 - 每个方法必须独立追踪到 Sink，禁止复用其他方法结论
 - 多方法路由必须生成索引文件
-- 通用规范来源: [java-shared/OUTPUT_STANDARD.md](../java-shared/OUTPUT_STANDARD.md)
+- 通用规范来源: [java-shared/OUTPUT_STANDARD.md](./java-output-standard.md)
 
 ### 单方法路由
 
@@ -439,7 +439,7 @@ java -jar {CFR_JAR} /path/to/A.class /path/to/B.class --outputdir {output_path}/
 | ... | ... | ... | ... |
 ```
 
-详细实现策略请参考：[multi-method-tracing.md](references/multi-method-tracing.md)
+详细实现策略请参考：multi-method-tracing.md
 
 ### 输出模板
 
@@ -888,7 +888,7 @@ L4 AbstractDao: page (Page<T>)  ← 泛型类型变化
 
 **适用于所有漏洞类型：SQL注入、命令注入、SSRF、文件操作、XXE、表达式注入等。**
 
-**详细判定原则请参考：[CONTROLLABILITY_ANALYSIS.md](references/CONTROLLABILITY_ANALYSIS.md)**
+**详细判定原则请参考：CONTROLLABILITY_ANALYSIS.md**
 
 ### 6.1 核心判定流程
 
@@ -958,7 +958,7 @@ L4 AbstractDao: page (Page<T>)  ← 泛型类型变化
 
 **追踪调用链时，必须记录所有条件分支，确保识别代码是否真的会执行！**
 
-**详细判定原则请参考：[BRANCH_TRACING.md](references/BRANCH_TRACING.md)**
+**详细判定原则请参考：BRANCH_TRACING.md**
 
 ### 7.1 核心判定流程
 

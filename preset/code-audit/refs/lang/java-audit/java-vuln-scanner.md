@@ -159,7 +159,7 @@ python3 scripts/scan_dependencies.py /path/to/webapp \
 > 3. 必须严格按照 `references/OUTPUT_TEMPLATE.md` 模板填充输出
 > 4. 不得增删章节、不得调整章节顺序
 
-**输出模板**: [references/OUTPUT_TEMPLATE.md](references/OUTPUT_TEMPLATE.md)
+**输出模板**: references/OUTPUT_TEMPLATE.md
 
 ```
 {project_name}_audit/vuln_report/
@@ -171,4 +171,4 @@ python3 scripts/scan_dependencies.py /path/to/webapp \
     └── 5. 审计结论
 ```
 
-通用输出规范来源: [java-shared/OUTPUT_STANDARD.md](../java-shared/OUTPUT_STANDARD.md)
+通用输出规范来源: [java-shared/OUTPUT_STANDARD.md](./java-output-standard.md)

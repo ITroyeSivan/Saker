@@ -440,12 +440,12 @@ done
 
 | 框架 | 识别特征 | 参考资料 |
 |------|---------|---------|
-| Spring MVC | `@Controller`、`@RequestMapping` | [SPRING_MVC.md](references/SPRING_MVC.md) |
-| Spring Boot | `application.properties/yml`、Spring Boot starter | [SPRING_MVC.md](references/SPRING_MVC.md) |
-| Servlet | `web.xml`、`@WebServlet` | [SERVLET.md](references/SERVLET.md) |
-| JAX-RS | `@Path`、`@GET`、`@POST` | [JAXRS.md](references/JAXRS.md) |
-| Struts 2 | `struts.xml` | [STRUTS.md](references/STRUTS.md) |
-| CXF Web Services | `/ws/*`、`@WebService`、`applicationContext.xml` | [WEBSERVICE.md](references/WEBSERVICE.md) |
+| Spring MVC | `@Controller`、`@RequestMapping` | SPRING_MVC.md |
+| Spring Boot | `application.properties/yml`、Spring Boot starter | SPRING_MVC.md |
+| Servlet | `web.xml`、`@WebServlet` | SERVLET.md |
+| JAX-RS | `@Path`、`@GET`、`@POST` | JAXRS.md |
+| Struts 2 | `struts.xml` | STRUTS.md |
+| CXF Web Services | `/ws/*`、`@WebService`、`applicationContext.xml` | WEBSERVICE.md |
 
 **任务制定规则：**
 - 检测到的每个框架都生成独立的分析任务
@@ -716,17 +716,17 @@ Content-Type: text/xml; charset=utf-8
 
 | 文件类型 | 模板 | 命名格式 | 数量 |
 |---------|------|---------|------|
-| 主索引 | [OUTPUT_TEMPLATE_INDEX.md](references/OUTPUT_TEMPLATE_INDEX.md) | `route_mapper/{project_name}_route_mapper_{YYYYMMDD_HHMMSS}.md` | 1 个 |
-| 模块详情 | [OUTPUT_TEMPLATE_MODULE.md](references/OUTPUT_TEMPLATE_MODULE.md) | `route_mapper/{module_name}/{project_name}_module_{module_name}_{YYYYMMDD_HHMMSS}.md` | N 个（按模块） |
-| WS 详情 | [OUTPUT_TEMPLATE_MODULE.md](references/OUTPUT_TEMPLATE_MODULE.md) | `route_mapper/webservice/{project_name}_ws_{service_name}_{YYYYMMDD_HHMMSS}.md` | N 个（按服务） |
-| 说明文档 | [OUTPUT_TEMPLATE_README.md](references/OUTPUT_TEMPLATE_README.md) | `route_mapper/{project_name}_route_README_{YYYYMMDD_HHMMSS}.md` | 1 个（**pipeline 模式下由 agent-1-merge 写；worker 不生成**） |
+| 主索引 | OUTPUT_TEMPLATE_INDEX.md | `route_mapper/{project_name}_route_mapper_{YYYYMMDD_HHMMSS}.md` | 1 个 |
+| 模块详情 | OUTPUT_TEMPLATE_MODULE.md | `route_mapper/{module_name}/{project_name}_module_{module_name}_{YYYYMMDD_HHMMSS}.md` | N 个（按模块） |
+| WS 详情 | OUTPUT_TEMPLATE_MODULE.md | `route_mapper/webservice/{project_name}_ws_{service_name}_{YYYYMMDD_HHMMSS}.md` | N 个（按服务） |
+| 说明文档 | OUTPUT_TEMPLATE_README.md | `route_mapper/{project_name}_route_README_{YYYYMMDD_HHMMSS}.md` | 1 个（**pipeline 模式下由 agent-1-merge 写；worker 不生成**） |
 
 **关键规则：**
 - 所有【填写】占位符必须替换为实际内容
 - 每个接口必须有完整的参数结构
 - 不得省略任何接口
 - 文件名根据实际项目中发现的模块名/namespace 动态生成
-- 通用规范来源: [java-shared/OUTPUT_STANDARD.md](../java-shared/OUTPUT_STANDARD.md)
+- 通用规范来源: [java-shared/OUTPUT_STANDARD.md](./java-output-standard.md)
 
 **保存步骤：**
 1. 完成所有路由分析
@@ -789,7 +789,7 @@ route_mapper/
 
 | 问题 | 解决方案 |
 |:-----|:---------|
-| 无法识别框架 | 检查项目根目录的配置文件，参考 [FRAMEWORK_PATTERNS.md](references/FRAMEWORK_PATTERNS.md) |
+| 无法识别框架 | 检查项目根目录的配置文件，参考 FRAMEWORK_PATTERNS.md |
 | 路由路径不完整 | 检查类级别的 `@RequestMapping` 和上下文路径配置 |
 | 参数类型未知 | 使用反编译工具获取完整的类型定义 |
 | 生成的路由信息不完整 | 确认未受安全拦截器/过滤器限制 |

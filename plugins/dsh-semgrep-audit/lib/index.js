@@ -1,7 +1,7 @@
 // dsh-semgrep-audit — code-audit 扫描对账闭环的运行时化（D5 收口）：本机 semgrep
 // 封装为模型工具，纪律内置（同 scanner-tools 范式）：
 //   1) 检测制：本机未装 semgrep 拒绝执行——三级兜底提示（MCP/安装请求批准制），绝不自动装；
-//   2) 规则集随预设：本地三层规则集（java 402 自建/php 1/oss 1080）自动定位，离线主通道；
+//   2) 规则集随预设：本地三层规则集（java 402 自建/php 1/oss 1096）自动定位，离线主通道；
 //   3) 产物落证据：JSON 写 <workspace>/artifacts/scans/semgrep-<ts>.json 并回 evidence-index.md；
 //   4) 命中进对账：命中自动双写 scan-reconcile.md（人读）+ scan-reconcile.csv（机读，
 //      表头对齐 audit-playbook A3 契约）待处置行——命中 ≠ 漏洞，复核后经
@@ -161,7 +161,7 @@ function apply(ctx) {
 		parameters: {
 			target: { type: "string", required: true, description: "扫描目标（仓库/目录根，绝对或相对工作区）" },
 			workspace: { type: "string", required: true, description: "任务工作区根（产物与对账落此）" },
-			layer: { type: "string", enum: ["builtin-java", "builtin-php", "oss", "custom"], required: true, description: "规则层：builtin-java=402 条自建/builtin-php=php 规则/oss=1080 条开源规则集/custom=自定路径" },
+			layer: { type: "string", enum: ["builtin-java", "builtin-php", "oss", "custom"], required: true, description: "规则层：builtin-java=402 条自建/builtin-php=php 规则/oss=1096 条开源规则集/custom=自定路径" },
 			rules_path: { type: "string", description: "layer=custom 时的规则文件/目录路径（必填）" }
 		},
 		output: {

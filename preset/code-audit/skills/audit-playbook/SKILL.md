@@ -44,7 +44,7 @@ shared/refs/finding-fields.md）；成果页列表/详情/导出报告/统计分
 |---|---|---|
 | 前置识别（语言/框架/依赖） | 本地统计+rg（build 文件/manifest/大表） | ast-grep 结构化识别 → kali MCP → 脚本 |
 | 面映射（surface-map） | 本地 rg 逐 sink 面 + sinks.csv 机器工件 | ast-grep 模式 → 脚本 |
-| 静态扫描 | **本地 semgrep 三层规则集**（402 自建+1080 oss+chanzi 语义，随预设离线自包含=主通道） | kali MCP semgrep_scan（**只替引擎不替规则集**，命中面收窄如实标注）→ bandit/flawfinder 专项 → 规则降级章通用模式+脚本 |
+| 静态扫描 | **本地 semgrep 三层规则集**（402 自建+1096 oss+chanzi 语义，随预设离线自包含=主通道） | kali MCP semgrep_scan（**只替引擎不替规则集**，命中面收窄如实标注）→ bandit/flawfinder 专项 → 规则降级章通用模式+脚本 |
 | 供应链 SCA / 凭据 | trivy + gitleaks（本地） | osv-scanner / syft+grype → kali MCP → pip-audit/npm-audit |
 | 深审调用链（双链 TRACE） | 人工推理 + rg 佐证（追踪员独立 grep，不预设写法） | ast-grep 结构化检索 → 脚本 |
 | 反编译（产物形态路由） | 卡 4 家族表：JVM=CFR·procyon / Android=jadx·apktool / .NET=ilspycmd·dnSpyEx / pyc=pycdc·uncompyle6 / Lua=unluac / native=生态分流 binary | kali MCP apk_decompile（apk 侧）→ 请用户提供反编译产物（生态流转）→ 标注「未反编译，结论降级」 |
@@ -344,7 +344,7 @@ error/warning/note（按 severity 映射）、`locations[].physicalLocation`=
 
 - **semgrep**（检测后使用）——多语言规则扫描主工具。
   - **首选封装工具 `semgrep_scan`**（preset 平面）：规则层参数化（builtin-java=402 自建 /
-    builtin-php / oss=1080 开源 / custom=自定路径），预设 refs/ 自动定位，产物自动落
+    builtin-php / oss=1096 开源 / custom=自定路径），预设 refs/ 自动定位，产物自动落
     `artifacts/scans/`+evidence-index 回行，**命中自动双写 scan-reconcile.md/.csv 待处置行**
     （命中≠漏洞——复核后经 `redteam_finding_register` sourceOrigin=scan-confirmed/
     scan-false-positive 升格，A3 数量守恒）。缺装时工具自带三级兜底提示。

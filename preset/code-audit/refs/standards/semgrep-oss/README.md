@@ -38,7 +38,7 @@
 
 ---
 
-## 3. 规则数量统计（共 1080 条 / 1078 个规则文件：semgrep-rules 788 + trailofbits 120 条〔118 文件〕 + gitleaks 172）
+## 3. 规则数量统计（共 1096 条规则 / 1078 个规则文件：semgrep-rules 804 条〔788 文件〕 + trailofbits 120 条〔118 文件〕 + gitleaks 172 条〔172 文件〕）
 
 | 语言目录 | 规则数 | 说明 |
 |---|---|---|
@@ -53,7 +53,7 @@
 | `ruby/` | 69 | 含 rails / brakeman / lang / aws-lambda 等 |
 | `trailofbits/` | 118 文件/120 条 | Trail of Bits 安全规则：python 24 / yaml 24（ansible·docker-compose·github-actions 凭据与不加密 URL）/ go 18 / generic 17 / ruby 15 / hcl 9（terraform·nomad 配置）/ javascript 7（apollo-graphql CSRF/CORS）/ jvm 2 / rs 1 / swift 1 |
 | `generic/` | 232 | 49 条 `secrets/security/`（通用密钥/凭据检测）+ 11 条 `nginx/`（配置安全）+ **172 条 `secrets/gitleaks/`（厂商专属密钥枚举）** |
-| **合计** | **1080 条**（1078 文件） | semgrep-rules 788 保持 ≤800 上限；二批（trailofbits/gitleaks）经用户确认补入 |
+| **合计** | **1096 条**（1078 文件） | semgrep-rules 主体 804 条规则分布在 788 个文件里（部分文件含多条规则）；二批（trailofbits/gitleaks）经用户确认补入 |
 
 ---
 

@@ -68,5 +68,5 @@
   其 sink 清单与各语言手册（php-sink-reference 等）互为印证，命中即按本文档定级。
 - 与可执行规则的边界：chanzi 规则是**语义知识**（cypher 查询引擎依赖，不可离线重放）；
   可执行的扫描规则在 `lang/java-audit/semgrep-rules/`、`lang/php-audit/semgrep-rules/`
-  与 `standards/semgrep-oss/`（开源规则集 1080 条：semgrep-rules 788〔LGPL-2.1+Commons Clause 合规快照〕
+  与 `standards/semgrep-oss/`（开源规则集 1096 条：semgrep-rules 804〔LGPL-2.1+Commons Clause 合规快照〕
   + trailofbits 120〔AGPL-3.0〕 + gitleaks 厂商密钥 172；全量 semgrep --validate 通过——见其 README）。

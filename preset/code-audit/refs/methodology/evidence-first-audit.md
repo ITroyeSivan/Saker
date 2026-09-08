@@ -39,8 +39,8 @@ If external tools are missing, the scan script records them as missing and still
 3. **Analysis**
    - Run available local tools with `scripts/local_security_scan.py`, then inspect the highest-signal results manually.
    - For each suspected issue, trace **source -> transforms/guards -> sink**. Treat scanner hits as leads, not proof.
-   - Use the vulnerability patterns in [vulnerability-patterns.md](references/vulnerability-patterns.md) when choosing sources, sinks, bypasses, and remediation.
-   - Use [framework-checklists.md](references/framework-checklists.md) for Django, Flask, FastAPI, Express, React, and Supabase-specific checks.
+   - Use the vulnerability patterns in vulnerability-patterns.md when choosing sources, sinks, bypasses, and remediation.
+   - Use framework-checklists.md for Django, Flask, FastAPI, Express, React, and Supabase-specific checks.
 
 4. **Verification**
    - Re-read the exact file and surrounding lines before promoting a finding.

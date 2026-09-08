@@ -23,7 +23,7 @@ description: Java Web 源码 XXE (XML External Entity) 漏洞审计工具。从�
 
 ## 漏洞分级标准
 
-**详见 [SEVERITY_RATING.md](../java-shared/SEVERITY_RATING.md)**
+**详见 [SEVERITY_RATING.md](./java-severity-rating.md)**
 
 - 漏洞编号格式: `{C/H/M/L}-XXE-{序号}`
 - 严重等级 = f(可达性 R, 影响范围 I, 利用复杂度 C)
@@ -174,11 +174,11 @@ grep -ri "Unmarshaller\|JAXBContext" --include="*.java"
 
 | 解析器 | 参考资料 |
 |--------|----------|
-| XMLReader | [PARSERS.md - XMLReader 章节](references/PARSERS.md#1-xmlreader) |
-| SAXBuilder (JDOM2) | [PARSERS.md - SAXBuilder 章节](references/PARSERS.md#2-saxbuilder-jdom2) |
-| SAXReader (dom4j) | [PARSERS.md - SAXReader 章节](references/PARSERS.md#3-saxreader-dom4j) |
-| SAXParserFactory | [PARSERS.md - SAXParserFactory 章节](references/PARSERS.md#4-saxparserfactory) |
-| DocumentBuilderFactory | [PARSERS.md - DocumentBuilderFactory 章节](references/PARSERS.md#5-documentbuilderfactory) |
+| XMLReader | PARSERS.md - XMLReader 章节 |
+| SAXBuilder (JDOM2) | PARSERS.md - SAXBuilder 章节 |
+| SAXReader (dom4j) | PARSERS.md - SAXReader 章节 |
+| SAXParserFactory | PARSERS.md - SAXParserFactory 章节 |
+| DocumentBuilderFactory | PARSERS.md - DocumentBuilderFactory 章节 |
 
 #### 2.2 XML 输入来源追踪
 
@@ -238,11 +238,11 @@ XXE 利用方式取决于是否有回显：
 
 | 解析器 | 识别特征 | 所属包/依赖 | 参考资料 |
 |--------|----------|-------------|----------|
-| XMLReader | `XMLReaderFactory.createXMLReader()`, `xmlReader.parse()` | `org.xml.sax` (JDK 内置) | [PARSERS.md](references/PARSERS.md) |
-| SAXBuilder | `new SAXBuilder()`, `saxBuilder.build()` | `org.jdom2` (jdom2) | [PARSERS.md](references/PARSERS.md) |
-| SAXReader | `new SAXReader()`, `reader.read()` | `org.dom4j.io` (dom4j) | [PARSERS.md](references/PARSERS.md) |
-| SAXParserFactory | `SAXParserFactory.newInstance()`, `.getXMLReader().parse()` | `javax.xml.parsers` (JDK 内置) | [PARSERS.md](references/PARSERS.md) |
-| DocumentBuilderFactory | `DocumentBuilderFactory.newInstance()`, `builder.parse()` | `javax.xml.parsers` (JDK 内置) | [PARSERS.md](references/PARSERS.md) |
+| XMLReader | `XMLReaderFactory.createXMLReader()`, `xmlReader.parse()` | `org.xml.sax` (JDK 内置) | PARSERS.md |
+| SAXBuilder | `new SAXBuilder()`, `saxBuilder.build()` | `org.jdom2` (jdom2) | PARSERS.md |
+| SAXReader | `new SAXReader()`, `reader.read()` | `org.dom4j.io` (dom4j) | PARSERS.md |
+| SAXParserFactory | `SAXParserFactory.newInstance()`, `.getXMLReader().parse()` | `javax.xml.parsers` (JDK 内置) | PARSERS.md |
+| DocumentBuilderFactory | `DocumentBuilderFactory.newInstance()`, `builder.parse()` | `javax.xml.parsers` (JDK 内置) | PARSERS.md |
 
 ### 其他可能受 XXE 影响的组件
 
@@ -259,7 +259,7 @@ XXE 利用方式取决于是否有回显：
 
 **当源码不可用时，必须使用 CFR 反编译器反编译 XML 解析相关类。**
 
-详细策略参见 [DECOMPILE_STRATEGY.md](references/DECOMPILE_STRATEGY.md)
+详细策略参见 [DECOMPILE_STRATEGY.md](./java-decompile-strategy.md)
 
 ### 反编译工具调用
 
@@ -377,12 +377,12 @@ Skill(
 
 ## 输出格式
 
-**严格按照 [references/OUTPUT_TEMPLATE.md](references/OUTPUT_TEMPLATE.md) 中的填充式模板生成输出文件。**
+**严格按照 references/OUTPUT_TEMPLATE.md 中的填充式模板生成输出文件。**
 
 - 文件名格式: `{project_name}_xxe_audit_{YYYYMMDD_HHMMSS}.md`
 - 不得修改模板结构、不得增删章节、不得调整顺序
 - 所有【填写】占位符必须替换为实际内容
-- 通用规范来源: [java-shared/OUTPUT_STANDARD.md](../java-shared/OUTPUT_STANDARD.md)
+- 通用规范来源: [java-shared/OUTPUT_STANDARD.md](./java-output-standard.md)
 
 ---
 
@@ -412,6 +412,6 @@ Skill(
 
 ## 参考资料
 
-- [OUTPUT_TEMPLATE.md](references/OUTPUT_TEMPLATE.md) - 输出报告填充式模板
-- [PARSERS.md](references/PARSERS.md) - 五种 XML 解析器详细检测规则
-- [DECOMPILE_STRATEGY.md](references/DECOMPILE_STRATEGY.md) - 反编译策略指南
+- OUTPUT_TEMPLATE.md - 输出报告填充式模板
+- PARSERS.md - 五种 XML 解析器详细检测规则
+- [DECOMPILE_STRATEGY.md](./java-decompile-strategy.md) - 反编译策略指南

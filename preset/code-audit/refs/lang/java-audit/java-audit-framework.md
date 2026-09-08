@@ -313,7 +313,7 @@ Get-ChildItem -Recurse -Include *.java,*.kt | Select-String -Pattern "@PreAuthor
 Get-ChildItem -Recurse -Include *.java,*.kt | Select-String -Pattern "permitAll|anonymous"
 ```
 
-**详细说明**: [references/business-scenario-tags.md](references/business-scenario-tags.md)
+**详细说明**: [references/business-scenario-tags.md](./business-scenario-tags.md)
 
 ### 1.2 Tier 分类规则
 
@@ -903,7 +903,7 @@ Step 4: 漏洞结果判定 → 基于推演给出负责任结论
 - **CONFIRMED**: PoC 可执行，调用链完整，影响明确
 - **HYPOTHESIS**: 发现可疑模式但无法完全确认，需人工验证
 
-**详细推理模板**: [references/logic-vulnerability-cot.md](references/logic-vulnerability-cot.md)
+**详细推理模板**: [references/logic-vulnerability-cot.md](./logic-vulnerability-cot.md)
 
 #### 业务逻辑漏洞检查要点
 
@@ -1005,7 +1005,7 @@ Step 2: 检查版本列表:
 4. 调试模式开启
 ```
 
-**详细判断方法见**: [references/vulnerability-conditions.md](references/vulnerability-conditions.md) 第 16-19 节
+**详细判断方法见**: [references/vulnerability-conditions.md](./vulnerability-conditions.md) 第 16-19 节
 
 ### Layer 3: 调用链语义级验证
 
@@ -1370,7 +1370,7 @@ Controller → Service → FileUtil
 
 ### 漏洞成立条件判断
 
-**详见 [references/vulnerability-conditions.md](references/vulnerability-conditions.md)**
+**详见 [references/vulnerability-conditions.md](./vulnerability-conditions.md)**
 
 示例 - Fastjson 反序列化判断流程：
 ```
@@ -1384,7 +1384,7 @@ Controller → Service → FileUtil
 
 ### DKTSS 评分体系
 
-**详见 [references/dktss-scoring.md](references/dktss-scoring.md)**
+**详见 [references/dktss-scoring.md](./dktss-scoring.md)**
 
 核心公式：`Score = Base - Friction + Weapon + Ver`
 
@@ -1410,7 +1410,7 @@ Controller → Service → FileUtil
 
 ### Semgrep 安装
 
-**详见 [rules/semgrep/README.md](rules/semgrep/README.md)**
+**详见 [rules/semgrep/README.md](./semgrep-rules/README.md)**
 
 ```bash
 # macOS
@@ -1440,7 +1440,7 @@ semgrep --config rules/semgrep/java-emerging.yaml /path/to/project
 semgrep --config rules/semgrep/ --json /path/to/project > semgrep-results.json
 ```
 
-**规则列表**：见 [rules/semgrep/README.md](rules/semgrep/README.md)，共 314 条规则覆盖：
+**规则列表**：见 [rules/semgrep/README.md](./semgrep-rules/README.md)，共 314 条规则覆盖：
 - **传统漏洞**：RCE、SQL注入、SSRF、文件操作、加密安全
 - **新兴技术**：LLM/AI 安全、GraphQL、Kotlin 特有漏洞、Java 21 新特性
 - **微服务安全**：Feign、Gateway、Dubbo、gRPC、NoSQL 注入
@@ -1520,7 +1520,7 @@ semgrep --validate --config custom-rules.yaml
 
 ### ⚠️ 必须先阅读模板
 
-**在生成报告之前，必须完整阅读 [references/report-template.md](references/report-template.md)**。
+**在生成报告之前，必须完整阅读 [references/report-template.md](./report-template.md)**。
 
 报告格式以 `report-template.md` 为准，SKILL.md 不再重复定义格式细节。
 
@@ -1762,26 +1762,26 @@ AI 先构建业务的因果关系基准与状态机模型，明确每个业务�
 
 | 文档 | 内容 |
 |------|------|
-| [vulnerability-conditions.md](references/vulnerability-conditions.md) | 漏洞成立条件判断表（Fastjson、JNDI、SSTI 等） |
-| [dktss-scoring.md](references/dktss-scoring.md) | DKTSS 评分体系详细说明 |
-| [cve-offline-lookup.md](references/cve-offline-lookup.md) | 常见 CVE 离线速查表（Log4j、Fastjson、Spring、Shiro 等） |
-| [report-template.md](references/report-template.md) | 标准化漏洞报告模板 |
-| [logic-vulnerability-cot.md](references/logic-vulnerability-cot.md) | 逻辑漏洞 CoT 四步推理流程 |
-| [business-scenario-tags.md](references/business-scenario-tags.md) | 业务场景标签系统 |
-| [security-checklist.md](references/security-checklist.md) | Java Web 应用安全审计检查清单 |
+| [vulnerability-conditions.md](./vulnerability-conditions.md) | 漏洞成立条件判断表（Fastjson、JNDI、SSTI 等） |
+| [dktss-scoring.md](./dktss-scoring.md) | DKTSS 评分体系详细说明 |
+| [cve-offline-lookup.md](./cve-offline-lookup.md) | 常见 CVE 离线速查表（Log4j、Fastjson、Spring、Shiro 等） |
+| [report-template.md](./report-template.md) | 标准化漏洞报告模板 |
+| [logic-vulnerability-cot.md](./logic-vulnerability-cot.md) | 逻辑漏洞 CoT 四步推理流程 |
+| [business-scenario-tags.md](./business-scenario-tags.md) | 业务场景标签系统 |
+| [security-checklist.md](./security-checklist.md) | Java Web 应用安全审计检查清单 |
 
 ### Semgrep 规则文件
 
 | 文件 | 覆盖内容 | 规则数 |
 |------|----------|--------|
-| [java-rce.yaml](rules/semgrep/java-rce.yaml) | 反序列化、SSTI、表达式注入、命令注入 | 21 |
-| [java-sqli.yaml](rules/semgrep/java-sqli.yaml) | SQL 注入、MyBatis ${} 注入 | 12 |
-| [java-ssrf.yaml](rules/semgrep/java-ssrf.yaml) | SSRF 漏洞 | 8 |
-| [java-file.yaml](rules/semgrep/java-file.yaml) | 文件操作漏洞 | 14 |
-| [java-crypto.yaml](rules/semgrep/java-crypto.yaml) | 加密算法安全 | 8 |
-| [java-misc.yaml](rules/semgrep/java-misc.yaml) | XXE、XSS、认证授权等 | 56 |
-| [java-config.yaml](rules/semgrep/java-config.yaml) | 组件配置安全（60+ 组件） | 95 |
-| [java-emerging.yaml](rules/semgrep/java-emerging.yaml) | LLM/AI、GraphQL、Kotlin、Java 21、并发安全 | 14 |
+| [java-rce.yaml](./semgrep-rules/java-rce.yaml) | 反序列化、SSTI、表达式注入、命令注入 | 21 |
+| [java-sqli.yaml](./semgrep-rules/java-sqli.yaml) | SQL 注入、MyBatis ${} 注入 | 12 |
+| [java-ssrf.yaml](./semgrep-rules/java-ssrf.yaml) | SSRF 漏洞 | 8 |
+| [java-file.yaml](./semgrep-rules/java-file.yaml) | 文件操作漏洞 | 14 |
+| [java-crypto.yaml](./semgrep-rules/java-crypto.yaml) | 加密算法安全 | 8 |
+| [java-misc.yaml](./semgrep-rules/java-misc.yaml) | XXE、XSS、认证授权等 | 56 |
+| [java-config.yaml](./semgrep-rules/java-config.yaml) | 组件配置安全（60+ 组件） | 95 |
+| [java-emerging.yaml](./semgrep-rules/java-emerging.yaml) | LLM/AI、GraphQL、Kotlin、Java 21、并发安全 | 14 |
 
 **总计 314 条规则**
 
@@ -1789,7 +1789,7 @@ AI 先构建业务的因果关系基准与状态机模型，明确每个业务�
 
 | 目录 | 说明 |
 |------|------|
-| [examples/vulnerable-springboot/](examples/vulnerable-springboot/audit-report.md) | 完整审计报告示例（含 4 个漏洞详细分析） |
+| examples/vulnerable-springboot/ | 完整审计报告示例（含 4 个漏洞详细分析） |
 
 ---
 

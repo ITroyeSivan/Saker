@@ -10,9 +10,9 @@ description: >-
 
 ## 0. RELATED ROUTING
 
-- [deserialization-insecure](../deserialization/SKILL.md) for general Java deserialization
-- [jndi-injection](../jndi/SKILL.md) for JNDI-based chains
-- [fastjson-exploitation](../fastjson-exploitation/SKILL.md) when Fastjson is in the classpath
+- [deserialization-insecure](../../../pentest/refs/web/web-deserialization.md) for general Java deserialization
+- [jndi-injection](../../../pentest/refs/components/jndi-injection.md) for JNDI-based chains
+- [fastjson-exploitation](./fastjson.md) when Fastjson is in the classpath
 
 ---
 
