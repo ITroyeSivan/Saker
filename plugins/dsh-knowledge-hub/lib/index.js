@@ -32,6 +32,54 @@ const MAX_SEARCH_FILES = 500 // per search call
 const SMALL_FILE_LIMIT = 200 * 1024 // ≤200 KiB scanned fully; larger scans head + filename only
 const HEAD_LINES = 1000 // lines scanned from large files
 
+// Exploit-DB：约定目录 imports/exploitdb（官方仓库或元数据快照）。识别标志=两个 CSV。
+// 检索=字段化索引（EDB-ID/平台/描述），不做整库 embedding；PoC 原文按需读。
+const EDB_DIRNAME = 'exploitdb'
+const EDB_INDEX_TTL = 120000
+
+/** 中文问句 → 英文/缩写同义词展开（轻量召回增强，不做语义检索）。 */
+const ALIASES = {
+  越权: ['access-control', 'access control', 'idor', 'authorization', 'privilege', '越权', '未授权'],
+  注入: ['injection', 'sqli', 'sql injection', '注入'],
+  'sql注入': ['sqli', 'sql-injection', 'sql injection', '注入'],
+  xss: ['xss', 'cross-site', 'cross site', 'reflected', 'stored'],
+  csrf: ['csrf', 'xsrf', 'cross-site request', 'cross site request'],
+  ssrf: ['ssrf', 'server-side request', 'server side request', 'fetch'],
+  rce: ['rce', 'remote code execution', '命令执行', '代码执行'],
+  命令执行: ['rce', 'command execution', 'command injection', '命令执行', '代码执行'],
+  反序列化: ['deserialization', 'unserialize', '反序列化'],
+  文件包含: ['file inclusion', 'lfi', 'rfi', 'path traversal', '文件包含', '目录穿越'],
+  上传: ['upload', 'unrestricted file upload', '上传'],
+  弱口令: ['weak password', 'weak credential', '弱口令', '默认口令', 'default credential'],
+  爆破: ['brute', 'brute-force', 'bruteforce', '爆破'],
+  提权: ['privilege escalation', 'privesc', '提权'],
+  横向: ['lateral', '横向', 'movement'],
+  内网: ['intranet', 'internal network', '内网', 'network'],
+  webshell: ['webshell', 'shell', '一句话', '马', 'backdoor'],
+  免杀: ['evasion', 'bypass av', '免杀', 'obfuscation'],
+  内存马: ['memory shell', 'memoryshell', 'filter inject', '内存马'],
+  钓鱼: ['phishing', '钓鱼'],
+  侦察: ['recon', 'reconnaissance', 'discovery', '侦察', '信息收集'],
+  目录: ['directory', 'dir', 'path', '目录'],
+  子域: ['subdomain', '子域名', '子域'],
+}
+function expandTerms(query) {
+  const q = String(query || '').trim().toLowerCase()
+  if (!q) return []
+  const out = [q]
+  for (const [cn, terms] of Object.entries(ALIASES)) {
+    if (q.includes(cn)) {
+      for (const t of terms) if (!out.includes(t)) out.push(t)
+    }
+  }
+  // CVE / EDB-数字 归一化：CVE 再按数字段匹配；EDB-n 抽出数字精确找 id
+  let cve
+  if ((cve = q.match(/cve[-_ ]?(\d{4}[-_ ]?\d+)/i))) out.push('cve-' + cve[1].toLowerCase().replace(/[_\s]/g, '-'))
+  let edbId
+  if ((edbId = q.match(/edb[-_ ]?(\d+)/i))) out.push(edbId[1])
+  return out.slice(0, 6)
+}
+
 // ── path resolution ─────────────────────────────────────────────────────────
 
 function dshHome() {
@@ -206,19 +254,126 @@ function matchIn(text, query) {
   return hits
 }
 
+/** terms 任一命中即命中（行级；供别名展开后的多词检索）。 */
+function matchTermsIn(text, terms) {
+  const lower = []
+  const lines = linesOf(text)
+  for (let i = 0; i < lines.length; i++) lower.push(lines[i].toLowerCase())
+  const hits = []
+  const seen = new Set()
+  for (const term of terms) {
+    for (let i = 0; i < lower.length && hits.length < 5; i++) {
+      if (lower[i].includes(term) && !seen.has(i)) {
+        seen.add(i)
+        hits.push({ line: i + 1, preview: lines[i].trim().slice(0, 180), term })
+      }
+    }
+  }
+  return hits.slice(0, 4)
+}
+
+// ── Exploit-DB 字段化索引层（imports/exploitdb）────────────────────────────
+// exploits.csv: id,file,description,date,author,type,platform,port
+// files_exploits.csv: id,file — 定位真实 PoC 路径。检索在内存行缓存上做。
+let edbCache = { at: 0, rows: [] }
+function edbDir() {
+  return path.join(importsRoot(), EDB_DIRNAME)
+}
+function loadEdbIndex() {
+  const now = Date.now()
+  if (edbCache.at && now - edbCache.at < EDB_INDEX_TTL) return edbCache.rows
+  const dir = edbDir()
+  const rows = []
+  const expCsv = path.join(dir, 'exploits.csv')
+  const fileCsv = path.join(dir, 'files_exploits.csv')
+  if (!fs.existsSync(expCsv)) { edbCache = { at: 1, rows }; return rows }
+  try {
+    const files = new Map()
+    if (fs.existsSync(fileCsv)) {
+      const text = fs.readFileSync(fileCsv, 'utf8')
+      const first = text.indexOf('\n')
+      const body = first < 0 ? '' : text.slice(first + 1)
+      for (const line of body.split('\n')) {
+        const m = line.match(/^"?(\d+)"?,(.+)$/)
+        if (m && !files.has(m[1])) files.set(m[1], m[2].trim().replace(/^"|"$/g, ''))
+      }
+    }
+    const text = fs.readFileSync(expCsv, 'utf8')
+    const first = text.indexOf('\n')
+    const body = first < 0 ? '' : text.slice(first + 1)
+    for (const line of body.split('\n')) {
+      if (!line.trim()) continue
+      const parts = splitCsvLine(line)
+      if (parts.length < 6) continue
+      const id = parts[0]
+      const desc = parts[2] || ''
+      rows.push({
+        id,
+        path: files.get(id) || '',
+        desc: desc.slice(0, 220),
+        type: parts[5] || '',
+        platform: parts[6] || '',
+        date: parts[3] || '',
+      })
+    }
+  } catch { /* 解析失败返回空 */ }
+  edbCache = { at: now, rows }
+  return rows
+}
+/** CSV 行解析（支持带引号字段内的逗号）。 */
+function splitCsvLine(line) {
+  const out = []
+  let cur = ''
+  let q = false
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]
+    if (c === '"') q = !q
+    else if (c === ',' && !q) { out.push(cur); cur = '' }
+    else cur += c
+  }
+  out.push(cur)
+  return out
+}
+
+function searchEdbLayer(query) {
+  const rows = loadEdbIndex()
+  if (rows.length === 0) return []
+  const terms = expandTerms(query)
+  const q = String(query || '').toLowerCase().trim()
+  const hits = []
+  for (const r of rows) {
+    if (hits.length >= 8) break
+    const idExact = r.id === q || r.id === q.replace(/\D/g, '')
+    const inDesc = r.desc.toLowerCase().includes(q)
+    const termHit = terms.some((t) => t.length >= 2 && (r.desc.toLowerCase().includes(t) || r.type.toLowerCase().includes(t) || r.platform.toLowerCase().includes(t)))
+    if (idExact || inDesc || termHit) {
+      hits.push({
+        source: 'import', mode: '', path: `exploitdb/${r.path || r.id + ' (无文件映射)'}`,
+        line: 0,
+        preview: `[EDB-${r.id}] ${r.platform || ''} ${r.type || ''} ${r.desc.slice(0, 130)}`,
+        edb: true, edbId: r.id,
+      })
+    }
+  }
+  return hits
+}
+
 function searchLayer(dir, query, maxFiles, sourceLabel, mode) {
   const files = walkFiles(dir, maxFiles)
   const hits = []
-  const q = query.toLowerCase()
+  const terms = expandTerms(query)
+  const nameTerm = String(query || '').toLowerCase()
   for (const rel of files) {
+    // 跳过 exploitdb 目录（走字段化层，避免把巨型 CSV/源码当文本扫）
+    if (rel.split('/')[0] === EDB_DIRNAME) continue
     const file = path.join(dir, rel)
-    const nameHits = rel.toLowerCase().includes(q)
+    const nameHits = terms.some((t) => t.length >= 2 && rel.toLowerCase().includes(t))
     const data = readHead(file, SMALL_FILE_LIMIT)
     if (!data) {
       if (nameHits) hits.push({ source: sourceLabel, mode, path: rel, line: 0, preview: '(文件名命中，文件过大未扫描)' })
       continue
     }
-    const inHead = matchIn(data.text, q)
+    const inHead = matchTermsIn(data.text, terms)
     if (inHead.length > 0) {
       for (const h of inHead) hits.push({ source: sourceLabel, mode, path: rel, line: h.line, preview: h.preview })
     } else if (nameHits) {
@@ -228,10 +383,11 @@ function searchLayer(dir, query, maxFiles, sourceLabel, mode) {
   return hits
 }
 
-/** Unified search across bundled PATT + bundle(mode) + user(mode) + all imports. */
+/** Unified search: Exploit-DB 字段层优先，再 PATT/bundle/user/import 文本层。 */
 function searchAll(query, mode) {
   if (!query || !query.trim()) return []
   const hits = []
+  hits.push(...searchEdbLayer(query))
   const bRoot = readRootOf('bundle', mode)
   if (bRoot && fs.existsSync(bRoot)) hits.push(...searchLayer(bRoot, query, MAX_SEARCH_FILES, 'bundle', mode))
   const pRoot = pattRoot()
@@ -412,6 +568,19 @@ async function dispatch(endpoint, payload) {
   switch (endpoint) {
     case 'stats': {
       return ok(stats())
+    }
+
+    case 'edb-status': {
+      const dir = edbDir()
+      const present = fs.existsSync(path.join(dir, 'exploits.csv'))
+      const rows = present ? loadEdbIndex() : []
+      const hasFiles = fs.existsSync(path.join(dir, 'files_exploits.csv'))
+      return ok({
+        dir, present, rows: rows.length, hasFiles,
+        hint: present
+          ? 'Exploit-DB 已就绪：knowledge_search 会自动字段化命中 [EDB-ID] 条目；按需 knowledge_read exploitdb/<path> 读 PoC 原文。'
+          : `imports/${EDB_DIRNAME}/ 下未发现 exploits.csv。接入：① 把官方 exploitdb 仓库（含 exploits.csv / files_exploits.csv）放入 DSH_HOME/refs/imports/exploitdb/（离线可用）；② 或用 git 浅克隆后再拷入。元数据索引检索即可用，PoC 原文按需读。`,
+      })
     }
 
     case 'browse': {
@@ -674,6 +843,8 @@ export function apply(ctx, config = {}) {
         const parts = []
         if (s.patt > 0) parts.push(`随包 PayloadsAllTheThings payload 库 ${s.patt} 篇（commit ${PATT_SNAPSHOT}，MIT，离线）`)
         if (s.user > 0) parts.push(`个人/团队知识 ${s.user} 篇`)
+        const edbRows = loadEdbIndex().length
+        if (edbRows > 0) parts.push(`Exploit-DB 元数据索引 ${edbRows} 条（离线；命中形如 [EDB-12345]，PoC 原文按需读 exploitdb/<path>）`)
         if (s.imports > 0) {
           const names = topImportNames()
           parts.push(
