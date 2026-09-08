@@ -21,7 +21,7 @@ import { protocolMeta, detectProtocol, probeConnection } from "./protocol/regist
 import * as cap from "./protocol/capabilities.js";
 import { GEN_KINDS, makeAndSave, importFromFile, GEN_DIR } from "./generators.js";
 import { listPlugins, getPlugin, runPlugin, checkRunnable } from "./plugins-registry.js";
-import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { readFileSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 const name = "dsh-webshell-mgr";
@@ -35,16 +35,39 @@ export function checkCsrf(req, token) {
 }
 const BASE_DIR = path.join(os.homedir(), ".dsh", "webshell-mgr");
 const DB_PATH = path.join(BASE_DIR, "webshell.db");
+const WS_SETTINGS_FILE = path.join(BASE_DIR, "settings.json");
 
-// 设置命名空间 webshell-mgr（设置页「WebShell」）：genDir=生成目录（空=默认 BASE_DIR）。
-// 注意：不要把这些 scope 服务加进 `export inject` —— 那会让 cordis 把插件按独立 ctx 实例化，
-// webServer 路由会注册进非主实例（对外 404）。settings/systemPrompt/connection 一律走 ctx.inject 层。
+// 生成目录（genDir）策略：插件自有 settings.json 持久化（写盘即回，绝不挂 UI）；
+// genDir 为空时探测常用 WebShell 目录候选（存在即直接用——本机 01-WebShell管理/WebShell
+// 放马目录；候选不存在则自动回退默认）。settings 服务仅在可用时尽力同步，不作为持久化主路径。
+const WS_GEN_CANDIDATES = [
+	path.join("E:\\", "工作", "Web Security", "Tools", "01-WebShell管理", "WebShell"),
+	path.join("E:\\", "工作", "Web Security", "Tools", "01-WebShell管理"),
+];
 let WS_CFG = { genDir: "" };
-const WS_SCHEMA = z.object({ genDir: z.string().default("") });
-function genBase() {
-  const d = String(WS_CFG.genDir ?? "").trim();
-  return d ? path.resolve(d) : BASE_DIR;
+function loadWsCfg() {
+	try {
+		const j = JSON.parse(readFileSync(WS_SETTINGS_FILE, "utf8"));
+		WS_CFG = { genDir: typeof j.genDir === "string" ? j.genDir : "" };
+	} catch { WS_CFG = { genDir: "" }; }
+	return WS_CFG;
 }
+function saveWsCfg() {
+	try { mkdirSync(BASE_DIR, { recursive: true }); writeFileSync(WS_SETTINGS_FILE, JSON.stringify({ genDir: WS_CFG.genDir || "" }, null, 2), "utf8"); } catch { /* 磁盘异常仅降级 */ }
+}
+function defaultGenDir() {
+	try {
+		for (const c of WS_GEN_CANDIDATES) {
+			if (existsSync(c)) return path.resolve(c);
+		}
+	} catch { /* ignore */ }
+	return "";
+}
+function genBase() {
+	const d = String(WS_CFG.genDir ?? "").trim();
+	return d ? path.resolve(d) : (defaultGenDir() || BASE_DIR);
+}
+loadWsCfg(); // 模块加载即读入自有配置（tools 端点可能在 settings 层就绪前被调用）
 const MAX_BODY = 8 * 1024 * 1024;
 const MAX_READ = 4 * 1024 * 1024;
 const ALLOWED_MODES = ["pentest"];
@@ -745,9 +768,11 @@ function registerSettingsLayer(ctx, web) {
 	const settings = web?.settings ?? ctx.settings;
 	const systemPrompt = web?.systemPrompt ?? ctx.systemPrompt;
 	const connection = web?.connection ?? ctx.connection;
+	// 启动时读自有 settings.json；settings 服务仅尽力同步（非持久化主路径，避免 mutate 挂起）
+	loadWsCfg();
 	try {
-		const scope = ctx.settings.register("webshell-mgr", WS_SCHEMA, { base: { genDir: "" } });
-		const sync = () => { const v = scope.get?.(); WS_CFG.genDir = (v && typeof v.genDir === "string") ? v.genDir : ""; };
+		const scope = ctx.settings.register("webshell-mgr", WS_SCHEMA, { base: { genDir: WS_CFG.genDir || "" } });
+		const sync = () => { try { WS_CFG.genDir = scope.get?.().genDir ?? WS_CFG.genDir; } catch { /* ignore */ } };
 		sync();
 		try { ctx.settings.on?.("set", sync); } catch { /* ignore */ }
 	} catch (e) {
@@ -773,14 +798,20 @@ function registerSettingsLayer(ctx, web) {
 	try {
 		connection.rpc.handle("/dsh-webshell-mgr", async (endpoint, payload) => {
 			const p = payload && typeof payload === "object" ? payload : {};
-			if (endpoint === "settings-get") return { ok: true, value: { genDir: WS_CFG.genDir || "" } };
+			if (endpoint === "settings-get") {
+				loadWsCfg();
+				return { ok: true, value: { genDir: WS_CFG.genDir || "", effective: genBase() } };
+			}
 			if (endpoint === "settings-set") {
 				const d = typeof p.genDir === "string" ? p.genDir.trim() : "";
-				try {
-					if (settings?.mutate) await settings.mutate("webshell-mgr", [{ op: "set", path: ["genDir"], value: d }], undefined);
-				} catch (e) { /* 不可写时本进程生效 */ }
+				// 主持久化=自有文件（同步、立即返回，UI 不会卡"保存中"）；settings 服务尽力而为
 				WS_CFG.genDir = d;
-				return { ok: true, value: { genDir: WS_CFG.genDir } };
+				saveWsCfg();
+				if (settings?.mutate) {
+					try { settings.mutate("webshell-mgr", [{ op: "set", path: ["genDir"], value: d }], undefined).catch(() => {}); }
+					catch { /* ignore */ }
+				}
+				return { ok: true, value: { genDir: WS_CFG.genDir, effective: genBase() } };
 			}
 			if (endpoint === "conn-list") return { ok: true, value: { connections: listConns(theStore()).map(publicConn) } };
 			if (endpoint === "manifest-preview") {

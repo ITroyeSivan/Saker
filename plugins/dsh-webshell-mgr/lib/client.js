@@ -1330,18 +1330,18 @@ function wsRpc(connection, endpoint, payload) {
 }
 function WebShellSettings(props) {
 	var [genDir, setGenDir] = useState("");
+	var [effective, setEffective] = useState("");
 	var [conns, setConns] = useState(null);
 	var [kinds, setKinds] = useState([]);
-	var [latest, setLatest] = useState([]);
 	var [msg, setMsg] = useState("");
 	var [busy, setBusy] = useState(false);
 	function load() {
-		wsRpc(props.connection, "settings-get", {}).then(function (r) { if (r && r.ok) setGenDir(r.value.genDir || ""); });
+		wsRpc(props.connection, "settings-get", {}).then(function (r) { if (r && r.ok) { setGenDir(r.value.genDir || ""); setEffective(r.value.effective || ""); } });
 		wsRpc(props.connection, "manifest-preview", {}).then(function (r) {
 			if (r && r.ok) {
+				setEffective(r.value.genDir || "");
 				setConns(r.value.connections || 0);
 				setKinds(r.value.kinds || []);
-				setLatest(r.value.latest || []);
 			}
 		});
 	}
@@ -1350,20 +1350,24 @@ function WebShellSettings(props) {
 		setBusy(true); setMsg("");
 		wsRpc(props.connection, "settings-set", { genDir: genDir.trim() }).then(function (r) {
 			setBusy(false);
-			if (r && r.ok) { setMsg("已保存：新生成的马将落在 " + (r.value.genDir || "默认目录") + "（下一轮生效，无需重启）"); setTimeout(function () { setMsg(""); }, 3000); }
-			else setMsg((r && r.error) || "保存失败");
-		});
+			if (r && r.ok) {
+				setEffective(r.value.effective || "");
+				setMsg(r.value.effective ? "已保存，生效目录：" + r.value.effective : "已保存（使用默认目录）");
+				setTimeout(function () { setMsg(""); }, 3000);
+			} else setMsg((r && r.error) || "保存失败");
+		}).catch(function (e) { setBusy(false); setMsg(String(e && e.message || e)); });
 	}
 	var box = { border: "1px solid var(--dsw-alias-border-l1,#e4e4e7)", borderRadius: 8, padding: 10, marginBottom: 10, background: "var(--dsw-alias-bg-base,#fff)" };
 	return h("div", { style: { maxWidth: 760 } },
 		h("div", { style: { fontSize: 14, fontWeight: 700, margin: "0 0 4px" } }, "WebShell"),
 		h("div", { style: { fontSize: 12, color: "#6e6e73", lineHeight: 1.7, marginBottom: 8 } },
-			"管理本地 webshell 工具与生成的马：设置生成目录（默认 ~/.dsh/webshell-mgr/generated/），查看已登记连接。" +
+			"管理本地 webshell 工具与生成的马：设置生成目录（默认自动探测你本机的 01-WebShell管理 放马目录），查看已登记连接。" +
 			"连接/执行/文件/数据库的操作与完整界面在会话侧「webshell 管理」tab；本页用于配置与实时知情（模型每轮会看到下方信息）。"),
 		h("div", { style: box },
 			h("div", { style: { fontWeight: 700, fontSize: 13, marginBottom: 4 } }, "生成目录（genDir）"),
+			effective ? h("div", { style: { fontSize: 12, color: "#1a7f37", marginBottom: 4 } }, "当前生效目录：" + effective) : null,
 			h("div", { style: { display: "flex", gap: 6, alignItems: "center" } },
-				h("input", { value: genDir, onChange: function (e) { setGenDir(e.target.value); }, placeholder: "留空=默认 ~/.dsh/webshell-mgr（生成到 generated/）", style: { flex: 1, padding: "5px 8px", borderRadius: 6, border: "1px solid var(--dsw-alias-border-l1,#d9d9de)", fontSize: 12 } }),
+				h("input", { value: genDir, onChange: function (e) { setGenDir(e.target.value); }, placeholder: "留空=自动探测本机 WebShell 放马目录（存在即用）", style: { flex: 1, padding: "5px 8px", borderRadius: 6, border: "1px solid var(--dsw-alias-border-l1,#d9d9de)", fontSize: 12 } }),
 				h("button", { type: "button", onClick: save, disabled: busy, style: { padding: "5px 12px", borderRadius: 6, fontSize: 12, cursor: "pointer", border: "1px solid #2f81f7", background: "#2f81f7", color: "#fff" } }, busy ? "保存中…" : "保存")),
 			msg ? h("div", { style: { fontSize: 12, color: "#1a7f37", marginTop: 4 } }, msg) : null,
 			h("div", { style: { fontSize: 11, color: "#6e6e73", marginTop: 6 } }, "可用马类型 " + kinds.length + " 种：" + kinds.join(" / ") + "。")),
