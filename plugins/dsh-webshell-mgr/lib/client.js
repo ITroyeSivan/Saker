@@ -1326,7 +1326,7 @@ var REDTEAM_MANAGER_UI_NAMESPACE = "redteam-manager-ui";
 
 // ── 设置页「WebShell」tab（独立于会话管理 tab）：生成目录 + 连接一览 ────
 function wsRpc(connection, endpoint, payload) {
-	return connection.rpc.call("/dsh-webshell-mgr", endpoint, payload);
+	return connection.rpc.call("/dsh-webshell-mgr-rpc", endpoint, payload);
 }
 function WebShellSettings(props) {
 	var [genDir, setGenDir] = useState("");
