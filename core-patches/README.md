@@ -19,3 +19,16 @@ pnpm run build:lib:host && pnpm run build:web
 ```
 
 > ⚠️ 应用前请先审视上游许可与本仓库授权；二开分发时保留上游 MIT 版权声明。
+
+### 2026-09-08 宿主 rebase 到 dsh-v0.1.3-alpha.2（Saker 0.2.3 起）
+
+参考机宿主源码已从官方 0.1.3-alpha.1 整树换基到 alpha.2（316 commits）。除上表补丁外新增宿主侧两处本地适配（功能不变）：
+
+| 位置 | 改动 | 原因 |
+|---|---|---|
+| `packages/session/session-persistence-jsonl/src/lease.ts` | fs-ext `flock` 改为惰性绑定：win32 直接走 Win32 信号量句柄（不 import fs-ext）；非 win32 才 `import('fs-ext')` | fs-ext 原生模块需 node-gyp/VS 编译，本机无 VS；Windows 分支本就使用 win32 信号量、从不调用 flock，官方 browser-worker 亦以"立即成功"stub 处理同场景 |
+| `packages/client/web/package.json` | devDependencies 补 `zod@^4.4.3` | 本地 `seed.ts`/`platform.ts` 鉴权补丁依赖 zod |
+
+其余 alpha.1 时代本地补丁（browser-auth 密码登录、frontend-static 退出浮标 tapIndex、login/index/manifest 品牌、locale brand.localBuild、client/web platform/seed）均已在 alpha.2 树原样保留；`connection/src/index.ts` 为官方断线恢复增量 + 本地 auth 路由增量合并（互不重叠）。alpha.2 新增的官方 `recovery-config` 注入与本地补丁并存（回归已验证：SPA 同时含 `dsh-auth-logout` 与 `__DSH_CONNECTION_RECOVERY__`）。
+
+完整 diff 与升级记录见宿主工作区 `_upgrade/`（`Saker-dsh-alpha2-upgrade-report.md`、`upgrade-execute.js`、`prune-apply.js`、`merged-connection-index.ts`）。
