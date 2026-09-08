@@ -44,6 +44,7 @@ export const TOOL_PRESETS = [
   { key: 'frp', label: 'Frp', category: '内网与横向' },
   { key: 'impacket', label: 'Impacket', category: '内网与横向' },
   { key: 'ladon', label: 'Ladon', category: '内网与横向' },
+  { key: 'kerbrute', label: 'Kerbrute', category: '内网与横向' },
   { key: 'mimikatz', label: 'Mimikatz', category: '内网与横向' },
   { key: 'bloodhound', label: 'BloodHound', category: '内网与横向' },
 ]
@@ -64,7 +65,7 @@ function isToolKey(key) {
 }
 
 /** Fields the client may write through settings/mutate. */
-const WRITABLE_FIELDS = new Set(['tools', 'services', 'dnslog', 'apiKeys', 'scanRoots'])
+const WRITABLE_FIELDS = new Set(['tools', 'services', 'dnslog', 'apiKeys', 'scanRoots', 'hiddenTools'])
 
 /** Secret-bearing fields: redacted on read; an empty/`***` write is ignored. */
 const SECRET_FIELDS = new Set(['dnslog.token', 'apiKeys.deepseekKey'])
@@ -136,6 +137,9 @@ const Config = z.object({
   }),
   /** 供「工具自动探测」扫描的候选根（用户可选填；留空则用已配工具父目录）。 */
   scanRoots: z.array(z.string()).default([]),
+  /** 被用户从工具行「隐藏」的 preset/自定义工具 key：行不展示、不进 manifest、
+   * 不进 shell 环境；路径配置值保留，随时可恢复（移除 ≠ 删除配置）。 */
+  hiddenTools: z.array(z.string()).default([]),
 })
 
 function ok(value) { return { ok: true, value } }
@@ -200,7 +204,7 @@ function resolveBurpProxyPath() {
  * 已知工具目录常量）里做深度受限的静默扫描，按工具名匹配出候选绝对路径，
  * 前端渲染成"一键点选"列表——体验与技能上传一致，永不弹窗、永不冻结。
  */
-const TOOL_NAME_EXT_RE = /\.(exe|py|bat|cmd|ps1|go|sh|jar|rb|pl)$/i
+const TOOL_NAME_EXT_RE = /\.(exe|py|py3|jar|sh|ps1|bat|cmd|pl)$/i
 
 function isToolCandidateFile(name, toolKey) {
   const lower = name.toLowerCase()
@@ -217,29 +221,68 @@ function isToolCandidateFile(name, toolKey) {
   return false
 }
 
-/** 单层目录扫描（不递归，候选根一般已按工具分好层）。 */
-function scanDirForTool(root, toolKey, out, depth = 0, maxDepth = 2) {
+/**
+ * 收集根目录（含）下所有"可能候选"文件：扩展名在白名单内或无扩展名、
+ * 且非安装包/构建残留。单次遍历一棵树，供全部工具 key 复用匹配。
+ * 跳过隐藏目录（含 .git）与依赖/构建目录，避免把巨型仓库拉进探测。
+ */
+function collectCandidateFiles(root, sink, depth = 0, maxDepth = 3) {
   if (depth > maxDepth) return
   let entries
   try { entries = readdirSync(root, { withFileTypes: true }) } catch { return }
   for (const e of entries) {
     if (e.name.startsWith('.')) continue
-    if (e.name === 'node_modules' || e.name === '__pycache__') continue
+    if (e.name === 'node_modules' || e.name === '__pycache__' || e.name === 'dist' || e.name === 'build') continue
     const full = join(root, e.name)
     if (e.isDirectory()) {
-      scanDirForTool(full, toolKey, out, depth + 1, maxDepth)
-    } else if (e.isFile() && isToolCandidateFile(e.name, toolKey)) {
-      out.push(full)
+      collectCandidateFiles(full, sink, depth + 1, maxDepth)
+    } else if (e.isFile()) {
+      const lower = e.name.toLowerCase()
+      const base = lower.replace(/\.[^.]+$/, '')
+      const extOk = TOOL_NAME_EXT_RE.test(lower) || !lower.includes('.')
+      // 文件名噪音：仓库元文件（Dockerfile/README/Makefile/锁文件等）即使命中
+      // 路径段也不该作为工具候选（impacket/…/Dockerfile）。
+      const noiseBase = /^(dockerfile|makefile|readme|readme\.\w+|license|copying|changelog|notice|authors|contributing|requirements.*|pyproject|cmakelists|setup|setup\.cfg|install|package.*|.*lock.*|\.env|gitignore)$/i.test(base)
+      if (extOk && !noiseBase && !/setup|install|uninstall|\.msi$|\.zip$|\.7z$|\.tar|\.gz$/.test(lower)) {
+        sink.push({ name: e.name, full })
+      }
     }
   }
 }
 
 /**
- * 汇总候选根并扫描。同步执行（几十~几百目录，深度 ≤2，单次毫秒级）；
- * 结果按"越靠前越可能"排序（父目录命中 > 深层）。超长扫描加保护上限。
+ * 汇总候选根并扫描。同步执行；候选根 = 用户 scanRoots + 已配工具父目录两级
+ * + 已配工具所在"工具基目录"（Tools/…工具…）下的数字/主题分类目录
+ * （如 05-内网与域渗透），因此内网/漏扫等整库工具即使未逐一点配也能被探到。
+ * 结果按短路径优先排序（更接近工具根），同一路径跨根去重。
  */
 const SCAN_MAX_ROOTS = 32
 const SCAN_MAX_HITS = 64
+
+/** 是否像"工具库基目录"（Tools / 安全工具 / …bin 扁平仓除外）。 */
+function isToolBaseName(name) {
+  const lower = name.toLowerCase()
+  return lower === 'tools' || lower === 'tool' || lower.includes('工具')
+}
+
+/** 是否像分类子目录（03-扫描与信息收集 / 05-内网与域渗透 / scan/exploit…）。 */
+function isCategoryDirName(name) {
+  if (/^\d{1,2}\s*[-_.]/.test(name)) return true
+  return /(扫描|信息收集|漏洞|利用|注入|爆破|内网|域渗透|横向|webshell|payload|fuzz)/i.test(name)
+}
+
+/** 从已配路径上溯，找最近的"工具库基目录"。 */
+function findToolBase(leaf) {
+  let dir = leaf
+  for (let i = 0; i < 6 && dir; i++) {
+    const parent = dirname(dir)
+    if (!parent || parent === dir) break
+    if (isToolBaseName(parent)) return parent
+    dir = parent
+  }
+  return ''
+}
+
 function findToolCandidates(section) {
   const tools = (section && section.tools) || {}
   const roots = []
@@ -253,21 +296,48 @@ function findToolCandidates(section) {
   if (Array.isArray(section && section.scanRoots)) section.scanRoots.forEach(addRoot)
   // 2) 所有已配工具路径的父目录及其上一级（Tools\04-...\sqlmap → 扫 04-... 与 Tools，
   //    让同大类/同目录的 nuclei/ffuf 等互见；bin 型扁平目录自动覆盖）
+  const bases = new Set()
   for (const v of Object.values(tools)) {
     if (typeof v !== 'string' || !v || v === '***') continue
     addRoot(dirname(v))
     addRoot(dirname(dirname(v)))
+    const base = findToolBase(dirname(v))
+    if (base) bases.add(base)
   }
-  // 3) 随包常量里的工具根线索（mcp-proxy 父目录等）
+  // 3) 工具基目录下的分类子目录整体纳入扫描：05-内网与域渗透/… 里即使只配过
+  //    外网工具，也能据此把整类目录扫到（分类目录自身作为根，深度预算充足）。
+  for (const base of bases) {
+    addRoot(base)
+    let entries
+    try { entries = readdirSync(base, { withFileTypes: true }) } catch { continue }
+    for (const e of entries) {
+      if (!e.isDirectory() || e.name.startsWith('.')) continue
+      if (isCategoryDirName(e.name)) addRoot(join(base, e.name))
+      if (roots.length >= SCAN_MAX_ROOTS + 8) break
+    }
+  }
+  // 4) 随包常量里的工具根线索（mcp-proxy 父目录等）
   for (const p of BURP_PROXY_DEFAULT_PATHS) {
     try { if (existsSync(p)) addRoot(dirname(dirname(p))) } catch { /* ignore */ }
   }
   if (roots.length === 0) return { roots: [], candidates: {} }
+  // 每根单次遍历收集候选文件，再按工具 key 过滤，跨根去重。
+  const collected = []
+  for (const root of roots.slice(0, SCAN_MAX_ROOTS)) collectCandidateFiles(root, collected)
   const candidates = {}
   for (const t of TOOL_PRESETS) {
     const hits = []
-    for (const root of roots.slice(0, SCAN_MAX_ROOTS)) scanDirForTool(root, t.key, hits)
-    if (hits.length > SCAN_MAX_HITS) hits.length = SCAN_MAX_HITS
+    const dup = new Set()
+    for (const c of collected) {
+      // 文件名匹配之外，还接受「路径某段 == 工具 key」的可执行文件：典型如
+      // impacket/…/examples/secretsdump.py（仓库内脚本不带 impacket 前缀）。
+      const segMatch = c.full.toLowerCase().split(/[\\/]/).includes(t.key.toLowerCase())
+      if (!isToolCandidateFile(c.name, t.key) && !segMatch) continue
+      if (dup.has(c.full)) continue
+      dup.add(c.full)
+      hits.push(c.full)
+      if (hits.length >= SCAN_MAX_HITS) break
+    }
     // 排序：短路径优先（更接近工具根）；同长度按字母序稳定
     hits.sort((a, b) => a.length - b.length || (a < b ? -1 : 1))
     candidates[t.key] = hits.slice(0, 8)
@@ -450,12 +520,15 @@ function scheduleSync(settings, services, logger) {
 export function renderManifest(section, listMountedMcpTools) {
   const lines = []
   const tools = section && section.tools ? section.tools : {}
+  const hidden = new Set(Array.isArray(section && section.hiddenTools) ? section.hiddenTools : [])
   const byKey = new Map(TOOL_PRESETS.map((t) => [t.key, t]))
   const configured = []
   for (const t of TOOL_PRESETS) {
+    if (hidden.has(t.key)) continue
     if (typeof tools[t.key] === 'string' && tools[t.key].length > 0) configured.push(t.key)
   }
   for (const key of Object.keys(tools)) {
+    if (hidden.has(key)) continue
     if (!byKey.has(key) && isToolKey(key) && typeof tools[key] === 'string' && tools[key].length > 0) {
       configured.push(key + '(自定义)')
     }
@@ -597,8 +670,9 @@ export function apply(ctx, config = {}) {
         const section = current()
         const out = {}
         const tools = section && section.tools ? section.tools : {}
+        const hidden = new Set(Array.isArray(section && section.hiddenTools) ? section.hiddenTools : [])
         for (const key of TOOL_KEYS) {
-          out['DSH_TOOL_' + key.toUpperCase()] = typeof tools[key] === 'string' ? tools[key] : ''
+          out['DSH_TOOL_' + key.toUpperCase()] = hidden.has(key) ? '' : (typeof tools[key] === 'string' ? tools[key] : '')
         }
         return out
       },

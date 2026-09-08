@@ -31,6 +31,17 @@ function getArg(name, fallback) {
 
 const SSE_URL = getArg('sse-url', process.env.DSH_BURP_SSE_URL || 'http://127.0.0.1:9876').replace(/\/+$/, '')
 const REQUEST_TIMEOUT_MS = Number(getArg('timeout-ms', '30000'))
+// 本桥只连本机 Burp：去掉环境代理，避免 localhost 请求走代理并触发 undici 的
+// EnvHttpProxyAgent 实验警告（每次桥进程都会打印一次，Burp 未开会刷屏）。
+delete process.env.HTTP_PROXY
+delete process.env.http_proxy
+delete process.env.HTTPS_PROXY
+delete process.env.https_proxy
+delete process.env.ALL_PROXY
+delete process.env.all_proxy
+process.env.NO_PROXY = '127.0.0.1,localhost'
+
+const VERBOSE = args.includes('--debug')
 
 process.stdin.setEncoding('utf8')
 
@@ -47,6 +58,12 @@ const waitingForSession = [] // pending dispatches buffered until handshake comp
 
 function log(...rest) {
   process.stderr.write('[burp-bridge] ' + rest.join(' ') + '\n')
+}
+
+/** Verbose-only diagnostics: suppressed by default so an offline Burp does not
+ *  spam the host console while the MCP supervisor retries with backoff. */
+function vlog(...rest) {
+  if (VERBOSE) log(...rest)
 }
 
 function writeOut(obj) {
@@ -77,7 +94,7 @@ function startSse() {
     let buf = ''
     while (!closed) {
       const { done, value } = await reader.read()
-      if (done) { log('SSE stream closed by server'); break }
+      if (done) { vlog('SSE stream closed by server'); break }
 buf += decoder.decode(value, { stream: true })
     // SSE spec allows CRLF or LF record separators; Burp emits CRLF, others LF.
     buf = buf.replace(/\r\n/g, '\n')
@@ -90,7 +107,7 @@ buf += decoder.decode(value, { stream: true })
     }
   }).catch((err) => {
     if (closed) return
-    log('SSE handshake failed:', err.message)
+    vlog('SSE handshake failed:', err.message)
     sessionReadyReject?.(err)
     process.exit(1)
   })
@@ -114,7 +131,7 @@ function handleEvent(block) {
   }
   if (event === 'message') {
     let msg
-    try { msg = JSON.parse(data) } catch (err) { log('bad JSON from server:', err.message); return }
+    try { msg = JSON.parse(data) } catch (err) { vlog('bad JSON from server:', err.message); return }
     if (msg.id !== undefined) {
       const p = inflight.get(msg.id)
       if (p) {
@@ -122,7 +139,7 @@ function handleEvent(block) {
         inflight.delete(msg.id)
         p.resolve(msg)
       } else {
-        log('response for unknown id', msg.id)
+        vlog('response for unknown id', msg.id)
       }
     } else {
       // server-initiated notification — pass straight through
@@ -151,12 +168,12 @@ async function sendRequest(msg) {
 
 function dispatch(line) {
   let msg
-  try { msg = JSON.parse(line) } catch (err) { log('bad JSON from client:', err.message); return }
+  try { msg = JSON.parse(line) } catch (err) { vlog('bad JSON from client:', err.message); return }
   if (msg.id === undefined) {
     // client-initiated notification (e.g. notifications/initialized) — forward, no reply expected
     sessionReady.then(() => {
       if (!sessionId) { log('dropping client notification: no session yet'); return }
-      sendRequest(msg).catch((err) => log('notification forward failed:', err.message))
+      sendRequest(msg).catch((err) => vlog('notification forward failed:', err.message))
     })
     return
   }
@@ -193,7 +210,7 @@ process.stdin.on('data', (chunk) => {
   }
 })
 
-process.stdin.on('end', () => { closed = true; log('stdin closed'); process.exit(0) })
+process.stdin.on('end', () => { closed = true; vlog('stdin closed'); process.exit(0) })
 process.on('SIGTERM', () => { closed = true; process.exit(0) })
 process.on('SIGINT', () => { closed = true; process.exit(0) })
 

@@ -91,7 +91,17 @@ function ToolRow(props) {
           color: has ? '#d1242f' : '#c8c8cc', opacity: has ? 1 : 0.6,
         },
         onClick: props.onRemove,
-      }, '移除')),
+      }, '移除'),
+      props.onHide ? React.createElement('button', {
+        type: 'button',
+        title: '隐藏该工具行：不再展示、不进提示词清单与 shell 环境（配置路径保留，可随时恢复）',
+        style: {
+          padding: '6px 10px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
+          border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: 'transparent',
+          color: 'var(--dsw-alias-label-tertiary,#6e6e73)',
+        },
+        onClick: props.onHide,
+      }, '隐藏') : null),
     !has && shown.length > 0 ? React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 4, margin: '4px 0 2px 0', paddingLeft: 0 } },
       React.createElement('span', { style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', lineHeight: '20px', marginRight: 4 } }, '自动探测到：'),
       shown.map(function (p) {
@@ -132,7 +142,15 @@ function ToolGroup(props) {
   var byKey = {};
   catalog.forEach(function (t) { byKey[t.key] = t; });
   var tools = props.value || {};
+  var hiddenSet = new Set(props.hidden || []);
   var candidatesOf = function (key) { return (cand && cand.candidates && cand.candidates[key]) || []; };
+
+  function toggleHide(key) {
+    var cur = Array.isArray(props.hidden) ? props.hidden.slice() : [];
+    var idx = cur.indexOf(key);
+    if (idx >= 0) cur.splice(idx, 1); else cur.push(key);
+    props.onHidden && props.onHidden(cur);
+  }
 
   function setTool(key, val) {
     var next = JSON.parse(JSON.stringify(tools));
@@ -155,9 +173,9 @@ function ToolGroup(props) {
     setNewName(''); setNewPath(''); setMsg(null);
   }
 
-  // Preset rows grouped by category (all shown — fill a path to add/select).
+  // Preset rows grouped by category (hidden ones stay out of the main list).
   var presetGroups = categoryOrder.map(function (cat) {
-    var rows = catalog.filter(function (t) { return t.category === cat; });
+    var rows = catalog.filter(function (t) { return t.category === cat && !hiddenSet.has(t.key); });
     if (rows.length === 0) return null;
     var children = rows.map(function (t) {
       var val = typeof tools[t.key] === 'string' ? tools[t.key] : '';
@@ -168,13 +186,37 @@ function ToolGroup(props) {
         connection: props.connection,
         onChange: function (v) { setTool(t.key, v); },
         onRemove: function () { removeTool(t.key); },
+        onHide: function () { toggleHide(t.key); },
       });
     });
     return React.createElement(Group, { key: cat, title: cat }, children);
   });
 
+  // Hidden rows (preset or custom): value/config kept, row collapsed until 恢复.
+  var hiddenKeys = (props.hidden || []).filter(function (k) { return TOOL_NAME_RE.test(k); }).sort();
+  var hiddenGroup = null;
+  if (hiddenKeys.length > 0) {
+    var hiddenChips = hiddenKeys.map(function (k) {
+      var meta = byKey[k];
+      var val = typeof tools[k] === 'string' ? tools[k] : '';
+      return React.createElement('span', {
+        key: k,
+        style: { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '2px 6px 2px 10px', borderRadius: 999, fontSize: 12, border: '1px dashed var(--dsw-alias-border-l1,#d9d9de)', color: 'var(--dsw-alias-label-tertiary,#6e6e73)', margin: '2px 4px 2px 0', maxWidth: 420 },
+      },
+        React.createElement('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, (meta ? meta.label : k) + (val ? '（已配置）' : '（未配置）')),
+        React.createElement('button', {
+          type: 'button', title: '恢复显示该工具',
+          style: { padding: '1px 6px', borderRadius: 6, fontSize: 11, cursor: 'pointer', border: 'none', background: 'transparent', color: '#2f81f7' },
+          onClick: function () { toggleHide(k); },
+        }, '恢复'));
+    });
+    hiddenGroup = React.createElement('div', { style: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', marginBottom: 6, lineHeight: 1.6 } },
+      React.createElement('div', { style: { fontSize: 13, fontWeight: 600, margin: '14px 0 6px', color: 'var(--dsw-alias-label-primary,#1a1a1a)' } }, '已隐藏工具（不展示、不进提示词/shell，点「恢复」重新启用）'),
+      hiddenChips);
+  }
+
   // Operator-defined tools (keys outside the preset catalog) with a value.
-  var customKeys = Object.keys(tools).filter(function (k) { return !byKey[k] && TOOL_NAME_RE.test(k) && typeof tools[k] === 'string' && tools[k].length > 0; }).sort();
+  var customKeys = Object.keys(tools).filter(function (k) { return !byKey[k] && !hiddenSet.has(k) && TOOL_NAME_RE.test(k) && typeof tools[k] === 'string' && tools[k].length > 0; }).sort();
   var customGroup = null;
   if (customKeys.length > 0 || true) {
     var customRows = customKeys.map(function (k) {
@@ -183,6 +225,7 @@ function ToolGroup(props) {
         connection: props.connection,
         onChange: function (v) { setTool(k, v); },
         onRemove: function () { removeTool(k); },
+        onHide: function () { toggleHide(k); },
       });
     });
     customGroup = React.createElement('div', { style: { marginBottom: 4 } },
@@ -209,6 +252,7 @@ function ToolGroup(props) {
       ? React.createElement('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', marginBottom: 8 } },
           '扫描根：' + cand.roots.join('  ·  ')) : null,
     presetGroups,
+    hiddenGroup,
     customGroup);
 }
 
@@ -270,7 +314,10 @@ function ConfigForm(props) {
     setBusy(true); setMsg('');
     // API 密钥（DeepSeek Key）已统一在「平台设置 → 模型/服务」中维护；本页面
     // 不再读写 apiKeys，避免双源/覆盖。
-    rpc(props.connection, 'settings/mutate', { ops: [{ op: 'set', path: ['tools'], value: v.tools }, { op: 'set', path: ['services'], value: v.services }, { op: 'set', path: ['dnslog'], value: v.dnslog }] }).then(function (res) {
+    var ops = [{ op: 'set', path: ['tools'], value: v.tools }, { op: 'set', path: ['services'], value: v.services }, { op: 'set', path: ['dnslog'], value: v.dnslog }];
+    if (v.hiddenTools && v.hiddenTools.length > 0) ops.push({ op: 'set', path: ['hiddenTools'], value: v.hiddenTools });
+    else ops.push({ op: 'set', path: ['hiddenTools'], value: [] });
+    rpc(props.connection, 'settings/mutate', { ops: ops }).then(function (res) {
       setBusy(false);
       if (res && res.ok) { setMsg('已保存'); props.onSaved && props.onSaved(); refreshStatus(); }
       else setMsg('保存失败：' + ((res && res.error && res.error.message) || '未知错误'));
@@ -278,7 +325,7 @@ function ConfigForm(props) {
   }
 
   return React.createElement('div', null,
-    React.createElement(ToolGroup, { connection: props.connection, value: v.tools || {}, onChange: function (next) { setPath(['tools'], next); } }),
+    React.createElement(ToolGroup, { connection: props.connection, value: v.tools || {}, hidden: v.hiddenTools || [], onChange: function (next) { setPath(['tools'], next); }, onHidden: function (next) { setPath(['hiddenTools'], next); } }),
     React.createElement(Group, { title: '服务连接地址（保存后自动同步到 MCP 工作台，模型立即可见）' },
       React.createElement(ServiceRow, { connection: props.connection, name: 'burp', label: 'Burp Suite 地址', placeholder: 'http://127.0.0.1:9876', value: services.burpUrl || '', status: mountStatus.burp, mounting: mountingName === 'burp', onChange: function (val) { setPath(['services', 'burpUrl'], val); }, onMount: mountOne.bind(null, 'burp') }),
       React.createElement(ServiceRow, { connection: props.connection, name: 'yakit', label: 'Yakit 地址', placeholder: 'http://127.0.0.1:11432', value: services.yakitUrl || '', status: mountStatus.yakit, mounting: mountingName === 'yakit', onChange: function (val) { setPath(['services', 'yakitUrl'], val); }, onMount: mountOne.bind(null, 'yakit') })),
