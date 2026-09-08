@@ -163,10 +163,14 @@ function failure(message) { return { ok: false, error: { code: 'method-stack', m
 export function apply(ctx, config = {}) {
   const cfg = { enable: true, ...config }
   if (!cfg.enable) return
+  console.log('[method-stack] apply begin (enable)')
   const { connection, systemPrompt } = ctx
 
   // 1) RPC：目录 / 组合读写（设置页「方法编排」用）
-  connection.rpc.handle(CHANNEL, async (endpoint, payload) => {
+  if (!connection || typeof connection.rpc?.handle !== 'function') {
+    ctx.logger?.warn?.('dsh-method-stack: connection service unavailable, RPC disabled')
+  } else {
+    connection.rpc.handle(CHANNEL, async (endpoint, payload) => {
     try {
       const p = payload && typeof payload === 'object' ? payload : {}
       if (endpoint === 'list') {
@@ -259,6 +263,7 @@ export function apply(ctx, config = {}) {
       return failure(error instanceof Error ? error.message : String(error))
     }
   }, { authority: 'loopback' })
+  }
 
   // 2) 每轮注入：把当前模式启用方法正文作为一段 context。
   //    复用 route-boost 姿势：context text 由 agent-loop 每轮重渲染。
@@ -284,6 +289,7 @@ export function apply(ctx, config = {}) {
   } else {
     ctx.logger?.warn?.('dsh-method-stack: systemPrompt unavailable, method injection disabled')
   }
+  console.log('[method-stack] apply done')
 }
 
 function builtinMethodPath(group, id) {
