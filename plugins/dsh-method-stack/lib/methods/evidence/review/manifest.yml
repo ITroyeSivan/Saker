@@ -1,0 +1,5 @@
+---
+name: review
+description: 复核判据：对候选漏洞按影响/可利用性/真实性给出判定意见。
+order: 20
+---

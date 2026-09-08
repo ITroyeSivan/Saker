@@ -1,0 +1,5 @@
+---
+name: lateral-entry
+description: 横向入口盘点：识别内网可达服务上的可利用入口与弱配置。
+order: 20
+---

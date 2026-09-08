@@ -1,0 +1,5 @@
+---
+name: vuln-report
+description: 漏洞描述规范：按位置/复现/影响/修复四段写正式报告条目。
+order: 10
+---

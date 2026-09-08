@@ -32,15 +32,22 @@ export const TOOL_PRESETS = [
   { key: 'nmap', label: 'Nmap', category: '信息收集' },
   { key: 'nuclei', label: 'Nuclei', category: '漏洞扫描' },
   { key: 'afrog', label: 'Afrog', category: '漏洞扫描' },
-  { key: 'fscan', label: 'Fscan', category: '漏洞扫描' },
   { key: 'dirsearch', label: 'Dirsearch', category: '目录与接口' },
   { key: 'katana', label: 'Katana', category: '目录与接口' },
   { key: 'ffuf', label: 'Ffuf', category: '目录与接口' },
   { key: 'sqlmap', label: 'SQLMap', category: '注入与利用' },
   { key: 'jwt_tool', label: 'JWT Tool', category: '令牌与认证' },
+  // 内网与横向（v0.3.0 新增；fscan 归类于此，二进制由用户自备）
+  { key: 'fscan', label: 'Fscan', category: '内网与横向' },
+  { key: 'chisel', label: 'Chisel', category: '内网与横向' },
+  { key: 'frp', label: 'Frp', category: '内网与横向' },
+  { key: 'impacket', label: 'Impacket', category: '内网与横向' },
+  { key: 'ladon', label: 'Ladon', category: '内网与横向' },
+  { key: 'mimikatz', label: 'Mimikatz', category: '内网与横向' },
+  { key: 'bloodhound', label: 'BloodHound', category: '内网与横向' },
 ]
 
-export const TOOL_CATEGORIES = ['信息收集', '漏洞扫描', '目录与接口', '注入与利用', '令牌与认证']
+export const TOOL_CATEGORIES = ['信息收集', '漏洞扫描', '目录与接口', '注入与利用', '令牌与认证', '内网与横向']
 
 /** Preset tool keys whose paths the shell receives as DSH_TOOL_<NAME>. */
 const TOOL_KEYS = TOOL_PRESETS.map((t) => t.key)

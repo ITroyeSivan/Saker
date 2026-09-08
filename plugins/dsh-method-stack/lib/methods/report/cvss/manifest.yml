@@ -1,0 +1,5 @@
+---
+name: cvss
+description: CVSS 评分与修复建议：按 GB/T 与 CVSS v3.x 约定给出可辩护的评分与修复。
+order: 20
+---

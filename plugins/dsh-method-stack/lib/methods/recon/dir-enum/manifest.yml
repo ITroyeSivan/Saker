@@ -1,0 +1,5 @@
+---
+name: dir-enum
+description: 目录与敏感文件枚举：字典化发现隐藏路由、备份、配置、源码与 .git 等泄露。
+order: 20
+---

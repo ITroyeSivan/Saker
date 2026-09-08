@@ -1,0 +1,5 @@
+# dsh-method-stack — host 层注册（每 agent 会话经由 systemPrompt context 注入方法组合）。
+# 依赖同层 systemPrompt / agentPresets / connection（均在 base bundle 提供）。
+add:
+  - id: dsh-method-stack
+    name: '@dsh-external/dsh-method-stack'

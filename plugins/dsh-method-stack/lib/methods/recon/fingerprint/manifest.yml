@@ -1,0 +1,5 @@
+---
+name: fingerprint
+description: 指纹识别：确认框架/CMS/中间件/网关及其版本，为后续选漏洞方向。
+order: 30
+---
