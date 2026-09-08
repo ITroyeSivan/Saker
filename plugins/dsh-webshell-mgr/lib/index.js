@@ -21,7 +21,7 @@ import { protocolMeta, detectProtocol, probeConnection } from "./protocol/regist
 import * as cap from "./protocol/capabilities.js";
 import { GEN_KINDS, makeAndSave, importFromFile, GEN_DIR } from "./generators.js";
 import { listPlugins, getPlugin, runPlugin, checkRunnable } from "./plugins-registry.js";
-import { readFileSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, mkdirSync, writeFileSync, existsSync, unlinkSync as fsUnlink, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const name = "dsh-webshell-mgr";
@@ -961,11 +961,48 @@ function registerSettingsLayer(ctx, web) {
 				logOp(theStore(), "", "self.add", `${name} (${password === row.password && String(p.password ?? "") === "" ? "密码自动生成" : "用户设置"}) → ${safe}`);
 				return { ok: true, value: row };
 			}
-			if (endpoint === "self-list") return { ok: true, value: { shells: WS_CFG.selfShells || [] } };
+			if (endpoint === "self-list") {
+				// 目录即库：列出 genBase() 内马文件（含手工放入的），merge 已登记元数据
+				const exts = new Set([".php", ".jsp", ".jspx", ".jspa", ".aspx", ".asp", ".asmx", ".ashx", ".py", ".cgi", ".war", ".txt.php"]);
+				const recByFile = new Map((WS_CFG.selfShells || []).map((x) => [x.file, x]));
+				const shells = [];
+				let entries = [];
+				try { entries = readdirSync(genBase(), { withFileTypes: true }); } catch { entries = []; }
+				for (const e of entries) {
+					if (!e.isFile()) continue;
+					const lower = e.name.toLowerCase();
+					if (lower === "readme.md") continue;
+					if (lower.endsWith(".part") || lower.endsWith(".md")) continue;
+					const okExt = [...exts].some((ex) => lower.endsWith(ex) || lower.endsWith(ex.replace(/^\./, "") + ".exe"));
+					const isShell = okExt || lower.endsWith(".jsp") || lower.endsWith(".php") || lower.endsWith(".aspx") || lower.endsWith(".asp") || lower.endsWith(".py") || lower.endsWith(".cgi");
+					if (!isShell) continue;
+					const rec = recByFile.get(e.name);
+					const guessLang = (n) => { const l = n.toLowerCase(); if (l.includes(".jsp")) return "JSP"; if (l.includes(".aspx") || l.includes(".asmx") || l.includes(".ashx")) return "ASPX"; if (l.includes(".asp")) return "ASP"; if (l.includes(".py") || l.includes(".cgi")) return "其他"; return "PHP"; };
+					shells.push({
+						id: rec ? rec.id : "dir-" + e.name,
+						name: rec ? rec.name : e.name.replace(/\.(php|jsp|jspx|aspx|asp|asmx|ashx|py|cgi|war)$/i, ""),
+						lang: (rec && rec.lang) || guessLang(e.name),
+						obf: (rec && rec.obf) || "（未登记）",
+						file: e.name,
+						password: (rec && rec.password) || "",
+						registered: !!rec,
+					});
+				}
+				shells.sort((a, b) => a.file.localeCompare(b.file));
+				return { ok: true, value: { dir: genBase(), shells } };
+			}
 			if (endpoint === "self-update") {
+				// id 或 file 匹配；未登记的 file 首次更新=自动登记（用户改口令/分类即入库）
 				const id = String(p.id ?? "");
-				const s = (WS_CFG.selfShells || []).find((x) => x.id === id);
-				if (!s) return { ok: false, error: "不存在" };
+				const file = String(p.file ?? "").replace(/[\\/]/g, "");
+				let s = (WS_CFG.selfShells || []).find((x) => x.id === id || (file && x.file === file));
+				if (!s) {
+					if (!file) return { ok: false, error: "不存在" };
+					const guessLang = (n) => { const l = n.toLowerCase(); if (l.includes(".jsp")) return "JSP"; if (l.includes(".aspx") || l.includes(".asmx") || l.includes(".ashx")) return "ASPX"; if (l.includes(".asp")) return "ASP"; return "PHP"; };
+					s = { id: "self-" + Date.now().toString(36), name: file.replace(/\.[^.]+$/, ""), lang: guessLang(file), obf: String(p.obf || "").trim() || "自定义", password: "", file, createdAt: new Date().toISOString() };
+					WS_CFG.selfShells = WS_CFG.selfShells || [];
+					WS_CFG.selfShells.push(s);
+				}
 				if (typeof p.password === "string") s.password = p.password;
 				if (typeof p.lang === "string" && p.lang.trim()) s.lang = p.lang.trim().slice(0, 20);
 				if (typeof p.obf === "string" && p.obf.trim()) s.obf = p.obf.trim().slice(0, 40);
@@ -973,32 +1010,37 @@ function registerSettingsLayer(ctx, web) {
 				return { ok: true, value: s };
 			}
 			if (endpoint === "self-remove") {
+				// 按 id 或 file：删记录并（可选）删文件
 				const id = String(p.id ?? "");
-				const before = (WS_CFG.selfShells || []).length;
-				WS_CFG.selfShells = (WS_CFG.selfShells || []).filter((x) => x.id !== id);
-				if (WS_CFG.selfShells.length === before) return { ok: false, error: "不存在" };
+				const file = String(p.file ?? "").replace(/[\\/]/g, "");
+				WS_CFG.selfShells = (WS_CFG.selfShells || []).filter((x) => x.id !== id && (file ? x.file !== file : true));
 				saveWsCfg();
+				if (file && p.deleteFile) {
+					try { fsUnlink(path.join(genBase(), file)); } catch { /* 文件不存在忽略 */ }
+				}
 				return { ok: true };
 			}
 			if (endpoint === "self-content-get") {
-				const id = String(p.id ?? "");
-				const s = (WS_CFG.selfShells || []).find((x) => x.id === id);
-				if (!s) return { ok: false, error: "不存在" };
+				const file = String(p.file ?? "").replace(/[\\/]/g, "");
+				const rec = (WS_CFG.selfShells || []).find((x) => x.id === String(p.id ?? "") || x.file === file);
+				const name = file || (rec && rec.file) || "";
+				if (!name) return { ok: false, error: "缺 file" };
 				try {
-					const content = readFileSync(path.join(genBase(), s.file), "utf8");
-					return { ok: true, value: { id, file: s.file, content } };
+					const content = readFileSync(path.join(genBase(), name), "utf8");
+					return { ok: true, value: { file: name, content } };
 				} catch (e) { return { ok: false, error: "读取文件失败：" + (e && e.message) }; }
 			}
 			if (endpoint === "self-content-set") {
-				const id = String(p.id ?? "");
-				const s = (WS_CFG.selfShells || []).find((x) => x.id === id);
-				if (!s) return { ok: false, error: "不存在" };
+				const file = String(p.file ?? "").replace(/[\\/]/g, "");
+				const rec = (WS_CFG.selfShells || []).find((x) => x.id === String(p.id ?? "") || x.file === file);
+				const name = file || (rec && rec.file) || "";
+				if (!name) return { ok: false, error: "缺 file" };
 				const content = String(p.content ?? "");
 				if (!content) return { ok: false, error: "内容为空" };
-				try { writeFileSync(path.join(genBase(), s.file), content, "utf8"); }
+				try { writeFileSync(path.join(genBase(), name), content, "utf8"); }
 				catch (e) { return { ok: false, error: "写入失败：" + (e && e.message) }; }
-				logOp(theStore(), "", "self.edit", `${s.name} (${content.length} chars)`);
-				return { ok: true, value: { id } };
+				logOp(theStore(), "", "self.edit", `${name} (${content.length} chars)`);
+				return { ok: true, value: { file: name } };
 			}
 			if (endpoint === "conn-list-plain") {
 				// 设置页管理用：返回连接含明文口令（自用 UI）；模型 manifest 仍走脱敏版

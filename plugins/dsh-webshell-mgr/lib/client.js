@@ -1403,7 +1403,7 @@ function SelfShellRow(props) {
 	var [langEdit, setLangEdit] = useState(false);
 	var [obfEdit, setObfEdit] = useState(false);
 	function commit(kind, val) {
-		var payload = { id: sh.id };
+		var payload = { file: sh.file };
 		if (kind === "lang") payload.lang = val;
 		else payload.obf = val;
 		wsRpc(props.connection, "self-update", payload).then(function () { setLangEdit(false); setObfEdit(false); props.onChanged(); });
@@ -1414,14 +1414,15 @@ function SelfShellRow(props) {
 	};
 	return h("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderBottom: "1px solid #f0f0f2", flexWrap: "wrap" } },
 		h("code", { style: Object.assign({}, wsMono, { fontWeight: 600, fontSize: 12, minWidth: 150 }) }, sh.name),
-		h("span", { style: { fontSize: 11, color: "#6e6e73", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 170, whiteSpace: "nowrap" } }, sh.file),
+		sh.registered ? null : h("span", { style: { fontSize: 10, padding: "1px 6px", borderRadius: 999, background: "#eef2f6", color: "#6b7280", fontWeight: 600 } }, "目录内（未登记）"),
+		h("span", { style: { fontSize: 11, color: "#6e6e73", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 160, whiteSpace: "nowrap" } }, sh.file),
 		h("span", { style: { display: "inline-flex", gap: 4, alignItems: "center" } },
-			h("button", { type: "button", title: "修改语言分类", onClick: function () { catEdit("lang"); }, style: { fontSize: 11, padding: "2px 7px", borderRadius: 999, background: "#eef2f6", border: "none", color: "#3b556e", cursor: "pointer" } }, (sh.lang || "其他") + " ▾"),
+			h("button", { type: "button", title: "修改语言分类（未登记首次修改会自动登记）", onClick: function () { catEdit("lang"); }, style: { fontSize: 11, padding: "2px 7px", borderRadius: 999, background: "#eef2f6", border: "none", color: "#3b556e", cursor: "pointer" } }, (sh.lang || "其他") + " ▾"),
 			h("button", { type: "button", title: "修改绕过形式分类", onClick: function () { catEdit("obf"); }, style: { fontSize: 11, padding: "2px 7px", borderRadius: 999, background: "#fef3c7", border: "none", color: "#92400e", cursor: "pointer" } }, (sh.obf || "自定义") + " ▾")),
 		h("div", { style: { flex: 1 } }),
-		h(PasswordField, { value: sh.password, editable: true, onChange: function (v) { props.onChangePassword(sh.id, v); } }),
+		h(PasswordField, { value: sh.password, emptyText: "未设置（首次改密自动登记）", editable: true, onChange: function (v) { props.onChangePassword(sh.file, v); } }),
 		h("button", { type: "button", onClick: function () { props.onEdit(sh); }, style: { padding: "3px 10px", borderRadius: 6, fontSize: 11, border: "1px solid #d9d9de", background: "#fff", cursor: "pointer" } }, "编辑内容"),
-		h("button", { type: "button", onClick: function () { props.onRemove(sh.id); }, style: wsBtnDanger }, "删除"));
+		h("button", { type: "button", onClick: function () { props.onRemove(sh); }, style: wsBtnDanger }, "删除"));
 }
 
 function SelfShellsCard(props) {
@@ -1540,12 +1541,15 @@ function WebShellSettings(props) {
 			else setMsg((r && r.error) || "保存失败");
 		}).catch(function (e) { setBusy(false); setMsg(String(e && e.message || e)); });
 	}
-	function changePassword(id, password) {
-		wsRpc(props.connection, "self-update", { id: id, password: password }).then(function () { load(); });
+	function changePassword(file, password) {
+		wsRpc(props.connection, "self-update", { file: file, password: password }).then(function () { load(); });
 	}
-	function removeShell(id) {
-		if (!window.confirm("确认从库中移除？文件保留在目录（如需连同一文件可重新上传）")) return;
-		wsRpc(props.connection, "self-remove", { id: id }).then(function () { load(); });
+	function removeShell(sh) {
+		var q = sh.registered
+			? window.confirm("确认从库中移除「" + sh.file + "」？文件将一并删除（选择「取消」可保留文件）。")
+			: window.confirm("确认删除文件「" + sh.file + "」？");
+		if (!q) return;
+		wsRpc(props.connection, "self-remove", { file: sh.file, deleteFile: true }).then(function () { load(); });
 	}
 	return h("div", { style: { maxWidth: 880 } },
 		h("div", { style: { fontSize: 15, fontWeight: 700, margin: "0 0 2px" } }, "WebShell"),
