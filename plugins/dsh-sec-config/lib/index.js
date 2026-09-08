@@ -65,7 +65,7 @@ function isToolKey(key) {
 }
 
 /** Fields the client may write through settings/mutate. */
-const WRITABLE_FIELDS = new Set(['tools', 'services', 'dnslog', 'apiKeys', 'scanRoots', 'hiddenTools'])
+const WRITABLE_FIELDS = new Set(['tools', 'services', 'dnslog', 'apiKeys', 'scanRoots', 'hiddenTools', 'roots', 'categories', 'entries'])
 
 /** Secret-bearing fields: redacted on read; an empty/`***` write is ignored. */
 const SECRET_FIELDS = new Set(['dnslog.token', 'apiKeys.deepseekKey'])
@@ -135,12 +135,97 @@ const Config = z.object({
   apiKeys: z.object({
     deepseekKey: z.string().default(''),
   }),
+  /** 工具库 v2：一个或多个「工具根目录」。选择后一键探测并按分类导入；也支持单目录。 */
+  roots: z.array(z.string()).default([]),
+  /** 分类自定义：内置分类不可删，追加的自定义分类名放这里。 */
+  categories: z.array(z.string()).default([]),
+  /** 工具库资产条目：key=稳定标识（preset key 或文件名规整），name=展示名，
+   * path=绝对路径，category=分类 id。entries 为空且 tools 有值（旧版）时按 tools 兼容。 */
+  entries: z.array(z.object({
+    key: z.string(),
+    name: z.string().default(''),
+    path: z.string().default(''),
+    category: z.string().default('其他'),
+  })).default([]),
   /** 供「工具自动探测」扫描的候选根（用户可选填；留空则用已配工具父目录）。 */
   scanRoots: z.array(z.string()).default([]),
   /** 被用户从工具行「隐藏」的 preset/自定义工具 key：行不展示、不进 manifest、
    * 不进 shell 环境；路径配置值保留，随时可恢复（移除 ≠ 删除配置）。 */
   hiddenTools: z.array(z.string()).default([]),
 })
+
+/** 兜底/缺省分类。 */
+const CATEGORY_FALLBACK = '其他'
+
+/** 内置分类顺序（对应常见攻防工具库目录结构；自定义分类追加在其后）。 */
+export const TOOL_CATEGORY_ORDER = ['信息收集', '漏洞扫描', '目录与接口', '注入与利用', '令牌与认证', '内网与横向', CATEGORY_FALLBACK]
+
+/** 由路径（目录名/文件名）推断分类的线索。命中先后即优先级。 */
+const CATEGORY_HINTS = [
+  { category: '内网与横向', re: /内网|域渗透|横向|kerberos|ad |bloodhound|mimikatz|impacket|内网扫描|提权|权限维持|隧道/i },
+  { category: '目录与接口', re: /目录|接口|fuzz|ffuf|dirsearch|katana|爆破|字典/i },
+  { category: '漏洞扫描', re: /漏洞|扫描|nuclei|afrog|xray|vuln/i },
+  { category: '注入与利用', re: /注入|利用|sqlmap|exploit|payload|upload|上传/i },
+  { category: '令牌与认证', re: /令牌|认证|jwt|token|cookie|登录|auth/i },
+  { category: '信息收集', re: /信息收集|recon|subfinder|httpx|指纹|资产|测绘|whois|枚举/i },
+]
+
+/** 内置分类目录名（用户 tools 目录风格）到分类的精确映射，优先级高于线索。 */
+const CATEGORY_DIR_EXACT = [
+  ['01-信息收集', '信息收集'], ['信息收集', '信息收集'],
+  ['02-漏洞扫描', '漏洞扫描'], ['漏洞扫描', '漏洞扫描'],
+  ['03-目录与接口', '目录与接口'], ['目录与接口', '目录与接口'], ['目录爆破', '目录与接口'],
+  ['04-注入与利用', '注入与利用'], ['注入与利用', '注入与利用'], ['漏洞利用', '注入与利用'], ['利用工具', '注入与利用'],
+  ['05-令牌与认证', '令牌与认证'], ['令牌与认证', '令牌与认证'], ['认证与令牌', '令牌与认证'],
+  ['06-内网与域渗透', '内网与横向'], ['05-内网与域渗透', '内网与横向'], ['内网与域渗透', '内网与横向'], ['内网渗透', '内网与横向'], ['内网', '内网与横向'], ['域渗透', '内网与横向'], ['横向', '内网与横向'],
+]
+
+function categoryForPath(full) {
+  const lower = full.toLowerCase()
+  for (const [dir, cat] of CATEGORY_DIR_EXACT) {
+    if (lower.includes(dir.toLowerCase())) return cat
+  }
+  for (const { category, re } of CATEGORY_HINTS) {
+    if (re.test(lower)) return category
+  }
+  return CATEGORY_FALLBACK
+}
+
+/** 由旧版 tools（仅 preset key）或自定义 key 生成兼容条目。 */
+function entriesFromLegacyTools(tools) {
+  const byKey = new Map(TOOL_PRESETS.map((t) => [t.key, t]))
+  const out = []
+  for (const [key, val] of Object.entries(tools || {})) {
+    if (typeof val !== 'string' || !val) continue
+    const meta = byKey.get(key)
+    out.push({
+      key,
+      name: meta ? meta.label : key,
+      path: val,
+      category: meta ? meta.category : CATEGORY_FALLBACK,
+    })
+  }
+  return out
+}
+
+/** 工具库条目（v2 entries；空时回退旧版 tools 以兼容历史配置）。 */
+export function entriesOf(section) {
+  if (Array.isArray(section && section.entries) && section.entries.length > 0) return section.entries
+  const tools = (section && section.tools) || {}
+  const legacy = entriesFromLegacyTools(tools)
+  return legacy.length > 0 ? legacy : []
+}
+
+/** 条目 → tools 映射（供 manifest/shell 等既有消费者）。 */
+export function toolsOf(section) {
+  const out = {}
+  for (const e of entriesOf(section)) {
+    if (e && typeof e.key === 'string' && e.key && typeof e.path === 'string' && e.path) {
+      if (out[e.key] === undefined) out[e.key] = e.path
+    }
+  }
+  return out
+}
 
 function ok(value) { return { ok: true, value } }
 function failure(message) { return { ok: false, error: { code: 'sec-config', message: String(message), details: {} } } }
@@ -221,6 +306,14 @@ function isToolCandidateFile(name, toolKey) {
   return false
 }
 
+/** 文件名命中的第一个 preset key（无则空串）。 */
+function presetKeyForName(name) {
+  for (const t of TOOL_PRESETS) {
+    if (isToolCandidateFile(name, t.key)) return t.key
+  }
+  return ''
+}
+
 /**
  * 收集根目录（含）下所有"可能候选"文件：扩展名在白名单内或无扩展名、
  * 且非安装包/构建残留。单次遍历一棵树，供全部工具 key 复用匹配。
@@ -284,7 +377,7 @@ function findToolBase(leaf) {
 }
 
 function findToolCandidates(section) {
-  const tools = (section && section.tools) || {}
+  const tools = toolsOf(section)
   const roots = []
   const seen = new Set()
   const addRoot = (r) => {
@@ -292,7 +385,8 @@ function findToolCandidates(section) {
     seen.add(r)
     roots.push(r)
   }
-  // 1) 用户显式填的扫描根（顶层配置 scanRoots，UI 可编辑）
+  // 1) 用户显式填的扫描根：v2 roots（工具根目录）+ 顶层配置 scanRoots
+  if (Array.isArray(section && section.roots)) section.roots.forEach(addRoot)
   if (Array.isArray(section && section.scanRoots)) section.scanRoots.forEach(addRoot)
   // 2) 所有已配工具路径的父目录及其上一级（Tools\04-...\sqlmap → 扫 04-... 与 Tools，
   //    让同大类/同目录的 nuclei/ffuf 等互见；bin 型扁平目录自动覆盖）
@@ -519,19 +613,20 @@ function scheduleSync(settings, services, logger) {
  */
 export function renderManifest(section, listMountedMcpTools) {
   const lines = []
-  const tools = section && section.tools ? section.tools : {}
+  const entries = entriesOf(section)
   const hidden = new Set(Array.isArray(section && section.hiddenTools) ? section.hiddenTools : [])
   const byKey = new Map(TOOL_PRESETS.map((t) => [t.key, t]))
   const configured = []
-  for (const t of TOOL_PRESETS) {
-    if (hidden.has(t.key)) continue
-    if (typeof tools[t.key] === 'string' && tools[t.key].length > 0) configured.push(t.key)
-  }
-  for (const key of Object.keys(tools)) {
-    if (hidden.has(key)) continue
-    if (!byKey.has(key) && isToolKey(key) && typeof tools[key] === 'string' && tools[key].length > 0) {
-      configured.push(key + '(自定义)')
-    }
+  const seen = new Set()
+  for (const e of entries) {
+    if (!e || typeof e.path !== 'string' || !e.path) continue
+    if (hidden.has(e.key)) continue
+    const preset = byKey.get(e.key)
+    const label = preset ? preset.label : (e.name || e.key)
+    const display = preset ? label : `${label}(自定义)`
+    if (seen.has(display)) continue
+    seen.add(display)
+    configured.push(display)
   }
   if (configured.length > 0) lines.push(`tools: ${configured.join(' ')}`)
   const services = section && section.services ? section.services : {}
@@ -631,6 +726,30 @@ export function apply(ctx, config = {}) {
             return failure(err && err.message ? err.message : String(err))
           }
         }
+        if (endpoint === 'catalog/scan') {
+          // 工具库 v2：对给定「工具根目录」全量枚举可导入工具文件，逐项推断分类
+          // 与 preset 归属，供"一键探测导入"预览。无弹窗、可 headless。
+          try {
+            const raw = (payload && Array.isArray(payload.roots) ? payload.roots : []).filter((r) => typeof r === 'string' && r)
+            if (raw.length === 0) return ok({ roots: [], files: [] })
+            const MAX = 1500
+            const files = []
+            for (const root of raw) {
+              if (!existsSync(root)) continue
+              const sink = []
+              collectCandidateFiles(root, sink)
+              for (const c of sink) {
+                files.push({ name: c.name, path: c.full, category: categoryForPath(c.full), presetKey: presetKeyForName(c.name) })
+                if (files.length >= MAX) break
+              }
+              if (files.length >= MAX) break
+            }
+            files.sort((a, b) => (a.category < b.category ? -1 : a.category > b.category ? 1 : a.path < b.path ? -1 : 1))
+            return ok({ roots: raw, files: files.slice(0, MAX) })
+          } catch (err) {
+            return failure(err && err.message ? err.message : String(err))
+          }
+        }
         if (endpoint === 'services/probe') {
           // Cheap reachability probe for the UI badge — connects (no full MCP handshake)
           // and reports whether the endpoint accepts traffic. Does not require
@@ -669,7 +788,7 @@ export function apply(ctx, config = {}) {
       resolve: () => {
         const section = current()
         const out = {}
-        const tools = section && section.tools ? section.tools : {}
+        const tools = toolsOf(section)
         const hidden = new Set(Array.isArray(section && section.hiddenTools) ? section.hiddenTools : [])
         for (const key of TOOL_KEYS) {
           out['DSH_TOOL_' + key.toUpperCase()] = hidden.has(key) ? '' : (typeof tools[key] === 'string' ? tools[key] : '')

@@ -20,12 +20,19 @@ var FALLBACK_PRESETS = [
   { key: 'nmap', label: 'Nmap', category: '信息收集' },
   { key: 'nuclei', label: 'Nuclei', category: '漏洞扫描' },
   { key: 'afrog', label: 'Afrog', category: '漏洞扫描' },
-  { key: 'fscan', label: 'Fscan', category: '漏洞扫描' },
   { key: 'dirsearch', label: 'Dirsearch', category: '目录与接口' },
   { key: 'katana', label: 'Katana', category: '目录与接口' },
   { key: 'ffuf', label: 'Ffuf', category: '目录与接口' },
   { key: 'sqlmap', label: 'SQLMap', category: '注入与利用' },
   { key: 'jwt_tool', label: 'JWT Tool', category: '令牌与认证' },
+  { key: 'fscan', label: 'Fscan', category: '内网与横向' },
+  { key: 'chisel', label: 'Chisel', category: '内网与横向' },
+  { key: 'frp', label: 'Frp', category: '内网与横向' },
+  { key: 'impacket', label: 'Impacket', category: '内网与横向' },
+  { key: 'ladon', label: 'Ladon', category: '内网与横向' },
+  { key: 'kerbrute', label: 'Kerbrute', category: '内网与横向' },
+  { key: 'mimikatz', label: 'Mimikatz', category: '内网与横向' },
+  { key: 'bloodhound', label: 'BloodHound', category: '内网与横向' },
 ];
 var TOOL_NAME_RE = /^[A-Za-z0-9_]+$/;
 var PRESET_LABEL = { key: 'preset', label: '预设', bg: '#e4e4e7', fg: '#6e6e73' };
@@ -63,199 +70,217 @@ function Group(props) {
 // 目录 + 可选 scanRoots），把每个工具按文件名匹配出的候选路径渲染成 chips，
 // 点一下即填入。与技能上传一样点选即得、永不弹窗。
 
-function ToolRow(props) {
-  var badge = props.kind === 'custom' ? CUSTOM_LABEL : PRESET_LABEL;
-  var label = props.label;
-  var has = props.has;
-  var candidates = props.candidates || [];
-  var shown = (candidates || []).filter(function (p) { return p !== props.value; }).slice(0, 4);
-  return React.createElement('div', { style: { marginBottom: 6 } },
-    React.createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'center' } },
-      React.createElement('span', {
-        style: { display: 'inline-flex', alignItems: 'center', padding: '1px 7px', borderRadius: 999, fontSize: 11, fontWeight: 600, background: badge.bg, color: badge.fg, lineHeight: '16px', whiteSpace: 'nowrap', flex: '0 0 auto' },
-      }, badge.label),
-      React.createElement('div', { style: { flex: '0 0 140px', fontSize: 13, color: 'var(--dsw-alias-label-primary,#1a1a1a)' } }, label),
-      React.createElement('div', { style: { flex: 1, minWidth: 120 } },
-        React.createElement(Input, {
-          value: props.value || '',
-          placeholder: has ? '已配置' : (props.placeholder || '工具路径，留空=未添加'),
-          onChange: props.onChange,
-        })),
-      React.createElement('button', {
-        type: 'button',
-        title: has ? '从配置中移除该工具（空路径不注入、不进提示词）' : '',
-        disabled: !has,
-        style: {
-          padding: '6px 10px', borderRadius: 6, fontSize: 12, cursor: has ? 'pointer' : 'not-allowed',
-          border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: has ? 'transparent' : 'transparent',
-          color: has ? '#d1242f' : '#c8c8cc', opacity: has ? 1 : 0.6,
-        },
-        onClick: props.onRemove,
-      }, '移除'),
-      props.onHide ? React.createElement('button', {
-        type: 'button',
-        title: '隐藏该工具行：不再展示、不进提示词清单与 shell 环境（配置路径保留，可随时恢复）',
-        style: {
-          padding: '6px 10px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
-          border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: 'transparent',
-          color: 'var(--dsw-alias-label-tertiary,#6e6e73)',
-        },
-        onClick: props.onHide,
-      }, '隐藏') : null),
-    !has && shown.length > 0 ? React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 4, margin: '4px 0 2px 0', paddingLeft: 0 } },
-      React.createElement('span', { style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', lineHeight: '20px', marginRight: 4 } }, '自动探测到：'),
-      shown.map(function (p) {
-        return React.createElement('button', {
-          key: p, type: 'button', title: p,
-          style: { padding: '2px 8px', borderRadius: 999, fontSize: 11, cursor: 'pointer', border: '1px solid #2f81f7', background: 'transparent', color: '#2f81f7', maxWidth: 340, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-          onClick: function () { props.onChange && props.onChange(p); },
-        }, p);
-      })) : null);
+// ============ 工具库 v2（目录即库）：默认空 → 选根目录一键探测自动分类导入 ============
+var BASE_CATEGORIES = ['信息收集', '漏洞扫描', '目录与接口', '注入与利用', '令牌与认证', '内网与横向', '其他'];
+var CAT_FALLBACK = '其他';
+
+function sanitizeKey(name) {
+  return String(name || '').toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 48);
 }
+function prettyName(stem) {
+  return String(stem || '').replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); }).trim();
+}
+function uniqueKey(baseKey, existing) {
+  var k = sanitizeKey(baseKey) || 'tool';
+  var cand = k; var n = 2;
+  while (existing.indexOf(cand) >= 0) { cand = k + '_' + n; n++; }
+  return cand;
+}
+function catListOf(cfg) {
+  var extras = Array.isArray(cfg && cfg.categories) ? cfg.categories.filter(function (c) { return BASE_CATEGORIES.indexOf(c) < 0; }) : [];
+  var all = BASE_CATEGORIES.slice();
+  extras.forEach(function (c) { if (all.indexOf(c) < 0) all.push(c); });
+  return all;
+}
+function presetLabelOf(key) {
+  var hit = FALLBACK_PRESETS.filter(function (t) { return t.key === key; })[0];
+  return hit ? hit.label : null;
+}
+function rowBtnStyle(extra) {
+  return Object.assign({ padding: '3px 9px', borderRadius: 6, fontSize: 11, cursor: 'pointer', border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: 'transparent', color: 'var(--dsw-alias-label-primary,#1a1a1a)' }, extra || {});
+}
+var miniHint = { fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#6e6e73)' };
 
-function ToolGroup(props) {
-  var [presets, setPresets] = useState(null);
-  var [newName, setNewName] = useState('');
-  var [newPath, setNewPath] = useState('');
-  var [msg, setMsg] = useState(null);
-  var [cand, setCand] = useState(null); // { roots, candidates: {key:[paths]} }
-  var [scanning, setScanning] = useState(false);
+function ToolLibrary(props) {
+  var cfg = props.value || {};
+  var entries = Array.isArray(cfg.entries) ? cfg.entries : [];
+  var roots = Array.isArray(cfg.roots) ? cfg.roots : [];
+  var cats = catListOf(cfg);
+  var state = React.useState({ rootInput: '', scanning: false, msg: null, preview: null, manual: { cat: CAT_FALLBACK, name: '', path: '' }, newCat: '' });
+  var S = state[0]; var set = state[1];
+  var up = function (patch) { set(Object.assign({}, S, patch)); };
+  var patchCfg = function (p) { props.onChange && props.onChange(p); };
 
-  function scan() {
-    setScanning(true);
-    rpc(props.connection, 'scan-candidates', {}).then(function (res) {
-      setScanning(false);
-      if (res && res.ok && res.value && res.value.candidates) setCand(res.value);
-    }).catch(function () { setScanning(false); });
-  }
-  useEffect(function () {
-    rpc(props.connection, 'tool-presets', {}).then(function (res) {
-      if (res && res.ok && res.value && Array.isArray(res.value.presets)) {
-        setPresets({ presets: res.value.presets, categories: res.value.categories || CATEGORY_ORDER });
+  var setRootInput = function (v) { up({ rootInput: v }); };
+  var addRoot = function () {
+    var r = S.rootInput.trim();
+    if (!r || roots.indexOf(r) >= 0) { if (r) up({ rootInput: '' }); return; }
+    patchCfg({ roots: roots.concat([r]) });
+    up({ rootInput: '' });
+  };
+  var removeRoot = function (r) { patchCfg({ roots: roots.filter(function (x) { return x !== r; }) }); };
+
+  var doScan = function () {
+    if (roots.length === 0) { up({ msg: '请先在上方添加工具根目录（可多个）' }); return; }
+    up({ scanning: true, msg: null });
+    rpc(props.connection, 'catalog/scan', { roots: roots }).then(function (res) {
+      if (!res || !res.ok || !res.value || !Array.isArray(res.value.files)) {
+        up({ scanning: false, msg: '探测失败：' + ((res && res.error && res.error.message) || '未知错误') });
+        return;
       }
-    }).catch(function () { /* fall back to local copy */ });
-    scan();
-  }, []);
-
-  var catalog = presets ? presets.presets : FALLBACK_PRESETS;
-  var categoryOrder = presets ? presets.categories : CATEGORY_ORDER;
-  var byKey = {};
-  catalog.forEach(function (t) { byKey[t.key] = t; });
-  var tools = props.value || {};
-  var hiddenSet = new Set(props.hidden || []);
-  var candidatesOf = function (key) { return (cand && cand.candidates && cand.candidates[key]) || []; };
-
-  function toggleHide(key) {
-    var cur = Array.isArray(props.hidden) ? props.hidden.slice() : [];
-    var idx = cur.indexOf(key);
-    if (idx >= 0) cur.splice(idx, 1); else cur.push(key);
-    props.onHidden && props.onHidden(cur);
-  }
-
-  function setTool(key, val) {
-    var next = JSON.parse(JSON.stringify(tools));
-    next[key] = val;
-    props.onChange(next);
-  }
-  function removeTool(key) {
-    var next = JSON.parse(JSON.stringify(tools));
-    delete next[key];
-    props.onChange(next);
-  }
-  function addCustom() {
-    var name = newName.trim();
-    var pathv = newPath.trim();
-    if (!TOOL_NAME_RE.test(name)) { setMsg('工具名只允许字母/数字/下划线（用于标识，也用于环境变量式引用）'); return; }
-    if (name.length > 40) { setMsg('工具名过长（≤40）'); return; }
-    if (byKey[name]) { setMsg('该名称与预设工具重复：' + name); return; }
-    if (!pathv) { setMsg('请填工具路径'); return; }
-    setTool(name, pathv);
-    setNewName(''); setNewPath(''); setMsg(null);
-  }
-
-  // Preset rows grouped by category (hidden ones stay out of the main list).
-  var presetGroups = categoryOrder.map(function (cat) {
-    var rows = catalog.filter(function (t) { return t.category === cat && !hiddenSet.has(t.key); });
-    if (rows.length === 0) return null;
-    var children = rows.map(function (t) {
-      var val = typeof tools[t.key] === 'string' ? tools[t.key] : '';
-      return React.createElement(ToolRow, {
-        key: t.key, kind: 'preset', label: t.label, value: val, has: val.length > 0,
-        placeholder: '选择添加：填路径即可',
-        candidates: candidatesOf(t.key),
-        connection: props.connection,
-        onChange: function (v) { setTool(t.key, v); },
-        onRemove: function () { removeTool(t.key); },
-        onHide: function () { toggleHide(t.key); },
-      });
+      var picks = {};
+      res.value.files.forEach(function (f) { picks[f.path] = true; });
+      up({ scanning: false, preview: { files: res.value.files, picks: picks, catOverride: {} } });
+    }).catch(function () { up({ scanning: false, msg: '探测请求失败' }); });
+  };
+  var togglePick = function (path) {
+    var pv = S.preview;
+    var picks = Object.assign({}, pv.picks);
+    if (picks[path]) delete picks[path]; else picks[path] = true;
+    up({ preview: Object.assign({}, pv, { picks: picks }) });
+  };
+  var setFileCat = function (path, cat) {
+    var pv = S.preview;
+    var co = Object.assign({}, pv.catOverride); co[path] = cat;
+    up({ preview: Object.assign({}, pv, { catOverride: co }) });
+  };
+  var importSelection = function () {
+    var pv = S.preview;
+    if (!pv || !pv.files || !pv.files.length) return;
+    var existingPaths = {}; var existingKeys = {};
+    entries.forEach(function (e) { existingPaths[e.path] = true; existingKeys[e.key] = true; });
+    var added = []; var dup = 0;
+    pv.files.forEach(function (f) {
+      if (!pv.picks[f.path]) return;
+      if (existingPaths[f.path]) { dup++; return; }
+      var used = Object.keys(existingKeys).concat(added.map(function (a) { return a.key; }));
+      var key = f.presetKey && !existingKeys[f.presetKey] ? f.presetKey : uniqueKey(f.name, used);
+      var name = f.presetKey ? (presetLabelOf(f.presetKey) || f.presetKey) : prettyName(sanitizeKey(f.name).replace(/\.(exe|py|ps1|jar|bat|cmd|sh|pl)$/i, ''));
+      existingKeys[key] = true;
+      added.push({ key: key, name: name, path: f.path, category: pv.catOverride[f.path] || f.category || CAT_FALLBACK });
     });
-    return React.createElement(Group, { key: cat, title: cat }, children);
+    if (added.length === 0) {
+      up({ msg: dup > 0 ? '所选均已在库（跳过重复 ' + dup + ' 项）' : '没有勾选可导入的条目' });
+      return;
+    }
+    patchCfg({ entries: entries.concat(added) });
+    up({ preview: null, msg: '已导入 ' + added.length + ' 项' + (dup ? '（跳过重复 ' + dup + '）' : '') + '，点「保存配置」生效' });
+  };
+  var importOne = function (f) {
+    if (entries.some(function (e) { return e.path === f.path; })) { up({ msg: '该工具已在库中' }); return; }
+    var used = entries.map(function (e) { return e.key; });
+    var key = f.presetKey && used.indexOf(f.presetKey) < 0 ? f.presetKey : uniqueKey(f.name, used);
+    var name = f.presetKey ? (presetLabelOf(f.presetKey) || f.presetKey) : prettyName(sanitizeKey(f.name).replace(/\.(exe|py|ps1|jar|bat|cmd|sh|pl)$/i, ''));
+    patchCfg({ entries: entries.concat([{ key: key, name: name, path: f.path, category: f.category || CAT_FALLBACK }]) });
+    var pv = S.preview;
+    if (pv) up({ preview: Object.assign({}, pv, { files: pv.files.filter(function (x) { return x.path !== f.path; }) }), msg: '已导入 ' + name });
+  };
+
+  var removeEntry = function (key) { patchCfg({ entries: entries.filter(function (e) { return e.key !== key; }) }); };
+  var setEntryCat = function (key, cat) { patchCfg({ entries: entries.map(function (e) { return e.key === key ? Object.assign({}, e, { category: cat }) : e; }) }); };
+
+  var manualAdd = function () {
+    var name = S.manual.name.trim(); var p = S.manual.path.trim();
+    if (!TOOL_NAME_RE.test(name)) { up({ msg: '工具名只允许字母/数字/下划线' }); return; }
+    if (!p) { up({ msg: '请填写工具绝对路径' }); return; }
+    if (entries.some(function (e) { return e.path === p || e.key === name; })) { up({ msg: '该路径或名称已在库中' }); return; }
+    patchCfg({ entries: entries.concat([{ key: name, name: name, path: p, category: S.manual.cat || CAT_FALLBACK }]) });
+    up({ manual: { cat: S.manual.cat || CAT_FALLBACK, name: '', path: '' }, msg: '已加入，点「保存配置」生效' });
+  };
+  var addCategory = function () {
+    var c = S.newCat.trim();
+    if (!c || cats.indexOf(c) >= 0) { if (c) up({ newCat: '' }); return; }
+    patchCfg({ categories: (cfg.categories || []).concat([c]) });
+    up({ newCat: '' });
+  };
+  var removeCategory = function (c) {
+    if (BASE_CATEGORIES.indexOf(c) >= 0) return;
+    patchCfg({
+      categories: (cfg.categories || []).filter(function (x) { return x !== c; }),
+      entries: entries.map(function (e) { return e.category === c ? Object.assign({}, e, { category: CAT_FALLBACK }) : e; }),
+    });
+  };
+
+  var grouped = {};
+  cats.forEach(function (c) { grouped[c] = []; });
+  entries.forEach(function (e) { var c = cats.indexOf(e.category) >= 0 ? e.category : CAT_FALLBACK; (grouped[c] = grouped[c] || []).push(e); });
+
+  var el = React.createElement;
+  var children = [];
+  // 1) 目录格式提示
+  children.push(el('div', { key: 'hint', style: { fontSize: 12, lineHeight: 1.7, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', marginBottom: 10, padding: '10px 12px', borderRadius: 8, background: 'var(--dsw-alias-bg-layer-2,#f6f6f7)', border: '1px dashed var(--dsw-alias-border-l1,#d9d9de)' } },
+    el('div', { style: { fontWeight: 600, color: 'var(--dsw-alias-label-primary,#1a1a1a)', marginBottom: 4 } }, '推荐的工具目录格式'),
+    el('div', null, '默认工具库为空；添加「工具根目录」（可多个）后一键探测，按目录自动分类导入。推荐结构：'),
+    el('code', { style: { background: 'rgba(127,127,127,.12)', padding: '1px 5px', borderRadius: 4 } }, '工具根/05-内网与域渗透/Kerbrute/kerbrute_windows_amd64.exe'),
+    el('div', null, '分类目录名不限，按名称自动归类（内网/漏洞/注入/目录…）。扁平目录也可，导入后逐项改分类；分散在不同位置的工具用「按分类手动导入」。')));
+  // 2) 根目录编辑 + 探测
+  var rootRow = [];
+  rootRow.push(el(Input, { key: 'ri', value: S.rootInput, placeholder: '工具根目录，如 E:\\...\\Tools（可添加多个）', onChange: setRootInput }));
+  rootRow.push(el('button', { key: 'add', type: 'button', style: rowBtnStyle(), onClick: addRoot }, '添加目录'));
+  rootRow.push(el('button', { key: 'scan', type: 'button', disabled: S.scanning, style: rowBtnStyle({ borderColor: '#2f81f7', color: '#2f81f7' }), onClick: doScan }, S.scanning ? '探测中…' : '探测并自动导入'));
+  children.push(el('div', { key: 'roots', style: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: 6 } }, rootRow));
+  if (roots.length > 0) {
+    children.push(el('div', { key: 'rootlist', style: Object.assign({}, miniHint, { marginBottom: 8 }) }, '工具根目录：' + roots.map(function (r) {
+      return el('span', { key: r, style: { marginRight: 8 } }, r + el('button', { type: 'button', title: '移出该目录', style: { border: 'none', background: 'transparent', color: '#d1242f', cursor: 'pointer', marginLeft: 2 }, onClick: function () { removeRoot(r); } }, '×'));
+    })));
+  }
+  // 3) 探测预览
+  if (S.preview && S.preview.files) {
+    var pv = S.preview;
+    var prevKids = [];
+    prevKids.push(el('div', { key: 'meta', style: Object.assign({}, miniHint, { marginBottom: 4 }) }, '探测到 ' + pv.files.length + ' 个可导入工具（★=内置预设识别）：'));
+    prevKids.push(el('button', { key: 'all', type: 'button', style: rowBtnStyle(), onClick: function () { var picks = {}; pv.files.forEach(function (f) { picks[f.path] = true; }); up({ preview: Object.assign({}, pv, { picks: picks }) }); } }, '全选'));
+    prevKids.push(el('button', { key: 'none', type: 'button', style: rowBtnStyle(), onClick: function () { up({ preview: Object.assign({}, pv, { picks: {} }) }); } }, '清空'));
+    pv.files.forEach(function (f) {
+      prevKids.push(el('div', { key: f.path, style: { display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0', fontSize: 12 } },
+        el('input', { type: 'checkbox', checked: !!pv.picks[f.path], onChange: function () { togglePick(f.path); } }),
+        el('select', { value: pv.catOverride[f.path] || f.category || CAT_FALLBACK, style: { fontSize: 11, maxWidth: 130 }, onChange: function (e) { setFileCat(f.path, e.target.value); } }, cats.map(function (c) { return el('option', { key: c, value: c }, c); })),
+        el('span', { style: { flex: '0 0 110px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, (f.presetKey ? '★ ' + (presetLabelOf(f.presetKey) || f.presetKey) : f.name)),
+        el('span', { style: { flex: 1, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, f.path),
+        el('button', { type: 'button', style: rowBtnStyle(), onClick: function () { importOne(f); } }, '单导')));
+    });
+    prevKids.push(el('div', { key: 'go', style: { marginTop: 6 } },
+      el('button', { type: 'button', style: rowBtnStyle({ background: '#2f81f7', color: '#fff', borderColor: '#2f81f7' }), onClick: importSelection }, '导入勾选项')));
+    children.push(el('div', { key: 'preview', style: { border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', borderRadius: 8, margin: '4px 0 8px', padding: 8, maxHeight: 300, overflow: 'auto' } }, prevKids));
+  }
+  // 4) 分类树
+  cats.forEach(function (c) {
+    var rows = grouped[c] || [];
+    var kids = rows.length === 0
+      ? [el('div', { key: 'empty', style: miniHint }, '空——可手动导入，或扫描自动归入')]
+      : rows.map(function (e) {
+          return el('div', { key: e.key, style: { display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0', fontSize: 13 } },
+            el('span', { style: { flex: '0 0 150px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, e.name || e.key),
+            el('span', { style: { flex: 1, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 } }, e.path),
+            el('select', { value: e.category, style: { fontSize: 11 }, onChange: function (ev) { setEntryCat(e.key, ev.target.value); } }, cats.map(function (cc) { return el('option', { key: cc, value: cc }, cc); })),
+            el('button', { type: 'button', style: rowBtnStyle({ color: '#d1242f' }), onClick: function () { removeEntry(e.key); } }, '移除'));
+        });
+    children.push(el(Group, { key: 'g:' + c, title: c + '（' + rows.length + '）' }, kids));
   });
-
-  // Hidden rows (preset or custom): value/config kept, row collapsed until 恢复.
-  var hiddenKeys = (props.hidden || []).filter(function (k) { return TOOL_NAME_RE.test(k); }).sort();
-  var hiddenGroup = null;
-  if (hiddenKeys.length > 0) {
-    var hiddenChips = hiddenKeys.map(function (k) {
-      var meta = byKey[k];
-      var val = typeof tools[k] === 'string' ? tools[k] : '';
-      return React.createElement('span', {
-        key: k,
-        style: { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '2px 6px 2px 10px', borderRadius: 999, fontSize: 12, border: '1px dashed var(--dsw-alias-border-l1,#d9d9de)', color: 'var(--dsw-alias-label-tertiary,#6e6e73)', margin: '2px 4px 2px 0', maxWidth: 420 },
-      },
-        React.createElement('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, (meta ? meta.label : k) + (val ? '（已配置）' : '（未配置）')),
-        React.createElement('button', {
-          type: 'button', title: '恢复显示该工具',
-          style: { padding: '1px 6px', borderRadius: 6, fontSize: 11, cursor: 'pointer', border: 'none', background: 'transparent', color: '#2f81f7' },
-          onClick: function () { toggleHide(k); },
-        }, '恢复'));
-    });
-    hiddenGroup = React.createElement('div', { style: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', marginBottom: 6, lineHeight: 1.6 } },
-      React.createElement('div', { style: { fontSize: 13, fontWeight: 600, margin: '14px 0 6px', color: 'var(--dsw-alias-label-primary,#1a1a1a)' } }, '已隐藏工具（不展示、不进提示词/shell，点「恢复」重新启用）'),
-      hiddenChips);
-  }
-
-  // Operator-defined tools (keys outside the preset catalog) with a value.
-  var customKeys = Object.keys(tools).filter(function (k) { return !byKey[k] && !hiddenSet.has(k) && TOOL_NAME_RE.test(k) && typeof tools[k] === 'string' && tools[k].length > 0; }).sort();
-  var customGroup = null;
-  if (customKeys.length > 0 || true) {
-    var customRows = customKeys.map(function (k) {
-      return React.createElement(ToolRow, {
-        key: k, kind: 'custom', label: k, value: tools[k], has: true,
-        connection: props.connection,
-        onChange: function (v) { setTool(k, v); },
-        onRemove: function () { removeTool(k); },
-        onHide: function () { toggleHide(k); },
-      });
-    });
-    customGroup = React.createElement('div', { style: { marginBottom: 4 } },
-      React.createElement('div', { style: { fontSize: 13, fontWeight: 600, margin: '14px 0 6px' } }, '自定义工具'),
-      customRows.length > 0 ? customRows : React.createElement('div', { style: { fontSize: 12, color: '#9a9aa0' } }, '还没有自定义工具——在下方添加你本地有、预设里没有的工具。'),
-      React.createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 } },
-        React.createElement('div', { style: { flex: '0 0 150px' } }, React.createElement(Input, { value: newName, placeholder: '名称（如 ksubdomain）', onChange: setNewName })),
-        React.createElement('div', { style: { flex: 1 } }, React.createElement(Input, { value: newPath, placeholder: '工具路径（保存后进提示词，PATH 内可用）', onChange: setNewPath })),
-        React.createElement('button', { type: 'button', style: btnStyle(false), onClick: addCustom }, '添加')),
-      msg ? React.createElement('div', { style: msgStyle(false) }, msg) : null);
-  }
-
-  return React.createElement('div', null,
-      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 10 } },
-      React.createElement('div', { style: groupTitleStyle() }, '本地工具库'),
-      React.createElement('button', {
-        type: 'button', disabled: scanning,
-        style: { padding: '3px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer', border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: 'transparent', color: 'var(--dsw-alias-label-primary,#1a1a1a)' },
-        onClick: scan,
-      }, scanning ? '探测中…' : '重新探测')),
-    React.createElement('div', { style: hintStyle() },
-      '预设按分类列出，填路径即启用（保存后以 DSH_TOOL_<NAME> 注入 shell）。路径可手动粘贴，或在空行下点「自动探测到」的候选路径一键填入（宿主扫描已配工具目录自动发现同目录/同大类工具）。留空=不启用；「移除」从配置中删除。自定义工具名/路径经 PATH 或绝对路径调用。'),
-    cand && cand.roots && cand.roots.length > 0
-      ? React.createElement('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', marginBottom: 8 } },
-          '扫描根：' + cand.roots.join('  ·  ')) : null,
-    presetGroups,
-    hiddenGroup,
-    customGroup);
+  // 5) 手动导入
+  var m = S.manual;
+  children.push(el('div', { key: 'manual', style: { borderTop: '1px solid var(--dsw-alias-border-l1,#d9d9de)', marginTop: 10, paddingTop: 8 } },
+    el('div', { style: { fontWeight: 600, fontSize: 13, margin: '6px 0' } }, '按分类手动导入（工具分散在不同目录/已单独安装时用这个）'),
+    el('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' } },
+      el('select', { value: m.cat, style: { fontSize: 12, maxWidth: 150 }, onChange: function (ev) { up({ manual: Object.assign({}, m, { cat: ev.target.value }) }); } }, cats.map(function (c) { return el('option', { key: c, value: c }, c); })),
+      el('div', { style: { width: 170 } }, el(Input, { value: m.name, placeholder: '工具名（字母数字下划线）', onChange: function (v) { up({ manual: Object.assign({}, m, { name: v }) }); } })),
+      el('div', { style: { flex: 1, minWidth: 220 } }, el(Input, { value: m.path, placeholder: '工具绝对路径（exe/py/ps1/jar…）', onChange: function (v) { up({ manual: Object.assign({}, m, { path: v }) }); } })),
+      el('button', { type: 'button', style: rowBtnStyle({ borderColor: '#2f81f7', color: '#2f81f7' }), onClick: manualAdd }, '手动导入'))));
+  // 6) 分类管理
+  var catKids = cats.map(function (c) {
+    var builtin = BASE_CATEGORIES.indexOf(c) >= 0;
+    return el('span', { key: c, style: { display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 999, fontSize: 12, border: '1px solid var(--dsw-alias-border-l1,#d9d9de)' } },
+      c,
+      builtin ? null : el('button', { type: 'button', title: '删除分类（工具移回「其他」）', style: { border: 'none', background: 'transparent', color: '#d1242f', cursor: 'pointer', fontSize: 12, padding: 0 }, onClick: function () { removeCategory(c); } }, '×'));
+  });
+  catKids.push(el(Input, { key: 'inp', value: S.newCat, placeholder: '自定义分类名', onChange: function (v) { up({ newCat: v }); } }));
+  catKids.push(el('button', { key: 'addc', type: 'button', style: rowBtnStyle(), onClick: addCategory }, '添加分类'));
+  children.push(el('div', { key: 'cats', style: { borderTop: '1px solid var(--dsw-alias-border-l1,#d9d9de)', marginTop: 10, paddingTop: 8 } },
+    el('div', { style: { fontWeight: 600, fontSize: 13, margin: '6px 0' } }, '分类管理'),
+    el('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' } }, catKids)));
+  if (S.msg) children.push(el('div', { key: 'msg', style: msgStyle(true) }, S.msg));
+  return el('div', null, children);
 }
-
 function hintStyle() { return { fontSize: 12, color: 'var(--dsw-alias-label-tertiary, #6e6e73)', marginBottom: 6, lineHeight: 1.6 }; }
 
 function ConfigForm(props) {
@@ -314,7 +339,18 @@ function ConfigForm(props) {
     setBusy(true); setMsg('');
     // API 密钥（DeepSeek Key）已统一在「平台设置 → 模型/服务」中维护；本页面
     // 不再读写 apiKeys，避免双源/覆盖。
-    var ops = [{ op: 'set', path: ['tools'], value: v.tools }, { op: 'set', path: ['services'], value: v.services }, { op: 'set', path: ['dnslog'], value: v.dnslog }];
+    // 工具库 v2 为真源：entries/roots/categories 一起持久化；tools 映射由条目派生，
+    // 供 shell 环境变量（DSH_TOOL_*，preset key）与既有读取方继续工作。
+    var libTools = {};
+    (v.entries || []).forEach(function (e) { if (e && e.key && e.path) libTools[e.key] = e.path; });
+    var ops = [
+      { op: 'set', path: ['entries'], value: v.entries || [] },
+      { op: 'set', path: ['roots'], value: v.roots || [] },
+      { op: 'set', path: ['categories'], value: v.categories || [] },
+      { op: 'set', path: ['tools'], value: libTools },
+      { op: 'set', path: ['services'], value: v.services },
+      { op: 'set', path: ['dnslog'], value: v.dnslog },
+    ];
     if (v.hiddenTools && v.hiddenTools.length > 0) ops.push({ op: 'set', path: ['hiddenTools'], value: v.hiddenTools });
     else ops.push({ op: 'set', path: ['hiddenTools'], value: [] });
     rpc(props.connection, 'settings/mutate', { ops: ops }).then(function (res) {
@@ -325,7 +361,11 @@ function ConfigForm(props) {
   }
 
   return React.createElement('div', null,
-    React.createElement(ToolGroup, { connection: props.connection, value: v.tools || {}, hidden: v.hiddenTools || [], onChange: function (next) { setPath(['tools'], next); }, onHidden: function (next) { setPath(['hiddenTools'], next); } }),
+    React.createElement(ToolLibrary, { connection: props.connection, value: v, onChange: function (patch) {
+      var next = JSON.parse(JSON.stringify(v));
+      Object.keys(patch).forEach(function (k) { next[k] = patch[k]; });
+      props.onChange(next);
+    } }),
     React.createElement(Group, { title: '服务连接地址（保存后自动同步到 MCP 工作台，模型立即可见）' },
       React.createElement(ServiceRow, { connection: props.connection, name: 'burp', label: 'Burp Suite 地址', placeholder: 'http://127.0.0.1:9876', value: services.burpUrl || '', status: mountStatus.burp, mounting: mountingName === 'burp', onChange: function (val) { setPath(['services', 'burpUrl'], val); }, onMount: mountOne.bind(null, 'burp') }),
       React.createElement(ServiceRow, { connection: props.connection, name: 'yakit', label: 'Yakit 地址', placeholder: 'http://127.0.0.1:11432', value: services.yakitUrl || '', status: mountStatus.yakit, mounting: mountingName === 'yakit', onChange: function (val) { setPath(['services', 'yakitUrl'], val); }, onMount: mountOne.bind(null, 'yakit') })),
