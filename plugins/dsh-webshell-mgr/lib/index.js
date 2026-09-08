@@ -840,9 +840,40 @@ function registerTools(ctx) {
 			return pluginsCore("run", { name: args.plugin, connId: args.conn_id, params }).then((r) => ({ ok: true, result: r.result })).catch((e) => ({ ok: false, error: e?.message ?? String(e) }));
 		}
 	}));
-}
+	ctx.tools.register(defineTool({
+		name: "webshell_library_list",
+		description: "列出本机 webshell 库：可生成的内置形态（kind，用 webshell_generate 生成）与你/团队上传的自有马（name/file/lang/绕过形式）。口令不在此返回（用设置页查看）。",
+		parameters: {},
+		output: { schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } }, render: (_a, v) => [{ type: "text", text: v.ok
+			? `内置形态 ${Object.keys(GEN_KINDS).length} 种（${Object.keys(GEN_KINDS).join("/")}）\n自有马 ${(WS_CFG.selfShells || []).length} 个：` + ((WS_CFG.selfShells || []).map((s) => `${s.name} (${s.lang} / ${s.obf}) file=${s.file}`).join("\n") || "（无）")
+			: `查询失败：${v.error}` }] },
+		execute(_args, exec) {
+			const g = modeGuard(ctx, exec);
+			if (!g.ok) return Promise.resolve({ ok: false, error: g.error });
+			return Promise.resolve({ ok: true, shells: WS_CFG.selfShells || [], kinds: Object.keys(GEN_KINDS), dir: genBase() });
+		}
+	}));
 
-//#endregion
+	ctx.tools.register(defineTool({
+		name: "webshell_library_read",
+		description: "读取本机 webshell 库中某个自有马的完整源码（仅授权测试）。先用 webshell_library_list 拿到 name，或直接用生成返回的 file。内容可作审计/免杀研究。",
+		parameters: {
+			name: { type: "string", description: "库中马的 name（list 返回）或 file 文件名" }
+		},
+		output: { schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } }, render: (_a, v) => [{ type: "text", text: v.ok ? `【${v.file}】\n${v.content}` : `读取失败：${v.error}` }] },
+		execute(args, exec) {
+			const g = modeGuard(ctx, exec);
+			if (!g.ok) return Promise.resolve({ ok: false, error: g.error });
+			const key = String((args && args.name) ?? "");
+			const s = (WS_CFG.selfShells || []).find((x) => x.name === key || x.file === key);
+			if (!s) return Promise.resolve({ ok: false, error: `库中不存在 ${key}（先用 webshell_library_list 查看）` });
+			try {
+				const content = readFileSync(path.join(genBase(), s.file), "utf8");
+				return Promise.resolve({ ok: true, file: s.file, content });
+			} catch (e) { return Promise.resolve({ ok: false, error: `读取失败：${e?.message ?? String(e)}` }); }
+		}
+	}));
+}
 
 /** 设置层（host ctx.inject 后调用；勿进 export inject，原因见常量区注释）。 */
 function registerSettingsLayer(ctx, web) {
@@ -869,8 +900,9 @@ function registerSettingsLayer(ctx, web) {
 				parts.push(`连接 ${conns.length} 个${conns.length ? "：" + conns.map((c) => `/${c.id} ${c.name || c.host || c.url}(${c.protocol}/${c.os || "?"})`).join("，") : ""}`);
 				const kinds = Object.keys(GEN_KINDS);
 				parts.push(`可生成马类型 ${kinds.length} 种（${kinds.join("/")}）`);
-				parts.push(`生成目录：${genBase()}`);
-				return `<webshell-mgr-manifest>${parts.join("；")}。连接用 webshell_connect/list/exec/file/db，生成用 webshell_generate（授权测试）。</webshell-mgr-manifest>`;
+				parts.push(`自有马 ${(WS_CFG.selfShells || []).length} 个`);
+				parts.push(`文件目录：${genBase()}`);
+				return `<webshell-mgr-manifest>${parts.join("；")}。连接用 webshell_connect/list/exec/file/db；生成用 webshell_generate；查看本机马库（上传的自有马/内置形态）用 webshell_library_list，读某个自有马源码用 webshell_library_read（授权测试）。</webshell-mgr-manifest>`;
 			},
 		});
 	} catch (e) {
