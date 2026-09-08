@@ -1332,10 +1332,12 @@ function wsRpc(connection, endpoint, payload) {
 function TplEditor(props) {
 	var [form, setForm] = useState({});
 	useEffect(function () {
+		if (!props.open || !props.item) return;
 		var init = {};
-		(props.item.values || {}).forEach(function (v, k) { init[k] = v; });
+		var vals = props.item.values || {};
+		Object.keys(vals).forEach(function (k) { init[k] = vals[k]; });
 		setForm(init);
-	}, [props.item && props.item.kind]);
+	}, [props.open, props.item && props.item.kind]);
 	if (!props.open) return null;
 	function set(k, v) { var n = JSON.parse(JSON.stringify(form)); n[k] = v; setForm(n); }
 	function save() {
