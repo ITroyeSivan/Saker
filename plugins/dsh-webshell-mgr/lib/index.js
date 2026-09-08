@@ -44,16 +44,65 @@ const WS_GEN_CANDIDATES = [
 	path.join("E:\\", "工作", "Web Security", "Tools", "01-WebShell管理", "WebShell"),
 	path.join("E:\\", "工作", "Web Security", "Tools", "01-WebShell管理"),
 ];
-let WS_CFG = { genDir: "" };
+let WS_CFG = { genDir: "", templates: {} };
 function loadWsCfg() {
 	try {
 		const j = JSON.parse(readFileSync(WS_SETTINGS_FILE, "utf8"));
-		WS_CFG = { genDir: typeof j.genDir === "string" ? j.genDir : "" };
-	} catch { WS_CFG = { genDir: "" }; }
+		WS_CFG = {
+			genDir: typeof j.genDir === "string" ? j.genDir : "",
+			templates: j.templates && typeof j.templates === "object" ? j.templates : {},
+		};
+	} catch { WS_CFG = { genDir: "", templates: {} }; }
 	return WS_CFG;
 }
 function saveWsCfg() {
-	try { mkdirSync(BASE_DIR, { recursive: true }); writeFileSync(WS_SETTINGS_FILE, JSON.stringify({ genDir: WS_CFG.genDir || "" }, null, 2), "utf8"); } catch { /* 磁盘异常仅降级 */ }
+	try { mkdirSync(BASE_DIR, { recursive: true }); writeFileSync(WS_SETTINGS_FILE, JSON.stringify({ genDir: WS_CFG.genDir || "", templates: WS_CFG.templates || {} }, null, 2), "utf8"); } catch { /* 磁盘异常仅降级 */ }
+}
+/** 形态模板默认：显式 raw 字段优先；模板非空次之；其余交给 generate 随机/默认。 */
+function genWithTpl(kind, raw) {
+	const tpl = (WS_CFG.templates && WS_CFG.templates[kind]) || {};
+	const norm = {};
+	for (const [snake, camel] of [["password", "password"], ["pass_param", "passParam"], ["cmd_param", "cmdParam"], ["secret_key", "secretKey"]]) {
+		if (raw && typeof raw[snake] === "string" && raw[snake] !== "") norm[camel] = raw[snake];
+	}
+	for (const camel of ["password", "passParam", "cmdParam", "secretKey"]) {
+		if (raw && typeof raw[camel] === "string" && raw[camel] !== "") norm[camel] = raw[camel];
+		else if (tpl && typeof tpl[camel] === "string" && tpl[camel] !== "") norm[camel] = tpl[camel];
+	}
+	return { ...(raw || {}), ...norm };
+}
+/** 形态族（一级语言下的二级分类，展示用）。 */
+function familyOf(kind) {
+	if (kind.endsWith("-oneliner")) return "一句话";
+	if (kind.endsWith("-basic")) return "基础（口令门）";
+	if (kind.endsWith("-aes1") || kind.endsWith("-aes2")) return "自研 AES";
+	if (kind.endsWith("-behinder")) return "冰蝎兼容";
+	if (kind.endsWith("-godzilla")) return "哥斯拉兼容";
+	if (kind.endsWith("-mem-filter")) return "内存马";
+	return "其他";
+}
+/** 该形态可自定义的模板字段。 */
+function fieldsOf(kind) {
+	const f = [];
+	if (kind.includes("-oneliner")) f.push({ key: "passParam", label: "口令 POST 参数名", hint: "默认 pass" });
+	if (kind.includes("-basic")) f.push({ key: "password", label: "连接口令", hint: "留空=生成时随机" }, { key: "cmdParam", label: "命令参数名", hint: "默认 cmd" }, { key: "passParam", label: "口令 POST 参数名", hint: "默认 pass" });
+	if (kind.includes("-behinder") || kind.includes("-mem-filter")) f.push({ key: "password", label: "连接口令（key=md5(口令)[0:16]）", hint: "留空=生成时随机" });
+	if (kind.includes("-godzilla")) f.push({ key: "password", label: "口令/密钥源", hint: "哥斯拉型：密钥缺省取口令" }, { key: "passParam", label: "口令 POST 参数名", hint: "默认 pass" });
+	return f;
+}
+/** 生成目录/模板目录树（按语言分组）。 */
+function catalogTree() {
+	const langs = [];
+	const order = { php: "PHP", jsp: "JSP", aspx: "ASPX", asp: "ASP" };
+	for (const [lang, label] of Object.entries(order)) {
+		const items = Object.entries(GEN_KINDS).filter(([, m]) => m.lang === lang).map(([kind, m]) => ({
+			kind, label: m.label, ext: m.ext, family: familyOf(kind), fields: fieldsOf(kind),
+			values: ((WS_CFG.templates && WS_CFG.templates[kind]) || {}),
+			customized: Boolean(WS_CFG.templates && WS_CFG.templates[kind]),
+		}));
+		if (items.length) langs.push({ lang, label, items });
+	}
+	return langs;
 }
 function defaultGenDir() {
 	try {
@@ -322,9 +371,26 @@ async function dbCore(connId, action, a = {}) {
 function genCore(action, a = {}) {
 	switch (action) {
 		case "kinds": return { kinds: GEN_KINDS, protocols: protocolMeta() };
+		case "catalog": return { langs: catalogTree() };
+		case "tpl-set": {
+			const kind = String(a.kind ?? "");
+			if (!GEN_KINDS[kind]) throw new Error("未知生成类型 " + kind);
+			WS_CFG.templates = WS_CFG.templates || {};
+			const cur = WS_CFG.templates[kind] || {};
+			for (const key of ["password", "passParam", "cmdParam", "secretKey", "encoding"]) {
+				if (a[key] === undefined) continue;
+				const v = typeof a[key] === "string" ? a[key].trim() : "";
+				if (v === "") delete cur[key]; else cur[key] = v;
+			}
+			if (Object.keys(cur).length === 0) delete WS_CFG.templates[kind];
+			else WS_CFG.templates[kind] = cur;
+			saveWsCfg();
+			logOp(theStore(), "", "tpl.set", `${kind} ${JSON.stringify(cur)}`);
+			return { ok: true, kind, values: cur };
+		}
 		case "list": return { generations: listGenerations(theStore()) };
 		case "make": {
-			const item = makeAndSave(genBase(), String(a.kind ?? ""), a);
+			const item = makeAndSave(genBase(), String(a.kind ?? ""), genWithTpl(String(a.kind ?? ""), a));
 			const rec = recordGeneration(theStore(), { name: item.name, lang: item.lang, kind: item.kind, filePath: item.filePath, meta: { password: item.password, passParam: item.passParam, cmdParam: item.cmdParam, connHint: item.connHint } });
 			logOp(theStore(), "", "gen.make", `${item.kind} → ${item.filePath}`);
 			return { generation: rec, password: item.password, connHint: item.connHint, content: item.content };
@@ -816,7 +882,12 @@ function registerSettingsLayer(ctx, web) {
 			if (endpoint === "conn-list") return { ok: true, value: { connections: listConns(theStore()).map(publicConn) } };
 			if (endpoint === "manifest-preview") {
 				const kinds = Object.keys(GEN_KINDS);
-				return { ok: true, value: { genDir: genBase(), kinds, connections: listConns(theStore()).map(publicConn).length, latest: listGenerations(theStore()).slice(0, 5) } };
+				return { ok: true, value: { genDir: genBase(), kinds, connections: listConns(theStore()).map(publicConn).length, latest: listGenerations(theStore()).slice(0, 5), langs: catalogTree() } };
+			}
+			if (endpoint === "tpl-catalog") return { ok: true, value: { langs: catalogTree() } };
+			if (endpoint === "tpl-set") {
+				const r = genCore("tpl-set", p);
+				return { ok: true, value: r };
 			}
 			return { ok: false, error: "unknown endpoint " + endpoint };
 		}, { authority: "loopback" });

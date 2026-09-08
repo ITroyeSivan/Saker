@@ -1328,11 +1328,45 @@ var REDTEAM_MANAGER_UI_NAMESPACE = "redteam-manager-ui";
 function wsRpc(connection, endpoint, payload) {
 	return connection.rpc.call("/dsh-webshell-mgr-rpc", endpoint, payload);
 }
+// 形态参数编辑弹窗
+function TplEditor(props) {
+	var [form, setForm] = useState({});
+	useEffect(function () {
+		var init = {};
+		(props.item.values || {}).forEach(function (v, k) { init[k] = v; });
+		setForm(init);
+	}, [props.item && props.item.kind]);
+	if (!props.open) return null;
+	function set(k, v) { var n = JSON.parse(JSON.stringify(form)); n[k] = v; setForm(n); }
+	function save() {
+		var payload = { kind: props.item.kind };
+		props.item.fields.forEach(function (f) { payload[f.key] = form[f.key] || ""; });
+		wsRpc(props.connection, "tpl-set", payload).then(function (r) { if (r && r.ok) props.onSaved(); });
+	}
+	var rows = props.item.fields.length === 0
+		? h("div", { style: { fontSize: 12, color: "#9a9aa0" } }, "该形态无独立参数（协议自研密钥每请求随机；连接细节在会话管理查看）。")
+		: props.item.fields.map(function (f) {
+			return h("div", { key: f.key, style: { marginBottom: 8 } },
+				h("div", { style: { fontSize: 12, fontWeight: 600 } }, f.label),
+				h("input", { value: form[f.key] || "", onChange: function (e) { set(f.key, e.target.value); }, placeholder: f.hint + "（留空=默认）", style: { width: "100%", boxSizing: "border-box", marginTop: 2, padding: "5px 8px", borderRadius: 6, border: "1px solid #d9d9de", fontSize: 12 } }));
+		});
+	var btnRow = h("div", { style: { display: "flex", gap: 8, marginTop: 8 } },
+		h("button", { type: "button", onClick: save, style: { padding: "5px 14px", borderRadius: 6, border: "1px solid #2f81f7", background: "#2f81f7", color: "#fff", fontSize: 12, cursor: "pointer" } }, "保存模板"),
+		h("button", { type: "button", onClick: props.onClose, style: { padding: "5px 14px", borderRadius: 6, border: "1px solid #d9d9de", background: "#fff", fontSize: 12, cursor: "pointer" } }, "关闭"));
+	var card = h("div", { style: { width: 480, maxWidth: "92vw", background: "#fff", borderRadius: 10, padding: 14, border: "1px solid #e4e4e7", maxHeight: "80vh", overflow: "auto" } },
+		h("div", { style: { fontSize: 14, fontWeight: 700, marginBottom: 2 } }, "形态模板：", props.item.kind),
+		h("div", { style: { fontSize: 12, color: "#6e6e73", marginBottom: 10 } }, props.item.label),
+		rows, btnRow);
+	return h("div", { style: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 2100, display: "flex", alignItems: "center", justifyContent: "center" } }, card);
+}
+
 function WebShellSettings(props) {
 	var [genDir, setGenDir] = useState("");
 	var [effective, setEffective] = useState("");
 	var [conns, setConns] = useState(null);
-	var [kinds, setKinds] = useState([]);
+	var [langs, setLangs] = useState([]);
+	var [openLang, setOpenLang] = useState({});
+	var [editing, setEditing] = useState(null);
 	var [msg, setMsg] = useState("");
 	var [busy, setBusy] = useState(false);
 	function load() {
@@ -1341,7 +1375,7 @@ function WebShellSettings(props) {
 			if (r && r.ok) {
 				setEffective(r.value.genDir || "");
 				setConns(r.value.connections || 0);
-				setKinds(r.value.kinds || []);
+				if (r.value.langs) setLangs(r.value.langs);
 			}
 		});
 	}
@@ -1358,19 +1392,41 @@ function WebShellSettings(props) {
 		}).catch(function (e) { setBusy(false); setMsg(String(e && e.message || e)); });
 	}
 	var box = { border: "1px solid var(--dsw-alias-border-l1,#e4e4e7)", borderRadius: 8, padding: 10, marginBottom: 10, background: "var(--dsw-alias-bg-base,#fff)" };
-	return h("div", { style: { maxWidth: 760 } },
+	return h("div", { style: { maxWidth: 820 } },
 		h("div", { style: { fontSize: 14, fontWeight: 700, margin: "0 0 4px" } }, "WebShell"),
 		h("div", { style: { fontSize: 12, color: "#6e6e73", lineHeight: 1.7, marginBottom: 8 } },
-			"管理本地 webshell 工具与生成的马：设置生成目录（默认自动探测你本机的 01-WebShell管理 放马目录），查看已登记连接。" +
-			"连接/执行/文件/数据库的操作与完整界面在会话侧「webshell 管理」tab；本页用于配置与实时知情（模型每轮会看到下方信息）。"),
+			"管理本地 webshell：生成目录、按 语言 → 形态族 分类的马模板库（连接口令等参数可自定义）。" +
+			"连接/执行/文件/数据库操作与会话侧「webshell 管理」共用同一套形态；模型每轮实时看到本页信息。"),
 		h("div", { style: box },
 			h("div", { style: { fontWeight: 700, fontSize: 13, marginBottom: 4 } }, "生成目录（genDir）"),
 			effective ? h("div", { style: { fontSize: 12, color: "#1a7f37", marginBottom: 4 } }, "当前生效目录：" + effective) : null,
 			h("div", { style: { display: "flex", gap: 6, alignItems: "center" } },
 				h("input", { value: genDir, onChange: function (e) { setGenDir(e.target.value); }, placeholder: "留空=自动探测本机 WebShell 放马目录（存在即用）", style: { flex: 1, padding: "5px 8px", borderRadius: 6, border: "1px solid var(--dsw-alias-border-l1,#d9d9de)", fontSize: 12 } }),
 				h("button", { type: "button", onClick: save, disabled: busy, style: { padding: "5px 12px", borderRadius: 6, fontSize: 12, cursor: "pointer", border: "1px solid #2f81f7", background: "#2f81f7", color: "#fff" } }, busy ? "保存中…" : "保存")),
-			msg ? h("div", { style: { fontSize: 12, color: "#1a7f37", marginTop: 4 } }, msg) : null,
-			h("div", { style: { fontSize: 11, color: "#6e6e73", marginTop: 6 } }, "可用马类型 " + kinds.length + " 种：" + kinds.join(" / ") + "。")),
+			msg ? h("div", { style: { fontSize: 12, color: "#1a7f37", marginTop: 4 } }, msg) : null),
+		h("div", { style: box },
+			h("div", { style: { fontWeight: 700, fontSize: 13, marginBottom: 2 } }, "马模板库"),
+			h("div", { style: { fontSize: 11, color: "#6e6e73", marginBottom: 6 } },
+				"按语言（PHP/JSP/ASPX/ASP）分组，语言下按形态族列出；每形态可自定义连接口令与参数（保存后生成马/模型提示均采用）。"),
+			langs.length === 0 ? h("div", { style: { fontSize: 12, color: "#9a9aa0" } }, "加载中…") :
+				langs.map(function (lg) {
+					var open = openLang[lg.lang] !== false;
+					var customized = lg.items.filter(function (i) { return i.customized; }).length;
+					return h("div", { key: lg.lang, style: { marginBottom: 6 } },
+						h("div", { style: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", padding: "4px 0", fontWeight: 700, fontSize: 13 }, onClick: function () { var n = JSON.parse(JSON.stringify(openLang)); n[lg.lang] = !open; setOpenLang(n); } },
+							h("span", null, (open ? "▾" : "▸") + " " + lg.label),
+							h("span", { style: { fontSize: 11, color: "#6e6e73", fontWeight: 400 } }, lg.items.length + " 形态" + (customized ? " · 已自定义 " + customized : ""))),
+						open ? lg.items.map(function (it) {
+							var famChip = { fontSize: 10, padding: "1px 7px", borderRadius: 999, background: "#eef2f6", color: "#4a5568", fontWeight: 600, marginRight: 6 };
+							return h("div", { key: it.kind, style: { display: "flex", alignItems: "center", gap: 6, padding: "3px 0", borderBottom: "1px solid #f0f0f2" } },
+								h("div", { style: { flex: "0 0 150px", fontSize: 12, fontWeight: 600, fontFamily: "ui-monospace, Consolas, monospace" } }, it.kind),
+								h("span", { style: famChip }, it.family),
+								h("div", { style: { flex: 1, fontSize: 11, color: "#4a4a4f" } }, it.label),
+								it.customized ? h("span", { style: { fontSize: 10, padding: "1px 6px", borderRadius: 999, background: "#dafbe1", color: "#1a7f37", fontWeight: 600 } }, "已自定义") : null,
+								h("button", { type: "button", onClick: function () { setEditing(it); }, style: { padding: "3px 10px", borderRadius: 6, fontSize: 11, border: "1px solid #d9d9de", background: "#fff", cursor: "pointer" } }, "参数/口令"));
+						}) : null);
+				}),
+			h(TplEditor, { connection: props.connection, item: editing, open: !!editing, onClose: function () { setEditing(null); }, onSaved: function () { setEditing(null); load(); } })),
 		h("div", { style: box },
 			h("div", { style: { fontWeight: 700, fontSize: 13, marginBottom: 4 } }, "已登记连接"),
 			conns === null ? h("div", { style: { fontSize: 12, color: "#9a9aa0" } }, "加载中…") :
