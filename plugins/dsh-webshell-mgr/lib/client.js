@@ -1395,7 +1395,7 @@ function WebShellSettings(props) {
 	return h("div", { style: { maxWidth: 820 } },
 		h("div", { style: { fontSize: 14, fontWeight: 700, margin: "0 0 4px" } }, "WebShell"),
 		h("div", { style: { fontSize: 12, color: "#6e6e73", lineHeight: 1.7, marginBottom: 8 } },
-			"管理本地 webshell：生成目录、按 语言 → 形态族 分类的马模板库（连接口令等参数可自定义）。" +
+			"管理本地 webshell：生成目录、按 语言 → 绕过形式 分类的马模板库（连接口令等参数可自定义）。" +
 			"连接/执行/文件/数据库操作与会话侧「webshell 管理」共用同一套形态；模型每轮实时看到本页信息。"),
 		h("div", { style: box },
 			h("div", { style: { fontWeight: 700, fontSize: 13, marginBottom: 4 } }, "生成目录（genDir）"),
@@ -1407,7 +1407,7 @@ function WebShellSettings(props) {
 		h("div", { style: box },
 			h("div", { style: { fontWeight: 700, fontSize: 13, marginBottom: 2 } }, "马模板库"),
 			h("div", { style: { fontSize: 11, color: "#6e6e73", marginBottom: 6 } },
-				"按语言（PHP/JSP/ASPX/ASP）分组，语言下按形态族列出；每形态可自定义连接口令与参数（保存后生成马/模型提示均采用）。"),
+				"一级按语言（PHP/JSP/ASPX/ASP），二级按绕过形式分类；每形态可自定义连接口令与参数（保存后生成马/模型提示均采用）。"),
 			langs.length === 0 ? h("div", { style: { fontSize: 12, color: "#9a9aa0" } }, "加载中…") :
 				langs.map(function (lg) {
 					var open = openLang[lg.lang] !== false;
@@ -1416,14 +1416,16 @@ function WebShellSettings(props) {
 						h("div", { style: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", padding: "4px 0", fontWeight: 700, fontSize: 13 }, onClick: function () { var n = JSON.parse(JSON.stringify(openLang)); n[lg.lang] = !open; setOpenLang(n); } },
 							h("span", null, (open ? "▾" : "▸") + " " + lg.label),
 							h("span", { style: { fontSize: 11, color: "#6e6e73", fontWeight: 400 } }, lg.items.length + " 形态" + (customized ? " · 已自定义 " + customized : ""))),
-						open ? lg.items.map(function (it) {
-							var famChip = { fontSize: 10, padding: "1px 7px", borderRadius: 999, background: "#eef2f6", color: "#4a5568", fontWeight: 600, marginRight: 6 };
-							return h("div", { key: it.kind, style: { display: "flex", alignItems: "center", gap: 6, padding: "3px 0", borderBottom: "1px solid #f0f0f2" } },
-								h("div", { style: { flex: "0 0 150px", fontSize: 12, fontWeight: 600, fontFamily: "ui-monospace, Consolas, monospace" } }, it.kind),
-								h("span", { style: famChip }, it.family),
-								h("div", { style: { flex: 1, fontSize: 11, color: "#4a4a4f" } }, it.label),
-								it.customized ? h("span", { style: { fontSize: 10, padding: "1px 6px", borderRadius: 999, background: "#dafbe1", color: "#1a7f37", fontWeight: 600 } }, "已自定义") : null,
-								h("button", { type: "button", onClick: function () { setEditing(it); }, style: { padding: "3px 10px", borderRadius: 6, fontSize: 11, border: "1px solid #d9d9de", background: "#fff", cursor: "pointer" } }, "参数/口令"));
+						open ? (lg.groups || []).map(function (grp) {
+							return h("div", { key: grp.obf, style: { margin: "4px 0 2px" } },
+								h("div", { style: { fontSize: 11, fontWeight: 700, color: "#6e6e73", padding: "2px 0" } }, grp.label),
+								grp.items.map(function (it) {
+									return h("div", { key: it.kind, style: { display: "flex", alignItems: "center", gap: 6, padding: "3px 0", borderBottom: "1px solid #f0f0f2" } },
+										h("div", { style: { flex: "0 0 150px", fontSize: 12, fontWeight: 600, fontFamily: "ui-monospace, Consolas, monospace" } }, it.kind),
+										h("div", { style: { flex: 1, fontSize: 11, color: "#4a4a4f" } }, it.label),
+										it.customized ? h("span", { style: { fontSize: 10, padding: "1px 6px", borderRadius: 999, background: "#dafbe1", color: "#1a7f37", fontWeight: 600 } }, "已自定义") : null,
+										h("button", { type: "button", onClick: function () { setEditing(it); }, style: { padding: "3px 10px", borderRadius: 6, fontSize: 11, border: "1px solid #d9d9de", background: "#fff", cursor: "pointer" } }, "参数/口令"));
+								}));
 						}) : null);
 				}),
 			h(TplEditor, { connection: props.connection, item: editing, open: !!editing, onClose: function () { setEditing(null); }, onSaved: function () { setEditing(null); load(); } })),

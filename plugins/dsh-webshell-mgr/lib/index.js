@@ -71,16 +71,22 @@ function genWithTpl(kind, raw) {
 	}
 	return { ...(raw || {}), ...norm };
 }
-/** 形态族（一级语言下的二级分类，展示用）。 */
-function familyOf(kind) {
-	if (kind.endsWith("-oneliner")) return "一句话";
-	if (kind.endsWith("-basic")) return "基础（口令门）";
-	if (kind.endsWith("-aes1") || kind.endsWith("-aes2")) return "自研 AES";
-	if (kind.endsWith("-behinder")) return "冰蝎兼容";
-	if (kind.endsWith("-godzilla")) return "哥斯拉兼容";
-	if (kind.endsWith("-mem-filter")) return "内存马";
-	return "其他";
-}
+/** 绕过形式（二级分类，渗透/免杀视角）——语言下按此分组。 */
+const OBF_ORDER = [
+	["minimal", "极简一句话（特征最少）"],
+	["passgate", "口令门 + 命令通道（基础防护）"],
+	["encrypted", "加密通道（自研 AES 传输）"],
+	["cloak", "生态伪装（冰蝎 / 哥斯拉兼容）"],
+	["memory", "内存执行（无文件 / 访问即注入）"],
+];
+const OBF_OF_KIND = {
+	"php-oneliner": "minimal",
+	"php-basic": "passgate", "jsp-basic": "passgate", "aspx-basic": "passgate", "asp-basic": "passgate",
+	"php-aes1": "encrypted", "php-aes2": "encrypted", "jsp-aes1": "encrypted", "aspx-aes1": "encrypted",
+	"php-behinder": "cloak", "php-godzilla": "cloak", "jsp-behinder": "cloak", "jsp-godzilla": "cloak", "aspx-behinder": "cloak", "aspx-godzilla": "cloak",
+	"jsp-mem-filter": "memory",
+};
+function obfOf(kind) { return OBF_OF_KIND[kind] || "passgate"; }
 /** 该形态可自定义的模板字段。 */
 function fieldsOf(kind) {
 	const f = [];
@@ -90,17 +96,25 @@ function fieldsOf(kind) {
 	if (kind.includes("-godzilla")) f.push({ key: "password", label: "口令/密钥源", hint: "哥斯拉型：密钥缺省取口令" }, { key: "passParam", label: "口令 POST 参数名", hint: "默认 pass" });
 	return f;
 }
-/** 生成目录/模板目录树（按语言分组）。 */
+/** 模板目录树：语言 → 绕过形式组 → 形态。 */
 function catalogTree() {
 	const langs = [];
 	const order = { php: "PHP", jsp: "JSP", aspx: "ASPX", asp: "ASP" };
 	for (const [lang, label] of Object.entries(order)) {
 		const items = Object.entries(GEN_KINDS).filter(([, m]) => m.lang === lang).map(([kind, m]) => ({
-			kind, label: m.label, ext: m.ext, family: familyOf(kind), fields: fieldsOf(kind),
+			kind, label: m.label, ext: m.ext,
+			obf: obfOf(kind),
+			fields: fieldsOf(kind),
 			values: ((WS_CFG.templates && WS_CFG.templates[kind]) || {}),
 			customized: Boolean(WS_CFG.templates && WS_CFG.templates[kind]),
 		}));
-		if (items.length) langs.push({ lang, label, items });
+		if (!items.length) continue;
+		const groups = [];
+		for (const [id, gLabel] of OBF_ORDER) {
+			const gItems = items.filter((i) => i.obf === id);
+			if (gItems.length) groups.push({ obf: id, label: gLabel, items: gItems });
+		}
+		langs.push({ lang, label, items, groups });
 	}
 	return langs;
 }
