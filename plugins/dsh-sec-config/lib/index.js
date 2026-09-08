@@ -10,6 +10,7 @@
 // to the "MCP 工作台" for the same source-of-truth data.
 import z from '@deepseek-ai/schemastery'
 import { existsSync, readdirSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const name = 'dsh-sec-config'
@@ -224,7 +225,7 @@ function scanDirForTool(root, toolKey, out, depth = 0, maxDepth = 2) {
   for (const e of entries) {
     if (e.name.startsWith('.')) continue
     if (e.name === 'node_modules' || e.name === '__pycache__') continue
-    const full = path.join(root, e.name)
+    const full = join(root, e.name)
     if (e.isDirectory()) {
       scanDirForTool(full, toolKey, out, depth + 1, maxDepth)
     } else if (e.isFile() && isToolCandidateFile(e.name, toolKey)) {
@@ -254,12 +255,12 @@ function findToolCandidates(section) {
   //    让同大类/同目录的 nuclei/ffuf 等互见；bin 型扁平目录自动覆盖）
   for (const v of Object.values(tools)) {
     if (typeof v !== 'string' || !v || v === '***') continue
-    addRoot(path.dirname(v))
-    addRoot(path.dirname(path.dirname(v)))
+    addRoot(dirname(v))
+    addRoot(dirname(dirname(v)))
   }
   // 3) 随包常量里的工具根线索（mcp-proxy 父目录等）
   for (const p of BURP_PROXY_DEFAULT_PATHS) {
-    try { if (existsSync(p)) addRoot(path.dirname(path.dirname(p))) } catch { /* ignore */ }
+    try { if (existsSync(p)) addRoot(dirname(dirname(p))) } catch { /* ignore */ }
   }
   if (roots.length === 0) return { roots: [], candidates: {} }
   const candidates = {}
