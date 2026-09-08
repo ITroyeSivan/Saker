@@ -128,8 +128,8 @@ function defaultGenDir() {
 	return "";
 }
 function genBase() {
-	const d = String(WS_CFG.genDir ?? "").trim();
-	return d ? path.resolve(d) : (defaultGenDir() || BASE_DIR);
+	// 内置目录策略：固定本机 WebShell 目录（存在即用），不暴露"生成目录"配置项。
+	return (defaultGenDir() || BASE_DIR);
 }
 loadWsCfg(); // 模块加载即读入自有配置（tools 端点可能在 settings 层就绪前被调用）
 const MAX_BODY = 8 * 1024 * 1024;
@@ -945,6 +945,26 @@ function registerSettingsLayer(ctx, web) {
 				if (WS_CFG.selfShells.length === before) return { ok: false, error: "不存在" };
 				saveWsCfg();
 				return { ok: true };
+			}
+			if (endpoint === "self-content-get") {
+				const id = String(p.id ?? "");
+				const s = (WS_CFG.selfShells || []).find((x) => x.id === id);
+				if (!s) return { ok: false, error: "不存在" };
+				try {
+					const content = readFileSync(path.join(genBase(), s.file), "utf8");
+					return { ok: true, value: { id, file: s.file, content } };
+				} catch (e) { return { ok: false, error: "读取文件失败：" + (e && e.message) }; }
+			}
+			if (endpoint === "self-content-set") {
+				const id = String(p.id ?? "");
+				const s = (WS_CFG.selfShells || []).find((x) => x.id === id);
+				if (!s) return { ok: false, error: "不存在" };
+				const content = String(p.content ?? "");
+				if (!content) return { ok: false, error: "内容为空" };
+				try { writeFileSync(path.join(genBase(), s.file), content, "utf8"); }
+				catch (e) { return { ok: false, error: "写入失败：" + (e && e.message) }; }
+				logOp(theStore(), "", "self.edit", `${s.name} (${content.length} chars)`);
+				return { ok: true, value: { id } };
 			}
 			if (endpoint === "conn-list-plain") {
 				// 设置页管理用：返回连接含明文口令（自用 UI）；模型 manifest 仍走脱敏版
