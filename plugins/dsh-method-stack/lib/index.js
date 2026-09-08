@@ -181,6 +181,7 @@ export function apply(ctx, config = {}) {
           group: g.group,
           methods: g.methods.map((m) => ({
             id: m.id, description: m.description, order: m.order, origin: m.origin,
+            prompt: m.prompt,
             active: active.has(`${g.group}/${m.id}`),
             hasUser: userHasMethod(g.group, m.id),
           })),
@@ -247,16 +248,21 @@ export function apply(ctx, config = {}) {
         return ok({ count: rendered.count, chars: rendered.text.length, rev: rendered.rev })
       }
       if (endpoint === 'save-prompt') {
-        // 保存用户层方法正文（需先 clone；仅写 prompt.md，不覆盖 manifest）
+        // 保存方法正文（透明编辑）：若用户层不存在则先自动克隆官方，再写 prompt.md。
         const group = typeof p.group === 'string' ? p.group : ''
         const id = typeof p.id === 'string' ? p.id : ''
         const text = typeof p.text === 'string' ? p.text.slice(0, MAX_TEXT) : ''
-        const dst = path.join(USER_METHODS_ROOT, group, id)
-        if (!fs.existsSync(path.join(dst, 'prompt.md'))) return failure('请先克隆到用户层再编辑：' + `${group}/${id}`)
+        const src = builtinMethodPath(group, id)
+        if (!src) return failure('官方方法不存在：' + `${group}/${id}`)
         if (!text) return failure('正文不能为空')
+        const dst = path.join(USER_METHODS_ROOT, group, id)
+        if (!fs.existsSync(path.join(dst, 'prompt.md'))) {
+          fs.mkdirSync(dst, { recursive: true })
+          fs.cpSync(src, dst, { recursive: true, force: true })
+        }
         fs.writeFileSync(path.join(dst, 'prompt.md'), text, 'utf8')
         audit('user', 'save-prompt', `${group}/${id} (${text.length} chars)`)
-        return ok({ saved: `${group}/${id}` })
+        return ok({ saved: `${group}/${id}`, cloned: true })
       }
       return failure('unknown endpoint: ' + endpoint)
     } catch (error) {

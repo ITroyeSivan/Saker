@@ -344,6 +344,44 @@ function SearchBox(props) {
 
 // ── Page ────────────────────────────────────────────────────────────────────
 
+// ── Exploit-DB 状态卡（文件级组件，避免每次渲染重建导致状态重置）────────
+function EdbCard(props) {
+  var [st, setSt] = useState({ loading: true });
+  var [syncing, setSyncing] = useState(false);
+  function status() {
+    rpc(props.connection, 'edb-status', {}).then(function (r) { setSt(isOk(r) ? r.value : { error: errText(r) }); });
+  }
+  useEffect(status, []);
+  function sync() {
+    setSyncing(true);
+    rpc(props.connection, 'edb-sync', {}).then(function (r) {
+      setSyncing(false);
+      if (r && r.ok && r.value && r.value.ok) {
+        status();
+        window.alert('Exploit-DB 元数据下载完成，索引 ' + r.value.rows + ' 条。');
+      } else {
+        var msg = (r && r.value && r.value.results) ? r.value.results.map(function (x) { return x.name + ': ' + (x.ok ? 'OK' : x.error); }).join('；') : ((r && r.error && r.error.message) || '未知错误');
+        window.alert('下载失败：' + msg + '\n（需本机可访问 gitlab.com）');
+      }
+    }).catch(function (e) { setSyncing(false); window.alert('下载异常：' + String(e && e.message || e)); });
+  }
+  var box = { border: '1px solid ' + (st.present ? '#bbf7d0' : 'var(--dsw-alias-border-l1,#e4e4e7)'), borderRadius: 8, padding: '6px 10px', margin: '0 0 8px', fontSize: 12, background: st.present ? '#f0fdf4' : 'var(--dsw-alias-bg-layer-2,#fafafb)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' };
+  var tag = st.present
+    ? React.createElement('span', { style: { color: '#1a7f37', fontWeight: 700 } }, 'Exploit-DB ' + st.rows + ' 条')
+    : React.createElement('span', { style: { color: '#b45309', fontWeight: 700 } }, 'Exploit-DB 未接入');
+  return React.createElement('div', { style: box },
+    tag,
+    st.present
+      ? React.createElement('span', null, '索引 ' + st.rows + ' 条（按 EDB-ID 定位 PoC；完整描述检索需本地完整仓库或联网）')
+      : React.createElement('span', null, '接入后可离线按 EDB-ID 定位 PoC 文件。'),
+    React.createElement('div', { style: { flex: 1 } }),
+    st.present
+      ? null
+      : React.createElement('button', { type: 'button', disabled: syncing, onClick: sync, style: btn(false, { padding: '4px 12px', fontSize: 12 }) },
+          syncing ? '下载中…（约 30MB）' : '下载官方索引'),
+    React.createElement('button', { type: 'button', onClick: function () { window.alert(st.hint || ''); }, style: btn(false, { padding: '4px 12px', fontSize: 12 }) }, '说明'));
+}
+
 function Page(props) {
   var conn = props.connection;
   var [mode, setMode] = useState('pentest');
@@ -401,6 +439,7 @@ function Page(props) {
       React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } }, modeTabs),
       React.createElement('button', { type: 'button', style: btn(false, { padding: '5px 10px', fontSize: 12 }), onClick: newDoc }, '+ 新建（用户层）')),
     statsLine,
+    React.createElement(EdbCard, { connection: conn }),
     React.createElement('div', { style: { display: 'flex', gap: 16, alignItems: 'flex-start' } },
       React.createElement('div', { style: { flex: '0 0 330px', minWidth: 260, maxHeight: 580, overflowY: 'auto', borderRight: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', paddingRight: 10 } },
         React.createElement(TreeSection, { connection: conn, source: 'patt', mode: mode, title: '随包 PATT', writable: false, activeFile: activeFile, onOpen: openFile, reloadTick: reloadTick }),

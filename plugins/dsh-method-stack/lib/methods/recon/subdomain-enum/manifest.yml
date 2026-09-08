@@ -1,0 +1,5 @@
+---
+name: subdomain-enum
+description: 子域名与资产枚举：从根域与证书透明日志枚举子域，筛存活并识别接管风险。
+order: 50
+---

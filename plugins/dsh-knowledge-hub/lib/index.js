@@ -273,8 +273,10 @@ function matchTermsIn(text, terms) {
 }
 
 // ── Exploit-DB 字段化索引层（imports/exploitdb）────────────────────────────
-// exploits.csv: id,file,description,date,author,type,platform,port
-// files_exploits.csv: id,file — 定位真实 PoC 路径。检索在内存行缓存上做。
+// 现代 files_exploits.csv（16 列：id,file,description,date_published,author,type,platform,
+// port,date_added,date_updated,verified,codes,tags,...）自带完整描述与 CVE codes——
+// 单文件即可离线按 标题/类型/平台/CVE/EDB-ID 检索并定位 PoC 路径。
+// 兼容旧布局 exploits.csv（id,file,description,date,author,type,platform,port）作为兜底。
 let edbCache = { at: 0, rows: [] }
 function edbDir() {
   return path.join(importsRoot(), EDB_DIRNAME)
@@ -284,37 +286,37 @@ function loadEdbIndex() {
   if (edbCache.at && now - edbCache.at < EDB_INDEX_TTL) return edbCache.rows
   const dir = edbDir()
   const rows = []
-  const expCsv = path.join(dir, 'exploits.csv')
   const fileCsv = path.join(dir, 'files_exploits.csv')
-  if (!fs.existsSync(expCsv)) { edbCache = { at: 1, rows }; return rows }
+  const expCsv = path.join(dir, 'exploits.csv')
   try {
-    const files = new Map()
     if (fs.existsSync(fileCsv)) {
       const text = fs.readFileSync(fileCsv, 'utf8')
-      const first = text.indexOf('\n')
-      const body = first < 0 ? '' : text.slice(first + 1)
+      const nl = text.indexOf('\n')
+      const body = nl < 0 ? '' : text.slice(nl + 1)
       for (const line of body.split('\n')) {
-        const m = line.match(/^"?(\d+)"?,(.+)$/)
-        if (m && !files.has(m[1])) files.set(m[1], m[2].trim().replace(/^"|"$/g, ''))
+        if (!line.trim()) continue
+        const p = splitCsvLine(line)
+        if (p.length < 6) continue
+        const codes = (p[11] || '').split(';').map((s) => s.trim().toLowerCase()).filter((s) => s.startsWith('cve-'))
+        rows.push({
+          id: p[0], path: p[1] || '', desc: (p[2] || '').slice(0, 240),
+          date: p[3] || '', author: p[4] || '', type: p[5] || '', platform: p[6] || '',
+          codes, verified: p[10] === '1',
+        })
       }
-    }
-    const text = fs.readFileSync(expCsv, 'utf8')
-    const first = text.indexOf('\n')
-    const body = first < 0 ? '' : text.slice(first + 1)
-    for (const line of body.split('\n')) {
-      if (!line.trim()) continue
-      const parts = splitCsvLine(line)
-      if (parts.length < 6) continue
-      const id = parts[0]
-      const desc = parts[2] || ''
-      rows.push({
-        id,
-        path: files.get(id) || '',
-        desc: desc.slice(0, 220),
-        type: parts[5] || '',
-        platform: parts[6] || '',
-        date: parts[3] || '',
-      })
+    } else if (fs.existsSync(expCsv)) {
+      const text = fs.readFileSync(expCsv, 'utf8')
+      const nl = text.indexOf('\n')
+      const body = nl < 0 ? '' : text.slice(nl + 1)
+      for (const line of body.split('\n')) {
+        if (!line.trim()) continue
+        const p = splitCsvLine(line)
+        if (p.length < 6) continue
+        rows.push({
+          id: p[0], path: p[1] || '', desc: (p[2] || '').slice(0, 240),
+          date: p[3] || '', author: p[4] || '', type: p[5] || '', platform: p[6] || '', codes: [],
+        })
+      }
     }
   } catch { /* 解析失败返回空 */ }
   edbCache = { at: now, rows }
@@ -340,17 +342,21 @@ function searchEdbLayer(query) {
   if (rows.length === 0) return []
   const terms = expandTerms(query)
   const q = String(query || '').toLowerCase().trim()
+  const qNum = q.replace(/[^\d]/g, '')
+  const qCve = q.replace(/cve[-_ ]?/i, 'cve-')
   const hits = []
   for (const r of rows) {
     if (hits.length >= 8) break
-    const idExact = r.id === q || r.id === q.replace(/\D/g, '')
-    const inDesc = r.desc.toLowerCase().includes(q)
-    const termHit = terms.some((t) => t.length >= 2 && (r.desc.toLowerCase().includes(t) || r.type.toLowerCase().includes(t) || r.platform.toLowerCase().includes(t)))
-    if (idExact || inDesc || termHit) {
+    const idExact = qNum && r.id === qNum
+    const inDesc = r.desc && r.desc.toLowerCase().includes(q)
+    const inType = r.type && (q === r.type.toLowerCase() || (q.length > 1 && r.type.toLowerCase().includes(q)))
+    const cveHit = r.codes.some((c) => qCve.startsWith(c) || c.startsWith(qCve) || c === qCve)
+    const termHit = terms.some((t) => t.length >= 2 && (r.desc.toLowerCase().includes(t) || (r.platform || '').toLowerCase().includes(t) || (r.author || '').toLowerCase().includes(t)))
+    if (idExact || inDesc || inType || cveHit || termHit) {
+      const cveTxt = r.codes.length ? ' ' + r.codes[0] : ''
       hits.push({
-        source: 'import', mode: '', path: `exploitdb/${r.path || r.id + ' (无文件映射)'}`,
-        line: 0,
-        preview: `[EDB-${r.id}] ${r.platform || ''} ${r.type || ''} ${r.desc.slice(0, 130)}`,
+        source: 'import', mode: '', path: `exploitdb/${r.path || r.id}`,
+        line: 0, preview: `[EDB-${r.id}]${r.verified ? '' : ' (未验证)'}${cveTxt} ${r.platform || ''} ${r.type || ''} ${r.desc.slice(0, 140)}`,
         edb: true, edbId: r.id,
       })
     }
@@ -572,15 +578,61 @@ async function dispatch(endpoint, payload) {
 
     case 'edb-status': {
       const dir = edbDir()
-      const present = fs.existsSync(path.join(dir, 'exploits.csv'))
+      const present = fs.existsSync(path.join(dir, 'files_exploits.csv'))
       const rows = present ? loadEdbIndex() : []
-      const hasFiles = fs.existsSync(path.join(dir, 'files_exploits.csv'))
       return ok({
-        dir, present, rows: rows.length, hasFiles,
+        dir, present, rows: rows.length, hasFiles: true,
+        hasExp: fs.existsSync(path.join(dir, 'exploits.csv')),
+        hasShellcodes: fs.existsSync(path.join(dir, 'files_shellcodes.csv')),
         hint: present
-          ? 'Exploit-DB 已就绪：knowledge_search 会自动字段化命中 [EDB-ID] 条目；按需 knowledge_read exploitdb/<path> 读 PoC 原文。'
-          : `imports/${EDB_DIRNAME}/ 下未发现 exploits.csv。接入：① 把官方 exploitdb 仓库（含 exploits.csv / files_exploits.csv）放入 DSH_HOME/refs/imports/exploitdb/（离线可用）；② 或用 git 浅克隆后再拷入。元数据索引检索即可用，PoC 原文按需读。`,
+          ? 'Exploit-DB 已就绪：knowledge_search 自动字段化命中 [EDB-ID]（含 CVE/平台/类型/标题），共 ' + rows.length + ' 条。注意：仅索引时 knowledge_read PoC 原文需目录中确有对应文件（完整仓库才有）；描述/定位检索不受影响。'
+          : 'Exploit-DB 未接入。点「下载官方索引」抓取 files_exploits.csv（约 10MB，含 16 列完整元数据：标题/作者/类型/平台/CVE codes，可离线检索），需本机可访问 gitlab.com。',
       })
+    }
+
+    case 'edb-sync': {
+      // 下载 exploitdb 官方仓库根的两个索引 csv（现代仓库不随仓发布 exploits.csv 描述表，
+      // 描述检索需在线或依赖本地完整目录；本索引支持 EDB-ID 定位与 shellcode 索引）。
+      const dir = edbDir()
+      fs.mkdirSync(dir, { recursive: true })
+      const urls = [
+        ['files_exploits.csv', 'https://gitlab.com/exploit-database/exploitdb/-/raw/main/files_exploits.csv'],
+        ['files_shellcodes.csv', 'https://gitlab.com/exploit-database/exploitdb/-/raw/main/files_shellcodes.csv'],
+      ]
+      const results = []
+      try {
+        for (const [name, url] of urls) {
+          const tmp = path.join(dir, name + '.part')
+          const ctrl = new AbortController()
+          const timer = setTimeout(() => ctrl.abort(), 60000)
+          let res
+          try {
+            res = await fetch(url, { redirect: 'follow', signal: ctrl.signal })
+          } catch (e) {
+            results.push({ name, ok: false, error: e && e.name === 'AbortError' ? '超时(60s)' : (e && e.message ? e.message : String(e)) })
+            continue
+          } finally {
+            clearTimeout(timer)
+          }
+          if (!res.ok) {
+            results.push({ name, ok: false, error: `HTTP ${res.status}` })
+            continue
+          }
+          const buf = Buffer.from(await res.arrayBuffer())
+          if (buf.length < 1024 || buf.length > 300 * 1024 * 1024) {
+            results.push({ name, ok: false, error: `内容异常(${buf.length} bytes)` })
+            continue
+          }
+          fs.writeFileSync(tmp, buf)
+          fs.renameSync(tmp, path.join(dir, name))
+          results.push({ name, ok: true, bytes: buf.length })
+        }
+      } catch (e) {
+        return ok({ ok: false, results, error: e && e.message ? e.message : String(e) })
+      }
+      const allOk = results.length === urls.length && results.every((r) => r.ok)
+      edbCache = { at: 0, rows: [] } // 强制下次重建索引
+      return ok({ ok: allOk, results, rows: allOk ? loadEdbIndex().length : 0 })
     }
 
     case 'browse': {
