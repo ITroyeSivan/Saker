@@ -40,17 +40,62 @@ const WS_SETTINGS_FILE = path.join(BASE_DIR, "settings.json");
 // 生成目录（genDir）策略：插件自有 settings.json 持久化（写盘即回，绝不挂 UI）；
 // genDir 为空时按候选探测（存在即直接用），优先级：
 //   1) 环境变量 DSH_WEBSHELL_DIR（部署侧显式指定，最适合工具库集中管理）
-//   2) 用户主目录下的常见 WebShell 存放位置
+//   2) 从 sec-config「工具根目录」（settings.yaml sec-config.roots / tools 路径）派生的
+//      WebShell 相关子目录 —— 本机工具库集中管理时无需再配环境变量
+//   3) 用户主目录下的常见 WebShell 存放位置
 // 候选一律运行时派生，不硬编码任何机器专属路径；全不存在则回退 BASE_DIR。
-function wsGenCandidates() {
+/** 从任意文件路径反推其所在目录，用于 sec-config tools/entries 的 path 字段。 */
+function dirOf(p) {
+	try {
+		const s = String(p || "").trim();
+		if (!s) return "";
+		return path.dirname(path.resolve(s));
+	} catch { return "" }
+}
+/** 读取 sec-config 的工具根目录（settings 不可用时返回空数组）。 */
+function secConfigRoots(settings) {
 	const out = [];
+	try {
+		const s = settings;
+		if (!s || typeof s.get !== "function") return out;
+		const sec = s.get("sec-config") || {};
+		const push = (v) => {
+			const str = String(v || "").trim().replace(/[\\/]+$/, "");
+			if (str) out.push(str);
+		};
+		if (Array.isArray(sec.roots)) sec.roots.forEach(push);
+		if (Array.isArray(sec.scanRoots)) sec.scanRoots.forEach(push);
+	} catch { /* ignore */ }
+	return out;
+}
+/** 读取 sec-config 已登记工具/条目的所在目录（用于有人直接把 genDir 指到马目录的场景）。 */
+function secConfigToolDirs(settings) {
+	const out = [];
+	try {
+		const s = settings;
+		if (!s || typeof s.get !== "function") return out;
+		const sec = s.get("sec-config") || {};
+		if (sec.tools && typeof sec.tools === "object") Object.values(sec.tools).forEach((v) => out.push(dirOf(v)));
+		if (Array.isArray(sec.entries)) sec.entries.forEach((e) => out.push(dirOf(e && e.path)));
+	} catch { /* ignore */ }
+	return out.filter(Boolean);
+}
+function wsGenCandidates(settings) {
+	const out = [];
+	const push = (p) => { if (p) out.push(path.resolve(p)); };
 	const env = String(process.env.DSH_WEBSHELL_DIR || "").trim();
-	if (env) out.push(path.resolve(env));
-	out.push(
-		path.join(os.homedir(), "WebShell"),
-		path.join(os.homedir(), "webshell"),
-		path.join(os.homedir(), "shells"),
-	);
+	if (env) push(env);
+	// 工具根目录下的 WebShell 专用子目录（优先，避免裸根目录抢先命中）
+	const subs = ["01-WebShell管理\\WebShell", "01-WebShell管理", "WebShell", "webshell", "shells"];
+	for (const root of secConfigRoots(settings)) for (const sub of subs) push(path.join(root, sub));
+	// 已登记工具所在目录（有人把 genDir 直接指到马目录时）
+	for (const d of secConfigToolDirs(settings)) push(d);
+	// 工具根目录本身（兜底，排在子目录之后）
+	for (const root of secConfigRoots(settings)) push(root);
+	// 用户主目录常见位置
+	push(path.join(os.homedir(), "WebShell"));
+	push(path.join(os.homedir(), "webshell"));
+	push(path.join(os.homedir(), "shells"));
 	return out;
 }
 let WS_CFG = { genDir: "", templates: {}, selfShells: [] };
@@ -128,9 +173,11 @@ function catalogTree() {
 	}
 	return langs;
 }
+/** settings 服务句柄：由 inject 阶段写入，供 genBase 派生候选目录（未就绪时为 null）。 */
+let WS_SETTINGS = null;
 function defaultGenDir() {
 	try {
-		for (const c of wsGenCandidates()) {
+		for (const c of wsGenCandidates(WS_SETTINGS)) {
 			if (existsSync(c)) return path.resolve(c);
 		}
 	} catch { /* ignore */ }
@@ -891,6 +938,8 @@ function registerSettingsLayer(ctx, web) {
 	const settings = web?.settings ?? ctx.settings;
 	const systemPrompt = web?.systemPrompt ?? ctx.systemPrompt;
 	const connection = web?.connection ?? ctx.connection;
+	// 绑定 settings 句柄：genBase() 据此从 sec-config 工具根目录派生 WebShell 候选目录
+	WS_SETTINGS = settings ?? null;
 	// 启动时读自有 settings.json；settings 服务仅尽力同步（非持久化主路径，避免 mutate 挂起）
 	loadWsCfg();
 	try {
@@ -901,6 +950,17 @@ function registerSettingsLayer(ctx, web) {
 	} catch (e) {
 		ctx.logger?.warn?.("dsh-webshell-mgr: settings register failed: %s", e && e.message ? e.message : String(e));
 	}
+	// 启动自检：把生效的 WebShell 目录打到日志，便于一眼确认目录是否解析正确。
+	// genDir 为空且候选全部不存在时会回退 BASE_DIR（空目录），此处 warn 出来避免"目录凭空消失"的错觉。
+	try {
+		const eff = genBase();
+		const explicit = String(WS_CFG.genDir ?? "").trim();
+		if (!explicit && eff === BASE_DIR) {
+			ctx.logger?.warn?.("dsh-webshell-mgr: 未探测到任何 WebShell 目录，已回退 %s。请设置 genDir，或配置 sec-config.roots / DSH_WEBSHELL_DIR。", BASE_DIR);
+		} else {
+			ctx.logger?.info?.("dsh-webshell-mgr: WebShell 目录 = %s (%s)", eff, explicit ? "自定义 genDir" : "自动探测");
+		}
+	} catch { /* ignore */ }
 	try {
 		systemPrompt.context({
 			name: "webshell-mgr",
@@ -912,7 +972,8 @@ function registerSettingsLayer(ctx, web) {
 				const kinds = Object.keys(GEN_KINDS);
 				parts.push(`可生成马类型 ${kinds.length} 种（${kinds.join("/")}）`);
 				parts.push(`自有马 ${(WS_CFG.selfShells || []).length} 个`);
-				parts.push(`文件目录：${genBase()}`);
+				const eff = genBase();
+				parts.push(`文件目录：${eff}${eff === BASE_DIR ? "（⚠ 未探测到目录，已回退默认空目录——请设置 genDir 或 sec-config.roots）" : ""}`);
 				return `<webshell-mgr-manifest>${parts.join("；")}。连接用 webshell_connect/list/exec/file/db；生成用 webshell_generate；查看本机马库（上传的自有马/内置形态）用 webshell_library_list，读某个自有马源码用 webshell_library_read（授权测试）。</webshell-mgr-manifest>`;
 			},
 		});

@@ -80,8 +80,35 @@ function pruneDanglingSakerDeps() {
   return removed
 }
 
-// installed: package name -> installed version (read from the profile's node_modules)
-const installed = new Map()
+/**
+ * Ensure every Saker-managed package that is a dependency of the profile also
+ * appears in `dsh.profile.bundles` (the layer stack that actually loads it).
+ * `pruneDanglingSakerDeps()` splices a dangling entry out of that stack; pnpm
+ * add restores the dependency but not the layer, so re-add it here. Without
+ * this the plugin installs cleanly yet is never loaded — the operator sees the
+ * feature silently disappear.
+ */
+function ensureBundles() {
+  if (!existsSync(profilePkgPath)) return []
+  let p
+  try { p = JSON.parse(readFileSync(profilePkgPath, 'utf8')) } catch { return [] }
+  const bundles = p.dsh && p.dsh.profile && Array.isArray(p.dsh.profile.bundles) ? p.dsh.profile.bundles : null
+  if (!bundles) return []
+  const deps = p.dependencies || {}
+  const added = []
+  // root bundle + feature plugins, in the same order the install loop uses
+  const wanted = [rootPkg.name, ...pluginDirs.map((d) => d.pkg.name)]
+  for (const name of wanted) {
+    if (!deps[name]) continue
+    if (bundles.includes(name)) continue
+    bundles.push(name)
+    added.push(name)
+  }
+  if (added.length) writeFileSync(profilePkgPath, JSON.stringify(p, null, 2) + '\n', 'utf8')
+  return added
+}
+
+// installed: package name -> installed version (read from the profile's node_modules)const installed = new Map()
 if (existsSync(profilePkgPath)) {
   try {
     const p = JSON.parse(readFileSync(profilePkgPath, 'utf8'))
@@ -184,4 +211,12 @@ for (const { name, dir, pkg: p } of pluginDirs) {
 
 console.log(`\ninstalled ok=${ok} fail=${fail}`)
 if (fail) process.exit(1)
+
+// 3. reconcile the bundle layer stack: pruneDanglingSakerDeps() removes a stale
+//    entry from dsh.profile.bundles, but pnpm add only restores the dependency —
+//    the bundle layer itself is not re-added. Without this step the plugin is
+//    installed yet never loaded (silent "my feature disappeared" reports).
+const ensured = ensureBundles()
+if (ensured.length) console.log(`re-added ${ensured.length} bundle layer(s): ${ensured.join(', ')}`)
+
 console.log('Restart `dsh web`, then open 设置 → 安全配置 to point tools / MCP endpoints at your local services.')

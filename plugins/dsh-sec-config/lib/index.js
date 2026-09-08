@@ -236,6 +236,31 @@ function normSep(value) {
   return String(value || '').replace(/[\\/]+/g, '\\')
 }
 
+/**
+ * 规范化写入的路径类字段，避免 `E:/工作/Web Security\Tools` 这类混用分隔符
+ * 落盘后让下游插件（webshell-mgr / scanner-tools 等）解析失败：
+ *   - roots / scanRoots：数组，逐项归一化并去掉尾部斜杠
+ *   - tools / entries[].path：字符串绝对路径，归一化为反斜杠
+ */
+function normalizeOpValue(pathArr, value) {
+  const head = String(pathArr[0] || '')
+  if (head === 'roots' || head === 'scanRoots') {
+    if (!Array.isArray(value)) return value
+    return value.map((v) => (typeof v === 'string' ? normSep(v.trim()).replace(/\\+$/, '') : v)).filter((v) => v !== '')
+  }
+  if (head === 'tools') {
+    return typeof value === 'string' ? normSep(value.trim()) : value
+  }
+  if (head === 'entries') {
+    const fixOne = (e) => (e && typeof e === 'object' && typeof e.path === 'string'
+      ? { ...e, path: normSep(e.path.trim()) }
+      : e)
+    if (Array.isArray(value)) return value.map(fixOne)
+    return fixOne(value)
+  }
+  return value
+}
+
 function categoryForScanPath(full, root) {
   const fullNorm = normSep(full)
   const rootNorm = normSep(root).replace(/\\+$/, '')
@@ -991,7 +1016,7 @@ export function apply(ctx, config = {}) {
           }
           const ops = rawOps
             .filter((op) => op && typeof op === 'object' && op.op === 'set' && Array.isArray(op.path) && op.path.length >= 1 && WRITABLE_FIELDS.has(String(op.path[0])))
-            .map((op) => ({ op: 'set', path: op.path.map(String), value: op.value }))
+            .map((op) => ({ op: 'set', path: op.path.map(String), value: normalizeOpValue(op.path, op.value) }))
           // Preserve existing secrets when the client echoes a mask back.
           const before = current()
           const merged = applyOps(before, ops)
