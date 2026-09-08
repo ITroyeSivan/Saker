@@ -309,6 +309,7 @@ function stdioTransport(server) {
 async function httpTransport(server, messages) {
   const url = new URL(server.url);
   const responses = [];
+  let sessionId = String(Object.entries(server.headers ?? {}).find(([k]) => k.toLowerCase() === "mcp-session-id")?.[1] ?? "").trim();
   for (const message of messages) {
     const isNotification = typeof message.method === "string" && message.id === void 0;
     const response = await fetch(url, {
@@ -316,11 +317,16 @@ async function httpTransport(server, messages) {
       headers: {
         "content-type": "application/json",
         accept: "application/json, text/event-stream",
+        ...sessionId ? { "mcp-session-id": sessionId } : {},
         ...server.headers
       },
       body: JSON.stringify(message),
       signal: AbortSignal.timeout(TIMEOUT_MS)
     });
+    if (!sessionId) {
+      const issued = response.headers.get("mcp-session-id")?.trim();
+      if (issued) sessionId = issued;
+    }
     if (isNotification) continue;
     if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
     const contentType = response.headers.get("content-type") ?? "";

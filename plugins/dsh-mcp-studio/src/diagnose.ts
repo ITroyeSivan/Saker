@@ -66,6 +66,12 @@ function stdioTransport(server: ServerEntry): MinimalMcp {
 async function httpTransport(server: ServerEntry, messages: Array<Record<string, unknown>>): Promise<Array<Record<string, unknown>>> {
   const url = new URL(server.url)
   const responses: Array<Record<string, unknown>> = []
+  // Streamable-HTTP servers (Yakit, Kali 武器库等) 在 initialize 响应里下发
+  // Mcp-Session-Id，后续每个请求都必须原样回传，否则服务端一律 400
+  // "Missing session ID"。这里在同一次握手内记住并复用该会话。
+  let sessionId = String(
+    Object.entries(server.headers ?? {}).find(([k]) => k.toLowerCase() === 'mcp-session-id')?.[1] ?? '',
+  ).trim()
   for (const message of messages) {
     // Notifications carry no id and servers legitimately answer 202/empty —
     // never parse their bodies; only real requests contribute responses.
@@ -75,11 +81,16 @@ async function httpTransport(server: ServerEntry, messages: Array<Record<string,
       headers: {
         'content-type': 'application/json',
         accept: 'application/json, text/event-stream',
+        ...(sessionId ? { 'mcp-session-id': sessionId } : {}),
         ...server.headers,
       },
       body: JSON.stringify(message),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     })
+    if (!sessionId) {
+      const issued = response.headers.get('mcp-session-id')?.trim()
+      if (issued) sessionId = issued
+    }
     if (isNotification) continue
     if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`)
     const contentType = response.headers.get('content-type') ?? ''
