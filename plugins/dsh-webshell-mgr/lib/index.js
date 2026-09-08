@@ -128,7 +128,9 @@ function defaultGenDir() {
 	return "";
 }
 function genBase() {
-	// 内置目录策略：固定本机 WebShell 目录（存在即用），不暴露"生成目录"配置项。
+	// 目录策略：设置的自定义 genDir 优先；留空则自动探测本机 WebShell 目录，再无则 BASE_DIR。
+	const d = String(WS_CFG.genDir ?? "").trim();
+	if (d) return path.resolve(d);
 	return (defaultGenDir() || BASE_DIR);
 }
 loadWsCfg(); // 模块加载即读入自有配置（tools 端点可能在 settings 层就绪前被调用）

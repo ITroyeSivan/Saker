@@ -1520,12 +1520,26 @@ function WebShellSettings(props) {
 	var [openLang, setOpenLang] = useState({});
 	var [editing, setEditing] = useState(null);
 	var [editShell, setEditShell] = useState(null);
+	var [dirOpen, setDirOpen] = useState(false);
+	var [dirCfg, setDirCfg] = useState("");
+	var [effective, setEffective] = useState("");
+	var [busy, setBusy] = useState(false);
+	var [msg, setMsg] = useState("");
 	function load() {
-		wsRpc(props.connection, "manifest-preview", {}).then(function (r) { if (r && r.ok && r.value.langs) setLangs(r.value.langs); });
+		wsRpc(props.connection, "manifest-preview", {}).then(function (r) { if (r && r.ok && r.value.langs) { setLangs(r.value.langs); setEffective(r.value.genDir || ""); } });
 		wsRpc(props.connection, "self-list", {}).then(function (r) { if (r && r.ok) setShells(r.value.shells || []); });
 		wsRpc(props.connection, "conn-list-plain", {}).then(function (r) { if (r && r.ok) setConns(r.value.connections || []); });
+		wsRpc(props.connection, "settings-get", {}).then(function (r) { if (r && r.ok) setDirCfg(r.value.genDir || ""); });
 	}
 	useEffect(load, []);
+	function saveDir() {
+		setBusy(true); setMsg("");
+		wsRpc(props.connection, "settings-set", { genDir: dirCfg.trim() }).then(function (r) {
+			setBusy(false);
+			if (r && r.ok) { setEffective(r.value.effective || ""); setMsg(r.value.effective ? "目录已生效：" + r.value.effective : "已恢复自动探测"); setTimeout(function () { setMsg(""); }, 2600); load(); }
+			else setMsg((r && r.error) || "保存失败");
+		}).catch(function (e) { setBusy(false); setMsg(String(e && e.message || e)); });
+	}
 	function changePassword(id, password) {
 		wsRpc(props.connection, "self-update", { id: id, password: password }).then(function () { load(); });
 	}
@@ -1539,6 +1553,19 @@ function WebShellSettings(props) {
 			"内置库一体化管理：上传与内置马均按 语言 → 绕过形式 分类，可改码、改密、改分类。模型每轮实时知情（连接脱敏）。"),
 		h(SelfShellsCard, { connection: props.connection, shells: shells, onChangePassword: changePassword, onRemove: removeShell, onEdit: function (s) { setEditShell(s); }, onChanged: load }),
 		h(ShellEditor, { connection: props.connection, shell: editShell, open: !!editShell, onClose: function () { setEditShell(null); } }),
+		h("div", { style: { border: "1px solid var(--dsw-alias-border-l1,#e4e4e7)", borderRadius: 8, padding: "6px 12px", marginBottom: 10, fontSize: 12 } },
+			h("div", { style: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", color: "#4a5568" }, onClick: function () { setDirOpen(!dirOpen); } },
+				h("span", null, (dirOpen ? "▾" : "▸") + " WebShell 文件目录"),
+				h("span", { style: { color: "#1a7f37" } }, effective ? "当前：" + effective : "（自动探测中）"),
+				h("div", { style: { flex: 1 } }),
+				h("button", { type: "button", onClick: function (e) { e.stopPropagation(); setDirCfg(""); saveDir(); }, style: { padding: "2px 8px", fontSize: 11, cursor: "pointer", border: "1px solid #d9d9de", background: "#fff" } }, "恢复自动探测")),
+			dirOpen ? h("div", { style: { padding: "6px 0 8px" } },
+				h("div", { style: { fontSize: 11, color: "#6e6e73", lineHeight: 1.6, marginBottom: 6 } },
+					"生成/上传落盘目录。默认自动探测你本机的 01-WebShell管理 目录（存在即用）；如需改到别处，在这里填一个绝对路径。"),
+				h("div", { style: { display: "flex", gap: 6, alignItems: "center" } },
+					h("input", { value: dirCfg, onChange: function (e) { setDirCfg(e.target.value); }, placeholder: "绝对路径，如 E:\\WebShell（留空=自动探测）", style: Object.assign({}, wsInput, { flex: 1 }) }),
+					h("button", { type: "button", disabled: busy, onClick: saveDir, style: wsBtnPrimary }, busy ? "保存中…" : "保存目录")),
+				msg ? h("div", { style: { fontSize: 12, color: msg.indexOf("失败") >= 0 ? "#d1242f" : "#1a7f37", marginTop: 4 } }, msg) : null) : null),
 		h("div", { style: wsCard },
 			h("div", { style: wsTitle }, "内置马模板库（可直接生成）"),
 			h("div", { style: wsHint }, "16 种可生成形态按 语言 → 绕过形式 分类；点「参数/口令」可自定义该形态生成时的口令与参数。"),
