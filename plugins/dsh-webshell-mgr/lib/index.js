@@ -909,7 +909,7 @@ function registerSettingsLayer(ctx, web) {
 				const name = String(p.name ?? "").trim().slice(0, 60) || "self-shell";
 				const lang = String(p.lang ?? "").trim().slice(0, 20) || "PHP";
 				const obf = String(p.obf ?? "").trim().slice(0, 40) || "自定义";
-				const password = String(p.password ?? "");
+				const password = (() => { const v = String(p.password ?? ""); return v !== "" ? v : crypto.randomBytes(8).toString("hex"); })();
 				const fileName = String(p.fileName ?? "").replace(/[\\/]/g, "");
 				const b64 = String(p.dataBase64 ?? "");
 				if (!fileName || !b64) return { ok: false, error: "缺少文件内容" };
@@ -924,7 +924,7 @@ function registerSettingsLayer(ctx, web) {
 				const row = { id: "self-" + Date.now().toString(36), name, lang, obf, file: safe, password, createdAt: new Date().toISOString() };
 				WS_CFG.selfShells.push(row);
 				saveWsCfg();
-				logOp(theStore(), "", "self.add", `${name} @ ${safe}`);
+				logOp(theStore(), "", "self.add", `${name} (${password === row.password && String(p.password ?? "") === "" ? "密码自动生成" : "用户设置"}) → ${safe}`);
 				return { ok: true, value: row };
 			}
 			if (endpoint === "self-list") return { ok: true, value: { shells: WS_CFG.selfShells || [] } };
