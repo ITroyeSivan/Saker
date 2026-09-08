@@ -1,6 +1,8 @@
-// dsh-method-stack — web client. 设置页「方法编排」tab（order 145）：
-// 按 模式(preset) → 模块组 → 子方法 三层展示；勾选即改"当前模式启用组合"（下一轮模型
-// 请求生效）；方法可克隆到用户层并编辑正文 / 还原官方；组合可另存与一键应用。
+// dsh-method-stack — web client.
+// 1) 设置页「方法编排」tab（order 145）：模式 → 模块组 → 子方法；勾选改启用组合、
+//    克隆编辑/还原、组合另存应用、注入预览。
+// 2) 会话聊天输入框下方 dock（conversation.composer.dock）：当前模式启用的方法 pills，
+//    点 pill 即停用、点「+」展开该模式全部方法勾选——快捷点选，下一轮生效。
 // 模型侧注入由 host 的 systemPrompt context('saker-methods') 完成，本页只改 profile。
 window.__ModuleLoader__.load({ id: '@dsh-external/dsh-method-stack', factory: (require) => {
 var module = { exports: {} }; var exports = module.exports;
@@ -172,14 +174,151 @@ function activeIds(data) {
   return out;
 }
 
+// ── 会话输入框 dock：快捷点选当前模式方法 ─────────────────────────────────
+// 用与 mode-group 相同的方式取"当前会话模式"：订阅 remote 'agent-preset/selected'
+// 与 sessions noteAgentPreset。组件不依赖宿主注入 face 的细节，只从共享 store 读。
+
+var presetStore = { current: 'pentest', listeners: [] };
+function setCurrentPreset(id) {
+  if (!id || id === presetStore.current) return;
+  presetStore.current = id;
+  presetStore.listeners.forEach(function (l) { try { l(id); } catch (e) { /* ignore */ } });
+}
+function useCurrentPreset() {
+  var [p, setP] = useState(presetStore.current);
+  useEffect(function () {
+    var l = function (id) { setP(id); };
+    presetStore.listeners.push(l);
+    setP(presetStore.current);
+    return function () {
+      var i = presetStore.listeners.indexOf(l);
+      if (i >= 0) presetStore.listeners.splice(i, 1);
+    };
+  }, []);
+  return p;
+}
+
+var pillStyle = function (on, danger) {
+  return {
+    display: 'inline-flex', alignItems: 'center', gap: 4, borderRadius: 999,
+    padding: '1px 9px', fontSize: 11, fontWeight: 600, cursor: 'pointer', userSelect: 'none',
+    border: on ? '1px solid #2f81f7' : '1px solid var(--dsw-alias-border-l1,#d9d9de)',
+    background: on ? '#eaf2fe' : 'var(--dsw-alias-bg-layer-2,#f6f6f7)',
+    color: on ? '#175cd3' : 'var(--dsw-alias-label-tertiary,#6e6e73)',
+  };
+};
+
+/** dock 内嵌弹层：当前模式的组 → 方法勾选（复选 toggle）。 */
+function MethodPalette(props) {
+  var [open, setOpen] = useState(false);
+  var ref = useRef(null);
+  useEffect(function () {
+    if (!open) return;
+    function onDoc(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    function onKey(e) { if (e.key === 'Escape') setOpen(false); }
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return function () { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+  return React.createElement('span', { ref: ref, style: { position: 'relative', display: 'inline-block' } },
+    React.createElement('button', { type: 'button', onClick: function () { setOpen(!open); }, style: pillStyle(true, false) }, '＋ 方法'),
+    open ? React.createElement('div', { style: { position: 'absolute', bottom: 'calc(100% + 4px)', left: 0, zIndex: 500, width: 320, maxHeight: 320, overflow: 'auto', background: 'var(--dsw-alias-bg-base,#fff)', border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', borderRadius: 8, padding: 8, boxShadow: '0 6px 24px rgba(0,0,0,0.14)' } },
+      (props.groups || []).map(function (g) {
+        return React.createElement('div', { key: g.group, style: { marginBottom: 6 } },
+          React.createElement('div', { style: { fontSize: 12, fontWeight: 700, margin: '2px 0 4px' } }, groupLabel(g.group)),
+          g.methods.map(function (m) {
+            var k = keyOf(g.group, m.id);
+            return React.createElement('label', { key: k, style: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '2px 2px', cursor: 'pointer' } },
+              React.createElement('input', { type: 'checkbox', checked: m.active, onChange: function () { props.onToggle(k, !m.active); } }),
+              React.createElement('span', { style: { fontWeight: m.active ? 600 : 400, fontFamily: 'ui-monospace, Consolas, monospace' } }, m.id));
+          }));
+      })) : null);
+}
+
+/** 输入框下方 dock：当前模式 + 启用方法 pills（点 pill 停用）＋「方法」调色板。 */
+function MethodDock(props) {
+  var preset = useCurrentPreset();
+  var [data, setData] = useState(null);
+  var [busy, setBusy] = useState(false);
+  function load(p) {
+    rpc(props.connection, 'list', { presetId: p }).then(function (res) {
+      if (res && res.ok && res.value) setData(res.value);
+    }).catch(function () { /* 静默 */ });
+  }
+  useEffect(function () { load(preset); }, [preset]);
+  function toggle(key, on) {
+    var cur = [];
+    (data.groups || []).forEach(function (g) { g.methods.forEach(function (m) { if (m.active) cur.push(keyOf(g.group, m.id)); }); });
+    var next = on ? cur.concat([key]) : cur.filter(function (x) { return x !== key; });
+    setBusy(true);
+    rpc(props.connection, 'set-active', { presetId: preset, active: next }).then(function (r) {
+      setBusy(false);
+      if (r && r.ok) load(preset);
+    }).catch(function () { setBusy(false); });
+  }
+  if (!data) return null;
+  var activeMethods = [];
+  var allMethods = [];
+  (data.groups || []).forEach(function (g) {
+    g.methods.forEach(function (m) {
+      allMethods.push({ g: g.group, m: m });
+      if (m.active) activeMethods.push({ g: g.group, m: m });
+    });
+  });
+  var presetMeta = PRESETS.find(function (x) { return x.id === preset; });
+  return React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4, padding: '4px 2px', fontSize: 11 } },
+    React.createElement('span', { style: { color: 'var(--dsw-alias-label-tertiary,#6e6e73)', marginRight: 2, whiteSpace: 'nowrap' } },
+      (presetMeta ? presetMeta.label + '·' : '') + '方法 ' + activeMethods.length),
+    activeMethods.slice(0, 12).map(function (x) {
+      return React.createElement('button', {
+        key: keyOf(x.g, x.m.id), type: 'button', title: '停用 ' + x.m.id + '（下一轮不再注入）',
+        style: pillStyle(true, false), onClick: function () { toggle(keyOf(x.g, x.m.id), false); },
+      }, x.m.id + ' ✕');
+    }),
+    activeMethods.length > 12 ? React.createElement('span', { style: { color: 'var(--dsw-alias-label-tertiary,#6e6e73)' } }, '…') : null,
+    React.createElement(MethodPalette, { groups: data.groups, onToggle: toggle }),
+    busy ? React.createElement('span', { style: { color: 'var(--dsw-alias-label-tertiary,#6e6e73)' } }, '…') : null);
+}
+
 function apply(ctx) {
+  // 共享 store 订阅：当前会话模式（照 mode-group 从 remote 事件 + sessions 记录）。
+  try {
+    var remote = ctx.remote;
+    if (remote && typeof remote.$on === 'function') {
+      remote.$on('agent-preset/selected', function (sid, agentPreset) {
+        if (agentPreset) setCurrentPreset(agentPreset);
+      });
+    }
+    var sessions = ctx.sessions;
+    if (sessions && sessions.list && sessions.list.getSnapshot) {
+      try {
+        var snap = sessions.list.getSnapshot();
+        var byId = snap.byId || snap;
+        var ids = Object.keys(byId || {});
+        for (var i = 0; i < ids.length; i++) {
+          var s = byId[ids[i]];
+          if (s && s.agentPreset) { setCurrentPreset(s.agentPreset); break; }
+        }
+      } catch (e) { /* 快照形态差异时跳过 */ }
+    }
+  } catch (e) { /* 订阅失败不阻塞 */ }
+
   ctx.slots.inject('settings.section', function () {
     return ctx.slots.register({
       name: 'settings.section', id: 'method-stack', order: 145,
       label: function () { return '方法编排'; },
     }, function () { return React.createElement(Page, { connection: ctx.connection }); });
   });
+
+  // 聊天输入框下方 dock 快捷点选。
+  try {
+    ctx.slots.inject('conversation.composer.dock', function () {
+      return ctx.slots.register({
+        name: 'conversation.composer.dock', id: 'method-stack', order: 20,
+      }, function () { return React.createElement(MethodDock, { connection: ctx.connection }); });
+    });
+  } catch (e) { /* composer 槽不可用时仅保留设置页 */ }
 }
 
-module.exports = { name: 'dsh-method-stack-client', inject: ['slots', 'connection'], apply: apply };
+module.exports = { name: 'dsh-method-stack-client', inject: ['slots', 'connection', 'remote', 'sessions'], apply: apply };
 return module.exports; } });
