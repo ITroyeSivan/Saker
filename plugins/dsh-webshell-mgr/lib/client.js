@@ -1605,6 +1605,7 @@ function injectVisibleConversationView(ctx, field, register) {
 }
 
 function apply(ctx) {
+	var connection = ctx.connection; // 闭包捕获，apply 阶段已就绪（避免 slot 渲染时 ctx 缺服务）
 	ctx.effect(function () { return installStyles(); }, "dsh-webshell-mgr: styles");
 	injectVisibleConversationView(ctx, "showWebshellManager", function () {
 		return ctx.slots.register({
@@ -1621,7 +1622,7 @@ function apply(ctx) {
 			return ctx.slots.register({
 				name: "settings.section", id: "webshell-mgr", order: 150,
 				label: function () { return "WebShell"; }
-			}, function () { return h(WebShellSettings, { connection: ctx.connection }); });
+			}, function () { return h(WebShellSettings, { connection: connection }); });
 		});
 	} catch (e) { /* settings 槽不可用时忽略 */ }
 }
