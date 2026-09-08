@@ -1324,6 +1324,56 @@ function WebshellView(props) {
 
 var REDTEAM_MANAGER_UI_NAMESPACE = "redteam-manager-ui";
 
+// ── 设置页「WebShell」tab（独立于会话管理 tab）：生成目录 + 连接一览 ────
+function wsRpc(connection, endpoint, payload) {
+	return connection.rpc.call("/dsh-webshell-mgr", endpoint, payload);
+}
+function WebShellSettings(props) {
+	var [genDir, setGenDir] = useState("");
+	var [conns, setConns] = useState(null);
+	var [kinds, setKinds] = useState([]);
+	var [latest, setLatest] = useState([]);
+	var [msg, setMsg] = useState("");
+	var [busy, setBusy] = useState(false);
+	function load() {
+		wsRpc(props.connection, "settings-get", {}).then(function (r) { if (r && r.ok) setGenDir(r.value.genDir || ""); });
+		wsRpc(props.connection, "manifest-preview", {}).then(function (r) {
+			if (r && r.ok) {
+				setConns(r.value.connections || 0);
+				setKinds(r.value.kinds || []);
+				setLatest(r.value.latest || []);
+			}
+		});
+	}
+	useEffect(load, []);
+	function save() {
+		setBusy(true); setMsg("");
+		wsRpc(props.connection, "settings-set", { genDir: genDir.trim() }).then(function (r) {
+			setBusy(false);
+			if (r && r.ok) { setMsg("已保存：新生成的马将落在 " + (r.value.genDir || "默认目录") + "（下一轮生效，无需重启）"); setTimeout(function () { setMsg(""); }, 3000); }
+			else setMsg((r && r.error) || "保存失败");
+		});
+	}
+	var box = { border: "1px solid var(--dsw-alias-border-l1,#e4e4e7)", borderRadius: 8, padding: 10, marginBottom: 10, background: "var(--dsw-alias-bg-base,#fff)" };
+	return h("div", { style: { maxWidth: 760 } },
+		h("div", { style: { fontSize: 14, fontWeight: 700, margin: "0 0 4px" } }, "WebShell"),
+		h("div", { style: { fontSize: 12, color: "#6e6e73", lineHeight: 1.7, marginBottom: 8 } },
+			"管理本地 webshell 工具与生成的马：设置生成目录（默认 ~/.dsh/webshell-mgr/generated/），查看已登记连接。" +
+			"连接/执行/文件/数据库的操作与完整界面在会话侧「webshell 管理」tab；本页用于配置与实时知情（模型每轮会看到下方信息）。"),
+		h("div", { style: box },
+			h("div", { style: { fontWeight: 700, fontSize: 13, marginBottom: 4 } }, "生成目录（genDir）"),
+			h("div", { style: { display: "flex", gap: 6, alignItems: "center" } },
+				h("input", { value: genDir, onChange: function (e) { setGenDir(e.target.value); }, placeholder: "留空=默认 ~/.dsh/webshell-mgr（生成到 generated/）", style: { flex: 1, padding: "5px 8px", borderRadius: 6, border: "1px solid var(--dsw-alias-border-l1,#d9d9de)", fontSize: 12 } }),
+				h("button", { type: "button", onClick: save, disabled: busy, style: { padding: "5px 12px", borderRadius: 6, fontSize: 12, cursor: "pointer", border: "1px solid #2f81f7", background: "#2f81f7", color: "#fff" } }, busy ? "保存中…" : "保存")),
+			msg ? h("div", { style: { fontSize: 12, color: "#1a7f37", marginTop: 4 } }, msg) : null,
+			h("div", { style: { fontSize: 11, color: "#6e6e73", marginTop: 6 } }, "可用马类型 " + kinds.length + " 种：" + kinds.join(" / ") + "。")),
+		h("div", { style: box },
+			h("div", { style: { fontWeight: 700, fontSize: 13, marginBottom: 4 } }, "已登记连接"),
+			conns === null ? h("div", { style: { fontSize: 12, color: "#9a9aa0" } }, "加载中…") :
+				conns === 0 ? h("div", { style: { fontSize: 12, color: "#9a9aa0" } }, "暂无已登记连接——在会话侧「webshell 管理」用 webshell_connect 登记。") :
+					h("div", { style: { fontSize: 12, color: "#6e6e73" } }, "共 " + conns + " 个连接（模型每轮实时可见；完整管理见会话 tab）。")));
+}
+
 function injectVisibleConversationView(ctx, field, register) {
 	var settings = ctx.settingsScope.bind({ namespace: REDTEAM_MANAGER_UI_NAMESPACE });
 	ctx.slots.inject("conversation.view", function () {
@@ -1366,7 +1416,15 @@ function apply(ctx) {
 			return h(WebshellView, props);
 		});
 	});
+	try {
+		ctx.slots.inject("settings.section", function () {
+			return ctx.slots.register({
+				name: "settings.section", id: "webshell-mgr", order: 150,
+				label: function () { return "WebShell"; }
+			}, function () { return h(WebShellSettings, { connection: ctx.connection }); });
+		});
+	} catch (e) { /* settings 槽不可用时忽略 */ }
 }
 
-module.exports = { name: "dsh-webshell-mgr-client", inject: ["slots", "settingsScope"], apply: apply };
+module.exports = { name: "dsh-webshell-mgr-client", inject: ["slots", "settingsScope", "connection"], apply: apply };
 return module.exports; } });

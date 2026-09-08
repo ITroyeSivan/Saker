@@ -14,6 +14,7 @@
 import path from "node:path";
 import crypto from "node:crypto";
 import os from "node:os";
+import z from "@deepseek-ai/schemastery";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { openStore, saveConn, listConns, getConn, deleteConn, recordProbe, getState, setState, listDbProfiles, saveDbProfile, deleteDbProfile, recordGeneration, listGenerations, logOp, listOps } from "./store.js";
 import { protocolMeta, detectProtocol, probeConnection } from "./protocol/registry.js";
@@ -34,6 +35,16 @@ export function checkCsrf(req, token) {
 }
 const BASE_DIR = path.join(os.homedir(), ".dsh", "webshell-mgr");
 const DB_PATH = path.join(BASE_DIR, "webshell.db");
+
+// 设置命名空间 webshell-mgr（设置页「WebShell」）：genDir=生成目录（空=默认 BASE_DIR）。
+// 注意：不要把这些 scope 服务加进 `export inject` —— 那会让 cordis 把插件按独立 ctx 实例化，
+// webServer 路由会注册进非主实例（对外 404）。settings/systemPrompt/connection 一律走 ctx.inject 层。
+let WS_CFG = { genDir: "" };
+const WS_SCHEMA = z.object({ genDir: z.string().default("") });
+function genBase() {
+  const d = String(WS_CFG.genDir ?? "").trim();
+  return d ? path.resolve(d) : BASE_DIR;
+}
 const MAX_BODY = 8 * 1024 * 1024;
 const MAX_READ = 4 * 1024 * 1024;
 const ALLOWED_MODES = ["pentest"];
@@ -147,7 +158,7 @@ async function fileCore(connId, action, a = {}) {
 		case "shot": {
 			const png = await cap.screenshot(conn);
 			const name = `shot-${Date.now().toString(36)}.png`;
-			const dir = join(GEN_DIR(BASE_DIR));
+			const dir = join(GEN_DIR(genBase()));
 			mkdirSync(dir, { recursive: true });
 			const filePath = join(dir, name);
 			writeFileSync(filePath, png);
@@ -290,13 +301,13 @@ function genCore(action, a = {}) {
 		case "kinds": return { kinds: GEN_KINDS, protocols: protocolMeta() };
 		case "list": return { generations: listGenerations(theStore()) };
 		case "make": {
-			const item = makeAndSave(BASE_DIR, String(a.kind ?? ""), a);
+			const item = makeAndSave(genBase(), String(a.kind ?? ""), a);
 			const rec = recordGeneration(theStore(), { name: item.name, lang: item.lang, kind: item.kind, filePath: item.filePath, meta: { password: item.password, passParam: item.passParam, cmdParam: item.cmdParam, connHint: item.connHint } });
 			logOp(theStore(), "", "gen.make", `${item.kind} → ${item.filePath}`);
 			return { generation: rec, password: item.password, connHint: item.connHint, content: item.content };
 		}
 		case "import": {
-			const item = importFromFile(BASE_DIR, String(a.path ?? ""), a);
+			const item = importFromFile(genBase(), String(a.path ?? ""), a);
 			const rec = recordGeneration(theStore(), { name: item.name, lang: item.lang, kind: "import", filePath: item.filePath, meta: {} });
 			return { generation: rec, content: item.content };
 		}
@@ -729,6 +740,60 @@ function registerTools(ctx) {
 
 //#endregion
 
+/** 设置层（host ctx.inject 后调用；勿进 export inject，原因见常量区注释）。 */
+function registerSettingsLayer(ctx, web) {
+	const settings = web?.settings ?? ctx.settings;
+	const systemPrompt = web?.systemPrompt ?? ctx.systemPrompt;
+	const connection = web?.connection ?? ctx.connection;
+	try {
+		const scope = ctx.settings.register("webshell-mgr", WS_SCHEMA, { base: { genDir: "" } });
+		const sync = () => { const v = scope.get?.(); WS_CFG.genDir = (v && typeof v.genDir === "string") ? v.genDir : ""; };
+		sync();
+		try { ctx.settings.on?.("set", sync); } catch { /* ignore */ }
+	} catch (e) {
+		ctx.logger?.warn?.("dsh-webshell-mgr: settings register failed: %s", e && e.message ? e.message : String(e));
+	}
+	try {
+		systemPrompt.context({
+			name: "webshell-mgr",
+			order: 470,
+			text: () => {
+				const conns = listConns(theStore()).map(publicConn);
+				const parts = [];
+				parts.push(`连接 ${conns.length} 个${conns.length ? "：" + conns.map((c) => `/${c.id} ${c.name || c.host || c.url}(${c.protocol}/${c.os || "?"})`).join("，") : ""}`);
+				const kinds = Object.keys(GEN_KINDS);
+				parts.push(`可生成马类型 ${kinds.length} 种（${kinds.join("/")}）`);
+				parts.push(`生成目录：${genBase()}`);
+				return `<webshell-mgr-manifest>${parts.join("；")}。连接用 webshell_connect/list/exec/file/db，生成用 webshell_generate（授权测试）。</webshell-mgr-manifest>`;
+			},
+		});
+	} catch (e) {
+		ctx.logger?.warn?.("dsh-webshell-mgr: manifest context failed: %s", e && e.message ? e.message : String(e));
+	}
+	try {
+		connection.rpc.handle("/dsh-webshell-mgr", async (endpoint, payload) => {
+			const p = payload && typeof payload === "object" ? payload : {};
+			if (endpoint === "settings-get") return { ok: true, value: { genDir: WS_CFG.genDir || "" } };
+			if (endpoint === "settings-set") {
+				const d = typeof p.genDir === "string" ? p.genDir.trim() : "";
+				try {
+					if (settings?.mutate) await settings.mutate("webshell-mgr", [{ op: "set", path: ["genDir"], value: d }], undefined);
+				} catch (e) { /* 不可写时本进程生效 */ }
+				WS_CFG.genDir = d;
+				return { ok: true, value: { genDir: WS_CFG.genDir } };
+			}
+			if (endpoint === "conn-list") return { ok: true, value: { connections: listConns(theStore()).map(publicConn) } };
+			if (endpoint === "manifest-preview") {
+				const kinds = Object.keys(GEN_KINDS);
+				return { ok: true, value: { genDir: genBase(), kinds, connections: listConns(theStore()).map(publicConn).length, latest: listGenerations(theStore()).slice(0, 5) } };
+			}
+			return { ok: false, error: "unknown endpoint " + endpoint };
+		}, { authority: "loopback" });
+	} catch (e) {
+		ctx.logger?.warn?.("dsh-webshell-mgr: loopback rpc failed: %s", e && e.message ? e.message : String(e));
+	}
+}
+
 function apply(ctx) {
 	const trustedHosts = () => {
 		try { return ctx.webRuntime?.trustedHosts ?? []; } catch { return []; }
@@ -761,6 +826,14 @@ function apply(ctx) {
 			}
 		}
 	}), "dsh-webshell-mgr: web route");
+	try {
+		ctx.inject?.(["settings", "connection", "systemPrompt"], (web) => {
+			try { registerSettingsLayer(ctx, web); }
+			catch (e) { ctx.logger?.warn?.("dsh-webshell-mgr: settings layer failed: %s", e && e.message ? e.message : String(e)); }
+		});
+	} catch (e) {
+		ctx.logger?.warn?.("dsh-webshell-mgr: ctx.inject failed: %s", e && e.message ? e.message : String(e));
+	}
 	registerTools(ctx);
 }
 
