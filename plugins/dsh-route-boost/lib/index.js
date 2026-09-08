@@ -18,12 +18,14 @@ import os from "node:os";
 import path from "node:path";
 import z from "@deepseek-ai/schemastery";
 import { MODES, FALLBACK_GATES, NEGATION_TOKENS } from "./routes.mjs";
-import { toolsStatus, listSkillNames } from "./skilltools.mjs";
+import { toolsStatus, listSkillNames, configuredTools } from "./skilltools.mjs";
 import { detectScope } from "./scope.mjs";
 export { detectScope };
 
 const name = "dsh-route-boost";
-const inject = ["tools", "systemPrompt", "agentPresets"];
+// `settings` 用于读 sec-config 的已配置工具面——信封的 tools 行必须与 sec-config
+// manifest 同源，否则已配好的工具被 `command -v` 判为缺失（两者自相矛盾）。
+const inject = ["tools", "systemPrompt", "agentPresets", "settings"];
 
 const Config = z.object({
 	maxChars: z.natural().default(1200),
@@ -381,6 +383,17 @@ async function apply(ctx, config) {
 		} catch { /* 审计失败不阻塞 */ }
 	};
 	const logFile = accountingPath();
+	// sec-config 已配置工具面的缓存：信封每轮都要渲染，而 settings.get 是纯内存读，
+	// 仍不值得每轮重算集合——30s TTL 足以跟上用户在设置页的改动（UI 保存即热生效）。
+	let toolCfgCache = { at: 0, set: new Set() };
+	const configuredToolsCached = () => {
+		const now = Date.now();
+		if (now - toolCfgCache.at < 30_000) return toolCfgCache.set;
+		let set = new Set();
+		try { set = configuredTools(ctx.settings.get("sec-config")); } catch { /* 未装 sec-config 时退化为纯 PATH 探测 */ }
+		toolCfgCache = { at: now, set };
+		return set;
+	};
 	ctx.systemPrompt.context({
 		name: "route-boost",
 		order: 500,
@@ -398,7 +411,7 @@ async function apply(ctx, config) {
 			const evidence = inferEvidence(text);
 			const operation = readOperationSummary(agent?.session?.header?.cwd);
 			if (state?.phaseId !== phase.id) auditRoute(agent, presetId, phase.id, text);
-			const tools = toolsStatus(presetId);
+			const tools = toolsStatus(presetId, Date.now(), configuredToolsCached());
 			const scope = detectScope(presetId, text);
 			// 目的锚定粘滞：定向消息=最新用户指定（覆盖更新）；全流程下首条任务消息快照后粘滞
 			let purpose = state?.purpose ?? "";

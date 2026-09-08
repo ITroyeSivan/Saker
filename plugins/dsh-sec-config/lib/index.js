@@ -9,8 +9,8 @@
 // registry (mcp__burp__* / mcp__yakit__*) — saves the operator a second trip
 // to the "MCP 工作台" for the same source-of-truth data.
 import z from '@deepseek-ai/schemastery'
-import { existsSync, readdirSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { basename, dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const name = 'dsh-sec-config'
@@ -109,6 +109,25 @@ function resolveBurpBridgeScript(section) {
 }
 
 /**
+ * Absolute path to the Node interpreter used for stdio MCP children.
+ *
+ * A bare `node` would be resolved against the HOST process PATH, which differs
+ * from the interactive shell PATH: when the platform is started by absolute
+ * path (Start-Process / service / .lnk), PATH frequently has no node directory
+ * and the child dies with `'node' 不是内部或外部命令`. `process.execPath` is
+ * the exact interpreter running us, so it always works and avoids version drift
+ * between host and child. Forward slashes keep mcp-studio's splitArgs from
+ * treating backslashes as shell escapes.
+ */
+function resolveNodeCommand() {
+  try {
+    const exe = process.execPath
+    if (typeof exe === 'string' && exe) return exe.replace(/\\/g, '/')
+  } catch { /* fall through */ }
+  return 'node'
+}
+
+/**
  * Stable ids the sec-config bridge writes for the servers it manages. Picking a
  * fixed id (instead of a timestamp) keeps writes idempotent across page reloads
  * and lets mcp-studio reconcile without churning the mount cycle.
@@ -180,8 +199,17 @@ const CATEGORY_DIR_EXACT = [
   ['06-内网与域渗透', '内网与横向'], ['05-内网与域渗透', '内网与横向'], ['内网与域渗透', '内网与横向'], ['内网渗透', '内网与横向'], ['内网', '内网与横向'], ['域渗透', '内网与横向'], ['横向', '内网与横向'],
 ]
 
+/**
+ * 用户目录风格分类（Tools/01-WebShell管理 … 11-报告与模板）。当「工具根目录」
+ * 下就是这种编号分类目录时，直接沿用目录名作为分类 id（保留编号前缀，与
+ * 操作者自己的目录一一对应），不再猜内置分类。
+ */
+const USER_CATEGORY_DIR_RE = /^\d{1,2}\s*[-_.]\s*\S/
+
+/** 分类 id：优先沿用用户自己的编号分类目录名，其次内置精确映射/线索，最后兜底。 */
 function categoryForPath(full) {
-  const lower = full.toLowerCase()
+  const parts = String(full || '').split(/[\\/]/).filter(Boolean)
+  const lower = String(full || '').toLowerCase()
   for (const [dir, cat] of CATEGORY_DIR_EXACT) {
     if (lower.includes(dir.toLowerCase())) return cat
   }
@@ -189,6 +217,27 @@ function categoryForPath(full) {
     if (re.test(lower)) return category
   }
   return CATEGORY_FALLBACK
+}
+
+/**
+ * 分类 id（目录感知版）：若路径的「根目录下一级」是编号分类目录
+ * （01-WebShell管理 / 05-内网与域渗透…），直接用它——这是操作者自己的分类
+ * 体系，必须原样沿用；否则退回内置精确映射/线索推断。
+ * 注意：roots 可能来自浏览器输入（分隔符可能是 / 或 //），路径比较需归一化。
+ */
+function normSep(value) {
+  return String(value || '').replace(/[\\/]+/g, '\\')
+}
+
+function categoryForScanPath(full, root) {
+  const fullNorm = normSep(full)
+  const rootNorm = normSep(root).replace(/\\+$/, '')
+  const rel = rootNorm && fullNorm.toLowerCase().startsWith(rootNorm.toLowerCase())
+    ? fullNorm.slice(rootNorm.length).replace(/^\\+/, '')
+    : fullNorm
+  const segs = rel.split('\\').filter(Boolean)
+  if (segs.length >= 2 && USER_CATEGORY_DIR_RE.test(segs[0])) return segs[0]
+  return categoryForPath(fullNorm)
 }
 
 /** 由旧版 tools（仅 preset key）或自定义 key 生成兼容条目。 */
@@ -291,6 +340,23 @@ function resolveBurpProxyPath() {
  */
 const TOOL_NAME_EXT_RE = /\.(exe|py|py3|jar|sh|ps1|bat|cmd|pl)$/i
 
+/** 可作为「工具入口」的扩展名（比候选白名单更严：脚本需额外满足目录名匹配）。 */
+const ENTRY_EXT_RE = /\.(exe|jar|py|py3|ps1|sh|bat|cmd|pl|rb)$/i
+
+/** 安装包/构建残留：不作为工具（jdk-21_windows-x64_bin.exe、xxx-setup.exe…）。 */
+const INSTALLER_RE = /(setup|install|uninstall|\.msi$|\.paf\.exe$|portable.*\.exe$|jdk.*_bin\.exe$)/i
+
+/** 工具仓库里的「支撑目录」：只放库代码/测试/文档，不是工具入口。 */
+const SUPPORT_DIR_RE = /^(tests?|testing|tamper|lib|libs|docs?|documentation|build|dist|thirdparty|vendor|node_modules|__pycache__|hooks?|utils?|util|modules?|config|common|templates?|certs?|servers?|poisoners?|private|plugins?|assets|static|fonts|data|include|share|man|locale|i18n|examples?|samples?|src|images?|logs?|pyinstaller|offline|db|sessions?|resources?|frontend|public|keys)$/i
+
+/** 通用/噪音文件名主部（__init__/utils/core/cli/readme…）。
+ * 注意 test 相关只匹配「测试文件」形态（test / test_xxx / xxx_test / tests），
+ * 不能用 test\w* —— 那会把 testssl 这类真工具名一起吞掉。 */
+const NOISE_STEM_RE = /^(__init__|__main__|utils?|core|cli|logger|log|database|db|version|entry|console|main|conftest|setup|noxfile|walkmodules|_testutils|build|build_\w+|tests?|test_\w+|\w+_test|configure|makefile|dockerfile|readme\w*|license\w*|changelog\w*|notice\w*|authors?|contributors?|copying|contributing|requirements\w*|pyproject|install\w*|package\w*|__version__|gemfile|rakefile|gemspec)$/i
+
+/** 变体后缀（accesschk64a / Rubeus_net45 / tool-v1.2 …）→ 归一后合并为同一工具。 */
+const VARIANT_RE = /[_\-]?(x64|x86|win32|win64|amd64|i386|64a?|32|net2|net35|net45|net48|v?\d+(\.\d+)*|windows|linux|osx|portable|release|debug|bin)$/i
+
 function isToolCandidateFile(name, toolKey) {
   const lower = name.toLowerCase()
   const base = lower.replace(/\.[^.]+$/, '')
@@ -312,6 +378,224 @@ function presetKeyForName(name) {
     if (isToolCandidateFile(name, t.key)) return t.key
   }
   return ''
+}
+
+/** 归一化：小写 + 去非字母数字，用于目录名/文件名互比。 */
+function normName(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+/** 去掉变体后缀后的主部，用于把 accesschk / accesschk64 / accesschk64a 归为一组。 */
+function canonicalStem(value) {
+  let out = String(value || '').toLowerCase()
+  let prev = null
+  while (prev !== out) {
+    prev = out
+    out = out.replace(VARIANT_RE, '').replace(/[_\- ]+$/, '')
+  }
+  return normName(out)
+}
+
+/**
+ * 判断一个文件是否为「工具入口」。
+ * - exe/jar：默认是（非安装包）；一个二进制就是一个工具。
+ * - 脚本（py/ps1/sh/bat/cmd/pl）：仅当文件名主部与所在目录名互相匹配时才算
+ *   （OneForAll/oneforall.py、jwt_tool/jwt_tool.py），避免把仓库内部模块
+ *   （impacket/impacket/IP6.py、sqlmap/tamper/*.py）当工具收进来。
+ */
+function isToolEntryFile(fileName, dirName) {
+  const name = String(fileName || '')
+  if (INSTALLER_RE.test(name)) return false
+  const ext = (name.match(/\.[^.]+$/) || [''])[0].toLowerCase()
+  const stem = name.replace(/\.[^.]+$/, '')
+  if (ext === '.exe' || ext === '.jar') return true
+  if (NOISE_STEM_RE.test(stem)) return false
+  const ns = normName(stem)
+  const nd = normName(dirName)
+  if (!ns || ns.length < 3) return false
+  if (!nd || nd.length < 3) return false
+  return ns === nd || ns.startsWith(nd) || nd.startsWith(ns)
+}
+
+/** 仓库标记文件：出现即说明该目录是一个独立工具仓库（而非工具内的子目录）。 */
+const REPO_MARKER_RE = /^(readme\w*\.(md|txt|rst)|license\w*(\.(md|txt))?|pyproject\.toml|setup\.py|setup\.cfg|cargo\.toml|go\.mod|.*\.gemspec|.*\.sln|.*\.csproj|makefile|dockerfile)$/i
+
+/** 源码镜像目录后缀（Rubeus-src / Seatbelt-src）——同一工具的源码副本，不重复收录。 */
+const SRC_SUFFIX_RE = /[-_](src|source|dev|master|git)$/i
+
+/**
+ * 从包元数据解析仓库内的真实入口文件（Python / Go 两类常见形态）：
+ *  - pyproject.toml / setup.cfg 的 console_scripts：`certipy = "certipy.entry:main"`
+ *  - setup.py 的 scripts=[glob('examples/*.py')] / scripts=['bin/x.py']：
+ *    impacket 这类「一仓多工具」入口只在 setup.py 里声明
+ *  - go.mod：Go 项目主包入口，优先与目录同名的 .go（LadonGo/Ladon.go）
+ * 返回仓库内相对路径（正斜杠），找不到返回 null。
+ */
+function declaredEntryForDir(dir) {
+  let metaText = ''
+  for (const name of ['pyproject.toml', 'setup.cfg']) {
+    try { metaText = readFileSync(join(dir, name), 'utf8'); break } catch { /* try next */ }
+  }
+  if (metaText) {
+    const re = /^\s*["']?([A-Za-z0-9_.\-]+)["']?\s*=\s*["']([A-Za-z0-9_.]+)\s*:\s*[A-Za-z0-9_]+["']/gm
+    let m
+    while ((m = re.exec(metaText)) !== null) {
+      const parts = m[2].split('.')
+      const mod = parts.pop()
+      const pkg = parts.join('/')
+      const rel = pkg ? `${pkg}/${mod}.py` : `${mod}.py`
+      if (existsSync(join(dir, rel.split('/').join(sep)))) return rel
+    }
+  }
+  // setup.py 的 scripts=... ：支持两种写法
+  //   scripts=["bin/foo.py", "bin/bar.py"]
+  //   scripts=glob.glob(os.path.join('examples', '*.py'))   ← impacket 这类多工具仓
+  try {
+    const setupText = readFileSync(join(dir, 'setup.py'), 'utf8')
+    const sm = setupText.match(/scripts\s*=\s*(\[[\s\S]*?\]|glob[\s\S]{0,200}?\)\s*\))/)
+    if (sm) {
+      for (const q of sm[1].matchAll(/["']([^"']+\.(?:py|sh|pl|rb))["']/g)) {
+        if (existsSync(join(dir, q[1].split('/').join(sep)))) return q[1]
+      }
+      const gm = sm[1].match(/glob[^)]*?["']([A-Za-z0-9_\-./]+)["']\s*,\s*["']([^"']+\.[a-z]+)["']/)
+      if (gm) {
+        const sub = gm[1]
+        const pat = new RegExp('^' + gm[2].replace(/\./g, '\\.').replace(/\*/g, '.*') + '$', 'i')
+        try {
+          const cand = readdirSync(join(dir, sub)).filter((f) => pat.test(f)).sort()[0]
+          if (cand) return `${sub}/${cand}`
+        } catch { /* no such subdir */ }
+      }
+    }
+  } catch { /* no setup.py */ }
+  // Go 项目：主包入口优先与目录同名（LadonGo/Ladon.go 这类前缀匹配也算）
+  try {
+    if (existsSync(join(dir, 'go.mod'))) {
+      const nd = normName(basename(dir))
+      const cand = readdirSync(dir)
+        .filter((f) => /\.go$/i.test(f) && !/^_/.test(f))
+        .map((f) => ({ f, ns: normName(f.replace(/\.go$/i, '')) }))
+        .filter((x) => x.ns.length >= 3 && (x.ns === nd || nd.startsWith(x.ns) || x.ns.startsWith(nd)))
+        .sort((a, b) => b.ns.length - a.ns.length)[0]
+      if (cand) return cand.f
+    }
+  } catch { /* unreadable */ }
+  return null
+}
+
+/**
+ * 扫描一个「工具根目录」，产出工具级候选（每个工具一项，而不是每个文件一项）。
+ * 规则：
+ *  1. 递归（深度 3）遍历，跳过支撑目录（tests/tamper/lib/docs…）与隐藏目录。
+ *  2. exe/jar 一律视为工具；脚本需与所在目录名匹配。
+ *  3. 同目录内「归一主部」相同的变体（accesschk64/64a）合并，优先 exe/jar。
+ *  4. preset key 命中去重，优先 exe/jar、再取路径最短者。
+ *  5. 分类沿用根目录下一级的编号分类目录名（01-WebShell管理…）。
+ *  6. 目录即工具兜底：整仓库型工具（impacket/Nishang/PKINITtools…）内部没有
+ *     与目录同名的脚本，此时按「仓库标记 + 声明的入口 / 代表性脚本」收录一项。
+ */
+function collectToolEntries(root, maxEntries = 1500) {
+  const raw = []
+  const dirRecords = []
+  const walk = (dir, depth) => {
+    if (depth > 3 || raw.length > maxEntries * 4) return
+    let entries
+    try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
+    const fileNames = []
+    for (const e of entries) {
+      if (e.name.startsWith('.')) continue
+      if (e.name === 'node_modules' || e.name === '__pycache__') continue
+      const full = join(dir, e.name)
+      if (e.isDirectory()) {
+        if (SUPPORT_DIR_RE.test(e.name)) continue
+        walk(full, depth + 1)
+        continue
+      }
+      if (!e.isFile()) continue
+      fileNames.push(e.name)
+      if (!ENTRY_EXT_RE.test(e.name)) continue
+      const dirName = dir.split(/[\\/]/).filter(Boolean).pop() || ''
+      if (!isToolEntryFile(e.name, dirName)) continue
+      raw.push({
+        name: e.name,
+        path: full,
+        stem: e.name.replace(/\.[^.]+$/, ''),
+        dir,
+        category: categoryForScanPath(full, root),
+        presetKey: presetKeyForName(e.name),
+      })
+    }
+    dirRecords.push({ dir, name: basename(dir), depth, files: fileNames })
+  }
+  walk(root, 0)
+
+  // 6) 目录即工具兜底：只处理「整目录未产出任何工具」的仓库型目录。
+  const coveredDirs = new Set(raw.map((r) => r.dir.toLowerCase()))
+  const coveredStems = new Set(raw.map((r) => normName(r.stem)))
+  for (const d of dirRecords) {
+    if (d.depth === 0 || d.depth > 3) continue
+    if (coveredDirs.has(d.dir.toLowerCase())) continue
+    // 目录内（含子目录）已有工具收录 → 不重复
+    if ([...coveredDirs].some((c) => c.startsWith(d.dir.toLowerCase() + sep))) continue
+    if (SRC_SUFFIX_RE.test(d.name)) continue
+    if (!d.files.some((f) => REPO_MARKER_RE.test(f))) continue
+    const nd = normName(d.name)
+    if (nd.length < 3 || coveredStems.has(nd)) continue
+    // Python 包常把入口写在元数据里（impacket/Certipy/DonPAPI），先取声明入口；
+    // 没有声明时才退回目录内的代表性脚本。
+    const declared = declaredEntryForDir(d.dir)
+    const scripts = d.files.filter((f) => ENTRY_EXT_RE.test(f) && !INSTALLER_RE.test(f) && !NOISE_STEM_RE.test(f.replace(/\.[^.]+$/, '')))
+    if (!declared && scripts.length === 0) continue
+    const pickName = declared ? declared.split('/').pop() : scripts.slice().sort((a, b) => a.length - b.length)[0]
+    // 展示名：有声明入口时用目录名（Certipy/DonPAPI），否则用被选脚本的主部
+    // （PowerSploit/Recon/PowerView.ps1 应显示为 PowerView 而非 Recon）。
+    const stem = declared ? d.name : pickName.replace(/\.[^.]+$/, '')
+    raw.push({
+      name: pickName,
+      path: join(d.dir, declared ? declared.split('/').join(sep) : pickName),
+      stem,
+      dir: d.dir,
+      category: categoryForScanPath(join(d.dir, pickName), root),
+      presetKey: presetKeyForName(stem),
+    })
+  }
+
+  // 同目录 + 同归一主部 → 合并变体
+  const groups = new Map()
+  for (const item of raw) {
+    const key = `${item.dir}\u0000${canonicalStem(item.stem)}`
+    const list = groups.get(key)
+    if (list) list.push(item)
+    else groups.set(key, [item])
+  }
+  const rank = (item) => {
+    const ext = (item.name.match(/\.[^.]+$/) || [''])[0].toLowerCase()
+    return [ext === '.exe' || ext === '.jar' ? 0 : 1, item.stem.length, item.path.length]
+  }
+  const collapsed = []
+  for (const list of groups.values()) {
+    list.sort((a, b) => { const ra = rank(a); const rb = rank(b); return ra[0] - rb[0] || ra[1] - rb[1] || ra[2] - rb[2] })
+    collapsed.push(list[0])
+  }
+  // preset 去重（优先 exe/jar + 短路径）
+  const bestPreset = new Map()
+  for (const item of collapsed) {
+    if (!item.presetKey) continue
+    const prev = bestPreset.get(item.presetKey)
+    if (!prev) { bestPreset.set(item.presetKey, item); continue }
+    const ra = rank(item); const rb = rank(prev)
+    if (ra[0] < rb[0] || (ra[0] === rb[0] && ra[2] < rb[2])) bestPreset.set(item.presetKey, item)
+  }
+  const out = [...bestPreset.values()]
+  const seen = new Set(out.map((i) => `${i.stem.toLowerCase()}\u0000${i.category}`))
+  for (const item of collapsed.slice().sort((a, b) => { const ra = rank(a); const rb = rank(b); return ra[0] - rb[0] || ra[2] - rb[2] })) {
+    if (item.presetKey) continue
+    const key = `${item.stem.toLowerCase()}\u0000${item.category}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(item)
+  }
+  return out.slice(0, maxEntries)
 }
 
 /**
@@ -462,7 +746,12 @@ function buildServerEntry(name, rawUrl, section) {
         enabled: true,
         name: 'burp',
         transport: 'stdio',
-        command: 'node',
+        // Absolute interpreter path: a bare "node" relies on the host process
+        // PATH, which is NOT the interactive shell PATH — when the platform is
+        // launched by absolute path (Start-Process / service / shortcut) PATH
+        // often lacks the node dir and the stdio child dies with
+        // "'node' 不是内部或外部命令". process.execPath is always correct.
+        command: resolveNodeCommand(),
         argsLine: `"${scriptPosix}" --sse-url ${url}`,
         env: {},
         cwd: '',
@@ -727,19 +1016,27 @@ export function apply(ctx, config = {}) {
           }
         }
         if (endpoint === 'catalog/scan') {
-          // 工具库 v2：对给定「工具根目录」全量枚举可导入工具文件，逐项推断分类
-          // 与 preset 归属，供"一键探测导入"预览。无弹窗、可 headless。
+          // 工具库 v2：对给定「工具根目录」做**工具级**枚举（每个工具一项，而非
+          // 每个文件一项）：exe/jar 直接成工具，脚本需与所在目录名匹配，同目录
+          // 变体合并（accesschk/64/64a），preset 去重；分类沿用用户编号分类目录。
           try {
             const raw = (payload && Array.isArray(payload.roots) ? payload.roots : []).filter((r) => typeof r === 'string' && r)
             if (raw.length === 0) return ok({ roots: [], files: [] })
             const MAX = 1500
             const files = []
+            const seenPath = new Set()
             for (const root of raw) {
               if (!existsSync(root)) continue
-              const sink = []
-              collectCandidateFiles(root, sink)
-              for (const c of sink) {
-                files.push({ name: c.name, path: c.full, category: categoryForPath(c.full), presetKey: presetKeyForName(c.name) })
+              for (const item of collectToolEntries(root, MAX)) {
+                if (seenPath.has(item.path)) continue
+                seenPath.add(item.path)
+                files.push({
+                  name: item.name,
+                  path: item.path,
+                  category: item.category,
+                  presetKey: item.presetKey,
+                  tool: item.stem,
+                })
                 if (files.length >= MAX) break
               }
               if (files.length >= MAX) break

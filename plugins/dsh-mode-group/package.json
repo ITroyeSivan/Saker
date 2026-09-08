@@ -2,6 +2,12 @@
   "name": "@dsh-external/dsh-mode-group",
   "version": "1.0.0",
   "description": "DSH web client plugin: grouped agent-preset picker on the new-session screen — the pentest / code-audit security modes are kept as a clear group over host built-ins, viewport-adaptive, with no other surface touched.",
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
   "keywords": [
     "deepseek",
     "deepseek-harness",

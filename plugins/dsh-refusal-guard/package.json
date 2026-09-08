@@ -2,6 +2,12 @@
   "name": "@dsh-external/dsh-refusal-guard",
   "version": "1.0.0",
   "description": "DSH host-plane refusal-repair proximity injection for the five security presets: watches assistant turn text on session/event, detects refusal/moralizing patterns (two-tier: strong phrases full-text + weak keywords head-150, ), and when a hit lands re-injects a one-shot authorized-context reminder as a dynamic systemPrompt context contribution. RuntimeContextProjection dedupes: the reminder lands only when it appears (text change) and disappears after the repaired turn (change back to empty) — steady state costs nothing. Non-security presets resolve no preset id and render nothing.",
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
   "keywords": [
     "deepseek",
     "deepseek-harness",

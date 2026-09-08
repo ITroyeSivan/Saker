@@ -2,6 +2,12 @@
   "name": "@dsh-external/dsh-campaign-memory",
   "version": "1.1.2",
   "description": "Cross-session campaign memory for the pentest / code-audit presets: model-side write/search/get/list/remove tools storing raw content verbatim (credentials may be stored as-is or as pointers to existing local vaults), a marker-tagged per-workspace recall block injected into every assembly, preview-capped retrieval with on-demand full-text fetch, usage-ranked with expiry for detection fingerprints, a loopback web channel, and a per-session tab for browsing, searching and curating memories.",
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
   "keywords": [
     "deepseek",
     "deepseek-harness",

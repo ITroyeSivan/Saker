@@ -2,6 +2,12 @@
   "name": "@dsh-external/dsh-product-subagents",
   "version": "1.1.0",
   "description": "DSH subagent providers for the local claude-code / codex CLIs: registers the host-plane 'claude-code' and 'codex' providers the security presets' tool rows name. The CLIs keep their own model backend config (~/.claude/settings.json env, ~/.codex/config.toml); this plugin only spawns them headless and maps exit to a subagent run.",
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
   "keywords": [
     "deepseek",
     "deepseek-harness",

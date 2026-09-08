@@ -2,6 +2,12 @@
   "name": "@dsh-external/dsh-session-pulse",
   "version": "0.1.0",
   "description": "Session status panel for the pentest / code-audit presets: header progress chip (task-list projection with completion bar), subagent chip with a right-side subagent directory drawer (running/finished groups, click a name to open that subagent session), and a left-center prompt rail listing user prompts with hover preview and click-to-locate on the chat anchor.",
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
   "keywords": [
     "deepseek",
     "deepseek-harness",

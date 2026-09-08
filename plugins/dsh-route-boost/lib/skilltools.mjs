@@ -61,9 +61,43 @@ export function scanSkillDeps(presetId, now = Date.now()) {
 	return deps;
 }
 
-/** command -v 探测（/bin/sh 内建；名非法直接判缺）。 */
-export function checkTool(name, now = Date.now()) {
+/**
+ * 从 sec-config 命名空间解析「已配置工具名」集合（小写键）。
+ *
+ * 为什么需要它：技能依赖检查原本只做 `command -v`，但本平台的工具大多**不在 PATH**
+ * （用户把工具放在 E:\工作\Web Security\Tools\...，由 sec-config 的 entries/roots
+ * 管理，运行时经 DSH_TOOL_* 注入 shell）。只查 PATH 会把已配好的工具一律判为缺失，
+ * 于是信封里出现「0/13 就绪」与同一份 runtime context 里的 sec-config manifest
+ * 「tools: ... dirsearch ... sqlmap」自相矛盾，直接误导模型放弃既有工具。
+ *
+ * 真源与 sec-config 一致：entries[].key 优先，回退 legacy tools 的非空键；
+ * hiddenTools 里的键视为不可用（用户显式隐藏＝不想让模型用它）。
+ */
+export function configuredTools(section) {
+	const out = new Set();
+	if (!section || typeof section !== "object") return out;
+	const hidden = new Set(Array.isArray(section.hiddenTools) ? section.hiddenTools.map((k) => String(k).toLowerCase()) : []);
+	const push = (key) => {
+		const k = String(key || "").toLowerCase();
+		if (k && !hidden.has(k)) out.add(k);
+	};
+	if (Array.isArray(section.entries)) {
+		for (const e of section.entries) {
+			if (e && typeof e.path === "string" && e.path) push(e.key);
+		}
+	}
+	if (section.tools && typeof section.tools === "object") {
+		for (const [k, v] of Object.entries(section.tools)) {
+			if (typeof v === "string" && v) push(k);
+		}
+	}
+	return out;
+}
+
+/** 工具是否可用：先认 sec-config 的显式配置（路径已由 DSH_TOOL_* 注入），再回退 PATH。 */
+export function checkTool(name, now = Date.now(), configured) {
 	if (!TOOL_NAME_RE.test(name)) return false;
+	if (configured instanceof Set && configured.has(name.toLowerCase())) return true;
 	const hit = checkCache.get(name);
 	if (hit && now - hit.at < CHECK_TTL) return hit.ok;
 	let ok = false;
@@ -74,11 +108,12 @@ export function checkTool(name, now = Date.now()) {
 	return ok;
 }
 
-/** 装配期工具面：模式技能依赖的就绪概况；无声明依赖的模式返回 undefined（不占信封）。 */
-export function toolsStatus(presetId, now = Date.now()) {
+/** 装配期工具面：模式技能依赖的就绪概况；无声明依赖的模式返回 undefined（不占信封）。
+ *  `configured` = sec-config 已配置工具键集合（见 configuredTools）。 */
+export function toolsStatus(presetId, now = Date.now(), configured) {
 	const deps = [...scanSkillDeps(presetId, now)].sort();
 	if (deps.length === 0) return undefined;
-	const missing = deps.filter((n) => !checkTool(n, now));
+	const missing = deps.filter((n) => !checkTool(n, now, configured));
 	return { total: deps.length, ok: deps.length - missing.length, missing };
 }
 

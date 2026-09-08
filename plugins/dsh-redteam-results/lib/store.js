@@ -6,6 +6,8 @@
 //   session_meta 表存会话级任务元数据（审计对象/渗透范围、版本、scope）。
 // 测试注入 ":memory:"。
 
+import { mkdirSync } from "node:fs";
+import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 const SEVERITIES = ["critical", "high", "medium", "low"];
@@ -116,6 +118,9 @@ const MIGRATION_COLUMNS = [
 
 /** 打开（或创建）库并预编译语句。dbPath 传 ":memory:" 供测试。 */
 export function openStore(dbPath) {
+	// node:sqlite 不会自动创建父目录——首次运行（~/.dsh/redteam-results 尚不存在）
+	// 会直接抛 "unable to open database file"，这里与 attack-atlas 对齐补齐。
+	if (dbPath !== ":memory:") mkdirSync(path.dirname(dbPath), { recursive: true });
 	const db = new DatabaseSync(dbPath);
 	db.exec("PRAGMA journal_mode = WAL;");
 	db.exec("PRAGMA busy_timeout = 5000;"); // 多进程（两个 dsh web）并发写不直接抛 SQLITE_BUSY

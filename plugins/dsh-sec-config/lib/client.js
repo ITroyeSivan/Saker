@@ -71,7 +71,9 @@ function Group(props) {
 // 点一下即填入。与技能上传一样点选即得、永不弹窗。
 
 // ============ 工具库 v2（目录即库）：默认空 → 选根目录一键探测自动分类导入 ============
-var BASE_CATEGORIES = ['信息收集', '漏洞扫描', '目录与接口', '注入与利用', '令牌与认证', '内网与横向', '其他'];
+// 分类默认沿用操作者工具库的编号目录风格（01-WebShell管理 … 11-报告与模板）；
+// 探测时若根目录下就是这些目录，直接用目录名当分类 id。
+var BASE_CATEGORIES = ['01-WebShell管理', '02-流量抓包与代理', '03-扫描与信息收集', '04-漏洞利用', '05-内网与域渗透', '06-C2与免杀', '07-隧道与代理', '08-钓鱼社工', '09-口令与字典', '10-靶场与情报', '11-报告与模板', '信息收集', '漏洞扫描', '目录与接口', '注入与利用', '令牌与认证', '内网与横向', '其他'];
 var CAT_FALLBACK = '其他';
 
 function sanitizeKey(name) {
@@ -87,9 +89,13 @@ function uniqueKey(baseKey, existing) {
   return cand;
 }
 function catListOf(cfg) {
-  var extras = Array.isArray(cfg && cfg.categories) ? cfg.categories.filter(function (c) { return BASE_CATEGORIES.indexOf(c) < 0; }) : [];
+  var extras = Array.isArray(cfg && cfg.categories) ? cfg.categories : [];
   var all = BASE_CATEGORIES.slice();
-  extras.forEach(function (c) { if (all.indexOf(c) < 0) all.push(c); });
+  // 已导入条目用到的分类（例如用户自己的「01-WebShell管理」）必须出现，
+  // 否则会被 grouped 归到「其他」而看不见。
+  var entries = Array.isArray(cfg && cfg.entries) ? cfg.entries : [];
+  entries.forEach(function (e) { if (e && e.category && all.indexOf(e.category) < 0) all.push(e.category); });
+  extras.forEach(function (c) { if (c && all.indexOf(c) < 0) all.push(c); });
   return all;
 }
 function presetLabelOf(key) {
@@ -113,14 +119,18 @@ function ToolLibrary(props) {
 
   var setRootInput = function (v) { up({ rootInput: v }); };
   var addRoot = function () {
-    var r = S.rootInput.trim();
-    if (!r || roots.indexOf(r) >= 0) { if (r) up({ rootInput: '' }); return; }
-    patchCfg({ roots: roots.concat([r]) });
-    up({ rootInput: '' });
+    try {
+      var r = S.rootInput.trim();
+      if (!r) { up({ msg: '请先输入工具根目录路径' }); return; }
+      if (roots.indexOf(r) >= 0) { up({ rootInput: '', msg: '该目录已在列表中' }); return; }
+      patchCfg({ roots: roots.concat([r]) });
+      up({ rootInput: '', msg: '目录已添加，点「探测并自动导入」开始' });
+    } catch (err) { up({ msg: '添加目录出错：' + String(err && err.message || err) }); }
   };
   var removeRoot = function (r) { patchCfg({ roots: roots.filter(function (x) { return x !== r; }) }); };
 
   var doScan = function () {
+    try {
     if (roots.length === 0) { up({ msg: '请先在上方添加工具根目录（可多个）' }); return; }
     up({ scanning: true, msg: null });
     rpc(props.connection, 'catalog/scan', { roots: roots }).then(function (res) {
@@ -128,10 +138,14 @@ function ToolLibrary(props) {
         up({ scanning: false, msg: '探测失败：' + ((res && res.error && res.error.message) || '未知错误') });
         return;
       }
+      var files = res.value.files;
+      // 默认勾选：只勾「内置预设识别」的项（★），其余留空由用户按需勾选——
+      // 避免「全选导入」把工具库里的辅助脚本/附带二进制一起灌进配置。
       var picks = {};
-      res.value.files.forEach(function (f) { picks[f.path] = true; });
-      up({ scanning: false, preview: { files: res.value.files, picks: picks, catOverride: {} } });
+      files.forEach(function (f) { if (f.presetKey) picks[f.path] = true; });
+      up({ scanning: false, preview: { files: files, picks: picks, catOverride: {} } });
     }).catch(function () { up({ scanning: false, msg: '探测请求失败' }); });
+    } catch (err) { up({ scanning: false, msg: '探测出错：' + String(err && err.message || err) }); }
   };
   var togglePick = function (path) {
     var pv = S.preview;
@@ -144,6 +158,12 @@ function ToolLibrary(props) {
     var co = Object.assign({}, pv.catOverride); co[path] = cat;
     up({ preview: Object.assign({}, pv, { catOverride: co }) });
   };
+  // 扫描结果里的展示名/键名统一取「工具名」（f.tool，已去扩展名），回退文件名。
+  var toolStemOf = function (f) { return (f && f.tool) ? f.tool : String((f && f.name) || '').replace(/\.(exe|py|py3|ps1|jar|bat|cmd|sh|pl)$/i, ''); };
+  var displayNameOf = function (f) {
+    if (f.presetKey) return presetLabelOf(f.presetKey) || f.presetKey;
+    return prettyName(sanitizeKey(toolStemOf(f)) || 'tool');
+  };
   var importSelection = function () {
     var pv = S.preview;
     if (!pv || !pv.files || !pv.files.length) return;
@@ -154,10 +174,9 @@ function ToolLibrary(props) {
       if (!pv.picks[f.path]) return;
       if (existingPaths[f.path]) { dup++; return; }
       var used = Object.keys(existingKeys).concat(added.map(function (a) { return a.key; }));
-      var key = f.presetKey && !existingKeys[f.presetKey] ? f.presetKey : uniqueKey(f.name, used);
-      var name = f.presetKey ? (presetLabelOf(f.presetKey) || f.presetKey) : prettyName(sanitizeKey(f.name).replace(/\.(exe|py|ps1|jar|bat|cmd|sh|pl)$/i, ''));
+      var key = f.presetKey && !existingKeys[f.presetKey] ? f.presetKey : uniqueKey(toolStemOf(f), used);
       existingKeys[key] = true;
-      added.push({ key: key, name: name, path: f.path, category: pv.catOverride[f.path] || f.category || CAT_FALLBACK });
+      added.push({ key: key, name: displayNameOf(f), path: f.path, category: pv.catOverride[f.path] || f.category || CAT_FALLBACK });
     });
     if (added.length === 0) {
       up({ msg: dup > 0 ? '所选均已在库（跳过重复 ' + dup + ' 项）' : '没有勾选可导入的条目' });
@@ -169,8 +188,8 @@ function ToolLibrary(props) {
   var importOne = function (f) {
     if (entries.some(function (e) { return e.path === f.path; })) { up({ msg: '该工具已在库中' }); return; }
     var used = entries.map(function (e) { return e.key; });
-    var key = f.presetKey && used.indexOf(f.presetKey) < 0 ? f.presetKey : uniqueKey(f.name, used);
-    var name = f.presetKey ? (presetLabelOf(f.presetKey) || f.presetKey) : prettyName(sanitizeKey(f.name).replace(/\.(exe|py|ps1|jar|bat|cmd|sh|pl)$/i, ''));
+    var key = f.presetKey && used.indexOf(f.presetKey) < 0 ? f.presetKey : uniqueKey(toolStemOf(f), used);
+    var name = displayNameOf(f);
     patchCfg({ entries: entries.concat([{ key: key, name: name, path: f.path, category: f.category || CAT_FALLBACK }]) });
     var pv = S.preview;
     if (pv) up({ preview: Object.assign({}, pv, { files: pv.files.filter(function (x) { return x.path !== f.path; }) }), msg: '已导入 ' + name });
@@ -210,9 +229,9 @@ function ToolLibrary(props) {
   // 1) 目录格式提示
   children.push(el('div', { key: 'hint', style: { fontSize: 12, lineHeight: 1.7, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', marginBottom: 10, padding: '10px 12px', borderRadius: 8, background: 'var(--dsw-alias-bg-layer-2,#f6f6f7)', border: '1px dashed var(--dsw-alias-border-l1,#d9d9de)' } },
     el('div', { style: { fontWeight: 600, color: 'var(--dsw-alias-label-primary,#1a1a1a)', marginBottom: 4 } }, '推荐的工具目录格式'),
-    el('div', null, '默认工具库为空；添加「工具根目录」（可多个）后一键探测，按目录自动分类导入。推荐结构：'),
+    el('div', null, '默认工具库为空；添加「工具根目录」（可多个）后一键探测，按目录自动分类导入。推荐结构（一个目录 = 一个工具）：'),
     el('code', { style: { background: 'rgba(127,127,127,.12)', padding: '1px 5px', borderRadius: 4 } }, '工具根/05-内网与域渗透/Kerbrute/kerbrute_windows_amd64.exe'),
-    el('div', null, '分类目录名不限，按名称自动归类（内网/漏洞/注入/目录…）。扁平目录也可，导入后逐项改分类；分散在不同位置的工具用「按分类手动导入」。')));
+    el('div', null, '分类取根目录下一级的分类目录名（如 01-WebShell管理、05-内网与域渗透），没有编号目录时按名称线索归类。探测按「工具」而非「文件」收录：exe/jar 各自成项，脚本需与所在目录同名（如 sqlmap/sqlmap.py），仓库内部模块与测试文件自动排除。分散在别处的工具用「按分类手动导入」。')));
   // 2) 根目录编辑 + 探测
   var rootRow = [];
   rootRow.push(el(Input, { key: 'ri', value: S.rootInput, placeholder: '工具根目录，如 E:\\...\\Tools（可添加多个）', onChange: setRootInput }));
@@ -220,35 +239,40 @@ function ToolLibrary(props) {
   rootRow.push(el('button', { key: 'scan', type: 'button', disabled: S.scanning, style: rowBtnStyle({ borderColor: '#2f81f7', color: '#2f81f7' }), onClick: doScan }, S.scanning ? '探测中…' : '探测并自动导入'));
   children.push(el('div', { key: 'roots', style: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: 6 } }, rootRow));
   if (roots.length > 0) {
-    children.push(el('div', { key: 'rootlist', style: Object.assign({}, miniHint, { marginBottom: 8 }) }, '工具根目录：' + roots.map(function (r) {
-      return el('span', { key: r, style: { marginRight: 8 } }, r + el('button', { type: 'button', title: '移出该目录', style: { border: 'none', background: 'transparent', color: '#d1242f', cursor: 'pointer', marginLeft: 2 }, onClick: function () { removeRoot(r); } }, '×'));
+    children.push(el('div', { key: 'rootlist', style: { display: 'flex', flexWrap: 'wrap', gap: 6, margin: '2px 0 8px' } }, roots.map(function (r) {
+      return el('span', { key: r, style: { display: 'inline-flex', alignItems: 'center', gap: 5, maxWidth: '100%', padding: '3px 8px', borderRadius: 999, fontSize: 12, border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: 'var(--dsw-alias-bg-layer-2,#f6f6f7)' } },
+        el('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, r),
+        el('button', { type: 'button', title: '移出该目录', style: { border: 'none', background: 'transparent', color: '#d1242f', cursor: 'pointer', fontSize: 12, padding: 0, flex: '0 0 auto' }, onClick: function () { removeRoot(r); } }, '×'));
     })));
   }
   // 3) 探测预览
   if (S.preview && S.preview.files) {
     var pv = S.preview;
     var prevKids = [];
-    prevKids.push(el('div', { key: 'meta', style: Object.assign({}, miniHint, { marginBottom: 4 }) }, '探测到 ' + pv.files.length + ' 个可导入工具（★=内置预设识别）：'));
-    prevKids.push(el('button', { key: 'all', type: 'button', style: rowBtnStyle(), onClick: function () { var picks = {}; pv.files.forEach(function (f) { picks[f.path] = true; }); up({ preview: Object.assign({}, pv, { picks: picks }) }); } }, '全选'));
+    var pickedCount = Object.keys(pv.picks).length;
+    prevKids.push(el('div', { key: 'meta', style: Object.assign({}, miniHint, { marginBottom: 4 }) }, '探测到 ' + pv.files.length + ' 个工具（★=内置预设已识别，已默认勾选 ' + pickedCount + ' 项）：'));
+    prevKids.push(el('button', { key: 'all', type: 'button', style: rowBtnStyle(), onClick: function () { var picks = {}; pv.files.forEach(function (f) { if (f.presetKey) picks[f.path] = true; }); up({ preview: Object.assign({}, pv, { picks: picks }) }); } }, '全选识别项'));
     prevKids.push(el('button', { key: 'none', type: 'button', style: rowBtnStyle(), onClick: function () { up({ preview: Object.assign({}, pv, { picks: {} }) }); } }, '清空'));
     pv.files.forEach(function (f) {
       prevKids.push(el('div', { key: f.path, style: { display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0', fontSize: 12 } },
         el('input', { type: 'checkbox', checked: !!pv.picks[f.path], onChange: function () { togglePick(f.path); } }),
         el('select', { value: pv.catOverride[f.path] || f.category || CAT_FALLBACK, style: { fontSize: 11, maxWidth: 130 }, onChange: function (e) { setFileCat(f.path, e.target.value); } }, cats.map(function (c) { return el('option', { key: c, value: c }, c); })),
-        el('span', { style: { flex: '0 0 110px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, (f.presetKey ? '★ ' + (presetLabelOf(f.presetKey) || f.presetKey) : f.name)),
-        el('span', { style: { flex: 1, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, f.path),
+        el('span', { style: { flex: '0 0 130px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, (f.presetKey ? '★ ' + (presetLabelOf(f.presetKey) || f.presetKey) : (f.tool || f.name))),
+        el('span', { title: f.path, style: { flex: 1, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, f.path),
         el('button', { type: 'button', style: rowBtnStyle(), onClick: function () { importOne(f); } }, '单导')));
     });
     prevKids.push(el('div', { key: 'go', style: { marginTop: 6 } },
       el('button', { type: 'button', style: rowBtnStyle({ background: '#2f81f7', color: '#fff', borderColor: '#2f81f7' }), onClick: importSelection }, '导入勾选项')));
     children.push(el('div', { key: 'preview', style: { border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', borderRadius: 8, margin: '4px 0 8px', padding: 8, maxHeight: 300, overflow: 'auto' } }, prevKids));
   }
-  // 4) 分类树
-  cats.forEach(function (c) {
+  // 4) 分类树（只渲染「有工具」的分类；空分类在下方「分类管理」里可见可删）
+  var usedCats = cats.filter(function (c) { return (grouped[c] || []).length > 0; });
+  if (usedCats.length === 0) {
+    children.push(el('div', { key: 'emptyall', style: miniHint }, '工具库为空：添加根目录后点「探测并自动导入」，或用下方「按分类手动导入」。'));
+  }
+  usedCats.forEach(function (c) {
     var rows = grouped[c] || [];
-    var kids = rows.length === 0
-      ? [el('div', { key: 'empty', style: miniHint }, '空——可手动导入，或扫描自动归入')]
-      : rows.map(function (e) {
+    var kids = rows.map(function (e) {
           return el('div', { key: e.key, style: { display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0', fontSize: 13 } },
             el('span', { style: { flex: '0 0 150px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, e.name || e.key),
             el('span', { style: { flex: 1, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 } }, e.path),
