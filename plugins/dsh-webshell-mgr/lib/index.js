@@ -38,12 +38,21 @@ const DB_PATH = path.join(BASE_DIR, "webshell.db");
 const WS_SETTINGS_FILE = path.join(BASE_DIR, "settings.json");
 
 // 生成目录（genDir）策略：插件自有 settings.json 持久化（写盘即回，绝不挂 UI）；
-// genDir 为空时探测常用 WebShell 目录候选（存在即直接用——本机 01-WebShell管理/WebShell
-// 放马目录；候选不存在则自动回退默认）。settings 服务仅在可用时尽力同步，不作为持久化主路径。
-const WS_GEN_CANDIDATES = [
-	path.join("E:\\", "工作", "Web Security", "Tools", "01-WebShell管理", "WebShell"),
-	path.join("E:\\", "工作", "Web Security", "Tools", "01-WebShell管理"),
-];
+// genDir 为空时按候选探测（存在即直接用），优先级：
+//   1) 环境变量 DSH_WEBSHELL_DIR（部署侧显式指定，最适合工具库集中管理）
+//   2) 用户主目录下的常见 WebShell 存放位置
+// 候选一律运行时派生，不硬编码任何机器专属路径；全不存在则回退 BASE_DIR。
+function wsGenCandidates() {
+	const out = [];
+	const env = String(process.env.DSH_WEBSHELL_DIR || "").trim();
+	if (env) out.push(path.resolve(env));
+	out.push(
+		path.join(os.homedir(), "WebShell"),
+		path.join(os.homedir(), "webshell"),
+		path.join(os.homedir(), "shells"),
+	);
+	return out;
+}
 let WS_CFG = { genDir: "", templates: {}, selfShells: [] };
 function loadWsCfg() {
 	try {
@@ -121,7 +130,7 @@ function catalogTree() {
 }
 function defaultGenDir() {
 	try {
-		for (const c of WS_GEN_CANDIDATES) {
+		for (const c of wsGenCandidates()) {
 			if (existsSync(c)) return path.resolve(c);
 		}
 	} catch { /* ignore */ }

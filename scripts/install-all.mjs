@@ -21,7 +21,7 @@
 //   SAKER_PROFILE=prod node scripts/install-all.mjs
 //
 import { spawnSync } from 'node:child_process'
-import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, statSync, readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 
@@ -32,6 +32,54 @@ const cli = process.env.DSH_CLI || 'dsh'
 // profile home: honour DSH_HOME like the harness does, else ~/.dsh
 const homeRoot = process.env.DSH_HOME || join(process.env.USERPROFILE || process.env.HOME || '', '.dsh')
 const profilePkgPath = join(homeRoot, 'profiles', profile, 'package.json')
+
+// --- Saker-managed package names (root bundle + every plugin) ----------------
+// Only these are pruned/reconciled below; a user's own third-party profile deps
+// are never touched.
+const rootPkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+const sakerPackages = new Set([rootPkg.name])
+const pluginDirs = []
+for (const name of readdirSync(join(root, 'plugins')).sort()) {
+  const dir = join(root, 'plugins', name)
+  if (!name.startsWith('dsh-') || !statSync(dir).isDirectory()) continue
+  const pkgPath = join(dir, 'package.json')
+  if (!existsSync(pkgPath)) continue
+  pluginDirs.push({ name, dir, pkg: JSON.parse(readFileSync(pkgPath, 'utf8')) })
+  sakerPackages.add(pluginDirs[pluginDirs.length - 1].pkg.name)
+}
+
+/**
+ * Drop Saker-managed `file:` deps whose target tgz no longer exists.
+ *
+ * `dsh plugin add` rewrites the profile's package.json first and only then runs
+ * `pnpm install`. pnpm resolves the WHOLE dependency graph, so one dangling
+ * `file:` spec — e.g. the previous version's tgz was cleaned up after a repack
+ * — makes every subsequent install fail with ENOENT, including the package the
+ * operator is actually trying to upgrade. Pruning the stale entry first keeps
+ * the script idempotent; the package is re-added at its current version below.
+ */
+function pruneDanglingSakerDeps() {
+  if (!existsSync(profilePkgPath)) return []
+  let p
+  try { p = JSON.parse(readFileSync(profilePkgPath, 'utf8')) } catch { return [] }
+  const deps = p.dependencies || {}
+  const bundles = p.dsh && p.dsh.profile && Array.isArray(p.dsh.profile.bundles) ? p.dsh.profile.bundles : null
+  const removed = []
+  for (const [name, spec] of Object.entries(deps)) {
+    if (!sakerPackages.has(name)) continue
+    if (typeof spec !== 'string' || !spec.startsWith('file:')) continue
+    if (existsSync(spec.slice('file:'.length))) continue
+    delete deps[name]
+    removed.push(name)
+    if (bundles) {
+      const i = bundles.indexOf(name)
+      if (i >= 0) bundles.splice(i, 1)
+    }
+  }
+  if (removed.length) writeFileSync(profilePkgPath, JSON.stringify(p, null, 2) + '\n', 'utf8')
+  return removed
+}
+
 // installed: package name -> installed version (read from the profile's node_modules)
 const installed = new Map()
 if (existsSync(profilePkgPath)) {
@@ -104,10 +152,16 @@ function addWithRetry(label, pkgName, spec, version) {
   return false
 }
 
+// 0. reconcile the profile first: drop Saker-managed file: deps whose tgz is
+//    gone, so a repack + version bump cannot poison the whole pnpm resolve.
+const pruned = pruneDanglingSakerDeps()
+if (pruned.length) {
+  console.log(`pruned ${pruned.length} dangling dep(s): ${pruned.join(', ')}`)
+}
+
 // 1. root bundle first (presets + preset-root registration)
 let ok = 0
 let fail = 0
-const rootPkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const rootTgz = join(root, `dsh-saker-${rootPkg.version}.tgz`)
 if (!existsSync(rootTgz)) {
   console.error(`root tgz missing: ${rootTgz}\nrun \`node scripts/pack-all.mjs\` first`)
@@ -117,12 +171,7 @@ if (addWithRetry('root dsh-saker', rootPkg.name, fileSpec(rootTgz), rootPkg.vers
 else fail++
 
 // 2. feature plugins
-for (const name of readdirSync(join(root, 'plugins')).sort()) {
-  const dir = join(root, 'plugins', name)
-  if (!name.startsWith('dsh-') || !statSync(dir).isDirectory()) continue
-  const pkgPath = join(dir, 'package.json')
-  if (!existsSync(pkgPath)) continue
-  const p = JSON.parse(readFileSync(pkgPath, 'utf8'))
+for (const { name, dir, pkg: p } of pluginDirs) {
   const tgz = join(dir, `dsh-external-${name}-${p.version}.tgz`)
   if (!existsSync(tgz)) {
     console.error(`FAIL ${name} :: tgz missing ${tgz}`)

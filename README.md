@@ -11,13 +11,14 @@
 [快速开始](#快速开始) · [看看它能做什么](#看看它能做什么) · [插件清单](#插件清单) · [联系与反馈](#联系与反馈)
 
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek-Harness-111827?style=flat-square)](https://github.com/deepseek-ai/deepseek-harness)
-[![Saker](https://img.shields.io/badge/Saker-v0.2.2-4f46e5?style=flat-square)](https://github.com/ITroyeSivan/Saker)
+[![Saker](https://img.shields.io/badge/Saker-v0.2.3-4f46e5?style=flat-square)](https://github.com/ITroyeSivan/Saker)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.5-339933?style=flat-square&logo=node.js&logoColor=white)](./package.json)
 [![License](https://img.shields.io/badge/code-MIT-2563eb?style=flat-square)](./LICENSE)
 
 </div>
 
 ![Saker 工作台总览](./docs/images/saker-overview.png)
+
 ## Saker 是什么
 
 Saker 是一套安装在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 上的安全测试模式与插件集合。它提供 **渗透测试**、**代码审计** 两种专业模式，并把本机扫描器、MCP 服务、子代理、攻击面台账和漏洞成果串进同一个会话。
@@ -48,28 +49,28 @@ flowchart LR
 两个模式各带独立 persona、playbook 和离线参考资料。安全方法不会一次性塞满上下文，而是按当前任务读取相关内容。
 
 ![Saker 的渗透测试与代码审计模式](./docs/images/modes.png)
+
 ### 攻击面不再靠记忆
 
 AttackAtlas 按目标记录每个攻击面的状态：已测有发现、已测未命中、不适用、预算耗尽或尚未测试。你可以打开格子查看依据，也可以从矩阵继续派发任务。
 
-对于重复使用的测试流程，还可以把主类、子项、工具和 MCP 服务编排成方法模板，检查断链、孤立节点和循环后再运行。
+对于重复使用的测试流程，还可以把主类、子项、工具和 MCP 服务编排成方法模板——内置 26 个方法（侦查 5、利用 14、内网 3、证据 2、报告 2），支持组合、克隆与预览；检查断链、孤立节点和循环后再运行。
 
 ![AttackAtlas 按目标记录安全测试覆盖](./docs/images/attack-atlas.png)
 
 ### 工具归工具，判断归判断
 
-安全配置中心统一管理本机工具路径和服务地址。当前可配置 sqlmap、nuclei、dirsearch、fscan、subfinder、httpx、katana、afrog、ffuf、jwt_tool、nmap；配置页会自动扫描已配工具所在目录，把同目录/同大类的工具路径列成候选，点一下即可填入，也可手动粘贴；模型运行时通过 `DSH_TOOL_<NAME>` 找到你本机的真实工具，未配置时回退到系统 `PATH`。
+安全配置中心统一管理本机工具路径和服务地址。当前可配置 sqlmap、nuclei、dirsearch、fscan、subfinder、httpx、katana、afrog、ffuf、jwt_tool、nmap 等；配置页可指定一个或多个「工具根目录」，一键静默扫描并按分类导入候选，也可手动粘贴单条路径；模型运行时通过 `DSH_TOOL_<NAME>` 找到你本机的真实工具，未配置时回退到系统 `PATH`。
 
 渗透模式提供 nuclei、httpx、ffuf 封装，代码审计模式提供本地 Semgrep 封装。扫描命中先进入待核对记录，不会直接写成已确认漏洞。
 
-MCP Studio 支持 stdio 和 streamable HTTP 服务，可导入常见 MCP JSON、查看连接状态与工具列表、执行握手诊断并查看调用记录。Burp 的 legacy SSE 接入由安全配置插件内置桥接，Yakit 可通过 MCP 地址接入。
+MCP Studio 支持 stdio 和 streamable HTTP 服务，可导入常见 MCP JSON、查看连接状态与工具列表、执行握手诊断并查看调用记录。Burp 的 legacy SSE 接入由安全配置插件内置桥接脚本完成（无需 Java），Yakit 可通过 MCP 地址接入。
 
 ![本机工具配置与 MCP Studio](./docs/images/tool1.png)
 
 ![本机工具配置与 MCP Studio](./docs/images/tool2.png)
 
-
-### 从“可能有问题”到“可以交付”
+### 从"可能有问题"到"可以交付"
 
 Redteam Results 按会话保存发现，区分严重度、验证状态和证据等级。每条记录可以展开查看测试过程、复现内容、证据引用和修复建议，并按当前筛选或勾选项导出 Markdown。
 
@@ -79,10 +80,12 @@ Redteam Results 按会话保存发现，区分严重度、验证状态和证据�
 
 ### 知识库随包，来源清晰可维护
 
-离线资料随包即用：内置 [PayloadsAllTheThings](https://github.com/swisskyrepo/PayloadsAllTheThings) 全量文本快照（66 个漏洞章节的 README 与 payload 清单，commit `3ac2790`，MIT），加上渗透与代码审计两套手册和 Semgrep 规则，都不依赖外网。
+离线资料随包即用：内置 [PayloadsAllTheThings](https://github.com/swisskyrepo/PayloadsAllTheThings) 全量文本快照（68 个漏洞章节的 README 与 payload 清单，commit `3ac2790`，MIT），加上渗透（108 篇）与代码审计（236 篇）两套手册和 Semgrep 规则，都不依赖外网。
 
-“设置 → 知识库”按来源和主题分类展示这些资料：随包 PATT、随包手册、用户积累与导入源各自分组，每个分类带文件数徽章、可折叠展开。关键词检索先定位到文件与行号，再点开读原文；文档可以存放在用户层持续修订，也可以从 Git 仓库或本机文件夹整库导入（离线后仍可检索）。不同来源与许可证在目录内各有声明。
+"设置 → 知识库"按来源和主题分类展示这些资料：随包 PATT、随包手册、用户积累与导入源各自分组，每个分类带文件数徽章、可折叠展开。关键词检索先定位到文件与行号，再点开读原文；文档可以存放在用户层持续修订，也可以从 Git 仓库或本机文件夹整库导入（离线后仍可检索）。不同来源与许可证在目录内各有声明。
+
 ![知识库的分类分组浏览与随包 PATT](./docs/images/knowledge.png)
+
 ## 一次完整任务怎样推进
 
 1. 在新会话选择 `pentest` 或 `code-audit`，写清目标、授权范围和限制。
@@ -102,7 +105,7 @@ Redteam Results 按会话保存发现，区分严重度、验证状态和证据�
 - Node.js `>=22.5`。MCP Studio 要求 `^22.19.0 || >=24.0.0`。
 - 使用扫描器、Semgrep、Burp、Yakit、Claude Code 或 Codex 时，需要自行安装并配置对应程序。
 
-> 当前完整验证环境为 DeepSeek Harness `0.1.3-alpha.1` 内部 Web 版本。公开 npm 线 `@deepseek-ai/dsh@0.1.2-rc.1` 为 CLI-only，不在完整 Web 工作台的验证范围内。
+> 当前完整验证环境为 DeepSeek Harness `0.1.3-alpha.2` 内部 Web 版本。公开 npm 线 `@deepseek-ai/dsh@0.1.2-rc.1` 为 CLI-only，不在完整 Web 工作台的验证范围内。
 
 ### 从源码安装全部组件
 
@@ -110,21 +113,21 @@ Redteam Results 按会话保存发现，区分严重度、验证状态和证据�
 git clone https://github.com/ITroyeSivan/Saker.git
 cd Saker
 
-# 生成根模式包和 20 个插件包
+# 生成根模式包和 21 个插件包
 node scripts/pack-all.mjs
 
-# 按顺序安装到 web profile
+# 按顺序安装到 web profile（自动跳过同版本、升级更高版本）
 node scripts/install-all.mjs
 
 # 重启宿主
 dsh web
 ```
 
-`pack-all.mjs` 需要 `pnpm` 可用。`install-all.mjs` 默认安装到 `web` profile；自定义 profile 时设置 `SAKER_PROFILE`。脚本跳过已安装的同版本包，仓库内包版本更高时自动升级，适合首次安装、补装与升级。
+`pack-all.mjs` 需要 `pnpm` 可用。`install-all.mjs` 默认安装到 `web` profile，可用 `SAKER_PROFILE` 指定其他 profile；`dsh` 不在 PATH 时用 `DSH_CLI` 指向 CLI 入口（例如源码树里的 `apps/cli/lib/bin.js`），`DSH_HOME` 可覆盖配置目录。脚本会跳过已安装的同版本包、自动升级更高版本，并清理因重新打包而失效的旧 `file:` 依赖，可安全重复执行。
 
 启动后：
 
-1. 在“设置 → 安全配置”填写需要使用的本机工具路径与服务地址。
+1. 在"设置 → 安全配置"填写需要使用的本机工具路径与服务地址。
 2. 在 MCP Studio 导入或新增 MCP 服务。
 3. 新建会话，选择 `pentest` 或 `code-audit`。
 
@@ -134,9 +137,9 @@ dsh web
 每个目录都是独立的 dsh bundle。先安装根模式包，再按需要添加插件：
 
 ```powershell
-dsh plugin --profile web add "file:C:/packages/dsh-saker-0.2.2.tgz"
-dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-sec-config-1.0.12.tgz"
-dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-knowledge-hub-0.1.5.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-saker-0.2.3.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-sec-config-1.1.6.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-knowledge-hub-0.1.10.tgz"
 dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-skill-browse-1.1.1.tgz"
 dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-stage-gate-1.5.0.tgz"
 ```
@@ -156,7 +159,7 @@ dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-semgrep-audit-1.
 发布 Release 后，可以直接安装对应 `.tgz`：
 
 ```powershell
-dsh plugin --profile web add "https://github.com/ITroyeSivan/Saker/releases/download/v0.2.2/dsh-saker-0.2.2.tgz"
+dsh plugin --profile web add "https://github.com/ITroyeSivan/Saker/releases/download/v0.2.3/dsh-saker-0.2.3.tgz"
 ```
 
 根包只包含两种模式、共享技能和参考资料。可视化页面、工具连接和治理能力位于独立插件包中，需要按 Release 资产清单分别安装。
@@ -166,7 +169,7 @@ dsh plugin --profile web add "https://github.com/ITroyeSivan/Saker/releases/down
 <details>
 <summary><b>更新与卸载</b></summary>
 
-更新时重新打包并对需要升级的包执行 `dsh plugin add`，然后重启 dsh。`install-all.mjs` 会跳过同版本项，仓库包版本更高时自动升级。
+更新时重新打包并对需要升级的包执行 `dsh plugin add`，然后重启 dsh。`install-all.mjs` 会跳过同版本项、升级更高版本，并先清理指向已删除 tgz 的旧依赖。
 
 ```powershell
 dsh plugin --profile web add "file:C:/packages/dsh-saker-新版本.tgz"
@@ -197,22 +200,23 @@ dsh plugin --profile web remove dsh-saker
 
 ## 插件清单
 
-Saker 当前包含 20 个独立插件。多数用户不需要逐个理解它们；`pack-all` + `install-all` 会完成整套安装。
+Saker 当前包含 21 个独立插件。多数用户不需要逐个理解它们；`pack-all` + `install-all` 会完成整套安装。
 
 | 模块 | 插件 | 做什么 |
 |---|---|---|
 | 界面与配置 | `dsh-mode-group` | 在新会话页集中展示安全模式 |
-| 界面与配置 | `dsh-sec-config` | 管理工具路径、Burp/Yakit、DNSLog 与改密入口（API Key 由「平台设置」统一维护）；工具按分类呈现、支持自动探测候选路径一键填入，可自定义与删除 |
+| 界面与配置 | `dsh-sec-config` | 管理工具路径、Burp/Yakit、DNSLog 与改密入口（API Key 由「平台设置」统一维护）；工具按分类呈现、支持指定根目录自动探测候选一键导入，可自定义与删除 |
 | 界面与配置 | `dsh-mcp-studio` | 管理、诊断和预览 MCP 服务及工具 |
 | 界面与配置 | `dsh-knowledge-hub` | 知识库管理：随包 PATT 与手册、用户积累、Git/本机文件夹导入；按主题分类浏览与检索 |
 | 界面与配置 | `dsh-skill-browse` | 设置页「技能」：列出共享 / 模式专属 / 已安装技能；上传 zip/tgz 安装到 `~/.dsh/skills` 并热载、可卸载用户层技能；一键复制宿主引用串 `/技能名`（模型侧经 `skill` 工具加载，用户侧输入框打 `/` 或直接贴 `/name` 注入正文） |
+| 界面与配置 | `dsh-method-stack` | 设置页「方法编排」：26 个内置测试方法（侦查/利用/内网/证据/报告）可组合、克隆、预览与启用；`/方法名` 注入会话，渲染成方法状态行 |
 | 工具 | `dsh-scanner-tools` | 将 nuclei、httpx、ffuf 封装为模型工具 |
 | 工具 | `dsh-semgrep-audit` | 使用本地 Semgrep 和随包规则集进行代码扫描 |
 | 工具 | `dsh-hunter` | 聚合 FOFA、Hunter、Quake 资产检索 |
-| 工具 | `dsh-webshell-mgr` | 管理已授权环境中的连接、文件和数据库操作 |
+| 工具 | `dsh-webshell-mgr` | 管理已授权环境中的连接、文件和数据库操作；内置 16 种载荷生成形态 |
 | 过程 | `dsh-stage-gate` | 记录目标与意图，检查阶段产物是否齐全 |
 | 过程 | `dsh-sec-enforce` | 在工具执行前约束写入范围、报告门和高风险操作 |
-| 过程 | `dsh-route-boost` | 按当前阶段补充门禁、证据和知识资料指针；信封列出当前模式可引用技能名 |
+| 过程 | `dsh-route-boost` | 按当前阶段补充门禁、证据和知识资料指针；信封列出当前模式可引用技能名与工具就绪度 |
 | 过程 | `dsh-auto-advance` | 子代理返回后，在有限轮次内推进尚未收口的任务；试水消息不触发开工提醒 |
 | 过程 | `dsh-refusal-guard` | 识别异常拒答并触发有记录的纠偏流程 |
 | 记录 | `dsh-redteam-results` | 保存发现、复核状态并导出 Markdown |
@@ -238,9 +242,9 @@ Saker 当前包含 20 个独立插件。多数用户不需要逐个理解它们�
 <details>
 <summary><b>离线资料与第三方规则</b></summary>
 
-- 渗透测试资料索引当前记录 106 篇。
-- 代码审计资料索引当前记录 226 篇 Markdown，并包含自建及第三方 Semgrep 规则。
-- 内置 [PayloadsAllTheThings](https://github.com/swisskyrepo/PayloadsAllTheThings) 全量文本（66 个漏洞章节 README 与 payload 清单，commit `3ac2790`，MIT），随包离线可用；与其余资料一起在「设置 → 知识库」按主题分类浏览、检索。
+- 渗透测试资料索引当前记录 108 篇。
+- 代码审计资料索引当前记录 236 篇 Markdown，并包含自建及第三方 Semgrep 规则。
+- 内置 [PayloadsAllTheThings](https://github.com/swisskyrepo/PayloadsAllTheThings) 全量文本（68 个漏洞章节 README 与 payload 清单，commit `3ac2790`，MIT），随包离线可用；与其余资料一起在「设置 → 知识库」按主题分类浏览、检索。
 - Semgrep OSS 快照、自建规则和其他资料具有不同许可，数量与来源以各目录 README 为准。
 
 Saker 自有代码采用 MIT License；随附第三方资料不自动转为 MIT。再分发前请阅读 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。
@@ -254,9 +258,9 @@ Saker/
 ├── preset/
 │   ├── pentest/            # 渗透测试模式、playbook 与参考资料
 │   └── code-audit/         # 代码审计模式、playbook 与规则集
-├── shared/skills/          # 两种模式共享的协作与复核技能
+├── shared/skills/          # 两种模式共享的协作与复核技能（6 个）
 ├── shared/refs/            # 共享参考资料与随包 PayloadsAllTheThings（MIT）
-├── plugins/                # 20 个独立功能插件
+├── plugins/                # 21 个独立功能插件
 ├── scripts/                # 全量打包与安装脚本
 ├── lib/preset-root.js      # 模式注册入口
 ├── cordis.patch.yml        # bundle 加载配置

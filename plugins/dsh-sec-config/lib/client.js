@@ -234,7 +234,7 @@ function ToolLibrary(props) {
     el('div', null, '分类取根目录下一级的分类目录名（如 01-WebShell管理、05-内网与域渗透），没有编号目录时按名称线索归类。探测按「工具」而非「文件」收录：exe/jar 各自成项，脚本需与所在目录同名（如 sqlmap/sqlmap.py），仓库内部模块与测试文件自动排除。分散在别处的工具用「按分类手动导入」。')));
   // 2) 根目录编辑 + 探测
   var rootRow = [];
-  rootRow.push(el(Input, { key: 'ri', value: S.rootInput, placeholder: '工具根目录，如 E:\\...\\Tools（可添加多个）', onChange: setRootInput }));
+  rootRow.push(el(Input, { key: 'ri', value: S.rootInput, placeholder: '工具根目录，如 D:\\Tools（可添加多个）', onChange: setRootInput }));
   rootRow.push(el('button', { key: 'add', type: 'button', style: rowBtnStyle(), onClick: addRoot }, '添加目录'));
   rootRow.push(el('button', { key: 'scan', type: 'button', disabled: S.scanning, style: rowBtnStyle({ borderColor: '#2f81f7', color: '#2f81f7' }), onClick: doScan }, S.scanning ? '探测中…' : '探测并自动导入'));
   children.push(el('div', { key: 'roots', style: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: 6 } }, rootRow));

@@ -1567,7 +1567,7 @@ function WebShellSettings(props) {
 				h("div", { style: { fontSize: 11, color: "#6e6e73", lineHeight: 1.6, marginBottom: 6 } },
 					"生成/上传落盘目录。默认自动探测你本机的 01-WebShell管理 目录（存在即用）；如需改到别处，在这里填一个绝对路径。"),
 				h("div", { style: { display: "flex", gap: 6, alignItems: "center" } },
-					h("input", { value: dirCfg, onChange: function (e) { setDirCfg(e.target.value); }, placeholder: "绝对路径，如 E:\\WebShell（留空=自动探测）", style: Object.assign({}, wsInput, { flex: 1 }) }),
+					h("input", { value: dirCfg, onChange: function (e) { setDirCfg(e.target.value); }, placeholder: "绝对路径，如 D:\\WebShell（留空=自动探测）", style: Object.assign({}, wsInput, { flex: 1 }) }),
 					h("button", { type: "button", disabled: busy, onClick: saveDir, style: wsBtnPrimary }, busy ? "保存中…" : "保存目录")),
 				msg ? h("div", { style: { fontSize: 12, color: msg.indexOf("失败") >= 0 ? "#d1242f" : "#1a7f37", marginTop: 4 } }, msg) : null) : null),
 		h("div", { style: wsCard },

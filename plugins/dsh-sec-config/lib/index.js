@@ -10,6 +10,7 @@
 // to the "MCP 工作台" for the same source-of-truth data.
 import z from '@deepseek-ai/schemastery'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { basename, dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -76,10 +77,16 @@ const SECRET_FIELDS = new Set(['dnslog.token', 'apiKeys.deepseekKey'])
  * extract command exposed; this list lets the operator drop the JAR (e.g.
  * extracted from the Burp MCP tab "Extract server proxy..." button) at a
  * predictable location and have sec-config wire it up without further config.
+ *
+ * Paths are derived from the user profile / common install roots rather than
+ * any machine-specific absolute path, so a fresh clone works unchanged on
+ * another host. The JAR is optional: the in-package stdio bridge is preferred
+ * and needs no Java runtime at all.
  */
 const BURP_PROXY_DEFAULT_PATHS = [
-  'E:\\工作\\Web Security\\Tools\\02-流量抓包与代理\\BurpSuite_Pro_V2026.4\\mcp-proxy-all.jar',
-  'E:\\工作\\Web Security\\Tools\\02-流量抓包与代理\\mcp-proxy-all.jar',
+  join(homedir(), 'Downloads', 'mcp-proxy-all.jar'),
+  join(homedir(), 'mcp-proxy-all.jar'),
+  join(homedir(), 'burp-mcp', 'mcp-proxy-all.jar'),
 ]
 
 /**
