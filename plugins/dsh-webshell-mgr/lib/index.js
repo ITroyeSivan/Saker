@@ -44,19 +44,20 @@ const WS_GEN_CANDIDATES = [
 	path.join("E:\\", "工作", "Web Security", "Tools", "01-WebShell管理", "WebShell"),
 	path.join("E:\\", "工作", "Web Security", "Tools", "01-WebShell管理"),
 ];
-let WS_CFG = { genDir: "", templates: {} };
+let WS_CFG = { genDir: "", templates: {}, selfShells: [] };
 function loadWsCfg() {
 	try {
 		const j = JSON.parse(readFileSync(WS_SETTINGS_FILE, "utf8"));
 		WS_CFG = {
 			genDir: typeof j.genDir === "string" ? j.genDir : "",
 			templates: j.templates && typeof j.templates === "object" ? j.templates : {},
+			selfShells: Array.isArray(j.selfShells) ? j.selfShells : [],
 		};
-	} catch { WS_CFG = { genDir: "", templates: {} }; }
+	} catch { WS_CFG = { genDir: "", templates: {}, selfShells: [] }; }
 	return WS_CFG;
 }
 function saveWsCfg() {
-	try { mkdirSync(BASE_DIR, { recursive: true }); writeFileSync(WS_SETTINGS_FILE, JSON.stringify({ genDir: WS_CFG.genDir || "", templates: WS_CFG.templates || {} }, null, 2), "utf8"); } catch { /* 磁盘异常仅降级 */ }
+	try { mkdirSync(BASE_DIR, { recursive: true }); writeFileSync(WS_SETTINGS_FILE, JSON.stringify({ genDir: WS_CFG.genDir || "", templates: WS_CFG.templates || {}, selfShells: WS_CFG.selfShells || [] }, null, 2), "utf8"); } catch { /* 磁盘异常仅降级 */ }
 }
 /** 形态模板默认：显式 raw 字段优先；模板非空次之；其余交给 generate 随机/默认。 */
 function genWithTpl(kind, raw) {
@@ -902,6 +903,52 @@ function registerSettingsLayer(ctx, web) {
 			if (endpoint === "tpl-set") {
 				const r = genCore("tpl-set", p);
 				return { ok: true, value: r };
+			}
+			// ── 自有 webshell 库（上传/管理） ──
+			if (endpoint === "self-add") {
+				const name = String(p.name ?? "").trim().slice(0, 60) || "self-shell";
+				const lang = String(p.lang ?? "").trim().slice(0, 20) || "PHP";
+				const obf = String(p.obf ?? "").trim().slice(0, 40) || "自定义";
+				const password = String(p.password ?? "");
+				const fileName = String(p.fileName ?? "").replace(/[\\/]/g, "");
+				const b64 = String(p.dataBase64 ?? "");
+				if (!fileName || !b64) return { ok: false, error: "缺少文件内容" };
+				if (b64.length > 3 * 1024 * 1024) return { ok: false, error: "文件过大（≤3MB）" };
+				const buf = Buffer.from(b64, "base64");
+				const safe = ("self-" + Date.now().toString(36) + "-" + fileName.replace(/[^\w.-]+/g, "_")).slice(0, 80);
+				const dir = genBase();
+				mkdirSync(dir, { recursive: true });
+				const abs = path.join(dir, safe);
+				try { writeFileSync(abs, buf); } catch (e) { return { ok: false, error: "写入失败：" + (e && e.message) }; }
+				WS_CFG.selfShells = WS_CFG.selfShells || [];
+				const row = { id: "self-" + Date.now().toString(36), name, lang, obf, file: safe, password, createdAt: new Date().toISOString() };
+				WS_CFG.selfShells.push(row);
+				saveWsCfg();
+				logOp(theStore(), "", "self.add", `${name} @ ${safe}`);
+				return { ok: true, value: row };
+			}
+			if (endpoint === "self-list") return { ok: true, value: { shells: WS_CFG.selfShells || [] } };
+			if (endpoint === "self-update") {
+				const id = String(p.id ?? "");
+				const s = (WS_CFG.selfShells || []).find((x) => x.id === id);
+				if (!s) return { ok: false, error: "不存在" };
+				if (typeof p.password === "string") s.password = p.password;
+				if (typeof p.lang === "string" && p.lang.trim()) s.lang = p.lang.trim().slice(0, 20);
+				if (typeof p.obf === "string" && p.obf.trim()) s.obf = p.obf.trim().slice(0, 40);
+				saveWsCfg();
+				return { ok: true, value: s };
+			}
+			if (endpoint === "self-remove") {
+				const id = String(p.id ?? "");
+				const before = (WS_CFG.selfShells || []).length;
+				WS_CFG.selfShells = (WS_CFG.selfShells || []).filter((x) => x.id !== id);
+				if (WS_CFG.selfShells.length === before) return { ok: false, error: "不存在" };
+				saveWsCfg();
+				return { ok: true };
+			}
+			if (endpoint === "conn-list-plain") {
+				// 设置页管理用：返回连接含明文口令（自用 UI）；模型 manifest 仍走脱敏版
+				return { ok: true, value: { connections: listConns(theStore()).map((c) => ({ ...publicConn(c), password: c.password || "" })) } };
 			}
 			return { ok: false, error: "unknown endpoint " + endpoint };
 		}, { authority: "loopback" });

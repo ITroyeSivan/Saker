@@ -1328,7 +1328,112 @@ var REDTEAM_MANAGER_UI_NAMESPACE = "redteam-manager-ui";
 function wsRpc(connection, endpoint, payload) {
 	return connection.rpc.call("/dsh-webshell-mgr-rpc", endpoint, payload);
 }
-// 形态参数编辑弹窗
+// ===== WebShell 设置页（资产管理器）===== 自 v1.1.0 起整块替换旧实现
+var wsCard = { border: "1px solid var(--dsw-alias-border-l1,#e4e4e7)", borderRadius: 10, padding: "12px 14px", marginBottom: 12, background: "var(--dsw-alias-bg-base,#fff)" };
+var wsTitle = { fontSize: 13, fontWeight: 700, margin: "0 0 2px" };
+var wsHint = { fontSize: 11, color: "#6e6e73", marginBottom: 8, lineHeight: 1.6 };
+var wsInput = { padding: "5px 8px", borderRadius: 6, border: "1px solid var(--dsw-alias-border-l1,#d9d9de)", fontSize: 12, boxSizing: "border-box" };
+var wsBtn = { padding: "5px 12px", borderRadius: 6, fontSize: 12, cursor: "pointer", border: "1px solid #d9d9de", background: "#fff", color: "#1a1a1a" };
+var wsBtnPrimary = { padding: "5px 14px", borderRadius: 6, fontSize: 12, cursor: "pointer", border: "1px solid #2f81f7", background: "#2f81f7", color: "#fff" };
+var wsMono = { fontFamily: "ui-monospace, Consolas, monospace" };
+var wsGroupTitle = { fontSize: 11, fontWeight: 700, color: "#4a5568", background: "var(--dsw-alias-bg-layer-2,#f3f4f6)", padding: "3px 8px", borderRadius: 6, margin: "8px 0 4px" };
+
+function copyText(t) {
+	if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(t).then(function () { return true; }, function () { return false; });
+	try { var ta = document.createElement("textarea"); ta.value = t; ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.select(); var ok = document.execCommand("copy"); document.body.removeChild(ta); return Promise.resolve(ok); } catch (e) { return Promise.resolve(false); }
+}
+function CopyBtn(props) {
+	var [s, setS] = useState("idle");
+	function go() {
+		copyText(props.text).then(function (ok) {
+			setS(ok ? "done" : "fail");
+			setTimeout(function () { setS("idle"); }, 1500);
+		});
+	}
+	var label = s === "done" ? "已复制" : s === "fail" ? "失败" : "复制";
+	return h("button", { type: "button", title: "复制：" + props.text, onClick: go, style: { padding: "2px 8px", borderRadius: 5, fontSize: 11, border: "1px solid #d9d9de", background: s === "done" ? "#dafbe1" : "#fff", color: s === "done" ? "#1a7f37" : "#4a5568", cursor: "pointer" } }, label);
+}
+function PasswordCell(props) {
+	var [editing, setEditing] = useState(false);
+	var [val, setVal] = useState(props.value || "");
+	function save() {
+		props.onChange(val);
+		setEditing(false);
+	}
+	if (editing) {
+		return h("span", { style: { display: "inline-flex", gap: 4, alignItems: "center" } },
+			h("input", { value: val, onChange: function (e) { setVal(e.target.value); }, style: Object.assign({}, wsInput, { width: 130 }), placeholder: "新口令" }),
+			h("button", { type: "button", onClick: save, style: { padding: "2px 8px", borderRadius: 5, fontSize: 11, border: "1px solid #2f81f7", background: "#2f81f7", color: "#fff", cursor: "pointer" } }, "存"),
+			h("button", { type: "button", onClick: function () { setEditing(false); }, style: { padding: "2px 6px", fontSize: 11, cursor: "pointer", border: "none", background: "transparent", color: "#6e6e73" } }, "✕"));
+	}
+	return h("span", { style: { display: "inline-flex", gap: 6, alignItems: "center" } },
+		h("code", { style: Object.assign({}, wsMono, { background: "#f6f6f7", borderRadius: 5, padding: "1px 6px", fontSize: 12, color: "#b45309" }) }, val || "（无口令）"),
+		val ? h(CopyBtn, { text: val }) : null,
+		props.editable ? h("button", { type: "button", title: "修改口令", onClick: function () { setEditing(true); }, style: { padding: "2px 6px", fontSize: 11, cursor: "pointer", border: "none", background: "transparent", color: "#2f81f7" } }, "改密") : null);
+}
+
+function SelfShellRow(props) {
+	var sh = props.sh;
+	var obfChip = { fontSize: 10, padding: "1px 7px", borderRadius: 999, background: "#fef3c7", color: "#92400e", fontWeight: 600, marginRight: 6, whiteSpace: "nowrap" };
+	return h("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "4px 0", borderBottom: "1px solid #f0f0f2", flexWrap: "wrap" } },
+		h("code", { style: Object.assign({}, wsMono, { fontWeight: 600, fontSize: 12, minWidth: 150 }) }, sh.name),
+		h("span", { style: { fontSize: 11, color: "#4a5568" } }, sh.file),
+		h("span", { style: obfChip }, (sh.lang || "?") + " · " + (sh.obf || "自定义")),
+		h("div", { style: { flex: 1 } }),
+		h(PasswordCell, { value: sh.password, editable: true, onChange: function (v) { props.onChangePassword(sh.id, v); } }),
+		h("button", { type: "button", title: "删除该马", onClick: function () { props.onRemove(sh.id); }, style: { padding: "2px 8px", fontSize: 11, cursor: "pointer", border: "1px solid #fca5a5", background: "#fff", color: "#d1242f", borderRadius: 5 } }, "删除"));
+}
+function SelfShellsCard(props) {
+	var [name, setName] = useState("");
+	var [lang, setLang] = useState("");
+	var [obf, setObf] = useState("");
+	var [password, setPassword] = useState("");
+	var [file, setFile] = useState(null);
+	var [busy, setBusy] = useState(false);
+	var [msg, setMsg] = useState("");
+	var fileRef = React.useRef(null);
+	var shells = props.shells || [];
+	function upload() {
+		if (!file) { setMsg("请先选择要上传的 webshell 文件"); return; }
+		var reader = new FileReader();
+		reader.onload = function () {
+			var b64 = String(reader.result).split(",")[1] || "";
+			setBusy(true); setMsg("");
+			wsRpc(props.connection, "self-add", { name: name.trim() || file.name, lang: lang.trim() || "其他", obf: obf.trim() || "自定义", password: password, fileName: file.name, dataBase64: b64 }).then(function (r) {
+				setBusy(false);
+				if (r && r.ok) { setName(""); setObf(""); setPassword(""); setFile(null); if (fileRef.current) fileRef.current.value = ""; props.onChanged(); }
+				else setMsg((r && r.error) || "上传失败");
+			}).catch(function (e) { setBusy(false); setMsg(String(e && e.message || e)); });
+		};
+		reader.readAsDataURL(file);
+	}
+	// 按 语言 → 绕过形式 分组
+	var groups = [];
+	shells.forEach(function (s) {
+		var k = (s.lang || "其他") + "\u0000" + (s.obf || "自定义");
+		var g = groups.find(function (x) { return x.k === k; });
+		if (!g) { g = { k: k, lang: s.lang || "其他", obf: s.obf || "自定义", items: [] }; groups.push(g); }
+		g.items.push(s);
+	});
+	return h("div", { style: wsCard },
+		h("div", { style: wsTitle }, "我的 webshell（上传与管理）"),
+		h("div", { style: wsHint }, "上传你自己/第三方 webshell 文件入库（可含冰蝎、哥斯拉等自定义马），按 语言 → 绕过形式 归类；连接密码明文显示在此（仅本机管理页），模型侧始终脱敏。文件落盘于生成目录。" ),
+		h("div", { style: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 8 } },
+			h("input", { ref: fileRef, type: "file", accept: ".php,.jsp,.aspx,.asp,.jspx,.war,.py,.pl,.cgi,.aspx.cs", onChange: function (e) { setFile(e.target.files && e.target.files[0] || null); }, style: { flex: "1 1 180px", fontSize: 12 } }),
+			h("input", { value: name, onChange: function (e) { setName(e.target.value); }, placeholder: "备注名（默认取文件名）", style: Object.assign({}, wsInput, { flex: "1 1 140px" }) }),
+			h("input", { value: lang, onChange: function (e) { setLang(e.target.value); }, placeholder: "语言：PHP/JSP/ASPX/ASP…", style: Object.assign({}, wsInput, { flex: "0 0 130px" }) }),
+			h("input", { value: obf, onChange: function (e) { setObf(e.target.value); }, placeholder: "绕过形式：自定义（可新分类）", style: Object.assign({}, wsInput, { flex: "0 0 150px" }) }),
+			h("input", { value: password, onChange: function (e) { setPassword(e.target.value); }, placeholder: "连接密码（可后改）", style: Object.assign({}, wsInput, { flex: "0 0 120px" }) }),
+			h("button", { type: "button", disabled: busy, onClick: upload, style: wsBtnPrimary }, busy ? "上传中…" : "上传入库")),
+		msg ? h("div", { style: { fontSize: 12, color: "#d1242f", marginBottom: 6 } }, msg) : null,
+		shells.length === 0 ? h("div", { style: { fontSize: 12, color: "#9a9aa0" } }, "还没有上传的 webshell——上传后在此管理。") :
+			groups.map(function (g) {
+				return h("div", { key: g.k },
+					h("div", { style: wsGroupTitle }, g.lang + " / " + g.obf),
+					g.items.map(function (s) { return h(SelfShellRow, { key: s.id, sh: s, onChangePassword: props.onChangePassword, onRemove: props.onRemove }); }));
+			}));
+}
+
 function TplEditor(props) {
 	var [form, setForm] = useState({});
 	useEffect(function () {
@@ -1353,9 +1458,9 @@ function TplEditor(props) {
 				h("input", { value: form[f.key] || "", onChange: function (e) { set(f.key, e.target.value); }, placeholder: f.hint + "（留空=默认）", style: { width: "100%", boxSizing: "border-box", marginTop: 2, padding: "5px 8px", borderRadius: 6, border: "1px solid #d9d9de", fontSize: 12 } }));
 		});
 	var btnRow = h("div", { style: { display: "flex", gap: 8, marginTop: 8 } },
-		h("button", { type: "button", onClick: save, style: { padding: "5px 14px", borderRadius: 6, border: "1px solid #2f81f7", background: "#2f81f7", color: "#fff", fontSize: 12, cursor: "pointer" } }, "保存模板"),
-		h("button", { type: "button", onClick: props.onClose, style: { padding: "5px 14px", borderRadius: 6, border: "1px solid #d9d9de", background: "#fff", fontSize: 12, cursor: "pointer" } }, "关闭"));
-	var card = h("div", { style: { width: 480, maxWidth: "92vw", background: "#fff", borderRadius: 10, padding: 14, border: "1px solid #e4e4e7", maxHeight: "80vh", overflow: "auto" } },
+		h("button", { type: "button", onClick: save, style: wsBtnPrimary }, "保存模板"),
+		h("button", { type: "button", onClick: props.onClose, style: wsBtn }, "关闭"));
+	var card = h("div", { style: { width: 480, maxWidth: "92vw", background: "#fff", borderRadius: 12, padding: 16, border: "1px solid #e4e4e7", maxHeight: "82vh", overflow: "auto", boxShadow: "0 10px 30px rgba(0,0,0,0.16)" } },
 		h("div", { style: { fontSize: 14, fontWeight: 700, marginBottom: 2 } }, "形态模板：", props.item.kind),
 		h("div", { style: { fontSize: 12, color: "#6e6e73", marginBottom: 10 } }, props.item.label),
 		rows, btnRow);
@@ -1365,65 +1470,66 @@ function TplEditor(props) {
 function WebShellSettings(props) {
 	var [genDir, setGenDir] = useState("");
 	var [effective, setEffective] = useState("");
-	var [conns, setConns] = useState(null);
+	var [conns, setConns] = useState([]);
 	var [langs, setLangs] = useState([]);
+	var [shells, setShells] = useState([]);
 	var [openLang, setOpenLang] = useState({});
 	var [editing, setEditing] = useState(null);
-	var [msg, setMsg] = useState("");
 	var [busy, setBusy] = useState(false);
+	var [msg, setMsg] = useState("");
 	function load() {
 		wsRpc(props.connection, "settings-get", {}).then(function (r) { if (r && r.ok) { setGenDir(r.value.genDir || ""); setEffective(r.value.effective || ""); } });
 		wsRpc(props.connection, "manifest-preview", {}).then(function (r) {
-			if (r && r.ok) {
-				setEffective(r.value.genDir || "");
-				setConns(r.value.connections || 0);
-				if (r.value.langs) setLangs(r.value.langs);
-			}
+			if (r && r.ok) { setEffective(r.value.genDir || ""); if (r.value.langs) setLangs(r.value.langs); }
 		});
+		wsRpc(props.connection, "self-list", {}).then(function (r) { if (r && r.ok) setShells(r.value.shells || []); });
+		wsRpc(props.connection, "conn-list-plain", {}).then(function (r) { if (r && r.ok) setConns(r.value.connections || []); });
 	}
 	useEffect(load, []);
-	function save() {
+	function saveDir() {
 		setBusy(true); setMsg("");
 		wsRpc(props.connection, "settings-set", { genDir: genDir.trim() }).then(function (r) {
 			setBusy(false);
-			if (r && r.ok) {
-				setEffective(r.value.effective || "");
-				setMsg(r.value.effective ? "已保存，生效目录：" + r.value.effective : "已保存（使用默认目录）");
-				setTimeout(function () { setMsg(""); }, 3000);
-			} else setMsg((r && r.error) || "保存失败");
+			if (r && r.ok) { setEffective(r.value.effective || ""); setMsg(r.value.effective ? "已保存，生效目录：" + r.value.effective : "已保存（默认目录）"); setTimeout(function () { setMsg(""); }, 2800); }
+			else setMsg((r && r.error) || "保存失败");
 		}).catch(function (e) { setBusy(false); setMsg(String(e && e.message || e)); });
 	}
-	var box = { border: "1px solid var(--dsw-alias-border-l1,#e4e4e7)", borderRadius: 8, padding: 10, marginBottom: 10, background: "var(--dsw-alias-bg-base,#fff)" };
-	return h("div", { style: { maxWidth: 820 } },
-		h("div", { style: { fontSize: 14, fontWeight: 700, margin: "0 0 4px" } }, "WebShell"),
-		h("div", { style: { fontSize: 12, color: "#6e6e73", lineHeight: 1.7, marginBottom: 8 } },
-			"管理本地 webshell：生成目录、按 语言 → 绕过形式 分类的马模板库（连接口令等参数可自定义）。" +
-			"连接/执行/文件/数据库操作与会话侧「webshell 管理」共用同一套形态；模型每轮实时看到本页信息。"),
-		h("div", { style: box },
-			h("div", { style: { fontWeight: 700, fontSize: 13, marginBottom: 4 } }, "生成目录（genDir）"),
-			effective ? h("div", { style: { fontSize: 12, color: "#1a7f37", marginBottom: 4 } }, "当前生效目录：" + effective) : null,
-			h("div", { style: { display: "flex", gap: 6, alignItems: "center" } },
-				h("input", { value: genDir, onChange: function (e) { setGenDir(e.target.value); }, placeholder: "留空=自动探测本机 WebShell 放马目录（存在即用）", style: { flex: 1, padding: "5px 8px", borderRadius: 6, border: "1px solid var(--dsw-alias-border-l1,#d9d9de)", fontSize: 12 } }),
-				h("button", { type: "button", onClick: save, disabled: busy, style: { padding: "5px 12px", borderRadius: 6, fontSize: 12, cursor: "pointer", border: "1px solid #2f81f7", background: "#2f81f7", color: "#fff" } }, busy ? "保存中…" : "保存")),
-			msg ? h("div", { style: { fontSize: 12, color: "#1a7f37", marginTop: 4 } }, msg) : null),
-		h("div", { style: box },
-			h("div", { style: { fontWeight: 700, fontSize: 13, marginBottom: 2 } }, "马模板库"),
-			h("div", { style: { fontSize: 11, color: "#6e6e73", marginBottom: 6 } },
-				"一级按语言（PHP/JSP/ASPX/ASP），二级按绕过形式分类；每形态可自定义连接口令与参数（保存后生成马/模型提示均采用）。"),
+	function changePassword(id, password) {
+		wsRpc(props.connection, "self-update", { id: id, password: password }).then(function () { load(); });
+	}
+	function removeShell(id) {
+		if (!window.confirm("确认删除该上传的 webshell？（文件保留在目录，仅移出库）")) return;
+		wsRpc(props.connection, "self-remove", { id: id }).then(function () { load(); });
+	}
+	return h("div", { style: { maxWidth: 860 } },
+		h("div", { style: { fontSize: 15, fontWeight: 700, margin: "0 0 2px" } }, "WebShell"),
+		h("div", { style: { fontSize: 12, color: "#6e6e73", lineHeight: 1.7, marginBottom: 10 } },
+			"内置马库 + 自有马库一体化管理：内置按 语言 → 绕过形式 分类可直接生成；上传的马自定语言/绕过形式（可新建分类）。模型每轮实时知情（含脱敏连接与生成目录）。"),
+		h("div", { style: wsCard },
+			h("div", { style: wsTitle }, "生成目录"),
+			h("div", { style: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" } },
+				h("input", { value: genDir, onChange: function (e) { setGenDir(e.target.value); }, placeholder: "留空=自动探测本机 WebShell 放马目录", style: Object.assign({}, wsInput, { flex: 1, minWidth: 220 }) }),
+				h("button", { type: "button", onClick: saveDir, disabled: busy, style: wsBtnPrimary }, busy ? "保存中…" : "保存")),
+			effective ? h("div", { style: { fontSize: 12, color: "#1a7f37", marginTop: 6 } }, "当前生效目录：" + effective) : null,
+			msg ? h("div", { style: { fontSize: 12, color: msg.indexOf("失败") >= 0 ? "#d1242f" : "#1a7f37", marginTop: 4 } }, msg) : null),
+		h(SelfShellsCard, { connection: props.connection, shells: shells, onChangePassword: changePassword, onRemove: removeShell, onChanged: load }),
+		h("div", { style: wsCard },
+			h("div", { style: wsTitle }, "内置马模板库"),
+			h("div", { style: wsHint }, "内置 16 种可生成形态，按 语言 → 绕过形式 组织；每形态可自定义连接口令/参数（保存后 webshell_generate 与模型采用）。"),
 			langs.length === 0 ? h("div", { style: { fontSize: 12, color: "#9a9aa0" } }, "加载中…") :
 				langs.map(function (lg) {
 					var open = openLang[lg.lang] !== false;
 					var customized = lg.items.filter(function (i) { return i.customized; }).length;
-					return h("div", { key: lg.lang, style: { marginBottom: 6 } },
+					return h("div", { key: lg.lang, style: { marginBottom: 4 } },
 						h("div", { style: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", padding: "4px 0", fontWeight: 700, fontSize: 13 }, onClick: function () { var n = JSON.parse(JSON.stringify(openLang)); n[lg.lang] = !open; setOpenLang(n); } },
 							h("span", null, (open ? "▾" : "▸") + " " + lg.label),
 							h("span", { style: { fontSize: 11, color: "#6e6e73", fontWeight: 400 } }, lg.items.length + " 形态" + (customized ? " · 已自定义 " + customized : ""))),
 						open ? (lg.groups || []).map(function (grp) {
-							return h("div", { key: grp.obf, style: { margin: "4px 0 2px" } },
-								h("div", { style: { fontSize: 11, fontWeight: 700, color: "#6e6e73", padding: "2px 0" } }, grp.label),
+							return h("div", { key: grp.obf },
+								h("div", { style: wsGroupTitle }, grp.label),
 								grp.items.map(function (it) {
-									return h("div", { key: it.kind, style: { display: "flex", alignItems: "center", gap: 6, padding: "3px 0", borderBottom: "1px solid #f0f0f2" } },
-										h("div", { style: { flex: "0 0 150px", fontSize: 12, fontWeight: 600, fontFamily: "ui-monospace, Consolas, monospace" } }, it.kind),
+									return h("div", { key: it.kind, style: { display: "flex", alignItems: "center", gap: 6, padding: "3px 0 3px 8px", borderBottom: "1px solid #f0f0f2" } },
+										h("div", { style: Object.assign({ flex: "0 0 150px", fontSize: 12, fontWeight: 600 }, wsMono) }, it.kind),
 										h("div", { style: { flex: 1, fontSize: 11, color: "#4a4a4f" } }, it.label),
 										it.customized ? h("span", { style: { fontSize: 10, padding: "1px 6px", borderRadius: 999, background: "#dafbe1", color: "#1a7f37", fontWeight: 600 } }, "已自定义") : null,
 										h("button", { type: "button", onClick: function () { setEditing(it); }, style: { padding: "3px 10px", borderRadius: 6, fontSize: 11, border: "1px solid #d9d9de", background: "#fff", cursor: "pointer" } }, "参数/口令"));
@@ -1431,11 +1537,16 @@ function WebShellSettings(props) {
 						}) : null);
 				}),
 			h(TplEditor, { connection: props.connection, item: editing, open: !!editing, onClose: function () { setEditing(null); }, onSaved: function () { setEditing(null); load(); } })),
-		h("div", { style: box },
-			h("div", { style: { fontWeight: 700, fontSize: 13, marginBottom: 4 } }, "已登记连接"),
-			conns === null ? h("div", { style: { fontSize: 12, color: "#9a9aa0" } }, "加载中…") :
-				conns === 0 ? h("div", { style: { fontSize: 12, color: "#9a9aa0" } }, "暂无已登记连接——在会话侧「webshell 管理」用 webshell_connect 登记。") :
-					h("div", { style: { fontSize: 12, color: "#6e6e73" } }, "共 " + conns + " 个连接（模型每轮实时可见；完整管理见会话 tab）。")));
+		h("div", { style: wsCard },
+			h("div", { style: wsTitle }, "已登记连接"),
+			h("div", { style: wsHint }, "会话侧「webshell 管理」通过 webshell_connect 登记的连接（本机管理页显示明文口令；模型侧脱敏）。"),
+			conns.length === 0 ? h("div", { style: { fontSize: 12, color: "#9a9aa0" } }, "暂无已登记连接。") :
+				conns.map(function (c) {
+					return h("div", { key: c.id, style: { display: "flex", alignItems: "center", gap: 8, padding: "4px 0", borderBottom: "1px solid #f0f0f2", flexWrap: "wrap" } },
+						h("code", { style: Object.assign({}, wsMono, { fontWeight: 600, fontSize: 12, minWidth: 120 }) }, c.name || c.host || c.url),
+						h("span", { style: { fontSize: 11, color: "#6e6e73", flex: 1, minWidth: 140 } }, String(c.url || "").slice(0, 60) + (c.protocol ? " · " + c.protocol : "")),
+						h(PasswordCell, { value: c.password || "", editable: false }));
+				})));
 }
 
 function injectVisibleConversationView(ctx, field, register) {
