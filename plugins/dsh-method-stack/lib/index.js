@@ -11,6 +11,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
 import z from '@deepseek-ai/schemastery'
 
 export const name = 'dsh-method-stack'
@@ -135,19 +136,53 @@ function currentProfile(presetId) {
   return def
 }
 
-/** 把 active（group/id 数组）渲染成按目录实际存在过滤后的正文拼装。 */
+/** 把 active（group/id 数组）渲染成按目录实际存在过滤后的正文拼装（按组分节，避免标题堆叠）。 */
 function renderActive(presetId) {
   const profile = currentProfile(presetId)
   const catalog = fullCatalog()
-  const byId = new Map()
-  for (const g of catalog) for (const m of g.methods) byId.set(`${g.group}/${m.id}`, { group: g.group, m })
-  const activeIds = (profile.active || []).filter((key) => byId.has(key))
-  const parts = []
-  for (const key of activeIds) {
-    const { group, m } = byId.get(key)
-    parts.push(`### [${group}] ${m.id}${m.origin === 'user' ? '（用户版）' : ''}\n${m.prompt}`)
+  const byGroup = new Map()
+  for (const g of catalog) {
+    for (const m of g.methods) byGroup.set(`${g.group}/${m.id}`, { group: g.group, m })
   }
-  return { rev: profile.rev || 1, active: activeIds, text: parts.join('\n\n'), count: activeIds.length }
+  const activeIds = (profile.active || []).filter((key) => byGroup.has(key))
+  const groupOrder = []
+  for (const key of activeIds) { const grp = key.split('/')[0]; if (!groupOrder.includes(grp)) groupOrder.push(grp) }
+  const groupSeq = new Map(groupOrder.map((g, i) => [g, i + 1]))
+  const parts = []
+  let seq = 0
+  for (const g of groupOrder) {
+    const rows = []
+    for (const key of activeIds) {
+      if (key.split('/')[0] !== g) continue
+      const { m } = byGroup.get(key)
+      seq += 1
+      rows.push(`【方法 ${seq}】${m.id}${m.origin === 'user' ? '（用户版）' : ''}（PATT 关联见正文）\n${m.prompt}`)
+    }
+    parts.push(`▍模块 ${groupSeq.get(g)}/${groupOrder.length} · ${g}\n${rows.join('\n\n')}`)
+  }
+  const text = parts.length ? `<saker-methods mode="${presetId}" rev="${profile.rev || 1}" count="${activeIds.length}">\n下面是本次启用的一组测试方法（每个含 目的→步骤→证据→纪律；按方法编号执行，方法之间按目标与证据自然衔接）：\n${parts.join('\n\n')}\n</saker-methods>` : ''
+  return { rev: profile.rev || 1, active: activeIds, text, count: activeIds.length }
+}
+
+/** 用户"开场"（显示于官方 persona 之前）：~/.dsh/method-stack/opening/<preset>.md */
+function openingDir() { return path.join(HOME_ROOT, 'opening') }
+function openingText(presetId) {
+  try { return fs.readFileSync(path.join(openingDir(), `${presetId}.md`), 'utf8').trim() } catch { return '' }
+}
+/** 官方开场来源：preset 包 agent.cordis.yml 中 persona 行段原文（透明展示用）。 */
+function officialOpeningOf(presetId) {
+  try {
+    const req = createRequire(import.meta.url)
+    const pkgRoot = path.dirname(req.resolve('dsh-saker/package.json'))
+    const file = path.join(pkgRoot, 'preset', presetId, 'agent.cordis.yml')
+    if (!fs.existsSync(file)) return { sourcePath: file, excerpt: '' }
+    const raw = fs.readFileSync(file, 'utf8')
+    const start = raw.indexOf('id: persona')
+    if (start < 0) return { sourcePath: file, excerpt: '' }
+    const next = raw.indexOf('\n- id:', start + 5)
+    const seg = (next < 0 ? raw.slice(start) : raw.slice(start, next)).slice(0, 1500)
+    return { sourcePath: file, excerpt: seg }
+  } catch { return { sourcePath: '', excerpt: '' } }
 }
 
 function audit(presetId, action, detail) {
@@ -247,6 +282,26 @@ export function apply(ctx, config = {}) {
         const rendered = renderActive(presetId)
         return ok({ count: rendered.count, chars: rendered.text.length, rev: rendered.rev })
       }
+      if (endpoint === 'opening-get') {
+        const presetId = typeof p.presetId === 'string' && p.presetId ? p.presetId : 'pentest'
+        return ok({ presetId, text: openingText(presetId) })
+      }
+      if (endpoint === 'opening-save') {
+        const presetId = typeof p.presetId === 'string' && p.presetId ? p.presetId : 'pentest'
+        const text = typeof p.text === 'string' ? p.text.trim() : ''
+        fs.mkdirSync(openingDir(), { recursive: true })
+        if (!text) {
+          try { fs.rmSync(path.join(openingDir(), `${presetId}.md`), { force: true }) } catch { /* ignore */ }
+        } else {
+          fs.writeFileSync(path.join(openingDir(), `${presetId}.md`), text, 'utf8')
+        }
+        audit('user', 'opening-save', presetId + (text ? ` (${text.length} chars)` : ' (cleared)'))
+        return ok({ presetId, saved: true })
+      }
+      if (endpoint === 'opening-official') {
+        const presetId = typeof p.presetId === 'string' && p.presetId ? p.presetId : 'pentest'
+        return ok(officialOpeningOf(presetId))
+      }
       if (endpoint === 'save-prompt') {
         // 保存方法正文（透明编辑）：若用户层不存在则先自动克隆官方，再写 prompt.md。
         const group = typeof p.group === 'string' ? p.group : ''
@@ -285,8 +340,7 @@ export function apply(ctx, config = {}) {
           try { presetId = ctx.agentPresets.composedPreset(agent.ctx) } catch { /* ignore */ }
           if (!presetId) return ''
           const rendered = renderActive(presetId)
-          if (rendered.count === 0 || !rendered.text) return ''
-          return `<saker-methods mode="${presetId}" rev="${rendered.rev}" count="${rendered.count}">\n${rendered.text}\n</saker-methods>`
+          return rendered.text // renderActive 已带 <saker-methods> 标签与分节
         },
       })
     } catch (error) {
@@ -294,6 +348,28 @@ export function apply(ctx, config = {}) {
     }
   } else {
     ctx.logger?.warn?.('dsh-method-stack: systemPrompt unavailable, method injection disabled')
+  }
+
+  // 3) 用户"开场"：order -50（官方 persona order=0 之前）注册 section；
+  //    有 ~/.dsh/method-stack/opening/<preset>.md 时注入，让"开头"可自定义。
+  if (systemPrompt && typeof systemPrompt.section === 'function') {
+    try {
+      systemPrompt.section({
+        name: 'saker-opening',
+        order: -50,
+        text: (assembly) => {
+          const agent = assembly?.agent
+          if (!agent) return ''
+          let presetId = ''
+          try { presetId = ctx.agentPresets.composedPreset(agent.ctx) } catch { /* ignore */ }
+          if (!presetId) return ''
+          const text = openingText(presetId)
+          return text ? `<user-opening mode="${presetId}">${text}</user-opening>` : ''
+        },
+      })
+    } catch (error) {
+      ctx.logger?.warn?.('dsh-method-stack: saker-opening section registration failed: %s', String(error))
+    }
   }
   console.log('[method-stack] apply done')
 }
