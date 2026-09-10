@@ -108,7 +108,8 @@ function ensureBundles() {
   return added
 }
 
-// installed: package name -> installed version (read from the profile's node_modules)const installed = new Map()
+// installed: package name -> installed version (read from the profile's node_modules)
+const installed = new Map()
 if (existsSync(profilePkgPath)) {
   try {
     const p = JSON.parse(readFileSync(profilePkgPath, 'utf8'))
