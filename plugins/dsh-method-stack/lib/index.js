@@ -53,7 +53,10 @@ function builtinGroups() {
   return out
 }
 
-/** 用户层方法：整组镜像用户自己的 group 目录（仅含官方也存在的 id，避免孤儿）。 */
+/** 用户层方法：用户 group 目录下的全部条目。
+ *  与官方同名 → 覆盖（origin:'user'，官方版不受影响，restore 可还原）；
+ *  官方没有 → 新增（origin:'custom'，restore 即删除）。
+ *  目录名即 id，先过 ID_RE 防路径穿越；无官方同名同样必须落在官方已有的组内。 */
 function userGroupsFor() {
   const out = []
   for (const g of builtinGroups()) {
@@ -64,11 +67,10 @@ function userGroupsFor() {
     const users = []
     for (const e of entries) {
       if (!e.isDirectory()) continue
-      const official = byId.get(e.name)
-      if (!official) continue
+      if (!ID_RE.test(e.name)) continue
       const man = readManifest(path.join(dir, e.name, 'manifest.yml'))
       const md = readText(path.join(dir, e.name, 'prompt.md'))
-      if (man && md) users.push({ id: e.name, ...man, prompt: md, origin: 'user' })
+      if (man && md) users.push({ id: e.name, ...man, prompt: md, origin: byId.has(e.name) ? 'user' : 'custom' })
     }
     if (users.length > 0) out.push({ group: g.group, methods: users })
   }
@@ -156,11 +158,12 @@ function renderActive(presetId) {
       if (key.split('/')[0] !== g) continue
       const { m } = byGroup.get(key)
       seq += 1
-      rows.push(`【方法 ${seq}】${m.id}${m.origin === 'user' ? '（用户版）' : ''}（PATT 关联见正文）\n${m.prompt}`)
+      const tag = m.origin === 'user' ? '（用户版）' : m.origin === 'custom' ? '（自定义）' : ''
+      rows.push(`【方法 ${seq}】${m.id}${tag}（PATT 关联见正文）\n${m.prompt}`)
     }
     parts.push(`▍模块 ${groupSeq.get(g)}/${groupOrder.length} · ${g}\n${rows.join('\n\n')}`)
   }
-  const text = parts.length ? `<saker-methods mode="${presetId}" rev="${profile.rev || 1}" count="${activeIds.length}">\n下面是本次启用的一组测试方法（每个含 目的→步骤→证据→纪律；按方法编号执行，方法之间按目标与证据自然衔接）：\n${parts.join('\n\n')}\n</saker-methods>` : ''
+  const text = parts.length ? `<saker-methods mode="${presetId}" rev="${profile.rev || 1}" count="${activeIds.length}">\n下面是本次启用的一组测试方法（每个含 目的→步骤→证据；按方法编号执行，方法之间按目标与证据自然衔接）：\n${parts.join('\n\n')}\n</saker-methods>` : ''
   return { rev: profile.rev || 1, active: activeIds, text, count: activeIds.length }
 }
 
