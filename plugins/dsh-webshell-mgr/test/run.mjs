@@ -305,6 +305,41 @@ await ok("store：连接 CRUD + 档案 + op_log", () => {
 
 //#endregion
 
+//#region 4b. 库列举同源（界面侧 self-list == 模型侧 webshell_library_list）
+
+// 回归锁：曾出现「目录里 17 个马，模型 webshell_library_list 报自有马 0 个」——
+// 模型工具只读已登记元数据，而界面走目录扫描，两者不同源。这里锁定：目录里的
+// 马（含从未在设置页登记过的）必须对模型可见，且噪音文件不进库。
+import { listLibraryShells, findLibraryShell } from "../lib/index.js";
+
+await ok("库列举同源：目录里的马对模型可见（含未登记）+ 噪音过滤 + 语言归类", () => {
+	const dir = mkdtempSync(join(tmpdir(), "wsm-lib-"));
+	writeFileSync(join(dir, "php_eval.php"), "<?php @eval($_POST['x']);?>");
+	writeFileSync(join(dir, "jsp_cmd.jsp"), "<% out.print(1); %>");
+	writeFileSync(join(dir, "aspx_antsword.aspx"), "<%@ Page %>");
+	writeFileSync(join(dir, "readme.md"), "# 说明");
+	writeFileSync(join(dir, "notes.md"), "随手记");
+	writeFileSync(join(dir, "nmap.exe"), "MZ");
+	writeFileSync(join(dir, "half.php.part"), "partial");
+	const lib = listLibraryShells(dir);
+	const files = lib.shells.map((s) => s.file).sort();
+	const expect = ["aspx_antsword.aspx", "jsp_cmd.jsp", "php_eval.php"];
+	if (files.join(",") !== expect.join(",")) throw new Error(`库内条目=${files.join(",")} 期望=${expect.join(",")}`);
+	if (lib.dir !== dir) throw new Error("dir 未被 override 尊重：" + lib.dir);
+	if (!lib.shells.every((s) => s.registered === false)) throw new Error("目录条目应为未登记");
+	if (!lib.shells.every((s) => s.obf === "（未登记）")) throw new Error("未登记条目绕过形式应标注");
+	const byFile = Object.fromEntries(lib.shells.map((s) => [s.file, s.lang]));
+	if (byFile["php_eval.php"] !== "PHP" || byFile["jsp_cmd.jsp"] !== "JSP" || byFile["aspx_antsword.aspx"] !== "ASPX") {
+		throw new Error("语言归类错误：" + JSON.stringify(byFile));
+	}
+	// 按 name / file 两种键都要能定位（模型只会拿到 name 或 file）
+	if (findLibraryShell("jsp_cmd", dir)?.file !== "jsp_cmd.jsp") throw new Error("按 name 定位失败");
+	if (findLibraryShell("jsp_cmd.jsp", dir)?.file !== "jsp_cmd.jsp") throw new Error("按 file 定位失败");
+	if (findLibraryShell("readme", dir) !== null) throw new Error("噪音文件不应能被读取");
+});
+
+//#endregion
+
 //#region 5. 生成器
 
 import { GEN_KINDS, makeAndSave, generate } from "../lib/generators.js";

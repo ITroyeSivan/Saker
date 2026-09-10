@@ -231,7 +231,13 @@ function ToolLibrary(props) {
     el('div', { style: { fontWeight: 600, color: 'var(--dsw-alias-label-primary,#1a1a1a)', marginBottom: 4 } }, '推荐的工具目录格式'),
     el('div', null, '默认工具库为空；添加「工具根目录」（可多个）后一键探测，按目录自动分类导入。推荐结构（一个目录 = 一个工具）：'),
     el('code', { style: { background: 'rgba(127,127,127,.12)', padding: '1px 5px', borderRadius: 4 } }, '工具根/05-内网与域渗透/Kerbrute/kerbrute_windows_amd64.exe'),
-    el('div', null, '分类取根目录下一级的分类目录名（如 01-WebShell管理、05-内网与域渗透），没有编号目录时按名称线索归类。探测按「工具」而非「文件」收录：exe/jar 各自成项，脚本需与所在目录同名（如 sqlmap/sqlmap.py），仓库内部模块与测试文件自动排除。分散在别处的工具用「按分类手动导入」。')));
+    el('div', null, '分类取根目录下一级的分类目录名（如 01-WebShell管理、05-内网与域渗透），没有编号目录时按名称线索归类。探测按「工具」而非「文件」收录：exe/jar 各自成项，脚本需与所在目录同名（如 sqlmap/sqlmap.py），仓库内部模块与测试文件自动排除。分散在别处的工具用「按分类手动导入」。'),
+    el('div', { style: { marginTop: 6, paddingTop: 6, borderTop: '1px dashed var(--dsw-alias-border-l1,#d9d9de)' } },
+      el('span', { style: { fontWeight: 600, color: 'var(--dsw-alias-label-primary,#1a1a1a)' } }, '探测不到某个工具？先看这里：'),
+      el('div', null, '① 只有安装包的情况很常见（典型如 Nmap：官网只发 nmap-7.99-setup.exe）。安装包不被当作工具收录——探测器会跳过 '),
+      el('code', { style: { background: 'rgba(127,127,127,.12)', padding: '1px 5px', borderRadius: 4 } }, '*-setup.exe / *.msi / *.zip / *.7z / *.tar*'),
+      el('div', null, '② 想免安装使用：把解压/安装后的真实可执行文件放到工具根目录下的任意分类目录里（如 03-扫描与信息收集/Nmap/nmap.exe），再点「探测并自动导入」即可识别。'),
+      el('div', null, '③ 已装但不在 PATH、也不想放进工具根目录：用下面的「按分类手动导入」直接填绝对路径，或把该目录加进系统 PATH。'))));
   // 2) 根目录编辑 + 探测
   var rootRow = [];
   rootRow.push(el(Input, { key: 'ri', value: S.rootInput, placeholder: '工具根目录，如 D:\\Tools（可添加多个）', onChange: setRootInput }));

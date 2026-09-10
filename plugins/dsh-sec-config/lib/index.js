@@ -748,8 +748,12 @@ function findToolCandidates(section) {
       hits.push(c.full)
       if (hits.length >= SCAN_MAX_HITS) break
     }
-    // 排序：短路径优先（更接近工具根）；同长度按字母序稳定
-    hits.sort((a, b) => a.length - b.length || (a < b ? -1 : 1))
+    // 排序：先「可执行体名 == 工具 key」（nmap 目录里的 nmap.exe 必须排在
+    // ncat.exe / ndiff.py / nping.exe 之前，否则操作者在候选里挑错东西），
+    // 再短路径优先（更接近工具根），最后按字母序稳定。
+    const stemOf = (p) => String(p).replace(/[\\/]/g, '/').split('/').pop().toLowerCase().replace(/\.[^.]+$/, '')
+    const want = t.key.toLowerCase()
+    hits.sort((a, b) => (stemOf(a) === want ? 0 : 1) - (stemOf(b) === want ? 0 : 1) || a.length - b.length || (a < b ? -1 : 1))
     candidates[t.key] = hits.slice(0, 8)
   }
   return { roots, candidates }

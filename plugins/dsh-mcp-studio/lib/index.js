@@ -223,9 +223,17 @@ function createStatusHandler(section, viewOf, tracker, executions) {
     });
   };
 }
-function registerStudioRpc(ctx, connection, settings, ns, status, diagnose, clearExecutions) {
+function registerStudioRpc(ctx, connection, settings, ns, status, diagnose, clearExecutions, debug) {
   connection.register(ctx, STUDIO_CHANNEL, async (endpoint, rawPayload) => {
     if (endpoint === "status") return status();
+    // 只读诊断面：把「徽章为什么是这个状态」的依据摊开——工具视图是否拿到、
+    // 全局视图里有没有 mcp__ 前缀的工具、每个 server 的挂载备注（mounting /
+    // mounted / error）。徽章本身只反映「工具可见性」，排障时必须能看到中间量，
+    // 否则「诊断能连上、界面显示不可达」这类分歧无从定位。
+    if (endpoint === "debug") {
+      if (debug === void 0) return badRequest("debug unavailable");
+      return ok(debug());
+    }
     if (endpoint === "executions/clear") {
       if (clearExecutions === void 0) return badRequest("execution log unavailable");
       clearExecutions();
@@ -480,6 +488,50 @@ function apply(ctx, config) {
       if (!mounts.has(server.id)) tracker.states.delete(server.id);
     }
   };
+
+  // ── 自愈看门狗：已挂载但一个工具都没贡献 → 强制重挂（指数退避，封顶 5 分钟）──
+  //
+  // 为什么必须有：挂载只在 apply 时与「配置签名变化」时触发一次。操作者的典型时序是
+  // **先起 dsh、后起 Burp/Yakit**——此时首次连接注定失败，而 reconcile 不会因服务
+  // 后来上线而重试；`note.state` 停在 "mounted"，状态页却因「无可见工具」显示
+  // 「不可达」，且界面的「立即挂载」在配置未变时是空操作（签名相同 → 不重建挂载），
+  // 于是永久卡在不可达，只能重启宿主。实测踩到：服务早已可用，界面一直红。
+  // 这里以「工具可见性」为准做判定——它才是真正对模型有意义的事实。
+  const retryBackoff = new Map(); // serverId -> { attempts, nextAt }
+  const WATCHDOG_MS = 15000;
+  const watchdogTick = () => {
+    if (!alive) return;
+    // 已被删除/停用的 server 一并清掉重试记录，别让账留在表里。
+    for (const id of [...retryBackoff.keys()]) {
+      if (!current().servers.some((s) => s.id === id && s.enabled)) retryBackoff.delete(id);
+    }
+    let view;
+    try { view = ctx.get("tools")?.view?.(void 0); } catch { view = void 0; }
+    const visible = view !== void 0 && view.visible instanceof Map ? view.visible : void 0;
+    const now = Date.now();
+    let forced = false;
+    for (const server of current().servers) {
+      if (!server.enabled || !mounts.has(server.id)) continue;
+      const prefix = `mcp__${server.name}__`;
+      let count = 0;
+      if (visible !== void 0) for (const toolName of visible.keys()) if (toolName.startsWith(prefix)) count += 1;
+      if (count > 0) { retryBackoff.delete(server.id); continue; }
+      const state = retryBackoff.get(server.id) ?? { attempts: 0, nextAt: 0 };
+      if (now < state.nextAt) continue;
+      state.attempts += 1;
+      state.nextAt = now + Math.min(WATCHDOG_MS * 2 ** (state.attempts - 1), 300000);
+      retryBackoff.set(server.id, state);
+      ctx.logger.info('mcp-studio: "%s" 已挂载但无可见工具，第 %d 次重挂（%dms 后重试）', server.name, state.attempts, state.nextAt - now);
+      try { mounts.get(server.id)?.dispose(); } catch { /* 已释放则忽略 */ }
+      mounts.delete(server.id);
+      tracker.states.delete(server.id);
+      forced = true;
+    }
+    if (forced) reconcile();
+  };
+  const watchdog = setInterval(watchdogTick, WATCHDOG_MS);
+  ctx.effect(() => () => clearInterval(watchdog), "mcp-studio: watchdog");
+
   ctx.effect(() => () => {
     alive = false;
     for (const mount of mounts.values()) {
@@ -568,7 +620,26 @@ function apply(ctx, config) {
       const report = await diagnoseServer(server);
       return { ok: true, value: report };
     };
-    registerStudioRpc(ctx, connection, settings, STUDIO_SETTINGS_NAMESPACE, status, diagnose, () => executions.clear());
+    const debug = () => {
+      const toolsSvc = ctx.get("tools");
+      let view;
+      try { view = toolsSvc?.view?.(void 0); } catch { view = "threw"; }
+      const names = view && view !== "threw" && view.visible instanceof Map ? [...view.visible.keys()] : null;
+      return {
+        hasToolsService: Boolean(toolsSvc),
+        hasViewMethod: typeof toolsSvc?.view === "function",
+        viewKind: view === void 0 ? "undefined" : view === "threw" ? "threw" : typeof view,
+        globalViewSize: names === null ? null : names.length,
+        mcpPrefixed: names === null ? null : names.filter((n) => n.startsWith("mcp__")).slice(0, 12),
+        sampleNames: names === null ? null : names.slice(0, 12),
+        notes: [...tracker.states.entries()].map(([id, note]) => ({ id, ...note })),
+        // 自愈重试状态：attempts=0 表示该服务工具可见（看门狗不会碰它）。
+        retry: [...retryBackoff.entries()].map(([id, s]) => ({ id, attempts: s.attempts, nextInMs: Math.max(0, s.nextAt - Date.now()) })),
+        mountedIds: [...mounts.keys()],
+        servers: current().servers.map((s) => ({ id: s.id, name: s.name, enabled: s.enabled, transport: s.transport }))
+      };
+    };
+    registerStudioRpc(ctx, connection, settings, STUDIO_SETTINGS_NAMESPACE, status, diagnose, () => executions.clear(), debug);
   });
   reconcile();
 }

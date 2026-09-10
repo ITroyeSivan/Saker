@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-sec-config",
-  "version": "1.1.9",
+  "version": "1.1.10",
   "description": "DSH security platform configuration: local tool paths, service endpoints (Burp/Yakit), DNSLog, API keys, and password change — one settings section with a loopback RPC and shellEnv injection for agent tool discovery.",
   "type": "module",
   "main": "./lib/index.js",

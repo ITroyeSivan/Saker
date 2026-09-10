@@ -189,6 +189,56 @@ function genBase() {
 	if (d) return path.resolve(d);
 	return (defaultGenDir() || BASE_DIR);
 }
+
+/** 「目录即库」的唯一真源：扫描 genBase() 内的马文件，与已登记元数据合并。
+ *
+ *  为什么必须收敛成一处：设置页走 `self-list` RPC 读的是目录扫描结果（界面上能看到
+ *  「目录内（未登记）」条目），而模型工具 `webshell_library_list` 原先只读
+ *  `WS_CFG.selfShells` 元数据。两者不同源时，手工拷进目录的马**界面看得见、模型报
+ *  0 个**——实测踩到：目录里 17 个马，模型回复「自有马 0 个」。列举逻辑不许再各写一份。 */
+const LIB_SHELL_EXTS = [".php", ".jsp", ".jspx", ".jspa", ".aspx", ".asp", ".asmx", ".ashx", ".py", ".cgi", ".war", ".txt.php"];
+function guessShellLang(name) {
+	const l = String(name).toLowerCase();
+	if (l.includes(".jsp")) return "JSP";
+	if (l.includes(".aspx") || l.includes(".asmx") || l.includes(".ashx")) return "ASPX";
+	if (l.includes(".asp")) return "ASP";
+	if (l.includes(".py") || l.includes(".cgi")) return "其他";
+	return "PHP";
+}
+function listLibraryShells(dirOverride) {
+	// dirOverride 仅供测试传入固定目录；生产路径一律走 genBase() 的探测结果。
+	const dir = dirOverride ? path.resolve(dirOverride) : genBase();
+	const recByFile = new Map((WS_CFG.selfShells || []).map((x) => [x.file, x]));
+	const shells = [];
+	let entries = [];
+	try { entries = readdirSync(dir, { withFileTypes: true }); } catch { entries = []; }
+	for (const e of entries) {
+		if (!e.isFile()) continue;
+		const lower = e.name.toLowerCase();
+		if (lower === "readme.md") continue;
+		if (lower.endsWith(".part") || lower.endsWith(".md")) continue;
+		if (!LIB_SHELL_EXTS.some((ex) => lower.endsWith(ex))) continue;
+		const rec = recByFile.get(e.name);
+		shells.push({
+			id: rec ? rec.id : "dir-" + e.name,
+			name: rec ? rec.name : e.name.replace(/\.(php|jsp|jspx|jspa|aspx|asp|asmx|ashx|py|cgi|war)$/i, ""),
+			lang: (rec && rec.lang) || guessShellLang(e.name),
+			obf: (rec && rec.obf) || "（未登记）",
+			file: e.name,
+			password: (rec && rec.password) || "",
+			registered: !!rec,
+		});
+	}
+	shells.sort((a, b) => a.file.localeCompare(b.file));
+	return { dir, shells };
+}
+
+/** 按 name / file / id 在库里定位一个马（含未登记的目录条目）。 */
+function findLibraryShell(key, dirOverride) {
+	const k = String(key ?? "");
+	if (!k) return null;
+	return listLibraryShells(dirOverride).shells.find((s) => s.name === k || s.file === k || s.id === k) || null;
+}
 loadWsCfg(); // 模块加载即读入自有配置（tools 端点可能在 settings 层就绪前被调用）
 const MAX_BODY = 8 * 1024 * 1024;
 const MAX_READ = 4 * 1024 * 1024;
@@ -900,15 +950,16 @@ function registerTools(ctx) {
 	}));
 	ctx.tools.register(defineTool({
 		name: "webshell_library_list",
-		description: "列出本机 webshell 库：可生成的内置形态（kind，用 webshell_generate 生成）与你/团队上传的自有马（name/file/lang/绕过形式）。口令不在此返回（用设置页查看）。",
+		description: "列出本机 webshell 库：可生成的内置形态（kind，用 webshell_generate 生成）与库目录里的自有马（name/file/lang/绕过形式，含只有文件、未在设置页登记过的条目）。口令不在此返回（用设置页查看）。",
 		parameters: {},
 		output: { schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } }, render: (_a, v) => [{ type: "text", text: v.ok
-			? `内置形态 ${Object.keys(GEN_KINDS).length} 种（${Object.keys(GEN_KINDS).join("/")}）\n自有马 ${(WS_CFG.selfShells || []).length} 个：` + ((WS_CFG.selfShells || []).map((s) => `${s.name} (${s.lang} / ${s.obf}) file=${s.file}`).join("\n") || "（无）")
+			? `库目录：${v.dir}\n内置形态 ${v.kinds.length} 种（${v.kinds.join("/")}）\n自有马 ${v.shells.length} 个：` + (v.shells.map((s) => `${s.name} (${s.lang} / ${s.obf}) file=${s.file}${s.registered ? "" : " [未登记]"}${s.password ? " 口令已设" : ""}`).join("\n") || "（无）")
 			: `查询失败：${v.error}` }] },
 		execute(_args, exec) {
 			const g = modeGuard(ctx, exec);
 			if (!g.ok) return Promise.resolve({ ok: false, error: g.error });
-			return Promise.resolve({ ok: true, shells: WS_CFG.selfShells || [], kinds: Object.keys(GEN_KINDS), dir: genBase() });
+			const lib = listLibraryShells();
+			return Promise.resolve({ ok: true, shells: lib.shells, kinds: Object.keys(GEN_KINDS), dir: lib.dir });
 		}
 	}));
 
@@ -923,7 +974,8 @@ function registerTools(ctx) {
 			const g = modeGuard(ctx, exec);
 			if (!g.ok) return Promise.resolve({ ok: false, error: g.error });
 			const key = String((args && args.name) ?? "");
-			const s = (WS_CFG.selfShells || []).find((x) => x.name === key || x.file === key);
+			// 走统一列举（含未登记的目录条目），否则手工放进目录的马读不到。
+			const s = findLibraryShell(key);
 			if (!s) return Promise.resolve({ ok: false, error: `库中不存在 ${key}（先用 webshell_library_list 查看）` });
 			try {
 				const content = readFileSync(path.join(genBase(), s.file), "utf8");
@@ -1032,34 +1084,8 @@ function registerSettingsLayer(ctx, web) {
 				return { ok: true, value: row };
 			}
 			if (endpoint === "self-list") {
-				// 目录即库：列出 genBase() 内马文件（含手工放入的），merge 已登记元数据
-				const exts = new Set([".php", ".jsp", ".jspx", ".jspa", ".aspx", ".asp", ".asmx", ".ashx", ".py", ".cgi", ".war", ".txt.php"]);
-				const recByFile = new Map((WS_CFG.selfShells || []).map((x) => [x.file, x]));
-				const shells = [];
-				let entries = [];
-				try { entries = readdirSync(genBase(), { withFileTypes: true }); } catch { entries = []; }
-				for (const e of entries) {
-					if (!e.isFile()) continue;
-					const lower = e.name.toLowerCase();
-					if (lower === "readme.md") continue;
-					if (lower.endsWith(".part") || lower.endsWith(".md")) continue;
-					const okExt = [...exts].some((ex) => lower.endsWith(ex) || lower.endsWith(ex.replace(/^\./, "") + ".exe"));
-					const isShell = okExt || lower.endsWith(".jsp") || lower.endsWith(".php") || lower.endsWith(".aspx") || lower.endsWith(".asp") || lower.endsWith(".py") || lower.endsWith(".cgi");
-					if (!isShell) continue;
-					const rec = recByFile.get(e.name);
-					const guessLang = (n) => { const l = n.toLowerCase(); if (l.includes(".jsp")) return "JSP"; if (l.includes(".aspx") || l.includes(".asmx") || l.includes(".ashx")) return "ASPX"; if (l.includes(".asp")) return "ASP"; if (l.includes(".py") || l.includes(".cgi")) return "其他"; return "PHP"; };
-					shells.push({
-						id: rec ? rec.id : "dir-" + e.name,
-						name: rec ? rec.name : e.name.replace(/\.(php|jsp|jspx|aspx|asp|asmx|ashx|py|cgi|war)$/i, ""),
-						lang: (rec && rec.lang) || guessLang(e.name),
-						obf: (rec && rec.obf) || "（未登记）",
-						file: e.name,
-						password: (rec && rec.password) || "",
-						registered: !!rec,
-					});
-				}
-				shells.sort((a, b) => a.file.localeCompare(b.file));
-				return { ok: true, value: { dir: genBase(), shells } };
+				// 目录即库：与模型侧 webshell_library_list 走同一实现（listLibraryShells）
+				return { ok: true, value: listLibraryShells() };
 			}
 			if (endpoint === "self-update") {
 				// id 或 file 匹配；未登记的 file 首次更新=自动登记（用户改口令/分类即入库）
@@ -1166,4 +1192,4 @@ function apply(ctx) {
 	registerTools(ctx);
 }
 
-export { apply, inject, name, ROUTE_PATH, DB_PATH, BASE_DIR, ALLOWED_MODES, isTrustedRequest };
+export { apply, inject, name, ROUTE_PATH, DB_PATH, BASE_DIR, ALLOWED_MODES, isTrustedRequest, listLibraryShells, findLibraryShell };
