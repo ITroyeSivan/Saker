@@ -22,7 +22,7 @@ import { randomBytes } from 'node:crypto'
 import z from '@deepseek-ai/schemastery'
 
 export const name = 'dsh-skill-browse'
-export const inject = ['connection']
+export const inject = ['connection', 'webServer']
 
 const CHANNEL = '/dsh-skill-browse'
 

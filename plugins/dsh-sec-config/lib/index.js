@@ -15,7 +15,7 @@ import { basename, dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const name = 'dsh-sec-config'
-export const inject = ['connection', 'settings', 'shellEnv', 'systemPrompt']
+export const inject = ['connection', 'settings', 'shellEnv', 'systemPrompt', 'webServer']
 
 const NAMESPACE = 'sec-config'
 const CHANNEL = '/dsh-sec-config'

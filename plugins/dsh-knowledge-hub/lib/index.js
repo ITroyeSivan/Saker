@@ -21,7 +21,7 @@ import { createRequire } from 'node:module'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
 export const name = 'dsh-knowledge-hub'
-export const inject = ['connection', 'tools', 'systemPrompt']
+export const inject = ['connection', 'tools', 'systemPrompt', 'webServer']
 
 const CHANNEL = '/dsh-knowledge-hub'
 const MODE_IDS = ['pentest', 'code-audit']
@@ -740,8 +740,13 @@ export function apply(ctx, config = {}) {
   }
 
   // Front-end RPC (loopback only, same channel style as sec-config).
+  // 0.1.5-rc.1：必须用 ctx.inject([... 'webServer']) 作用域块（与 sec-config / mcp-studio 同写法）。
+  // 模块级 inject 里带 webServer 不足以让 rpc.handle 注册路由时取到它（connection 服务内部改用
+  // 调用方 owner.webServer），会抛 cannot get property "webServer" without inject。
+  ctx.inject(['connection', 'webServer'], (web) => {
   try {
-    ctx.connection.rpc.handle(
+    const connection = ctx.connection
+    connection.rpc.handle(
       CHANNEL,
       async (endpoint, payload) => {
         try {
@@ -755,6 +760,7 @@ export function apply(ctx, config = {}) {
   } catch (error) {
     console.error('[dsh-knowledge-hub] RPC unavailable: %s', error && error.message ? error.message : String(error))
   }
+  })
 
   // Model tools: extension-layer lookup plus the bundled PATT payload library;
   // the other bundled handbook docs keep being read directly at their preset

@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-knowledge-hub",
-  "version": "0.1.10",
+  "version": "0.1.13",
   "description": "Saker knowledge hub: two-layer refs (bundle read-only + DSH_HOME/refs user-writable with imports for external sources like PayloadsAllTheThings), a layered tree/search/read RPC for the settings page, and knowledge_search/read/list model tools.",
   "type": "module",
   "main": "./lib/index.js",

@@ -428,7 +428,7 @@ async function diagnoseServer(server) {
 
 // src/index.ts
 var name = "dsh-mcp-studio";
-var inject = ["tools", "settings"];
+var inject = ["tools", "settings", "webServer"];
 var STUDIO_SETTINGS_NAMESPACE = "mcp-studio";
 function signatureOf(server) {
   return JSON.stringify(toMcpClientConfig(server));
@@ -552,7 +552,7 @@ function apply(ctx, config) {
       }
     }
   }));
-  ctx.inject(["connection", "settings"], (web) => {
+  ctx.inject(["connection", "settings", "webServer"], (web) => {
     const { connection, settings } = web;
     const status = createStatusHandler(
       () => current(),
