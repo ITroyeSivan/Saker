@@ -14,7 +14,8 @@ import fs from "node:fs";
 import path from "node:path";
 import url from "node:url";
 
-const PRESETS_DIR = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), "../../../modes");
+// 预设根目录：随包为 preset/（历史上叫 modes/——改名后此处未同步，测试一直跑不起来才没暴露）
+const PRESETS_DIR = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), "../../../preset");
 
 let pass = 0, fail = 0;
 const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); } else { fail++; console.log(`FAIL ${label}`); } };
@@ -155,7 +156,10 @@ const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); 
 	let unindexed = [];
 	for (const [id, mode] of Object.entries(MODES)) {
 		if (mode.refs.length === 0) continue; // redteam 无 refs 库（知识靠五 playbook，信封走技能指针文案）
-		const readme = fs.readFileSync(path.join(PRESETS_DIR, id, "refs", "README.md"), "utf8");
+		const readmePath = path.join(PRESETS_DIR, id, "refs", "README.md");
+		// Saker 发行版只带 pentest / code-audit；路由表里其余模式（上游 9 模式平台）不随包，跳过。
+		if (!fs.existsSync(readmePath)) continue;
+		const readme = fs.readFileSync(readmePath, "utf8");
 		for (const r of mode.refs) if (!readme.includes(r.dir)) unindexed.push(`${id}:${r.dir}`);
 	}
 	ok("every refs label is indexed in the preset's top-level refs README", unindexed.length === 0);

@@ -8,6 +8,8 @@ import { openStore, insertTrace, searchTraces, getTrace, listRecent, statsTraces
 import { createCapture, callIdOfResult, isErrorResult, MODE_IDS } from "../lib/index.js";
 
 let pass = 0, fail = 0;
+// Windows 下临时库文件可能仍被模块级 store 单例占用（EBUSY）——清理失败不该判定套件失败。
+const safeRm = (p) => { try { fs.rmSync(p, { recursive: true, force: true }); } catch { /* 句柄未释放，交给系统清理 */ } };
 const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); } else { fail++; console.log(`FAIL ${label}`); } };
 
 // 1. 出局分类：error 优先；blocked 特征（403/WAF/429/验证码/拒绝）；其余 ok
@@ -118,8 +120,8 @@ const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); 
 	st.close();
 }
 
-// 7. 模式清单完整性（九模式）
-ok("九模式清单", Array.isArray(MODE_IDS) && MODE_IDS.length === 9);
+// 7. 模式清单完整性（Saker 发行版的两个安全模式）
+ok("安全模式清单", Array.isArray(MODE_IDS) && MODE_IDS.length === 2 && MODE_IDS.includes("pentest") && MODE_IDS.includes("code-audit"));
 
 // 8. apply 装配：defineTool 方言冒烟（真 dsh-tools）+ 事件接线 + 模式门禁
 //    库走 DSH_TRACE_VAULT_DB 临时文件，不碰真实过程库。
@@ -158,7 +160,7 @@ ok("九模式清单", Array.isArray(MODE_IDS) && MODE_IDS.length === 9);
 	ok("render 含命中行与 id", renderText.includes("sx:k1") && renderText.includes("bash"));
 	st.close();
 	delete process.env.DSH_TRACE_VAULT_DB;
-	fs.rmSync(tmp, { recursive: true, force: true });
+	safeRm(tmp);
 }
 
 // 9. 失败归因信封（v0.2.0）：阈值/空信号/装配接线/窗口过滤
@@ -202,7 +204,7 @@ ok("九模式清单", Array.isArray(MODE_IDS) && MODE_IDS.length === 9);
 	ok("非安全模式渲染空", contexts[0].text({ agent: { ctx: { preset: "plain" }, session: { id: "sx", header: {} } } }) === "");
 	ok("无 agent 渲染空", contexts[0].text({}) === "");
 	delete process.env.DSH_TRACE_VAULT_DB;
-	fs.rmSync(tmp, { recursive: true, force: true });
+	safeRm(tmp);
 }
 
 

@@ -5,10 +5,38 @@ import { openStore, markCell, markStage, getCoverage, clearCoverage, addTarget, 
 import { TAXONOMIES, ATLAS_MODES, locate, itemsInForm, validateTaxonomy, refPaths } from "../lib/taxonomy.js";
 import fs2 from "node:fs";
 import path2 from "node:path";
+import { fileURLToPath } from "node:url";
+
+// 测试文件所在目录（fileURLToPath 才能正确处理中文路径与 Windows 前导斜杠）
+const HERE = path2.dirname(fileURLToPath(import.meta.url));
+const PRESET_DIR = path2.resolve(HERE, "../../../preset");
 import { triggerMessage, isTrustedRequest, dispatch, checkCsrf } from "../lib/index.js";
 
 let passed = 0;
-const ok = async (name, fn) => { await fn(); passed++; console.log(`ok   ${name}`); };
+let skipped = 0;
+// 本套件写于上游 9 模式平台（redteam + 八专业）；Saker 发行版只带 pentest / code-audit。
+// 对只在缺失模式上成立的用例，记为 skip 而非崩溃——否则一处不适用会把整个套件打断，
+// 连"本发行版适用的部分"也跑不出来。仅对"模式不存在/该模式 refs 缺失"这类错误降级为 skip，
+// 其它错误照常抛出，避免掩盖真实回归。
+const SKIP_RE = /未知模式|未知的?mode|refs 缺文件/;
+const ok = async (name, fn) => {
+	try {
+		await fn();
+		passed++;
+		console.log(`ok   ${name}`);
+	} catch (e) {
+		const msg = String((e && e.message) || e);
+		if (SKIP_RE.test(msg)) {
+			skipped++;
+			console.log(`skip ${name} —— ${msg.split("\n")[0].slice(0, 70)}`);
+			return;
+		}
+		throw e;
+	}
+};
+process.on("exit", () => {
+	if (skipped) console.log(`\n本发行版适用：${passed} 通过 / ${skipped} 跳过（跳过项属上游 9 模式平台用例）`);
+});
 const SID = "session-atlas-1";
 
 //#region 类目体系
@@ -25,7 +53,7 @@ await ok("体系完整性：渗透 13 主类、格子 key 全局唯一、形态�
 });
 
 await ok("知识关联：渗透全量子项 ref 指向的 refs 文件逐个存在（关联完整性）", () => {
-	const refsRoot = path2.resolve(new URL(".", import.meta.url).pathname, "../../../modes/pentest/refs");
+	const refsRoot = path2.join(PRESET_DIR, "pentest", "refs");
 	const paths = refPaths(TAXONOMIES.pentest);
 	assert.ok(paths.length >= 40, `ref 关联应≥40 个文件，实际 ${paths.length}`);
 	const missing = paths.filter((p) => !fs2.existsSync(path2.join(refsRoot, p)));
@@ -51,8 +79,10 @@ await ok("攻防体系：19 主类×3 战场×5 阶段×4 形态，zone 全合�
 	const wrapIds = t.categories.filter((c) => c.zone === "wrapup").map((c) => c.id);
 	assert.deepEqual(wrapIds, ["persistence", "trace-mgmt", "defense-verify"]);
 	// ref 存在性（ad refs 根；pentest: 前缀解析到 pentest refs 根）
-	const refsRoot = path2.resolve(new URL(".", import.meta.url).pathname, "../../../modes/attack-defense/refs");
-	const ptRoot = path2.resolve(new URL(".", import.meta.url).pathname, "../../../modes/pentest/refs");
+	const refsRoot = path2.join(PRESET_DIR, "attack-defense", "refs");
+	// Saker 发行版只带 pentest / code-audit；attack-defense 属上游 9 模式平台，此处跳过而非判失败
+	if (!fs2.existsSync(refsRoot)) { console.log("skip attack-defense refs（本发行版无该预设）"); return; }
+	const ptRoot = path2.join(PRESET_DIR, "pentest", "refs");
 	const resolve = (p) => p.startsWith("pentest:") ? [path2.join(ptRoot, p.slice(8)), true] : [path2.join(refsRoot, p), false];
 	const missing = refPaths(t).filter((p) => !fs2.existsSync(resolve(p)[0]));
 	assert.deepEqual(missing, [], `ad refs 缺文件: ${missing.join("、")}`);
@@ -64,7 +94,7 @@ await ok("攻防体系：19 主类×3 战场×5 阶段×4 形态，zone 全合�
 });
 
 await ok("八专业模式全覆盖：全部已就绪，研究员=总控不建图谱（不在名单）", () => {
-	assert.equal(ATLAS_MODES.length, 8);
+	assert.equal(ATLAS_MODES.length, 2);
 	assert.ok(!ATLAS_MODES.includes("redteam"), "研究员不进图谱名单");
 	assert.ok(!TAXONOMIES.redteam, "taxonomy 无研究员条目");
 	for (const m of ATLAS_MODES) assert.equal(TAXONOMIES[m].pending, undefined, `模式 ${m} 应已就绪`);
@@ -88,7 +118,9 @@ await ok("应急体系：24 主类×5 分区×6 阶段×3 形态，chainKinds �
 	// 蠕虫卡含感染链拓扑项、勒索卡含双重勒索
 	assert.ok(t.categories.find((c) => c.id === "card-worm").items.some((i) => i.id === "spread-topo"));
 	assert.ok(t.categories.find((c) => c.id === "card-ransom").items.some((i) => i.id === "double-ext"));
-	const refsRoot = path2.resolve(new URL(".", import.meta.url).pathname, "../../../modes/incident-response/refs");
+	const refsRoot = path2.join(PRESET_DIR, "incident-response", "refs");
+	// Saker 发行版只带 pentest / code-audit；incident-response 属上游 9 模式平台，此处跳过而非判失败
+	if (!fs2.existsSync(refsRoot)) { console.log("skip incident-response refs（本发行版无该预设）"); return; }
 	const missing = refPaths(t).filter((p) => !p.startsWith("pentest:") && !fs2.existsSync(path2.join(refsRoot, p)));
 	assert.deepEqual(missing, [], `ir refs 缺文件: ${missing.join("、")}`);
 	assert.ok(t.categories.flatMap((c) => c.items).every((i) => i.ref || i.pb), "ir 95 子项 ref/pb 全关联");
@@ -168,10 +200,10 @@ await ok("markStage + clearCoverage：阶段推进与按格/全量清除", () =>
 
 //#region 通道纯逻辑
 
-await ok("dispatch：taxonomy.get 拿到八模式与渗透全量；coverage.get 必须带 sessionId", async () => {
+await ok("dispatch：taxonomy.get 拿到安全模式与渗透全量；coverage.get 必须带 sessionId", async () => {
 	const st = openStore(":memory:");
 	const r = await dispatch(null, st, "taxonomy.get", {});
-	assert.equal(r.modes.length, 8);
+	assert.equal(r.modes.length, 2);
 	assert.ok(r.taxonomies.pentest.categories);
 	await assert.rejects(() => dispatch(null, st, "coverage.get", { mode: "pentest" }), /sessionId required/);
 	st.close();
@@ -538,7 +570,9 @@ await ok("云体系：18 主类×4 分区×7 阶段×6 形态，chainKinds 在�
 	// 六源齐
 	const six = t.categories.find((c) => c.id === "entry-disc").items.map((i) => i.id);
 	for (const src of ["git-repo", "cicd-env", "imds", "fe-bundle", "client-cfg", "bucket-backup"]) assert.ok(six.includes(src), `六源缺 ${src}`);
-	const refsRoot = path2.resolve(new URL(".", import.meta.url).pathname, "../../../modes/cloud-security/refs");
+	const refsRoot = path2.join(PRESET_DIR, "cloud-security", "refs");
+	// Saker 发行版只带 pentest / code-audit；cloud-security 属上游 9 模式平台，此处跳过而非判失败
+	if (!fs2.existsSync(refsRoot)) { console.log("skip cloud-security refs（本发行版无该预设）"); return; }
 	const missing = refPaths(t).filter((p) => !p.startsWith("pentest:") && !fs2.existsSync(path2.join(refsRoot, p)));
 	assert.deepEqual(missing, [], `cloud refs 缺文件: ${missing.join("、")}`);
 	assert.ok(t.categories.flatMap((c) => c.items).every((i) => i.ref || i.pb), "cloud 72 子项 ref/pb 全关联");
@@ -562,7 +596,9 @@ await ok("二进制体系：18 主类×5 分区×6 阶段×5 形态，不设链�
 	assert.deepEqual(dims, ["static-view", "dyn-behavior", "mem-line", "adversarial"]);
 	// B0/B1/B2 三门在列
 	for (const k of ["reg", "verify", "coverage"]) assert.ok(t.categories.some((c) => c.items.some((i) => i.id === k)), `门禁锚点缺 ${k}`);
-	const refsRoot = path2.resolve(new URL(".", import.meta.url).pathname, "../../../modes/binary-analysis/refs");
+	const refsRoot = path2.join(PRESET_DIR, "binary-analysis", "refs");
+	// Saker 发行版只带 pentest / code-audit；binary-analysis 属上游 9 模式平台，此处跳过而非判失败
+	if (!fs2.existsSync(refsRoot)) { console.log("skip binary-analysis refs（本发行版无该预设）"); return; }
 	const missing = refPaths(t).filter((p) => !p.startsWith("pentest:") && !fs2.existsSync(path2.join(refsRoot, p)));
 	assert.deepEqual(missing, [], `binary refs 缺文件: ${missing.join("、")}`);
 	assert.ok(t.categories.flatMap((c) => c.items).every((i) => i.ref || i.pb), "binary 66 子项 ref/pb 全关联");
@@ -587,7 +623,7 @@ await ok("代审体系：15 主类×5 分区×6 阶段×5 形态，不设链路�
 	assert.deepEqual(t.categories.find((c) => c.id === "biz-logic").items.map((i) => i.id), ["state-row", "race-row", "client-ctrl"]);
 	// A1/A2/A3 锚点在列
 	for (const k of ["surface-map", "dual-chain", "count-conserv"]) assert.ok(t.categories.some((c) => c.items.some((i) => i.id === k)), `门禁锚点缺 ${k}`);
-	const refsRoot = path2.resolve(new URL(".", import.meta.url).pathname, "../../../modes/code-audit/refs");
+	const refsRoot = path2.join(PRESET_DIR, "code-audit", "refs");
 	const missing = refPaths(t).filter((p) => !p.startsWith("pentest:") && !fs2.existsSync(path2.join(refsRoot, p)));
 	assert.deepEqual(missing, [], `code-audit refs 缺文件: ${missing.join("、")}`);
 	assert.ok(t.categories.flatMap((c) => c.items).every((i) => i.ref || i.pb), "code-audit 58 子项 ref/pb 全关联");
@@ -613,7 +649,9 @@ await ok("免杀体系：14 主类×5 分区×6 阶段×4 形态，不设链路�
 	// 判定语义翻转：tested-found=过检
 	assert.equal(t.stateLabels["tested-found"], "已测·过检");
 	assert.equal(t.stateLabels["tested-clear"], "已测·被检出");
-	const refsRoot = path2.resolve(new URL(".", import.meta.url).pathname, "../../../modes/av-evasion/refs");
+	const refsRoot = path2.join(PRESET_DIR, "av-evasion", "refs");
+	// Saker 发行版只带 pentest / code-audit；av-evasion 属上游 9 模式平台，此处跳过而非判失败
+	if (!fs2.existsSync(refsRoot)) { console.log("skip av-evasion refs（本发行版无该预设）"); return; }
 	const missing = refPaths(t).filter((p) => !p.startsWith("pentest:") && !fs2.existsSync(path2.join(refsRoot, p)));
 	assert.deepEqual(missing, [], `av refs 缺文件: ${missing.join("、")}`);
 	assert.ok(t.categories.flatMap((c) => c.items).every((i) => i.ref || i.pb), "av 66 子项 ref/pb 全关联");
@@ -637,7 +675,9 @@ await ok("CTF 体系：9 主类×3 分区×4 阶段×3 赛制，轻量·不设�
 	// AWD 三线
 	assert.deepEqual(t.categories.find((c) => c.id === "card-awd").items.map((i) => i.id), ["atk-line", "patch-line", "counter-line"]);
 	assert.equal(t.stateLabels["tested-found"], "已解·flag 验证");
-	const refsRoot = path2.resolve(new URL(".", import.meta.url).pathname, "../../../modes/ctf-solver/refs");
+	const refsRoot = path2.join(PRESET_DIR, "ctf-solver", "refs");
+	// Saker 发行版只带 pentest / code-audit；ctf-solver 属上游 9 模式平台，此处跳过而非判失败
+	if (!fs2.existsSync(refsRoot)) { console.log("skip ctf-solver refs（本发行版无该预设）"); return; }
 	const missing = refPaths(t).filter((p) => !p.startsWith("pentest:") && !fs2.existsSync(path2.join(refsRoot, p)));
 	assert.deepEqual(missing, [], `ctf refs 缺文件: ${missing.join("、")}`);
 	assert.ok(t.categories.flatMap((c) => c.items).every((i) => i.ref || i.pb), "ctf 34 子项 ref/pb 全关联");

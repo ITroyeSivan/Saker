@@ -45,9 +45,11 @@ export const RULE_LAYERS = {
 };
 
 export function buildArgs(layer, target, rulesPath, refsDir) {
+	// --config 路径统一正斜杠：Windows 的 path.join 产反斜杠，同一份代码要在 POSIX/Windows
+	// 两端都成立，且该值会进证据与命令回显（跨平台可读性）。semgrep 两端均接受正斜杠。
 	const configs = layer === "custom"
 		? [String(rulesPath ?? "")]
-		: (RULE_LAYERS[layer] ?? []).map((rel) => path.join(refsDir, rel));
+		: (RULE_LAYERS[layer] ?? []).map((rel) => path.join(refsDir, rel).replace(/\\/g, "/"));
 	const args = ["scan", "--json", "--metrics=off", "--quiet"];
 	for (const c of configs) args.push("--config", c);
 	args.push(String(target));

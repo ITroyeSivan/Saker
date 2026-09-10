@@ -18,8 +18,10 @@ function sakerRoot() {
 	try {
 		return path.dirname(require2.resolve("dsh-saker/package.json"));
 	} catch {
-		// 源码仓库布局：<repo>/plugins/<name>/lib/skilltools.mjs → 四级上跳 = repo 根
-		return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+		// 源码仓库布局：<repo>/plugins/<name>/lib/skilltools.mjs
+		// lib/ 上跳三级 = repo 根（lib → <name> → plugins → <repo>）；原先写了四级，
+		// 落到仓库的父目录，导致回退路径下扫不到 preset/ 技能目录。
+		return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 	}
 }
 let _rootCache = "";
@@ -94,16 +96,30 @@ export function configuredTools(section) {
 	return out;
 }
 
-/** 工具是否可用：先认 sec-config 的显式配置（路径已由 DSH_TOOL_* 注入），再回退 PATH。 */
+/** 工具是否可用：先认 sec-config 的显式配置（路径已由 DSH_TOOL_* 注入），再回退 PATH。
+ *
+ *  跨平台探测：Windows 上不存在 /bin/sh，原先一律 `spawnSync("/bin/sh", ...)` 会直接 ENOENT，
+ *  status 为 null → 一律判为"缺件"。后果是 Windows 部署里**每个工具都被报成未安装**
+ *  （node/git 这类显然在装的也一样），把模型推向无谓的三级兜底。按平台分支探测。 */
+const IS_WIN = process.platform === "win32";
+function probeOnPath(name) {
+	try {
+		if (IS_WIN) {
+			// where 是 cmd 内建可执行，按 PATHEXT 解析 .exe/.cmd/.bat
+			return spawnSync("where", [name], { stdio: "ignore" }).status === 0;
+		}
+		return spawnSync("/bin/sh", ["-c", `command -v -- ${name} >/dev/null 2>&1`]).status === 0;
+	} catch {
+		return false; // 探测失败按缺件处理
+	}
+}
+
 export function checkTool(name, now = Date.now(), configured) {
 	if (!TOOL_NAME_RE.test(name)) return false;
 	if (configured instanceof Set && configured.has(name.toLowerCase())) return true;
 	const hit = checkCache.get(name);
 	if (hit && now - hit.at < CHECK_TTL) return hit.ok;
-	let ok = false;
-	try {
-		ok = spawnSync("/bin/sh", ["-c", `command -v -- ${name} >/dev/null 2>&1`]).status === 0;
-	} catch { /* 探测失败按缺件处理 */ }
+	const ok = probeOnPath(name);
 	checkCache.set(name, { at: now, ok });
 	return ok;
 }

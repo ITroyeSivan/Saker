@@ -167,7 +167,9 @@ ok("非执行体不命中", !isAdvanceTool("bash") && !isAdvanceTool("fetch") &&
 		const fakeAgent = { ctx: {}, session: { id: "sk-" + mode, header: { cwd: tmp, agentPreset: mode } }, followup: (m) => followups.push(m) };
 		const fakeCtx = { on: (ev, fn) => { handlers[ev] = fn; }, get: () => ({ get: (id) => (id === "sk-" + mode ? fakeAgent : undefined) }), agentPresets: { composedPreset: () => mode } };
 		await mod.apply(fakeCtx, {});
-		handlers["agent/inbox/inserted"]({ agent: fakeAgent, message: { id: "h-" + mode, source: { kind: "user" }, content: "x" } });
+		// 注意：内容不能太短——插件有"试水消息不打搅"规则（<6 字跳过 kickoff），
+		// 早期用例发 "x" 会被判为试水而静默跳过，导致断言假失败。
+		handlers["agent/inbox/inserted"]({ agent: fakeAgent, message: { id: "h-" + mode, source: { kind: "user" }, content: "对这个目标做一次完整的渗透测试" } });
 		if (mode === "pentest") {
 			ok("kickoff 含 pentest 拆分理论", followups.length === 1 && followups[0].content[0].text.includes("作战流程×资产×漏洞类矩阵") && followups[0].content[0].text.includes("准则按"));
 			ok("kickoff 含分母语义", followups[0].content[0].text.includes("入口资产面"));

@@ -10,9 +10,9 @@ import { dispatch, isTrustedRequest, subagentTranscript, ROUTE_PATH, checkCsrf }
 let pass = 0;
 const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); } else { console.log(`FAIL ${label}`); process.exitCode = 1; } };
 
-// 1. 模式门控：九模式名单 + 判定（含服务端兜底）
-ok("九模式名单齐（redteam + 八专业）", PULSE_MODES.length === 9 && PULSE_MODES.includes("redteam") && PULSE_MODES.includes("ctf-solver") && Object.keys(MODE_LABELS).length === 9);
-ok("modeOk：直判/服务端兜底/组合名拒绝", modeOk("pentest", "") === true && modeOk("cordis", "incident-response") === true && modeOk("cordis", "") === false && modeOk("", "") === false);
+// 1. 模式门控：安全模式名单 + 判定（含服务端兜底）。Saker 发行版只有两个安全模式。
+ok("安全模式名单齐（pentest + code-audit）", PULSE_MODES.length === 2 && PULSE_MODES.includes("pentest") && PULSE_MODES.includes("code-audit") && Object.keys(MODE_LABELS).length === 2);
+ok("modeOk：直判/服务端兜底/组合名拒绝", modeOk("pentest", "") === true && modeOk("cordis", "code-audit") === true && modeOk("cordis", "") === false && modeOk("", "") === false);
 
 // 2. 任务进度：todos 投影 → 汇总
 ok("progressOf：null/空清单返回 null", progressOf(null) === null && progressOf([]) === null);
@@ -111,12 +111,12 @@ ok("progressOf：null/空清单返回 null", progressOf(null) === null && progre
 	const mkAgents = (headerPreset) => ({ get: (id) => ({ id, ctx: { __x: 1 }, session: { header: { agentPreset: headerPreset } } }) });
 	const r1 = await dispatch({ agentPresets: { composedPreset: () => "pentest" }, get: () => mkAgents("cordis") }, "session.mode", { sessionId: "s1" });
 	ok("session.mode：composedPreset 直判", r1.mode === "pentest");
-	const r2 = await dispatch({ agentPresets: { composedPreset: () => "cordis" }, get: () => mkAgents("cloud-security") }, "session.mode", { sessionId: "s2" });
-	ok("session.mode：组合名退化走 header 兜底", r2.mode === "cloud-security");
+	const r2 = await dispatch({ agentPresets: { composedPreset: () => "cordis" }, get: () => mkAgents("code-audit") }, "session.mode", { sessionId: "s2" });
+	ok("session.mode：组合名退化走 header 兜底", r2.mode === "code-audit");
 	const r3 = await dispatch({ agentPresets: { composedPreset: () => "cordis" }, get: () => mkAgents("cordis") }, "session.mode", { sessionId: "s3" });
-	ok("session.mode：非九模式返回空串", r3.mode === "");
-	const r4 = await dispatch({ agentPresets: { composedPreset: () => "redteam" }, get: () => mkAgents("") }, "session.mode", { sessionId: "s4" });
-	ok("session.mode：redteam 总控在名单内", r4.mode === "redteam");
+	ok("session.mode：非安全模式返回空串", r3.mode === "");
+	const r4 = await dispatch({ agentPresets: { composedPreset: () => "code-audit" }, get: () => mkAgents("") }, "session.mode", { sessionId: "s4" });
+	ok("session.mode：composedPreset 命中 code-audit", r4.mode === "code-audit");
 	await assert.rejects(() => dispatch(null, "session.mode", {}), /sessionId required/);
 	await assert.rejects(() => dispatch(null, "unknown.x", {}), /unknown endpoint/);
 }
