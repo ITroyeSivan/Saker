@@ -11,7 +11,7 @@
 [为什么会有Saker](#为什么会有saker) · [写在前面](#写在前面) · [它是怎么搭起来的](#它是怎么搭起来的) · [功能](#功能) · [快速开始](#快速开始) · [插件清单](#插件清单)
 
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek-Harness-111827?style=flat-square)](https://github.com/deepseek-ai/deepseek-harness)
-[![Saker](https://img.shields.io/badge/Saker-v0.2.3-4f46e5?style=flat-square)](https://github.com/ITroyeSivan/Saker)
+[![Saker](https://img.shields.io/badge/Saker-v0.2.5-4f46e5?style=flat-square)](https://github.com/ITroyeSivan/Saker)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.5-339933?style=flat-square&logo=node.js&logoColor=white)](./package.json)
 [![License](https://img.shields.io/badge/code-MIT-2563eb?style=flat-square)](./LICENSE)
 
@@ -262,11 +262,27 @@ Exploit-DB不随包，走导入层。把官方仓库或元数据快照放到 `DS
 - Node.js `>=22.5`。MCP Studio要求 `^22.19.0 || >=24.0.0`。
 - 使用扫描器、Semgrep、Burp、Yakit、Claude Code或Codex时，需要自行安装并配置对应程序。
 
-> 当前完整验证环境为DeepSeek Harness `0.1.3-alpha.2` 内部Web版本。公开npm线 `@deepseek-ai/dsh@0.1.2-rc.1` 为CLI-only，不在完整Web工作台的验证范围内。
+> 当前完整验证环境为 DeepSeek Harness **`0.1.5-rc.1-183f08e`** 内部 Web 版本。公开 npm 线 `@deepseek-ai/dsh@0.1.2-rc.1` 为 CLI-only，不在完整 Web 工作台的验证范围内。
 
-**关于 `0.1.5-rc.1`**：已针对该版本完成 API 差分适配。逐包比对的结论是——对本项目的影响**仅一处**：宿主新增 `dsh-tool-present`（交付物声明工具，`standard`/`ptc`/`cordis` 预设已内置），Saker 两个预设已同步挂载。其余依赖面经确认**未变**：`agentPresets` 服务契约（`list`/`remoteExportList`/`resolve`/`resolvedRoots`，类型定义逐字节一致）、persona 配置字段（`prefix`，代码一致）、`skill-filesystem` 的 `customSkillDirs`（代码一致）、`defineTool` 契约（仅 PTC 内部事件改名，不影响声明式工具定义）；`dsh-mode-group` 依赖的 `conversation.hero.agentPreset` 槽位仍存在。
+**关于 `0.1.5-rc.1`**：已在真实宿主上完成适配并实跑验证。
 
-以上为静态差分结论，**尚未在真实 `0.1.5-rc.1` 宿主上实跑验证**，正式升级前建议先在测试环境走一遍安装与新建会话。
+需要特别说明的是——**这一版存在静态 API 差分看不出来的破坏性变更**，本项目最初的差分结论（「影响仅一处」）是**错的**，已被实跑推翻：
+
+| 变更 | 说明 |
+|---|---|
+| `connection` 服务的 inject 收窄 | `["webServer", "credentials"]` → `["credentials"]` |
+| 路由注册归属改为**调用方** | 需用 `owner.webServer`，不再是消费方 |
+
+后果：沿用 `connection.rpc.handle(channel, handler)` 的插件会**静默注册失败且不抛错** ——
+设置页永久「加载中…」、RPC 通道 404，日志里毫无线索。改用
+`connection.register(ctx, channel, handler)` 并确保 inject 带 `webServer` 后恢复正常。
+
+其余依赖面（`agentPresets` 契约、persona `prefix`、`skill-filesystem` 的 `customSkillDirs`、
+`defineTool` 声明式契约、`conversation.hero.agentPreset` 槽位）经实跑确认未变；
+宿主新增的 `dsh-tool-present` 已由 Saker 两个预设同步挂载。
+
+**验收基线**：设置页 10/10 分区正常 · 插件 RPC 路由 12/12 已注册 · 插件加载失败 0 · 15 套测试 968 断言全绿。
+详见 [docs/release-v0.2.5.md](docs/release-v0.2.5.md)。
 
 ### 从源码安装全部组件
 
@@ -298,7 +314,7 @@ dsh web
 每个目录都是独立的dsh bundle。先安装根模式包，再按需要添加插件：
 
 ```powershell
-dsh plugin --profile web add "file:C:/packages/dsh-saker-0.2.3.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-saker-0.2.5.tgz"
 dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-sec-config-1.1.7.tgz"
 dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-knowledge-hub-0.1.10.tgz"
 dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-skill-browse-1.1.1.tgz"
@@ -334,19 +350,19 @@ Saker当前包含21个独立插件。多数用户不需要逐个理解；`pack-a
 
 | 位置 | 插件 | 版本 | 做什么 |
 |---|---|---|---|
-| 界面与配置 | `dsh-mode-group` | 1.0.0 | 在新会话页集中展示安全模式 |
-| 界面与配置 | `dsh-sec-config` | 1.1.7 | 管理工具路径、Burp/Yakit、DNSLog与改密入口（API Key由「平台设置」统一维护）；工具按分类呈现、支持指定根目录自动探测候选一键导入，可自定义与删除 |
-| 界面与配置 | `dsh-mcp-studio` | 1.0.3 | 管理、诊断和预览MCP服务及工具 |
-| 界面与配置 | `dsh-knowledge-hub` | 0.1.10 | 知识库管理：随包PATT与手册、用户积累、Git/本机文件夹导入；Exploit-DB字段化索引与一键下载；按主题分类浏览与检索 |
-| 界面与配置 | `dsh-skill-browse` | 1.1.1 | 设置页「技能」：列出共享 / 模式专属 / 已安装技能；上传zip/tgz安装并热载、可卸载用户层技能；一键复制宿主引用串 |
-| 界面与配置 | `dsh-method-stack` | 0.1.4 | 提示词模块化：26个内置测试方法可勾选、克隆、改正文、存组合；输入框「方法 ▾」直接切换 |
-| 工具 | `dsh-scanner-tools` | 1.0.0 | 将nuclei、httpx、ffuf封装为模型工具 |
-| 工具 | `dsh-semgrep-audit` | 1.0.0 | 使用本地Semgrep和随包规则集进行代码扫描 |
+| 界面与配置 | `dsh-mode-group` | 1.0.1 | 在新会话页集中展示安全模式 |
+| 界面与配置 | `dsh-sec-config` | 1.1.10 | 管理工具路径、Burp/Yakit、DNSLog与改密入口（API Key由「平台设置」统一维护）；工具按分类呈现、支持指定根目录自动探测候选一键导入，可自定义与删除 |
+| 界面与配置 | `dsh-mcp-studio` | 1.0.10 | 管理、诊断和预览MCP服务及工具 |
+| 界面与配置 | `dsh-knowledge-hub` | 0.1.14 | 知识库管理：随包PATT与手册、用户积累、Git/本机文件夹导入；Exploit-DB字段化索引与一键下载；按主题分类浏览与检索 |
+| 界面与配置 | `dsh-skill-browse` | 1.1.4 | 设置页「技能」：列出共享 / 模式专属 / 已安装技能；上传zip/tgz安装并热载、可卸载用户层技能；一键复制宿主引用串 |
+| 界面与配置 | `dsh-method-stack` | 0.1.8 | 提示词模块化：26个内置测试方法可勾选、克隆、改正文、存组合；输入框「方法 ▾」直接切换 |
+| 工具 | `dsh-scanner-tools` | 1.0.1 | 将nuclei、httpx、ffuf封装为模型工具 |
+| 工具 | `dsh-semgrep-audit` | 1.0.1 | 使用本地Semgrep和随包规则集进行代码扫描 |
 | 工具 | `dsh-hunter` | 1.0.0 | 聚合FOFA、Hunter、Quake资产检索与分级实测 |
-| 工具 | `dsh-webshell-mgr` | 1.1.12 | 管理已授权环境中的连接、文件和数据库操作；内置16种载荷生成形态 |
+| 工具 | `dsh-webshell-mgr` | 1.1.15 | 管理已授权环境中的连接、文件和数据库操作；内置16种载荷生成形态 |
 | 过程 | `dsh-stage-gate` | 1.5.0 | 记录目标与意图，检查阶段产物是否齐全 |
 | 过程 | `dsh-sec-enforce` | 1.4.1 | 在工具执行前约束写入范围、报告门和高风险操作 |
-| 过程 | `dsh-route-boost` | 1.3.4 | 按当前阶段补充门禁、证据和知识资料指针；信封列出可引用技能名与工具就绪度 |
+| 过程 | `dsh-route-boost` | 1.3.5 | 按当前阶段补充门禁、证据和知识资料指针；信封列出可引用技能名与工具就绪度 |
 | 过程 | `dsh-auto-advance` | 0.3.2 | 子代理返回后，在有限轮次内推进尚未收口的任务 |
 | 过程 | `dsh-refusal-guard` | 1.0.0 | 识别异常拒答并触发有记录的纠偏流程 |
 | 记录 | `dsh-redteam-results` | 1.0.2 | 保存发现、复核状态并导出Markdown |
