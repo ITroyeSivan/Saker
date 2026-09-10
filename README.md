@@ -264,6 +264,10 @@ Exploit-DB不随包，走导入层。把官方仓库或元数据快照放到 `DS
 
 > 当前完整验证环境为DeepSeek Harness `0.1.3-alpha.2` 内部Web版本。公开npm线 `@deepseek-ai/dsh@0.1.2-rc.1` 为CLI-only，不在完整Web工作台的验证范围内。
 
+**关于 `0.1.5-rc.1`**：已针对该版本完成 API 差分适配。逐包比对的结论是——对本项目的影响**仅一处**：宿主新增 `dsh-tool-present`（交付物声明工具，`standard`/`ptc`/`cordis` 预设已内置），Saker 两个预设已同步挂载。其余依赖面经确认**未变**：`agentPresets` 服务契约（`list`/`remoteExportList`/`resolve`/`resolvedRoots`，类型定义逐字节一致）、persona 配置字段（`prefix`，代码一致）、`skill-filesystem` 的 `customSkillDirs`（代码一致）、`defineTool` 契约（仅 PTC 内部事件改名，不影响声明式工具定义）；`dsh-mode-group` 依赖的 `conversation.hero.agentPreset` 槽位仍存在。
+
+以上为静态差分结论，**尚未在真实 `0.1.5-rc.1` 宿主上实跑验证**，正式升级前建议先在测试环境走一遍安装与新建会话。
+
 ### 从源码安装全部组件
 
 ```bash

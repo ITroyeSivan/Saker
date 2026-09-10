@@ -3,4 +3,4 @@
 3. 高价值目标：dev/stage/test/admin/api/内部命名子域、泛解析；检查子域接管条件（悬空 CNAME/NS）。
 4. 产出 scripts/<target>/subdomains.md（含工具与时间）；存活面进入攻击面台账。
 关联 PATT：PayloadsAllTheThings/Virtual Hosts（接管）、Account Takeover。
-纪律：只对授权根域；泛解析域先过滤再枚举，控制请求量。
+边界：仅做无害最小验证。

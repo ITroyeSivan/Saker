@@ -304,6 +304,11 @@
   config:
     fetch: false
     searchTimeoutMs: 60000
+
+# 交付物声明（宿主 0.1.5-rc.1 起为 standard/ptc/cordis 内置）：审计报告、PoC、
+# 证据文件产出后用 present 声明，用户可从会话文件面直接打开；只登记路径与说明，不复制内容。
+- id: present
+  name: '@deepseek-ai/dsh-tool-present'
 # semgrep 封装（preset 平面：code-audit 可见；预设离线三层规则集自动定位+证据落盘+
 # 命中对账双写 md/csv 内置；仅用检测到的本机 semgrep，缺装走三级兜底提示，绝不自动安装)
 - id: tool-semgrep
