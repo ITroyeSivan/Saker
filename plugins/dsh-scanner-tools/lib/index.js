@@ -68,7 +68,8 @@ export function spillOutput(fsMod, workspace, tool, raw) {
 	const ts = new Date().toISOString().replace(/[-:T.]/g, "").slice(0, 14);
 	const file = path.join(dir, `${tool}-${ts}.txt`);
 	fsMod.writeFileSync(file, String(raw ?? ""));
-	return path.relative(workspace, file);
+	// 回读指针统一正斜杠：该值会写进证据并交给模型跨平台读取，Windows 反斜杠会污染记录。
+	return path.relative(workspace, file).replace(/\\/g, "/");
 }
 
 const BREAKER_THRESHOLD = 3, BREAKER_COOLDOWN_MS = 60_000;
@@ -151,12 +152,19 @@ export function runScan({ bin, args, workspace, tool, rate, defaultRate, active,
 
 	const raw = proc.stdout ? proc.stdout.toString() : "";
 	const parsed = parse ? parse(raw, proc) : { raw: raw };
-	if (parsed.__writeRaw !== null && parsed.__writeRaw !== undefined) fs.writeFileSync(outFile, parsed.__writeRaw);
-	else fs.writeFileSync(outFile, JSON.stringify({ raw: raw }, null, 2)); // 全文落盘不截断（模型侧预览另由注册表工具治理）
+	// 落盘所有权：工具已自行写出结果文件（如 ffuf -o）时不得再覆盖——否则证据原件被 stdout 顶掉，
+	// 扫描命中的结构化数组消失而工具仍报成功。缺文件时兜底回写 stdout，保证证据指针不悬空。
+	if (parsed.__skipWrite) {
+		if (!fs.existsSync(outFile)) fs.writeFileSync(outFile, JSON.stringify({ raw: raw }, null, 2));
+	} else if (parsed.__writeRaw !== null && parsed.__writeRaw !== undefined) {
+		fs.writeFileSync(outFile, parsed.__writeRaw);
+	} else {
+		fs.writeFileSync(outFile, JSON.stringify({ raw: raw }, null, 2)); // 全文落盘不截断（模型侧预览另由注册表工具治理）
+	}
 	const evidenceId = nextEvidenceId(workspace);
-	appendEvidence(workspace, evidenceId, cmdStr + (rate && rate !== defaultRate ? `（速率显式覆盖：默认 ${defaultRate} → ${rate}，留痕）` : `（保守默认速率 ${defaultRate}）`), path.relative(workspace, outFile));
+	appendEvidence(workspace, evidenceId, cmdStr + (rate && rate !== defaultRate ? `（速率显式覆盖：默认 ${defaultRate} → ${rate}，留痕）` : `（保守默认速率 ${defaultRate}）`), path.relative(workspace, outFile).replace(/\\/g, "/"));
 	const reconciled = appendReconcile(workspace, parsed.__hits || []);
-	return { ok: proc.status === 0, evidenceId, file: path.relative(workspace, outFile), summary: parsed.__summary ?? {}, hits: (parsed.__hits || []).length, reconciled, stdout: parsed.__summaryText ?? "" };
+	return { ok: proc.status === 0, evidenceId, file: path.relative(workspace, outFile).replace(/\\/g, "/"), summary: parsed.__summary ?? {}, hits: (parsed.__hits || []).length, reconciled, stdout: parsed.__summaryText ?? "" };
 }
 
 //#region 注册表工具执行器：声明式 def → 构参 → 治理执行（预览封顶 + 全文落盘 + 熔断 + 阶梯提示）
@@ -225,9 +233,9 @@ const httpxParse = (raw) => {
 	return { __writeRaw: JSON.stringify(out, null, 2), __hits: [], __summary: { alive: out.length }, __summaryText: `存活 ${out.length}；探测未登记资产属测绘行为，结果请回填资产基线（assets.md / cloud-assets.md）` };
 };
 
-const ffufParse = (_raw, proc) => {
+export const ffufParse = (_raw, proc) => {
 	// ffuf -o 已直接写 JSON 到 -o 文件；这里只汇总额外信息
-	return { __writeRaw: null, __hits: [], __summary: { note: "结果见 -o 输出文件（已由 ffuf 写入）" }, __summaryText: `ffuf 完成（exit ${proc.status}），结果见产物文件` };
+	return { __skipWrite: true, __writeRaw: null, __hits: [], __summary: { note: "结果见 -o 输出文件（已由 ffuf 写入）" }, __summaryText: `ffuf 完成（exit ${proc.status}），结果见产物文件` };
 };
 
 //#endregion
