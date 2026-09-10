@@ -281,7 +281,7 @@ export function apply(ctx, config = {}) {
   // 未注入到本插件上下文会抛 cannot get property "webServer" without inject，**导致插件加载整体失败**。
   // 捕获降级：RPC 关闭，其余功能不受影响。
   try {
-  connection.rpc.handle(CHANNEL, async (endpoint, payload) => {
+  connection.register(ctx, CHANNEL, async (endpoint, payload) => {
     if (endpoint === 'list') {
       const presetId = payload && typeof payload.presetId === 'string' ? payload.presetId : ''
       return ok({ skills: listSkills(presetId, cfg) })

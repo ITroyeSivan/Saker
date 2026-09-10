@@ -994,7 +994,7 @@ export function apply(ctx, config = {}) {
   ctx.inject(['connection', 'settings', 'shellEnv', 'systemPrompt'], (web) => {
     const { connection, settings, shellEnv } = web
 
-    connection.rpc.handle(CHANNEL, async (endpoint, payload) => {
+    connection.register(ctx, CHANNEL, async (endpoint, payload) => {
       try {
         if (endpoint === 'tool-presets') {
           return ok({ presets: TOOL_PRESETS, categories: TOOL_CATEGORIES })

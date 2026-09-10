@@ -223,8 +223,8 @@ function createStatusHandler(section, viewOf, tracker, executions) {
     });
   };
 }
-function registerStudioRpc(connection, settings, ns, status, diagnose, clearExecutions) {
-  connection.rpc.handle(STUDIO_CHANNEL, async (endpoint, rawPayload) => {
+function registerStudioRpc(ctx, connection, settings, ns, status, diagnose, clearExecutions) {
+  connection.register(ctx, STUDIO_CHANNEL, async (endpoint, rawPayload) => {
     if (endpoint === "status") return status();
     if (endpoint === "executions/clear") {
       if (clearExecutions === void 0) return badRequest("execution log unavailable");
@@ -568,7 +568,7 @@ function apply(ctx, config) {
       const report = await diagnoseServer(server);
       return { ok: true, value: report };
     };
-    registerStudioRpc(connection, settings, STUDIO_SETTINGS_NAMESPACE, status, diagnose, () => executions.clear());
+    registerStudioRpc(ctx, connection, settings, STUDIO_SETTINGS_NAMESPACE, status, diagnose, () => executions.clear());
   });
   reconcile();
 }

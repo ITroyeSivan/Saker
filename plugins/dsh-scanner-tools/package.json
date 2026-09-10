@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-scanner-tools",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "DSH scanner-wrapper plugin (preset-plane, pentest/attack-defense): nuclei/httpx/ffuf as model tools with built-in rate discipline (conservative defaults, audited overrides), evidence-index landing, nuclei-hits→scan-reconcile pending rows, and assets.md registration enforcement for active scans (防盲打). Local binaries only — never auto-installs; MCP/install-request fallback hints built in.",
   "files": [
     "lib",

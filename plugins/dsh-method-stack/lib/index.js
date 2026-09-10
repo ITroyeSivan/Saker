@@ -218,7 +218,7 @@ export function apply(ctx, config = {}) {
     // 若 webServer 未能注入到本插件上下文，会抛 cannot get property "webServer" without inject，
     // 且**插件加载会整体失败**（而非仅 RPC 不可用）。这里捕获降级：RPC 关闭，其余功能不受影响。
     try {
-    connection.rpc.handle(CHANNEL, async (endpoint, payload) => {
+    connection.register(ctx, CHANNEL, async (endpoint, payload) => {
     try {
       const p = payload && typeof payload === 'object' ? payload : {}
       if (endpoint === 'list') {

@@ -981,7 +981,7 @@ function registerSettingsLayer(ctx, web) {
 		ctx.logger?.warn?.("dsh-webshell-mgr: manifest context failed: %s", e && e.message ? e.message : String(e));
 	}
 	try {
-		connection.rpc.handle("/dsh-webshell-mgr-rpc", async (endpoint, payload) => {
+		connection.register(ctx, "/dsh-webshell-mgr-rpc", async (endpoint, payload) => {
 			const p = payload && typeof payload === "object" ? payload : {};
 			if (endpoint === "settings-get") {
 				loadWsCfg();

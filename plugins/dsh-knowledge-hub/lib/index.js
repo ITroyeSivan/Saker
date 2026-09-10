@@ -746,7 +746,7 @@ export function apply(ctx, config = {}) {
   ctx.inject(['connection', 'webServer'], (web) => {
   try {
     const connection = ctx.connection
-    connection.rpc.handle(
+    connection.register(ctx, 
       CHANNEL,
       async (endpoint, payload) => {
         try {
