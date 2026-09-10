@@ -102,11 +102,40 @@ export function configuredTools(section) {
  *  status 为 null → 一律判为"缺件"。后果是 Windows 部署里**每个工具都被报成未安装**
  *  （node/git 这类显然在装的也一样），把模型推向无谓的三级兜底。按平台分支探测。 */
 const IS_WIN = process.platform === "win32";
+const WIN_PATHEXT = ".COM;.EXE;.BAT;.CMD";
+
+/** PATH 直扫（Node 侧，不 spawn、不依赖宿主是否继承了 PATHEXT）。
+ *
+ *  为什么不能只信 `where`：`where <name>` 补扩展名靠的是环境变量 PATHEXT，而宿主进程
+ *  的 env 里 PATHEXT 可能是 **undefined** —— 实测 dsh 插件进程就是如此。后果是
+ *  `where node` → status 1、`where node.exe` → status 0：所有不带扩展名的探测一律判
+ *  「未安装」，把每个工具都报成缺件，把模型推向无谓的三级兜底。（同一个坑原先在
+ *  Windows 上以 /bin/sh ENOENT 的形式出现过，改成 where 只是换了个触发条件。）
+ *  直扫 PATH + 扩展名候选与 where 的语义一致，且省掉一次进程 spawn。 */
+function probeByPathScan(name) {
+	try {
+		const dirs = String(process.env.PATH || process.env.Path || "").split(path.delimiter).filter(Boolean);
+		const exts = IS_WIN
+			? String(process.env.PATHEXT || WIN_PATHEXT).split(";").filter(Boolean).map((e) => e.toLowerCase())
+			: [""];
+		for (const dir of dirs) {
+			for (const ext of exts) {
+				try { if (fs.existsSync(path.join(dir, name + ext))) return true; } catch { /* 目录不可读则跳过 */ }
+			}
+		}
+	} catch { /* PATH 不可解析按未命中 */ }
+	return false;
+}
 function probeOnPath(name) {
+	if (probeByPathScan(name)) return true;
 	try {
 		if (IS_WIN) {
-			// where 是 cmd 内建可执行，按 PATHEXT 解析 .exe/.cmd/.bat
-			return spawnSync("where", [name], { stdio: "ignore" }).status === 0;
+			// 兜底：where 还能看到 App Paths 注册项（不在 PATH 里的安装）。显式补 PATHEXT，
+			// 免得宿主没继承时这里同样补不出扩展名。
+			return spawnSync("where", [name], {
+				stdio: "ignore",
+				env: { ...process.env, PATHEXT: process.env.PATHEXT || WIN_PATHEXT },
+			}).status === 0;
 		}
 		return spawnSync("/bin/sh", ["-c", `command -v -- ${name} >/dev/null 2>&1`]).status === 0;
 	} catch {

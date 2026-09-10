@@ -328,7 +328,19 @@ console.log(fail === 0 ? `\nall ${pass} tests passed` : `\n${fail} FAILED, ${pas
 	ok("budget drops tools line before tail lines when tight", overTools.dropped.includes("tools") && overTools.text.length <= 200);
 	const deps = scanSkillDeps("pentest");
 	ok("scanSkillDeps reads playbook tools frontmatter", deps.has("nmap") && deps.has("sqlmap") && deps.has("masscan") && deps.has("hydra") && !deps.has("impacket") && deps.size === 13);
-	ok("checkTool: universal binary true, bogus false", checkTool("ls") === true && checkTool("definitely-not-a-real-tool-xyz") === false);
+	// 回归锁：宿主 env 可能没有 PATHEXT（实测 dsh 插件进程如此）。此时 `where cmd` 返回 1、
+	// `where cmd.exe` 返回 0 —— 探测若只信 where + 扩展名，就会把每个工具都误判成「未安装」
+	// （原先 Windows 上是 /bin/sh ENOENT 的同一症状，换 where 只是换了触发条件）。
+	// 因此这里主动清掉 PATHEXT 再断言，逼实现走 PATH 直扫。
+	// 可执行体按平台取恒在者：POSIX 用 ls，Windows 用 System32 里的 cmd（ls 在 Windows 上
+	// 只存在于 Git Bash 的 usr/bin，不在 Windows PATH，拿它当「恒在」会误报失败）。
+	const universalBin = process.platform === "win32" ? "cmd" : "ls";
+	const savedPathext = process.env.PATHEXT;
+	delete process.env.PATHEXT;
+	const universalOk = checkTool(universalBin) === true;
+	const bogusOk = checkTool("definitely-not-a-real-tool-xyz") === false;
+	if (savedPathext === undefined) delete process.env.PATHEXT; else process.env.PATHEXT = savedPathext;
+	ok("checkTool: universal binary true, bogus false（宿主未继承 PATHEXT 时同样成立）", universalOk && bogusOk);
 	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rb-acc-"));
 	const tmp = path.join(tmpDir, "injections.jsonl");
 	ok("appendAccounting writes JSONL line", appendAccounting(tmp, { ts: "t", mode: "pentest", rev: 1, dropped: ["refs"] }) === true && JSON.parse(fs.readFileSync(tmp, "utf8").trim()).rev === 1);

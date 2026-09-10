@@ -1397,88 +1397,81 @@ function ShellEditor(props) {
 	return h("div", { style: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 2200, display: "flex", alignItems: "center", justifyContent: "center" } }, card);
 }
 
-/** 一行上传的自有 webshell：名称 / 分类编辑 / 内容编辑 / 口令 / 删除。 */
-function SelfShellRow(props) {
-	var sh = props.sh;
-	var [langEdit, setLangEdit] = useState(false);
-	var [obfEdit, setObfEdit] = useState(false);
-	function commit(kind, val) {
-		var payload = { file: sh.file };
-		if (kind === "lang") payload.lang = val;
-		else payload.obf = val;
-		wsRpc(props.connection, "self-update", payload).then(function () { setLangEdit(false); setObfEdit(false); props.onChanged(); });
-	}
-	var catEdit = function (kind) {
-		var next = window.prompt(kind === "lang" ? "语言（输入新值即创建新语言分类）" : "绕过形式（输入新值即创建新绕过分类）", kind === "lang" ? sh.lang : sh.obf);
-		if (next !== null && next.trim()) commit(kind, next.trim());
-	};
-	return h("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderBottom: "1px solid #f0f0f2", flexWrap: "wrap" } },
-		h("code", { style: Object.assign({}, wsMono, { fontWeight: 600, fontSize: 12, minWidth: 150 }) }, sh.name),
-		sh.registered ? null : h("span", { style: { fontSize: 10, padding: "1px 6px", borderRadius: 999, background: "#eef2f6", color: "#6b7280", fontWeight: 600 } }, "目录内（未登记）"),
-		h("span", { style: { fontSize: 11, color: "#6e6e73", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 160, whiteSpace: "nowrap" } }, sh.file),
-		h("span", { style: { display: "inline-flex", gap: 4, alignItems: "center" } },
-			h("button", { type: "button", title: "修改语言分类（未登记首次修改会自动登记）", onClick: function () { catEdit("lang"); }, style: { fontSize: 11, padding: "2px 7px", borderRadius: 999, background: "#eef2f6", border: "none", color: "#3b556e", cursor: "pointer" } }, (sh.lang || "其他") + " ▾"),
-			h("button", { type: "button", title: "修改绕过形式分类", onClick: function () { catEdit("obf"); }, style: { fontSize: 11, padding: "2px 7px", borderRadius: 999, background: "#fef3c7", border: "none", color: "#92400e", cursor: "pointer" } }, (sh.obf || "自定义") + " ▾")),
-		h("div", { style: { flex: 1 } }),
-		h(PasswordField, { value: sh.password, emptyText: "未设置（首次改密自动登记）", editable: true, onChange: function (v) { props.onChangePassword(sh.file, v); } }),
-		h("button", { type: "button", onClick: function () { props.onEdit(sh); }, style: { padding: "3px 10px", borderRadius: 6, fontSize: 11, border: "1px solid #d9d9de", background: "#fff", cursor: "pointer" } }, "编辑内容"),
-		h("button", { type: "button", onClick: function () { props.onRemove(sh); }, style: wsBtnDanger }, "删除"));
+// ── 单一库视图：自有上传 / 内置模板 / 已登记连接 同库呈现 ────────────
+var SOURCE_META = {
+	self: { label: "自有上传", bg: "#e7f0ff", fg: "#1d4ed8" },
+	tpl: { label: "内置模板", bg: "#e8f5ec", fg: "#1a7f37" },
+	conn: { label: "已登记连接", bg: "#fff3e0", fg: "#b45309" }
+};
+var SOURCE_RANK = { self: 0, tpl: 1, conn: 2 };
+
+/** 来源标签：单一库视图下区分条目归属。 */
+function SourcePill(props) {
+	var m = SOURCE_META[props.source] || { label: props.source, bg: "#eeeeee", fg: "#555555" };
+	return h("span", {
+		title: props.title || m.label,
+		style: { fontSize: 10, padding: "1px 6px", borderRadius: 999, background: m.bg, color: m.fg, fontWeight: 700, whiteSpace: "nowrap", flex: "0 0 auto" }
+	}, m.label);
 }
 
-function SelfShellsCard(props) {
-	var [name, setName] = useState("");
-	var [lang, setLang] = useState("");
-	var [obf, setObf] = useState("");
-	var [password, setPassword] = useState("");
-	var [file, setFile] = useState(null);
-	var [busy, setBusy] = useState(false);
-	var [msg, setMsg] = useState("");
-	var fileRef = React.useRef(null);
-	var shells = props.shells || [];
-	function upload() {
-		if (!file) { setMsg("请先选择要上传的 webshell 文件"); return; }
-		var reader = new FileReader();
-		reader.onload = function () {
-			var b64 = String(reader.result).split(",")[1] || "";
-			setBusy(true); setMsg("");
-			wsRpc(props.connection, "self-add", { name: name.trim() || file.name, lang: lang.trim() || "其他", obf: obf.trim() || "自定义", password: password, fileName: file.name, dataBase64: b64 }).then(function (r) {
-				setBusy(false);
-				if (r && r.ok) { setName(""); setObf(""); setPassword(""); setFile(null); if (fileRef.current) fileRef.current.value = ""; props.onChanged(); }
-				else setMsg((r && r.error) || "上传失败");
-			}).catch(function (e) { setBusy(false); setMsg(String(e && e.message || e)); });
-		};
-		reader.readAsDataURL(file);
-	}
-	var groups = [];
-	shells.forEach(function (s) {
-		var k = (s.lang || "其他") + "\u0000" + (s.obf || "自定义");
-		var g = groups.find(function (x) { return x.k === k; });
-		if (!g) { g = { k: k, lang: s.lang || "其他", obf: s.obf || "自定义", items: [] }; groups.push(g); }
-		g.items.push(s);
+/** 把三种来源归一成同一行模型（保留 语言 / 绕过形式 与 连接密钥）。 */
+function buildLibItems(shells, langs, conns) {
+	var items = [];
+	(shells || []).forEach(function (s) {
+		items.push({ source: "self", key: "self:" + s.id, lang: s.lang || "其他", obf: s.obf || "自定义", name: s.name || s.file, file: s.file, registered: !!s.registered, raw: s });
 	});
-	return h("div", { style: wsCard },
-		h("div", { style: wsTitle }, "我的 webshell（上传 · 编辑内容 · 分类与口令管理）"),
-		h("div", { style: wsHint },
-			"上传自有马文件入库（语言/绕过形式可输入新值即新建分类）；行内点「语言 ▾ / 绕过形式 ▾」可改分类，「编辑内容」直接改马源码，「改密」管理连接口令（明文仅供本机查看，模型侧脱敏）。"),
-		h("div", { style: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 8 } },
-			h("input", { ref: fileRef, type: "file", accept: ".php,.jsp,.aspx,.asp,.jspx,.war,.py,.cgi", onChange: function (e) { setFile(e.target.files && e.target.files[0] || null); }, style: { flex: "1 1 200px", fontSize: 12 } }),
-			h("input", { value: name, onChange: function (e) { setName(e.target.value); }, placeholder: "备注名（默认文件名）", style: Object.assign({}, wsInput, { flex: "0 1 150px" }) }),
-			h("input", { value: lang, onChange: function (e) { setLang(e.target.value); }, placeholder: "语言：PHP/JSP/ASPX…（新值=新分类）", style: Object.assign({}, wsInput, { flex: "0 1 170px" }) }),
-			h("input", { value: obf, onChange: function (e) { setObf(e.target.value); }, placeholder: "绕过形式：如 base64（新值=新分类）", style: Object.assign({}, wsInput, { flex: "0 1 170px" }) }),
-			h("input", { value: password, onChange: function (e) { setPassword(e.target.value); }, placeholder: "连接密码", style: Object.assign({}, wsInput, { flex: "0 0 110px" }) }),
-			h("button", { type: "button", disabled: busy, onClick: upload, style: wsBtnPrimary }, busy ? "上传中…" : "上传入库")),
-		msg ? h("div", { style: { fontSize: 12, color: "#d1242f", marginBottom: 6 } }, msg) : null,
-		shells.length === 0
-			? h("div", { style: { fontSize: 12, color: "#9a9aa0", textAlign: "center", padding: "10px 0" } }, "还没有上传的 webshell——上传后在此集中管理。")
-			: groups.map(function (g) {
-				return h("div", { key: g.k },
-					h("div", { style: wsGroupTitle },
-						h("span", null, g.lang + " / " + g.obf),
-						h("span", { style: { flex: 1 } }),
-						h("span", { style: { fontWeight: 400, color: "#6e7a88" } }, g.items.length + " 个"),
-						h("button", { type: "button", title: "整组重命名绕过形式", onClick: function () { var v = window.prompt("整组改为绕过形式：", g.obf); if (v !== null && v.trim()) g.items.forEach(function (s) { wsRpc(props.connection, "self-update", { id: s.id, obf: v.trim() }); }); setTimeout(props.onChanged, 300); }, style: { padding: "0 6px", fontSize: 11, cursor: "pointer", border: "none", background: "transparent", color: "#2f81f7" } }, "组改名")),
-					g.items.map(function (s) { return h(SelfShellRow, { key: s.id, sh: s, connection: props.connection, onChangePassword: props.onChangePassword, onRemove: props.onRemove, onEdit: props.onEdit, onChanged: props.onChanged }); }));
-			}));
+	(langs || []).forEach(function (lg) {
+		if (!lg || !Array.isArray(lg.items)) return;
+		var langLabel = lg.label || lg.lang || "其他";
+		var obfOf = {};
+		(lg.groups || []).forEach(function (grp) { (grp.items || []).forEach(function (t) { obfOf[t.kind] = grp.label || grp.obf || "自定义"; }); });
+		lg.items.forEach(function (t) {
+			items.push({ source: "tpl", key: "tpl:" + t.kind, lang: langLabel, obf: obfOf[t.kind] || "自定义", name: t.kind, label: t.label, raw: t });
+		});
+	});
+	(conns || []).forEach(function (c) {
+		items.push({ source: "conn", key: "conn:" + (c.id || c.url), lang: c.protocol || "连接", obf: "已登记", name: c.name || c.host || c.url, url: c.url, raw: c });
+	});
+	return items;
+}
+
+/** 单一库行：行首统一来源标签；按来源分发可用动作。 */
+function LibraryRow(props) {
+	var it = props.item, sh = it.raw;
+	function commit(kind, val) {
+		var payload = { file: sh.file };
+		if (kind === "lang") payload.lang = val; else payload.obf = val;
+		wsRpc(props.connection, "self-update", payload).then(function () { props.onChanged(); });
+	}
+	function catEdit(kind) {
+		var cur = kind === "lang" ? (sh.lang || "其他") : (sh.obf || "自定义");
+		var next = window.prompt(kind === "lang" ? "语言（输入新值即创建新语言分类）" : "绕过形式（输入新值即创建新绕过分类）", cur);
+		if (next !== null && next.trim()) commit(kind, next.trim());
+	}
+	var mid = [], act = [];
+	if (it.source === "self") {
+		if (!sh.registered) mid.push(h("span", { key: "un", style: { fontSize: 10, padding: "1px 6px", borderRadius: 999, background: "#eef2f6", color: "#6b7280", fontWeight: 600 } }, "目录内（未登记）"));
+		mid.push(h("span", { key: "f", style: { fontSize: 11, color: "#6e6e73", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 150, whiteSpace: "nowrap" } }, sh.file));
+		mid.push(h("button", { key: "l", type: "button", title: "修改语言分类（未登记首次修改会自动登记）", onClick: function () { catEdit("lang"); }, style: { fontSize: 11, padding: "2px 7px", borderRadius: 999, background: "#eef2f6", border: "none", color: "#3b556e", cursor: "pointer" } }, (sh.lang || "其他") + " ▾"));
+		mid.push(h("button", { key: "o", type: "button", title: "修改绕过形式分类", onClick: function () { catEdit("obf"); }, style: { fontSize: 11, padding: "2px 7px", borderRadius: 999, background: "#fef3c7", border: "none", color: "#92400e", cursor: "pointer" } }, (sh.obf || "自定义") + " ▾"));
+		act.push(h(PasswordField, { key: "p", value: sh.password, emptyText: "未设置（首次改密自动登记）", editable: true, onChange: function (v) { props.onChangePassword(sh.file, v); } }));
+		act.push(h("button", { key: "e", type: "button", onClick: function () { props.onEdit(sh); }, style: { padding: "3px 10px", borderRadius: 6, fontSize: 11, border: "1px solid #d9d9de", background: "#fff", cursor: "pointer" } }, "编辑内容"));
+		act.push(h("button", { key: "d", type: "button", onClick: function () { props.onRemove(sh); }, style: wsBtnDanger }, "删除"));
+	} else if (it.source === "tpl") {
+		mid.push(h("span", { key: "l", style: { fontSize: 11, color: "#4a4a4f" } }, it.label || ""));
+		act.push(h(PasswordField, { key: "p", value: (sh.values && sh.values.password) || "", emptyText: "生成时随机", emptyTitle: "设默认口令", editable: true, onChange: function (v) { wsRpc(props.connection, "tpl-set", { kind: sh.kind, password: v }).then(function () { props.onChanged(); }); } }));
+		if (sh.customized) act.push(h("span", { key: "c", style: { fontSize: 10, padding: "1px 6px", borderRadius: 999, background: "#dafbe1", color: "#1a7f37", fontWeight: 600 } }, "已自定义"));
+		act.push(h("button", { key: "t", type: "button", onClick: function () { props.onEditTpl(sh); }, style: { padding: "3px 10px", borderRadius: 6, fontSize: 11, border: "1px solid #d9d9de", background: "#fff", cursor: "pointer" } }, "参数"));
+	} else {
+		mid.push(h("span", { key: "u", style: { fontSize: 11, color: "#6e6e73", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 240, whiteSpace: "nowrap" } }, String(sh.url || "") + (sh.protocol ? " · " + sh.protocol : "")));
+		act.push(h(PasswordField, { key: "p", value: sh.password || "", editable: false }));
+	}
+	return h("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "4px 0 4px 8px", borderBottom: "1px solid #f0f0f2", flexWrap: "wrap" } },
+		h(SourcePill, { source: it.source }),
+		h("code", { style: Object.assign({}, wsMono, { fontWeight: 600, fontSize: 12, flex: "0 0 156px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }) }, it.name),
+		mid,
+		h("div", { style: { flex: 1, minWidth: 8 } }),
+		act);
 }
 
 function TplEditor(props) {
@@ -1518,7 +1511,7 @@ function WebShellSettings(props) {
 	var [langs, setLangs] = useState([]);
 	var [shells, setShells] = useState([]);
 	var [conns, setConns] = useState([]);
-	var [openLang, setOpenLang] = useState({});
+	var [collapsed, setCollapsed] = useState({});
 	var [editing, setEditing] = useState(null);
 	var [editShell, setEditShell] = useState(null);
 	var [dirOpen, setDirOpen] = useState(false);
@@ -1526,6 +1519,17 @@ function WebShellSettings(props) {
 	var [effective, setEffective] = useState("");
 	var [busy, setBusy] = useState(false);
 	var [msg, setMsg] = useState("");
+	var [srcFilter, setSrcFilter] = useState("all");
+	var [langFilter, setLangFilter] = useState("all");
+	var [kw, setKw] = useState("");
+	var [upName, setUpName] = useState("");
+	var [upLang, setUpLang] = useState("");
+	var [upObf, setUpObf] = useState("");
+	var [upPwd, setUpPwd] = useState("");
+	var [upFile, setUpFile] = useState(null);
+	var [upBusy, setUpBusy] = useState(false);
+	var [upMsg, setUpMsg] = useState("");
+	var fileRef = React.useRef(null);
 	function load() {
 		wsRpc(props.connection, "manifest-preview", {}).then(function (r) { if (r && r.ok && r.value.langs) { setLangs(r.value.langs); setEffective(r.value.genDir || ""); } });
 		wsRpc(props.connection, "self-list", {}).then(function (r) { if (r && r.ok) setShells(r.value.shells || []); });
@@ -1551,12 +1555,96 @@ function WebShellSettings(props) {
 		if (!q) return;
 		wsRpc(props.connection, "self-remove", { file: sh.file, deleteFile: true }).then(function () { load(); });
 	}
-	return h("div", { style: { maxWidth: 880 } },
+	function upload() {
+		if (!upFile) { setUpMsg("请先选择要上传的 webshell 文件"); return; }
+		var reader = new FileReader();
+		reader.onload = function () {
+			var b64 = String(reader.result).split(",")[1] || "";
+			setUpBusy(true); setUpMsg("");
+			wsRpc(props.connection, "self-add", { name: upName.trim() || upFile.name, lang: upLang.trim() || "其他", obf: upObf.trim() || "自定义", password: upPwd, fileName: upFile.name, dataBase64: b64 }).then(function (r) {
+				setUpBusy(false);
+				if (r && r.ok) { setUpName(""); setUpObf(""); setUpPwd(""); setUpFile(null); if (fileRef.current) fileRef.current.value = ""; load(); }
+				else setUpMsg((r && r.error) || "上传失败");
+			}).catch(function (e) { setUpBusy(false); setUpMsg(String(e && e.message || e)); });
+		};
+		reader.readAsDataURL(upFile);
+	}
+	var allItems = buildLibItems(shells, langs, conns);
+	var langOpts = [];
+	allItems.forEach(function (it) { if (langOpts.indexOf(it.lang) < 0) langOpts.push(it.lang); });
+	var cnt = { all: allItems.length, self: 0, tpl: 0, conn: 0 };
+	allItems.forEach(function (it) { cnt[it.source]++; });
+	var q = kw.trim().toLowerCase();
+	var items = allItems.filter(function (it) {
+		if (srcFilter !== "all" && it.source !== srcFilter) return false;
+		if (langFilter !== "all" && it.lang !== langFilter) return false;
+		if (q) { var hay = [it.name, it.label, it.file, it.obf, it.lang, it.url].filter(Boolean).join(" ").toLowerCase(); if (hay.indexOf(q) < 0) return false; }
+		return true;
+	});
+	var byLang = [];
+	items.forEach(function (it) {
+		var g = byLang.filter(function (x) { return x.lang === it.lang; })[0];
+		if (!g) { g = { lang: it.lang, groups: [] }; byLang.push(g); }
+		var og = g.groups.filter(function (x) { return x.obf === it.obf; })[0];
+		if (!og) { og = { obf: it.obf, items: [] }; g.groups.push(og); }
+		og.items.push(it);
+	});
+	byLang.forEach(function (g) {
+		g.groups.sort(function (a, b) { return String(a.obf).localeCompare(String(b.obf)); });
+		g.groups.forEach(function (og) { og.items.sort(function (a, b) { return (SOURCE_RANK[a.source] - SOURCE_RANK[b.source]) || String(a.name).localeCompare(String(b.name)); }); });
+	});
+	function setAllCollapsed(v) { var n = {}; byLang.forEach(function (g) { n[g.lang] = v; }); setCollapsed(n); }
+	var FILTERS = [["all", "全部"], ["self", "自有上传"], ["tpl", "内置模板"], ["conn", "已登记连接"]];
+	return h("div", { style: { maxWidth: 900 } },
 		h("div", { style: { fontSize: 15, fontWeight: 700, margin: "0 0 2px" } }, "WebShell"),
 		h("div", { style: { fontSize: 12, color: "#6e6e73", lineHeight: 1.7, marginBottom: 10 } },
-			"内置库一体化管理：上传与内置马均按 语言 → 绕过形式 分类，可改码、改密、改分类。模型每轮实时知情（连接脱敏）。"),
-		h(SelfShellsCard, { connection: props.connection, shells: shells, onChangePassword: changePassword, onRemove: removeShell, onEdit: function (s) { setEditShell(s); }, onChanged: load }),
-		h(ShellEditor, { connection: props.connection, shell: editShell, open: !!editShell, onClose: function () { setEditShell(null); } }),
+			"单一库视图：自有上传、内置模板、已登记连接同库管理，按 语言 → 绕过形式 两级分类，行首「来源标签」区分归属。可上传改码、改密、改分类；连接密钥仅本机明文可见，模型侧脱敏。"),
+		h("div", { style: wsCard },
+			h("div", { style: wsTitle }, "WebShell 库"),
+			h("div", { style: wsHint }, "上传自有马入库（语言 / 绕过形式可输入新值即新建分类）；行内「语言 ▾ / 绕过形式 ▾」改分类，「编辑内容」直接改马源码，「改密」管理连接口令，内置模板点「参数」自定义生成细节。"),
+			h("div", { style: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 8 } },
+				h("input", { ref: fileRef, type: "file", accept: ".php,.jsp,.aspx,.asp,.jspx,.war,.py,.cgi", onChange: function (e) { setUpFile(e.target.files && e.target.files[0] || null); }, style: { flex: "1 1 180px", fontSize: 12 } }),
+				h("input", { value: upName, onChange: function (e) { setUpName(e.target.value); }, placeholder: "备注名（默认文件名）", style: Object.assign({}, wsInput, { flex: "0 1 140px" }) }),
+				h("input", { value: upLang, onChange: function (e) { setUpLang(e.target.value); }, placeholder: "语言：PHP/JSP/ASPX…（新值=新分类）", style: Object.assign({}, wsInput, { flex: "0 1 168px" }) }),
+				h("input", { value: upObf, onChange: function (e) { setUpObf(e.target.value); }, placeholder: "绕过形式：如 base64（新值=新分类）", style: Object.assign({}, wsInput, { flex: "0 1 168px" }) }),
+				h("input", { value: upPwd, onChange: function (e) { setUpPwd(e.target.value); }, placeholder: "连接密码", style: Object.assign({}, wsInput, { flex: "0 0 110px" }) }),
+				h("button", { type: "button", disabled: upBusy, onClick: upload, style: wsBtnPrimary }, upBusy ? "上传中…" : "上传入库")),
+			upMsg ? h("div", { style: { fontSize: 12, color: "#d1242f", marginBottom: 6 } }, upMsg) : null,
+			h("div", { style: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", margin: "4px 0 8px", paddingTop: 8, borderTop: "1px solid #f0f0f2" } },
+				FILTERS.map(function (f) {
+					var on = srcFilter === f[0];
+					return h("button", { key: f[0], type: "button", onClick: function () { setSrcFilter(f[0]); }, style: { fontSize: 11, padding: "3px 10px", borderRadius: 999, cursor: "pointer", border: on ? "1px solid #2f81f7" : "1px solid #d9d9de", background: on ? "#2f81f7" : "#fff", color: on ? "#fff" : "#4a5568", fontWeight: on ? 700 : 400 } }, f[1] + " " + cnt[f[0]]);
+				}),
+				h("div", { style: { flex: 1, minWidth: 8 } }),
+				h("select", { value: langFilter, onChange: function (e) { setLangFilter(e.target.value); }, style: Object.assign({}, wsInput, { fontSize: 11 }) },
+					[h("option", { key: "__all", value: "all" }, "全部语言")].concat(langOpts.map(function (l) { return h("option", { key: l, value: l }, l); }))),
+				h("input", { value: kw, onChange: function (e) { setKw(e.target.value); }, placeholder: "搜索名称/文件/形态", style: Object.assign({}, wsInput, { width: 158 }) }),
+				h("button", { type: "button", onClick: function () { setAllCollapsed(false); }, style: { fontSize: 11, padding: "3px 8px", borderRadius: 6, border: "1px solid #d9d9de", background: "#fff", cursor: "pointer", color: "#2f81f7" } }, "展开全部"),
+				h("button", { type: "button", onClick: function () { setAllCollapsed(true); }, style: { fontSize: 11, padding: "3px 8px", borderRadius: 6, border: "1px solid #d9d9de", background: "#fff", cursor: "pointer", color: "#2f81f7" } }, "收起全部")),
+			byLang.length === 0
+				? h("div", { style: { fontSize: 12, color: "#9a9aa0", textAlign: "center", padding: "14px 0" } }, allItems.length === 0 ? "库为空——上传自有马，或使用内置模板生成。" : "没有符合筛选条件的条目。")
+				: byLang.map(function (g) {
+					var open = collapsed[g.lang] !== true;
+					var n = 0; g.groups.forEach(function (og) { n += og.items.length; });
+					return h("div", { key: g.lang },
+						h("div", { style: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", padding: "6px 0", fontWeight: 700, fontSize: 13 }, onClick: function () { var n2 = Object.assign({}, collapsed); n2[g.lang] = open; setCollapsed(n2); } },
+							h("span", null, (open ? "▾" : "▸") + " " + g.lang),
+							h("span", { style: { fontSize: 11, color: "#6e6e73", fontWeight: 400 } }, n + " 项")),
+						open ? g.groups.map(function (og) {
+							var selfItems = og.items.filter(function (x) { return x.source === "self"; });
+							return h("div", { key: og.obf },
+								h("div", { style: wsGroupTitle },
+									h("span", null, og.obf),
+									h("span", { style: { flex: 1 } }),
+									h("span", { style: { fontWeight: 400, color: "#6e7a88" } }, og.items.length + " 项"),
+									selfItems.length > 0 ? h("button", { type: "button", title: "把本组自有上传条目的绕过形式整组改名", onClick: function () { var v = window.prompt("整组改为绕过形式：", og.obf); if (v !== null && v.trim()) { selfItems.forEach(function (s) { wsRpc(props.connection, "self-update", { id: s.raw.id, obf: v.trim() }); }); setTimeout(load, 300); } }, style: { padding: "0 6px", fontSize: 11, cursor: "pointer", border: "none", background: "transparent", color: "#2f81f7" } }, "组改名") : null),
+								og.items.map(function (it) {
+									return h(LibraryRow, { key: it.key, item: it, connection: props.connection, onChanged: load, onEdit: function (s) { setEditShell(s); }, onChangePassword: changePassword, onRemove: removeShell, onEditTpl: function (t) { setEditing(t); } });
+								}));
+						}) : null);
+				}),
+			h(ShellEditor, { connection: props.connection, shell: editShell, open: !!editShell, onClose: function () { setEditShell(null); } }),
+			h(TplEditor, { connection: props.connection, item: editing, open: !!editing, onClose: function () { setEditing(null); }, onSaved: function () { setEditing(null); load(); } })),
 		h("div", { style: { border: "1px solid var(--dsw-alias-border-l1,#e4e4e7)", borderRadius: 8, padding: "6px 12px", marginBottom: 10, fontSize: 12 } },
 			h("div", { style: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", color: "#4a5568" }, onClick: function () { setDirOpen(!dirOpen); } },
 				h("span", null, (dirOpen ? "▾" : "▸") + " WebShell 文件目录"),
@@ -1569,41 +1657,7 @@ function WebShellSettings(props) {
 				h("div", { style: { display: "flex", gap: 6, alignItems: "center" } },
 					h("input", { value: dirCfg, onChange: function (e) { setDirCfg(e.target.value); }, placeholder: "绝对路径，如 D:\\WebShell（留空=自动探测）", style: Object.assign({}, wsInput, { flex: 1 }) }),
 					h("button", { type: "button", disabled: busy, onClick: saveDir, style: wsBtnPrimary }, busy ? "保存中…" : "保存目录")),
-				msg ? h("div", { style: { fontSize: 12, color: msg.indexOf("失败") >= 0 ? "#d1242f" : "#1a7f37", marginTop: 4 } }, msg) : null) : null),
-		h("div", { style: wsCard },
-			h("div", { style: wsTitle }, "内置马模板库（可直接生成）"),
-			h("div", { style: wsHint }, "16 种可生成形态按 语言 → 绕过形式 分类；点「参数/口令」可自定义该形态生成时的口令与参数。"),
-			langs.length === 0 ? h("div", { style: { fontSize: 12, color: "#9a9aa0" } }, "加载中…") :
-				langs.map(function (lg) {
-					var open = openLang[lg.lang] !== false;
-					var customized = lg.items.filter(function (i) { return i.customized; }).length;
-					return h("div", { key: lg.lang },
-						h("div", { style: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", padding: "6px 0", fontWeight: 700, fontSize: 13 }, onClick: function () { var n = JSON.parse(JSON.stringify(openLang)); n[lg.lang] = !open; setOpenLang(n); } },
-							h("span", null, (open ? "▾" : "▸") + " " + lg.label),
-							h("span", { style: { fontSize: 11, color: "#6e6e73", fontWeight: 400 } }, lg.items.length + " 形态" + (customized ? " · 已自定义 " + customized : ""))),
-						open ? (lg.groups || []).map(function (grp) {
-							return h("div", { key: grp.obf },
-								h("div", { style: wsGroupTitle }, h("span", null, grp.label)),
-								grp.items.map(function (it) {
-							return h("div", { key: it.kind, style: { display: "flex", alignItems: "center", gap: 6, padding: "3px 0 3px 8px", borderBottom: "1px solid #f0f0f2", flexWrap: "wrap" } },
-								h("div", { style: Object.assign({ flex: "0 0 150px", fontSize: 12, fontWeight: 600 }, wsMono) }, it.kind),
-								h("div", { style: { flex: 1, fontSize: 11, color: "#4a4a4f", minWidth: 140 } }, it.label),
-								h(PasswordField, { value: (it.values && it.values.password) || "", emptyText: "生成时随机", emptyTitle: "设默认口令", editable: true, onChange: function (v) { wsRpc(props.connection, "tpl-set", { kind: it.kind, password: v }).then(function () { load(); }); } }),
-								it.customized ? h("span", { style: { fontSize: 10, padding: "1px 6px", borderRadius: 999, background: "#dafbe1", color: "#1a7f37", fontWeight: 600 } }, "已自定义") : null,
-								h("button", { type: "button", onClick: function () { setEditing(it); }, style: { padding: "3px 10px", borderRadius: 6, fontSize: 11, border: "1px solid #d9d9de", background: "#fff", cursor: "pointer" } }, "参数"));
-								}));
-						}) : null);
-				}),
-			h(TplEditor, { connection: props.connection, item: editing, open: !!editing, onClose: function () { setEditing(null); }, onSaved: function () { setEditing(null); load(); } })),
-		h("div", { style: wsCard },
-			h("div", { style: wsTitle }, "已登记连接（明文口令仅本机管理显示）"),
-			conns.length === 0 ? h("div", { style: { fontSize: 12, color: "#9a9aa0" } }, "暂无已登记连接——在会话侧「webshell 管理」通过 webshell_connect 登记。") :
-				conns.map(function (c) {
-					return h("div", { key: c.id, style: { display: "flex", alignItems: "center", gap: 8, padding: "4px 0", borderBottom: "1px solid #f0f0f2", flexWrap: "wrap" } },
-						h("code", { style: Object.assign({}, wsMono, { fontWeight: 600, fontSize: 12, minWidth: 110 }) }, c.name || c.host || c.url),
-						h("span", { style: { fontSize: 11, color: "#6e6e73", flex: 1, minWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, String(c.url || "") + (c.protocol ? " · " + c.protocol : "")),
-						h(PasswordField, { value: c.password || "", editable: false }));
-				})));
+				msg ? h("div", { style: { fontSize: 12, color: msg.indexOf("失败") >= 0 ? "#d1242f" : "#1a7f37", marginTop: 4 } }, msg) : null) : null));
 }
 
 function injectVisibleConversationView(ctx, field, register) {

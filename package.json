@@ -1,6 +1,6 @@
 {
   "name": "dsh-saker",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Saker 模式包 — 基于 DeepSeek Harness 的攻防平台：渗透测试 / 代码审计 双 agent 模式（含领域知识库、技能 playbook、协作子代理），自包含 bundle，随包只读注册、不污染 DSH_HOME。",
   "type": "module",
   "main": "./lib/preset-root.js",

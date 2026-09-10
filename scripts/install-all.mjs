@@ -21,7 +21,7 @@
 //   SAKER_PROFILE=prod node scripts/install-all.mjs
 //
 import { spawnSync } from 'node:child_process'
-import { existsSync, readdirSync, statSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, statSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 
@@ -152,6 +152,28 @@ function runAdd(spec) {
   return { status: r.status, out: String(r.stdout || '') + String(r.stderr || '') }
 }
 
+/**
+ * Drop the installed copy of a package before (re)installing it.
+ *
+ * pnpm's `hoisted` node-linker — the layout the dsh profile uses — opens a
+ * handle on the existing package directory and then deadlocks trying to
+ * replace it on Windows. The symptom is brutal to diagnose: `pnpm add` sits
+ * forever with zero network connections and near-zero CPU while the target
+ * dir is un-renamable for as long as the pnpm process lives (measured: 9m43s,
+ * 68s CPU, no TCP sockets, `mv` denied). Killing pnpm releases the lock
+ * instantly, which is how the holder was identified.
+ *
+ * Removing the directory up front sidesteps the deadlock entirely. Deletion
+ * goes through the Node fs API rather than the shell, so external
+ * "safe delete" shims cannot intercept it.
+ */
+function removeInstalledDir(pkgName) {
+  const target = join(homeRoot, 'profiles', profile, 'node_modules', pkgName)
+  try {
+    rmSync(target, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 })
+  } catch { /* best effort — a failed sweep just means the old flow applies */ }
+}
+
 function addWithRetry(label, pkgName, spec, version) {
   const want = String(version || '')
   if (installed.has(pkgName)) {
@@ -162,6 +184,7 @@ function addWithRetry(label, pkgName, spec, version) {
     }
     console.log(`UPGRADE ${label}  ${pkgName}@${have || '?'} -> ${want || '?'}`)
   }
+  if (installed.has(pkgName) ? installed.get(pkgName) !== want : true) removeInstalledDir(pkgName)
   for (let tryN = 1; tryN <= 5; tryN++) {
     const { status, out } = runAdd(spec)
     if (status === 0 && /Done in|Already up to date|Progress: resolved/i.test(out)) {

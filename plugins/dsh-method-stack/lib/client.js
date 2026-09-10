@@ -61,7 +61,7 @@ function MethodRow(props) {
   function save() {
     rpc(props.connection, 'save-prompt', { group: g, id: m.id, text: draft }).then(function (res) {
       if (res && res.ok) {
-        setMsg('已保存（派生到用户层，下一轮生效）');
+        setMsg('已保存（派生到用户层，下一次模型请求即生效）');
         setDirty(false);
         props.onChanged && props.onChanged();
       } else {
@@ -155,7 +155,7 @@ function Page(props) {
   return React.createElement('div', { style: { maxWidth: 780 } },
     React.createElement('div', { style: { fontSize: 14, fontWeight: 700, margin: '0 0 4px' } }, '方法编排'),
     React.createElement('div', { style: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', lineHeight: 1.7, marginBottom: 8 } },
-      '按 模式 → 模块组 → 子方法 组织测试逻辑。勾选=该模式启用（下一轮请求注入 <saker-methods>）。' +
+      '按 模式 → 模块组 → 子方法 组织测试逻辑。勾选即启用（下一次模型请求即注入 <saker-methods>，无需重启）。' +
       '点「查看/自定义」可看并编辑正文——编辑自动派生到用户层，官方版本保留可还原。' +
       '工具路径、MCP、知识库等配置不在此（见安全配置/知识库）。'),
     React.createElement(OpeningCard, { connection: props.connection, presetId: presetId }),
@@ -204,7 +204,7 @@ function OpeningCard(props) {
   }
   function save() {
     rpc(props.connection, 'opening-save', { presetId: props.presetId, text: text }).then(function (r) {
-      if (r && r.ok) setMsg('已保存：此开场将在下一轮显示于官方 persona 之前（清空内容=取消自定义）');
+      if (r && r.ok) setMsg('已保存：此开场将在下一次模型请求显示于官方 persona 之前（清空内容=取消自定义）');
       else setMsg((r && r.error && r.error.message) || '保存失败');
       setTimeout(function () { setMsg(''); }, 2600);
     });
@@ -303,7 +303,7 @@ function MethodDock(props) {
               React.createElement('span', { style: { fontSize: 10, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 } }, ' ' + (m.description || '').slice(0, 60)));
           }));
       }),
-      React.createElement('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', marginTop: 6 } }, '变更在下一轮模型请求生效；完整自定义见 设置 → 方法编排。'))
+      React.createElement('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', marginTop: 6 } }, '变更即时生效（下一次模型请求即注入，无需重启）；完整自定义见 设置 → 方法编排。'))
       : null);
 }
 
