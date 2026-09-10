@@ -1,5 +1,7 @@
 // dsh-mode-group 客户端：新建会话屏模式选择 chip。
-// pentest / code-audit 两个专业模式直接平铺于菜单（groupable=false 时不再二级折叠）。
+// pentest / code-audit 两个专业模式平铺于菜单最前；其余 roster 中可见的模式
+// （如宿主 standard，供日常办公会话使用）紧随其后列出——只认 PRO_IDS 会把
+// standard 挡在 UI 之外，preset 层放行了也依然选不到。
 // 数据与动作走 connection.api.agentPresets，语义与原生 seat 一致：选择=暂存+
 // 空白会话即应用；会话列表变化时补投。
 window.__ModuleLoader__.load({ id: "@dsh-external/dsh-mode-group", factory: (require) => {
@@ -97,9 +99,11 @@ function Chip(props) {
 	var options = snap.options || [];
 	var pro = options.filter(function (o) { return PRO_IDS.indexOf(o.id) >= 0; })
 		.sort(function (a, b) { return PRO_IDS.indexOf(a.id) - PRO_IDS.indexOf(b.id); });
+	// 专业模式之外的可见模式（standard 等）：排在专业模式之后平铺，供通用/办公会话选择。
+	var others = options.filter(function (o) { return PRO_IDS.indexOf(o.id) < 0; });
 	var builtin = [];
 	var researcher = undefined;
-	var groupable = false;                                 // 精简为两种模式：直接平铺
+	var groupable = false;                                 // 平铺展示：专业模式在前，其余模式随后
 	var chosen = options.find(function (o) { return o.id === snap.current; });
 	var label = chosen ? chosen.name : (snap.current || "…");
 
@@ -168,7 +172,8 @@ function Chip(props) {
 				React.createElement("span", { className: "dsh-mg-name" }, l.group),
 				React.createElement("span", { className: "dsh-mg-desc" }, l.groupDesc),
 				React.createElement("span", { className: "dsh-mg-caret is-sub" }, "▸")) : null,
-			!groupable ? pro.map(item) : null)
+			!groupable ? pro.map(item) : null,
+			!groupable ? others.map(item) : null)
 		: null,
 		(menuOpen && subOpen && groupable) ? React.createElement("div", { ref: subRef, role: "menu", className: "dsh-mg-menu dsh-mg-sub",
 			onMouseEnter: function () { window.clearTimeout(closeTimer.current); },
