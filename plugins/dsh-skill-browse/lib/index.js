@@ -277,6 +277,10 @@ export function apply(ctx, config = {}) {
   const { connection } = ctx
   const root = userSkillRoot(cfg)
 
+  // 宿主 0.1.5-rc.1 起 connection.rpc.handle 内部改用 owner.webServer 注册路由；若 webServer
+  // 未注入到本插件上下文会抛 cannot get property "webServer" without inject，**导致插件加载整体失败**。
+  // 捕获降级：RPC 关闭，其余功能不受影响。
+  try {
   connection.rpc.handle(CHANNEL, async (endpoint, payload) => {
     if (endpoint === 'list') {
       const presetId = payload && typeof payload.presetId === 'string' ? payload.presetId : ''
@@ -333,6 +337,9 @@ export function apply(ctx, config = {}) {
     }
     return failure('unknown endpoint: ' + endpoint)
   }, { authority: 'loopback' })
+  } catch (error) {
+    ctx.logger?.warn?.('dsh-skill-browse: RPC unavailable（技能浏览页不可用，其余功能正常）: ' + String(error && error.message ? error.message : error))
+  }
 }
 
 export { Config }

@@ -15,7 +15,12 @@ import { createRequire } from 'node:module'
 import z from '@deepseek-ai/schemastery'
 
 export const name = 'dsh-method-stack'
-export const inject = ['connection', 'systemPrompt', 'agentPresets']
+// webServer 必须显式声明：宿主 0.1.5-rc.1 起 connection 服务自身不再 inject webServer，
+// connection.rpc.handle 内部改用**调用方**的 owner.webServer（packages/client/connection
+// 第 617 行 `owner.effect(() => owner.webServer.register(route))`）。0.1.3-alpha.2 时
+// connection 自己声明了它，所以旧代码不需要；0.1.5 不声明即抛
+// `cannot get property "webServer" without inject`。
+export const inject = ['connection', 'systemPrompt', 'agentPresets', 'webServer']
 
 const CHANNEL = '/dsh-method-stack'
 const Config = z.object({ enable: z.boolean().default(true) })
@@ -208,6 +213,11 @@ export function apply(ctx, config = {}) {
   if (!connection || typeof connection.rpc?.handle !== 'function') {
     ctx.logger?.warn?.('dsh-method-stack: connection service unavailable, RPC disabled')
   } else {
+    // 宿主 0.1.5-rc.1 起 connection.rpc.handle 内部改用 owner.webServer 注册路由
+    // （packages/client/connection `owner.effect(() => owner.webServer.register(route))`）。
+    // 若 webServer 未能注入到本插件上下文，会抛 cannot get property "webServer" without inject，
+    // 且**插件加载会整体失败**（而非仅 RPC 不可用）。这里捕获降级：RPC 关闭，其余功能不受影响。
+    try {
     connection.rpc.handle(CHANNEL, async (endpoint, payload) => {
     try {
       const p = payload && typeof payload === 'object' ? payload : {}
@@ -327,6 +337,9 @@ export function apply(ctx, config = {}) {
       return failure(error instanceof Error ? error.message : String(error))
     }
   }, { authority: 'loopback' })
+    } catch (error) {
+      ctx.logger?.warn?.('dsh-method-stack: RPC unavailable（设置页「方法编排」不可用，其余功能正常）: ' + String(error && error.message ? error.message : error))
+    }
   }
 
   // 2) 每轮注入：把当前模式启用方法正文作为一段 context。
