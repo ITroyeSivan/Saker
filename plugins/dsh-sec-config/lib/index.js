@@ -10,6 +10,7 @@
 // to the "MCP 工作台" for the same source-of-truth data.
 import z from '@deepseek-ai/schemastery'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { startModelProxy } from './model-proxy.js'
 import { homedir } from 'node:os'
 import { basename, dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -66,7 +67,11 @@ function isToolKey(key) {
 }
 
 /** Fields the client may write through settings/mutate. */
-const WRITABLE_FIELDS = new Set(['tools', 'services', 'dnslog', 'apiKeys', 'scanRoots', 'hiddenTools', 'roots', 'categories', 'entries'])
+const WRITABLE_FIELDS = new Set(['tools', 'services', 'dnslog', 'apiKeys', 'scanRoots', 'hiddenTools', 'roots', 'categories', 'entries', 'model'])
+
+/** 模型接入落在 llm-pi-ai 命名空间下的 providers.<id>.baseURL。 */
+const LLM_PI_AI_NAMESPACE = 'llm-pi-ai'
+const PROVIDER_ID_RE = /^[a-z0-9][a-z0-9-]*$/
 
 /** Secret-bearing fields: redacted on read; an empty/`***` write is ignored. */
 const SECRET_FIELDS = new Set(['dnslog.token', 'apiKeys.deepseekKey'])
@@ -160,6 +165,24 @@ const Config = z.object({
   }),
   apiKeys: z.object({
     deepseekKey: z.string().default(''),
+  }),
+  /** 模型接入：把 dsh 的 llm-pi-ai provider 指向「本机代理」还是「直连上游」。
+   *  OpenCode Go 这类网关要求 x-opencode-session 头，dsh 不自带 —— 直连必报
+   *  400 MissingSessionID，走本机代理由代理补齐会话头并按需剥私有字段。
+   *  注意 dsh 会在 baseURL 后自动拼 /chat/completions，所以这里只到 /v1。 */
+  model: z.object({
+    provider: z.string().default('custom'),
+    /** proxy=走本机代理（推荐） / direct=直连上游 / custom=自定义地址 */
+    mode: z.string().default('proxy'),
+    /** mode=proxy 时：由本插件自己起内置代理（false 则假定已有外部程序在监听该端口） */
+    builtin: z.boolean().default(true),
+    listenHost: z.string().default('127.0.0.1'),
+    listenPort: z.number().default(8788),
+    upstream: z.string().default('https://opencode.ai/zen/go'),
+    customBaseUrl: z.string().default(''),
+    /** 剥掉客户端注入的私有字段（不剥上游会 400 Extra inputs are not permitted） */
+    sanitize: z.boolean().default(true),
+    userAgent: z.string().default('saker-sec-config/1.0'),
   }),
   /** 工具库 v2：一个或多个「工具根目录」。选择后一键探测并按分类导入；也支持单目录。 */
   roots: z.array(z.string()).default([]),
@@ -856,6 +879,133 @@ function buildServerEntry(name, rawUrl, section) {
  * MCP 工作台 gets auto-synced and the model's mcp__* tool registry lights up
  * on the next prompt assembly.
  */
+/** 去掉首尾空白与尾部斜杠。导出供离线单测直接覆盖。 */
+export function trimUrl(u) {
+  return String(u || '').trim().replace(/\/+$/, '')
+}
+
+/**
+ * 按当前配置算出该写进 provider 的 baseURL。
+ *
+ * **只到 /v1，不要带 /chat/completions** —— dsh 会在 baseURL 后自行拼
+ * `/chat/completions`，多写一层会变成 `/v1/chat/completions/chat/completions`，
+ * 上游回 404（实测踩过）。
+ */
+export function modelBaseUrl(model) {
+  const m = model && typeof model === 'object' ? model : {}
+  const mode = String(m.mode || 'proxy')
+  if (mode === 'direct') return trimUrl(m.upstream || 'https://opencode.ai/zen/go') + '/v1'
+  if (mode === 'custom') return trimUrl(m.customBaseUrl)
+  const host = String(m.listenHost || '127.0.0.1').trim() || '127.0.0.1'
+  const port = Number(m.listenPort) || 8788
+  return `http://${host}:${port}/v1`
+}
+
+/** 读 llm-pi-ai 里该 provider 当前生效的 baseURL；命名空间未注册时返回 null。 */
+function readProviderBaseUrl(settings, provider) {
+  try {
+    const ns = settings.get(LLM_PI_AI_NAMESPACE)
+    const entry = ns && ns.providers && ns.providers[provider]
+    return entry && typeof entry.baseURL === 'string' ? entry.baseURL : null
+  } catch {
+    return null
+  }
+}
+
+/** 带超时的 fetch（探测用，失败即返回错误文本而不是抛）。 */
+async function probeUrl(url, timeoutMs) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  const started = Date.now()
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { authorization: 'Bearer sk-local' },
+      signal: controller.signal,
+    })
+    const body = await res.text()
+    return { ok: res.ok, status: res.status, ms: Date.now() - started, body: body.slice(0, 400) }
+  } catch (err) {
+    return { ok: false, status: 0, ms: Date.now() - started, error: err && err.message ? err.message : String(err) }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * 内置代理的生命周期。
+ *
+ * 代理由插件在**宿主进程内**起一个 loopback 服务，不依赖任何外部程序 ——
+ * 任何用户装上插件就能用，不必额外装或手动起别的东西。
+ */
+function createModelProxyController(logger) {
+  let handle = null
+  let lastError = ''
+  let lastKey = ''
+
+  const keyOf = (model) => JSON.stringify([
+    String(model.mode || 'proxy'),
+    model.builtin !== false,
+    String(model.listenHost || '127.0.0.1'),
+    Number(model.listenPort) || 8788,
+    String(model.upstream || ''),
+    model.sanitize !== false,
+    String(model.userAgent || ''),
+  ])
+
+  async function stop() {
+    if (!handle) return
+    try { await handle.close() } catch { /* 关闭异常不影响后续重启 */ }
+    handle = null
+  }
+
+  async function start(model) {
+    await stop()
+    lastError = ''
+    lastKey = keyOf(model)
+    if (String(model.mode || 'proxy') !== 'proxy' || model.builtin === false) {
+      return { running: false, managed: false }
+    }
+    try {
+      handle = await startModelProxy({
+        host: String(model.listenHost || '127.0.0.1').trim() || '127.0.0.1',
+        port: Number(model.listenPort) || 8788,
+        upstreamBase: trimUrl(model.upstream || 'https://opencode.ai/zen/go'),
+        userAgent: String(model.userAgent || 'saker-sec-config/1.0'),
+        sanitize: model.sanitize !== false,
+        log: (line) => logger?.info?.(`dsh-sec-config: ${line}`),
+      })
+      return { running: true, managed: true, port: handle.port }
+    } catch (err) {
+      const raw = err && err.message ? err.message : String(err)
+      const port = Number(model.listenPort) || 8788
+      lastError = /EADDRINUSE/.test(raw)
+        ? `端口 ${port} 已被占用。若你已有别的代理在跑（例如自己起的脚本），保持即可 —— 面板会显示该端口在线；否则换个端口，或先停掉占用方。`
+        : raw
+      logger?.warn?.(`dsh-sec-config: 内置代理启动失败：${lastError}`)
+      return { running: false, managed: true, error: lastError }
+    }
+  }
+
+  /** 配置没变就空操作，变了才重启。 */
+  async function sync(model) {
+    if (keyOf(model) === lastKey) return { skipped: true }
+    return start(model)
+  }
+
+  return {
+    sync,
+    start,
+    stop,
+    status: () => ({
+      running: !!handle,
+      port: handle ? handle.port : null,
+      error: lastError,
+      stats: handle ? handle.stats() : null,
+    }),
+  }
+}
+
 async function syncMcpServers(settings, services) {
   const wanted = new Map()
   const missingProxy = []
@@ -997,6 +1147,8 @@ export function apply(ctx, config = {}) {
 
   ctx.inject(['connection', 'settings', 'shellEnv', 'systemPrompt'], (web) => {
     const { connection, settings, shellEnv } = web
+    // 内置代理：随插件走，不依赖任何外部程序
+    const modelProxy = createModelProxyController(ctx.logger)
 
     connection.register(ctx, CHANNEL, async (endpoint, payload) => {
       try {
@@ -1040,6 +1192,81 @@ export function apply(ctx, config = {}) {
           } catch (err) {
             return failure(err && err.message ? err.message : String(err))
           }
+        }
+        if (endpoint === 'model/state') {
+          // 模型接入：当前配置 + 该写进去的 baseURL + llm-pi-ai 里实际生效的值 + 代理健康
+          const model = (current() || {}).model || {}
+          const provider = String(model.provider || 'custom')
+          const target = modelBaseUrl(model)
+          const installed = readProviderBaseUrl(settings, provider)
+          const host = String(model.listenHost || '127.0.0.1').trim() || '127.0.0.1'
+          const port = Number(model.listenPort) || 8788
+          let proxy = null
+          if (String(model.mode || 'proxy') === 'proxy') {
+            proxy = await probeUrl(`http://${host}:${port}/__health`, 4000)
+            if (proxy.ok) {
+              try { proxy.health = JSON.parse(proxy.body) } catch { /* 非 JSON 就只看状态码 */ }
+            }
+          }
+          return ok({
+            mode: String(model.mode || 'proxy'),
+            provider,
+            targetBaseUrl: target,
+            installedBaseUrl: installed,
+            inSync: installed === target,
+            namespaceReady: installed !== null,
+            upstream: String(model.upstream || ''),
+            listenHost: host,
+            listenPort: port,
+            builtin: model.builtin !== false,
+            sanitize: model.sanitize !== false,
+            customBaseUrl: String(model.customBaseUrl || ''),
+            proxy,
+            builtinProxy: modelProxy.status(),
+          })
+        }
+        if (endpoint === 'model/proxy') {
+          // 起/停内置代理。代理是补 x-opencode-session 头的那一环，dsh 自己做不到；
+          // 代理由本插件在宿主进程内起，不依赖外部程序。
+          const model = (current() || {}).model || {}
+          const action = String((payload && payload.action) || 'start')
+          const result = action === 'stop'
+            ? (await modelProxy.stop(), { running: false })
+            : await modelProxy.start(model)
+          // 起停都要一点时间落地，等一拍再回报健康
+          await new Promise((r) => setTimeout(r, action === 'stop' ? 600 : 900))
+          const host = String(model.listenHost || '127.0.0.1').trim() || '127.0.0.1'
+          const port = Number(model.listenPort) || 8788
+          const health = await probeUrl(`http://${host}:${port}/__health`, 4000)
+          if (health.ok) {
+            try { health.health = JSON.parse(health.body) } catch { /* 非 JSON 只留状态码 */ }
+          }
+          return ok({ action, result, proxy: health, builtinProxy: modelProxy.status() })
+        }
+        if (endpoint === 'model/apply') {
+          // 只改 providers.<id>.baseURL 一个字段 —— 用 path-ops，不重述也不误删
+          // 同一命名空间下的其他 provider 与模型列表。
+          if (settings.writable === false) return failure('DSH settings are read-only')
+          const model = (current() || {}).model || {}
+          const provider = String(model.provider || 'custom')
+          if (!PROVIDER_ID_RE.test(provider)) return failure('provider 名不合法：' + provider)
+          const target = modelBaseUrl(model)
+          if (!target) return failure('目标地址为空，请先填写自定义地址')
+          if (readProviderBaseUrl(settings, provider) === null) {
+            return failure(`llm-pi-ai 里没有 provider「${provider}」—— 先在「设置 → 模型」建好它，这里只负责改它的地址`)
+          }
+          await settings.mutate(LLM_PI_AI_NAMESPACE, [
+            { op: 'set', path: ['providers', provider, 'baseURL'], value: target },
+          ])
+          return ok({ applied: true, provider, baseURL: target, restartRequired: true })
+        }
+        if (endpoint === 'model/probe') {
+          // 真发一个请求看通不通：GET <baseURL>/models，不消耗 token
+          const model = (current() || {}).model || {}
+          const target = modelBaseUrl(model)
+          if (!target) return failure('目标地址为空')
+          const result = await probeUrl(target + '/models', 8000)
+          return ok(Object.assign({ url: target + '/models' }, result))
         }
         if (endpoint === 'scan-candidates') {
           // 工具自动探测：静默扫描候选根（scanRoots + 已配工具父目录两级），
@@ -1154,8 +1381,11 @@ export function apply(ctx, config = {}) {
         scope.watch((next) => {
           const services = (next && next.services) || {}
           scheduleSync(settings, services, ctx.logger)
+          // 代理参数变了就重启内置代理；参数没变时 sync 是空操作
+          void modelProxy.sync((next && next.model) || {})
         })
         scheduleSync(settings, (current() && current().services) || {}, ctx.logger)
+        void modelProxy.sync((current() && current().model) || {})
       } else {
         console.error('[dsh-sec-config] NO settings scope — MCP bridge disabled (scope=%s)', scope === null ? 'null' : typeof scope)
       }

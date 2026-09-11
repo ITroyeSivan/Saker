@@ -52,7 +52,11 @@ function btnStyle(primary) { return { padding: '8px 16px', borderRadius: 6, bord
 function msgStyle(ok) { return { marginTop: 8, fontSize: 12, color: ok ? '#1a7f37' : '#d1242f' }; }
 
 function Input(props) {
-  return React.createElement('input', { type: props.type || 'text', value: props.value, placeholder: props.placeholder, style: fieldStyle(), onChange: function (e) { props.onChange(e.target.value); } });
+  return React.createElement('input', {
+    type: props.type || 'text', value: props.value, placeholder: props.placeholder, style: fieldStyle(),
+    onChange: function (e) { props.onChange(e.target.value); },
+    onBlur: props.onBlur ? function () { props.onBlur(); } : undefined,
+  });
 }
 
 function Group(props) {
@@ -484,6 +488,159 @@ function ServiceRow(props) {
       React.createElement('button', { type: 'button', disabled: props.mounting || !props.value, style: btnStyle(false), onClick: props.onMount }, props.mounting ? '同步中…' : '立即挂载')));
 }
 
+// ── 模型接入（第三方网关走本机代理）────────────────────────────────────────
+// dsh 不自带 x-opencode-session 头，直连 opencode.ai 会 400 MissingSessionID；
+// 指向本机代理后由代理补齐该头、并按需剥掉客户端私有字段。
+// 目标地址**只写到 /v1** —— dsh 会自己在后面拼 /chat/completions，
+// 多写一层会变成 /v1/chat/completions/chat/completions，上游回 404（实测踩过）。
+var MODEL_MODES = [
+  { id: 'proxy', label: '走本机代理（内置，推荐）' },
+  { id: 'direct', label: '直连上游（dsh 会 400，仅供排查）' },
+  { id: 'custom', label: '自定义地址' },
+];
+
+function ModelLink(props) {
+  var [st, setSt] = useState({ status: 'loading', value: null });
+  var [draft, setDraft] = useState({});
+  var [busy, setBusy] = useState('');
+  var [msg, setMsg] = useState(null);
+  var [probe, setProbe] = useState(null);
+
+  function load() {
+    rpc(props.connection, 'model/state', {}).then(function (res) {
+      if (res && res.ok && res.value) { setSt({ status: 'ready', value: res.value }); setDraft({}); }
+      else setSt({ status: 'error', value: null });
+    });
+  }
+  useEffect(load, []);
+
+  // 只写单个字段（settings/mutate 的 path-ops），不重述其他配置
+  function writeField(key, value) {
+    setBusy('save');
+    rpc(props.connection, 'settings/mutate', { ops: [{ op: 'set', path: ['model', key], value: value }] })
+      .then(function () { return rpc(props.connection, 'model/state', {}); })
+      .then(function (res) {
+        setBusy('');
+        if (res && res.ok && res.value) { setSt({ status: 'ready', value: res.value }); setDraft({}); }
+      });
+  }
+
+  function doApply() {
+    setBusy('apply'); setMsg(null);
+    rpc(props.connection, 'model/apply', {}).then(function (res) {
+      setBusy('');
+      if (res && res.ok && res.value) {
+        setMsg({ ok: true, text: '已写入 ' + res.value.baseURL + ' —— 重启 dsh 后生效' });
+        load();
+      } else setMsg({ ok: false, text: (res && res.error) || '写入失败' });
+    });
+  }
+
+  function doProbe() {
+    setBusy('probe'); setProbe(null); setMsg(null);
+    rpc(props.connection, 'model/probe', {}).then(function (res) {
+      setBusy('');
+      if (res && res.ok && res.value) {
+        var r = res.value;
+        setProbe(r);
+        setMsg({ ok: r.ok, text: (r.ok ? '连通正常' : '连不通') + ' · HTTP ' + r.status + ' · ' + r.ms + 'ms' + (r.error ? ' · ' + r.error : '') });
+      } else setMsg({ ok: false, text: (res && res.error) || '探测失败' });
+    });
+  }
+
+  function doProxy(action) {
+    setBusy('proxy'); setMsg(null);
+    rpc(props.connection, 'model/proxy', { action: action }).then(function (res) {
+      setBusy('');
+      if (res && res.ok && res.value) {
+        var p = res.value.proxy;
+        var bp = res.value.builtinProxy || {};
+        var up = p && p.ok;
+        var text = action === 'stop' ? '已停止内置代理' : (up ? '内置代理已在运行' : '内置代理未响应');
+        if (action !== 'stop' && bp.error) text += '：' + bp.error;
+        setMsg({ ok: !!up, text: text + (up && p.health ? '（build ' + (p.health.build || p.health.kind) + '）' : '') });
+        load();
+      } else setMsg({ ok: false, text: (res && res.error) || '操作失败' });
+    });
+  }
+
+  if (st.status === 'loading') return React.createElement('div', { style: { fontSize: 13 } }, '加载中…');
+  if (st.status === 'error') return null;
+  var v = st.value;
+
+  var draftOf = function (key, fallback) {
+    return draft[key] !== undefined ? draft[key] : String(fallback === undefined || fallback === null ? '' : fallback);
+  };
+
+  var badge = v.installedBaseUrl === null
+    ? React.createElement('span', { style: { color: '#d1242f' } }, 'provider 未注册')
+    : (v.inSync
+      ? React.createElement('span', { style: { color: '#1a7f37' } }, '● 已生效')
+      : React.createElement('span', { style: { color: '#9a6700' } }, '● 待写入'));
+
+  function modeBtn(m) {
+    var active = v.mode === m.id;
+    return React.createElement('button', {
+      key: m.id, type: 'button', disabled: busy !== '',
+      onClick: function () { writeField('mode', m.id); },
+      style: { padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+        border: '1px solid ' + (active ? '#2f81f7' : 'var(--dsw-alias-border-l1,#d9d9de)'),
+        background: active ? '#e8f1fe' : 'transparent',
+        color: active ? '#1d4ed8' : 'var(--dsw-alias-label-primary,#1a1a1a)' },
+    }, m.label);
+  }
+
+  return React.createElement(Group, { title: '模型接入（OpenCode Go）' },
+    React.createElement('div', { style: hintStyle() },
+      'OpenCode Go 这类网关要求请求带 x-opencode-session 头，dsh 没有注入自定义头的入口，直连会被判 400 MissingSessionID。开启本机代理即可：代理由本插件自带并在宿主内运行，不需要另装或手动启动任何程序。目标地址只写到 /v1，剩下的路径由 dsh 自己拼。'),
+    React.createElement('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 } }, MODEL_MODES.map(modeBtn)),
+    v.mode === 'proxy' ? React.createElement('div', null,
+      React.createElement('label', { style: labelStyle() }, '代理监听端口（本机回环，内置代理用这个端口）'),
+      React.createElement(Input, {
+        value: draftOf('listenPort', v.listenPort), placeholder: '8788',
+        onChange: function (t) { setDraft(Object.assign({}, draft, { listenPort: t })); },
+        onBlur: function () { var n = parseInt(draftOf('listenPort', v.listenPort), 10); writeField('listenPort', isNaN(n) ? 8788 : n); },
+      })) : null,
+    v.mode === 'custom' ? React.createElement('div', null,
+      React.createElement('label', { style: labelStyle() }, '自定义目标地址（写到 /v1 为止）'),
+      React.createElement(Input, {
+        value: draftOf('customBaseUrl', v.customBaseUrl), placeholder: 'http://127.0.0.1:8788/v1',
+        onChange: function (t) { setDraft(Object.assign({}, draft, { customBaseUrl: t })); },
+        onBlur: function () { writeField('customBaseUrl', draftOf('customBaseUrl', v.customBaseUrl)); },
+      })) : null,
+    React.createElement('div', { style: { marginTop: 10, fontSize: 12, lineHeight: 1.9, color: 'var(--dsw-alias-label-tertiary, #6e6e73)' } },
+      React.createElement('div', null, '目标地址：', React.createElement('code', null, v.targetBaseUrl || '（空）')),
+      React.createElement('div', null, '当前生效：',
+        React.createElement('code', null, v.installedBaseUrl === null ? '（未读到）' : (v.installedBaseUrl || '（空）')), ' ', badge),
+      (v.mode === 'proxy' && v.proxy)
+        ? React.createElement('div', null, '代理状态：',
+            React.createElement('span', { style: { color: v.proxy.ok ? '#1a7f37' : '#d1242f' } },
+              v.proxy.ok ? '● 在线' : ((v.builtinProxy && v.builtinProxy.error) ? '● 启动失败' : '● 未运行')),
+            (v.proxy.ok && v.proxy.health)
+              ? '（' + (v.proxy.health.kind === 'builtin' ? '内置代理' : '已有服务在监听该端口')
+                + (v.proxy.health.stats ? ' · 已转发 ' + v.proxy.health.stats.requests + ' 次 · 剥字段 ' + v.proxy.health.stats.stripped : '')
+                + '）'
+              : '')
+        : null),
+    (v.builtinProxy && v.builtinProxy.error)
+      ? React.createElement('div', { style: { color: '#d1242f', fontSize: 12, marginTop: 4 } }, v.builtinProxy.error)
+      : null,
+    React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' } },
+      React.createElement('button', { type: 'button', style: btnStyle(false), disabled: busy !== '', onClick: load }, '刷新状态'),
+      React.createElement('button', { type: 'button', style: btnStyle(false), disabled: busy !== '', onClick: doProbe }, busy === 'probe' ? '测试中…' : '测试连通'),
+      (v.mode === 'proxy' && !(v.proxy && v.proxy.ok))
+        ? React.createElement('button', { type: 'button', style: btnStyle(false), disabled: busy !== '', onClick: function () { doProxy('start'); } }, busy === 'proxy' ? '启动中…' : '启动内置代理')
+        : null,
+      (v.mode === 'proxy' && v.proxy && v.proxy.ok && v.proxy.health && v.proxy.health.kind === 'builtin')
+        ? React.createElement('button', { type: 'button', style: btnStyle(false), disabled: busy !== '', onClick: function () { doProxy('stop'); } }, '停止内置代理')
+        : null,
+      React.createElement('button', { type: 'button', style: btnStyle(true), disabled: busy !== '' || v.inSync, onClick: doApply }, busy === 'apply' ? '写入中…' : (v.inSync ? '已是最新' : '写入配置'))),
+    msg ? React.createElement('div', { style: msgStyle(msg.ok) }, msg.text) : null,
+    (probe && probe.body)
+      ? React.createElement('div', { style: { marginTop: 6, fontSize: 11, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', wordBreak: 'break-all' } }, probe.body.slice(0, 160))
+      : null);
+}
+
 function Page(props) {
   var [state, setState] = useState({ status: 'loading', value: null });
 
@@ -500,6 +657,8 @@ function Page(props) {
 
   return React.createElement('div', { style: { maxWidth: 620 } },
     React.createElement(ConfigForm, { connection: props.connection, value: state.value, onChange: function (v) { setState({ status: 'ready', value: v }); }, onSaved: load }),
+    React.createElement('hr', { style: { border: 'none', borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', margin: '20px 0' } }),
+    React.createElement(ModelLink, { connection: props.connection }),
     React.createElement('hr', { style: { border: 'none', borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', margin: '20px 0' } }),
     React.createElement(PasswordForm, { connection: props.connection }));
 }
