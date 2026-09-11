@@ -20,15 +20,15 @@ RADIUS = 10
 
 # 同一行放**宽高比接近**的图，各行宽度才均衡；混着放会出现一行里一窄两宽。
 ROWS = [
-    [("02-modes.png", "两种作业模式"),
-     ("03-attack-atlas.png", "攻击面矩阵 · 列序自定义"),
-     ("09-findings.png", "成果与证据链")],
-    [("06-skills.png", "技能与提示词可替换"),
-     ("07-tools1.png", "本机工具库"),
-     ("08-tools2.png", "MCP 服务接入")],
-    [("04-method-stack1.png", "测试方法可编排"),
+    [("02-modes.png", "三种模式"),
+     ("03-attack-atlas.png", "攻击面覆盖"),
+     ("09-findings.png", "成果与证据")],
+    [("06-skills.png", "技能可自定义"),
+     ("07-tools1.png", "工具可自定义"),
+     ("08-tools2.png", "MCP 可接入")],
+    [("04-method-stack1.png", "提示词可编排"),
      ("11-webshell1.png", "WebShell 管理"),
-     ("13-knowledge1.png", "随包知识库")],
+     ("13-knowledge1.png", "知识库随包")],
 ]
 
 CONTENT_W = CANVAS_W - 2 * PAD

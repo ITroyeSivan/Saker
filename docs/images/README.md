@@ -35,10 +35,10 @@ python docs/images/make-collage.py
 |---|---|---|
 | `00-hero-collage.png` | —（README 首屏） | 9 张功能截图拼接的封面 |
 | `01-saker-overview.png` | 开篇 | 工作台总览：会话列表 + 新会话输入区 |
-| `02-modes.png` | 两种模式，各自有完整作业路径 | Agent 预设页，pentest / code-audit 两个模式 |
+| `02-modes.png` | 三种模式，各有完整流程 | 新会话页展开模式选择器：渗透测试 / 代码审计 / 标准 |
 | `03-attack-atlas.png` | 攻击面不再靠记忆 | AttackAtlas 矩阵：阶段带、终态图例、攻击面分类 |
-| `04-method-stack1.png` | 测试方法可以自己编排 | 设置 → 方法编排：会话开场自定义 + 方法勾选 |
-| `05-method-stack2.png` | 测试方法可以自己编排 | 会话侧栏方法组合面板：26 方法按五组勾选 |
+| `04-method-stack1.png` | 提示词可以自己编排 | 设置 → 方法编排：会话开场自定义 + 方法勾选 |
+| `05-method-stack2.png` | 提示词可以自己编排 | 会话侧栏方法组合面板：26 方法按五组勾选 |
 | `06-skills.png` | 提示词、persona 和技能都可以换 | 设置 → 技能：上传安装 + 技能列表 + 引用串复制 |
 | `07-tools1.png` | 工具归工具，判断归判断 | 设置 → 安全配置：工具根目录探测 + 分类导入 |
 | `08-tools2.png` | 工具归工具，判断归判断 | MCP 工作台：服务列表、连接状态、工具计数 |

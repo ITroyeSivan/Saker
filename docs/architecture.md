@@ -27,7 +27,7 @@ Saker建在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 
 
 | 你想改的东西 | 改哪里 |
 |---|---|
-| 测试方法的组合与顺序 | 输入框「方法 ▾」直接切换，或「设置 → 方法编排」编辑 |
+| 提示词的组合与顺序 | 输入框「方法 ▾」直接切换，或「设置 → 方法编排」编辑 |
 | 工具清单与分类 | 设置 → 安全配置，增删工具、自己划分类别 |
 | 接哪个MCP服务 | 设置 → MCP工作台，stdio / streamable HTTP都行 |
 | 模式的性格和底线 | 模式包的persona段，或整套换掉 `dsh-saker` |

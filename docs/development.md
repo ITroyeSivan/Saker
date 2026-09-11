@@ -11,7 +11,7 @@ Saker/
 │   ├── code-audit/               # 代码审计模式：persona、playbook、规则集
 │   └── shared/refs/              # 随包 PayloadsAllTheThings 快照（MIT）
 ├── shared/
-│   ├── skills/                   # 两种模式共享的协作与复核技能（6 个）
+│   ├── skills/                   # 两个专业模式共享的协作与复核技能（6 个）
 │   ├── refs/                     # 共享参考资料
 │   └── scripts/                  # 工具面辅助脚本
 ├── plugins/                      # 21 个独立功能插件
