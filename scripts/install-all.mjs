@@ -3,7 +3,7 @@
 //
 // For a fresh deployment this does exactly what the README describes, in the
 // right order (root bundle first, then the feature plugins), so you do not
-// have to type 22 `dsh plugin add` commands. Already-installed packages are
+// have to type one `dsh plugin add` command per package. Already-installed packages are
 // skipped (detected via the profile package.json), so re-runs are safe.
 //
 // Prerequisites:
@@ -21,13 +21,21 @@
 //   SAKER_PROFILE=prod node scripts/install-all.mjs
 //
 import { spawnSync } from 'node:child_process'
-import { existsSync, readdirSync, statSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
+import { existsSync, readdirSync, statSync, readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
+import { stashInstalledDir, restoreStash, dropStash, sweepStashRoot } from './lib/install-stash.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const profile = process.env.SAKER_PROFILE || 'web'
 const cli = process.env.DSH_CLI || 'dsh'
+/**
+ * 每个包的安装尝试次数（默认 5）。
+ * 为什么可配：失败重试之间有 4s 等待，全量 24 个包 × 5 次约 8 分钟 ——
+ * 对「明知会失败」的场景（离线校验、CI、回归测试）纯属浪费时间。
+ * 设 SAKER_RETRIES=1 即可快速失败一次看结果。
+ */
+const MAX_TRIES = Math.max(1, Number(process.env.SAKER_RETRIES || 5) || 5)
 
 // profile home: honour DSH_HOME like the harness does, else ~/.dsh
 const homeRoot = process.env.DSH_HOME || join(process.env.USERPROFILE || process.env.HOME || '', '.dsh')
@@ -166,12 +174,15 @@ function runAdd(spec) {
  * Removing the directory up front sidesteps the deadlock entirely. Deletion
  * goes through the Node fs API rather than the shell, so external
  * "safe delete" shims cannot intercept it.
+ *
+ * **2026-09-13 修正**：这一步不再是「删除」而是「改名暂存」（见 lib/install-stash.mjs）。
+ * 原因是删除没有任何回滚 —— pnpm 连续失败时，插件会被**真正卸载**而输出里只有一行 FAIL。
+ * 当晚实测：route-boost / knowledge-hub / skill-browse 三个目录被删后 pnpm 全部失败，
+ * 23 个插件只剩 20 个，宿主静默不加载它们（无报错、功能凭空消失）。
+ * 改名与删除解死锁的效力相同（pnpm 只要看到目标路径不存在即可），但改名可逆。
  */
-function removeInstalledDir(pkgName) {
-  const target = join(homeRoot, 'profiles', profile, 'node_modules', pkgName)
-  try {
-    rmSync(target, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 })
-  } catch { /* best effort — a failed sweep just means the old flow applies */ }
+function stashDir(pkgName) {
+  return stashInstalledDir(join(homeRoot, 'profiles', profile, 'node_modules'), pkgName)
 }
 
 function addWithRetry(label, pkgName, spec, version) {
@@ -184,19 +195,37 @@ function addWithRetry(label, pkgName, spec, version) {
     }
     console.log(`UPGRADE ${label}  ${pkgName}@${have || '?'} -> ${want || '?'}`)
   }
-  if (installed.has(pkgName) ? installed.get(pkgName) !== want : true) removeInstalledDir(pkgName)
-  for (let tryN = 1; tryN <= 5; tryN++) {
+  // 替换前先把旧副本改名到暂存区：装成功就丢弃，装失败就放回。
+  const stash = stashDir(pkgName)
+  for (let tryN = 1; tryN <= MAX_TRIES; tryN++) {
     const { status, out } = runAdd(spec)
     if (status === 0 && /Done in|Already up to date|Progress: resolved/i.test(out)) {
+      // 只有**目标真的在了**才丢弃暂存副本。pnpm 偶尔会回 "Already up to date" 而不落盘
+      // （例如它认为 lockfile 已满足），此时若把暂存删掉，包里就什么都没了。
+      const landed = existsSync(join(homeRoot, 'profiles', profile, 'node_modules', pkgName))
+      if (!landed) {
+        if (restoreStash(stash)) {
+          console.error(`WARN ${label} :: 安装报告成功但目标目录不存在 —— 已放回升级前的副本（未丢失）`)
+          return false
+        }
+      }
       console.log(`OK   ${label}@${want}`)
       installed.set(pkgName, want)
+      dropStash(stash)
       return true
     }
-    if (tryN < 5) {
+    if (tryN < MAX_TRIES) {
       console.log(`     ${label} attempt ${tryN} failed, retrying in 4s… (${(out.split('\n').filter(Boolean).pop() || '').slice(0, 120)})`)
       spawnSync('ping', ['-n', '4', '127.0.0.1'], { stdio: 'ignore' })
     } else {
       console.error(`FAIL ${label}\n${out.split('\n').slice(-6).join('\n')}`)
+      if (restoreStash(stash)) {
+        console.error(`     ↩ 已回滚：${pkgName} 保持升级前的已有副本（未被卸载）`)
+      } else if (stash) {
+        console.error(`     ⚠ 回滚失败：旧副本仍在暂存区 ${stash.stash}，请手动改名回 node_modules`)
+      } else {
+        console.error(`     （该包此前未安装，无旧副本可回滚）`)
+      }
       return false
     }
   }
@@ -205,6 +234,8 @@ function addWithRetry(label, pkgName, spec, version) {
 
 // 0. reconcile the profile first: drop Saker-managed file: deps whose tgz is
 //    gone, so a repack + version bump cannot poison the whole pnpm resolve.
+//    顺手清掉上次运行可能留下的暂存残片（此前崩溃会把改名后的旧副本留在这里）。
+sweepStashRoot(join(homeRoot, 'profiles', profile, 'node_modules'))
 const pruned = pruneDanglingSakerDeps()
 if (pruned.length) {
   console.log(`pruned ${pruned.length} dangling dep(s): ${pruned.join(', ')}`)

@@ -1,11 +1,11 @@
 # dsh-trace-vault 过程库
 
-安全模式（pentest / code-audit）的过程留痕与检索面：自动捕获每一次工具调用，跨 compaction 可检索。
+安全模式（pentest / code-audit / ctf-solver）的过程留痕与检索面：自动捕获每一次工具调用，跨 compaction 可检索。
 
 ## 做什么
 
 - **自动留痕**：监听 `session/event` 的 `tool/call` + `tool/result`（callId 配对），
-  pentest / code-audit 会话的每次调用落 SQLite（`~/.dsh/trace-vault/traces.db`）：
+  pentest / code-audit / ctf-solver 会话的每次调用落 SQLite（`~/.dsh/trace-vault/traces.db`）：
   调用参数、结果文本、出局分类、耗时。零行为改变——不拦截、不改写、不注入。
 - **过程检索**（模型工具）：`trace_search`（关键词子串命中参数/响应）、
   `trace_get`（按 id 取全文）、`trace_recent`（最近调用+出局统计）。
@@ -19,7 +19,7 @@
   检索命中后按 id 取回的是截断内全文。
 - **与战役记忆分工**：campaign-memory 存成果（结构化打法），trace-vault 存
   原始调用流（未成形的观察——某次报错、拦截页、回显）。
-- **仅安全模式入库**（pentest / code-audit）：其余会话零捕获。本地库不做脱敏（过程证据的价值所在）。
+- **仅安全模式入库**（pentest / code-audit / ctf-solver）：其余会话零捕获。本地库不做脱敏（过程证据的价值所在）。
 - **LIKE 检索**：子串语义、跨机器行为一致；量级上来后升级 FTS5 trigram，接口不变。
 
 ## 配置

@@ -4,7 +4,7 @@ node_modules/
 *.tgz
 *.tar.gz
 dist/
-lib/**/*.map
+**/lib/**/*.map
 
 # runtime data (never publish)
 .dsh/
@@ -17,6 +17,7 @@ settings.yaml
 Thumbs.db
 .DS_Store
 *.log
+smoke/
 .idea/
 .vscode/
 

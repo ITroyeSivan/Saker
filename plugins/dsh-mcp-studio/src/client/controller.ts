@@ -1,7 +1,8 @@
 /** Staged form controller: edits stage a replacement section; Save writes it through the scope. */
 import type { DraftError, ServerDraft, SettingsScope, StudioDraft } from './contracts.js'
+import { DEFAULT_PROXY_THRESHOLD } from './contracts.js'
 import { createStore, type WritableStore } from './store.js'
-import { parseMcpJson } from './mcp-json.js'
+import { parseMcpJson, type McpJsonError } from './mcp-json.js'
 
 const ID_RE = /^[A-Za-z0-9_-]{1,32}$/
 const NAME_RE = /^[A-Za-z0-9_-]{1,32}$/
@@ -20,7 +21,7 @@ export interface StudioCardActions {
   addServer(): string
   updateServerDraft(next: ServerDraft): void
   removeServer(id: string): void
-  importMcpJson(text: string): { servers: number; warnings: string[] } | { error: string }
+  importMcpJson(text: string): { servers: number; warnings: McpJsonError[] } | { error: McpJsonError }
   moveServer(id: string, targetId: string): void
   save(): Promise<void>
   discard(): void
@@ -62,6 +63,9 @@ function serverToDraft(raw: unknown): ServerDraft {
     headers: dictToPairs(server.headers),
     toolCallTimeoutMs: typeof server.toolCallTimeoutMs === 'number' ? server.toolCallTimeoutMs : 60_000,
     failOnStartupError: server.failOnStartupError === true,
+    exposure: server.exposure === 'direct' || server.exposure === 'proxy' || server.exposure === 'hybrid' ? server.exposure : 'auto',
+    proxyThreshold: typeof server.proxyThreshold === 'number' ? server.proxyThreshold : DEFAULT_PROXY_THRESHOLD,
+    directTools: Array.isArray(server.directTools) ? server.directTools.filter((tool): tool is string => typeof tool === 'string') : [],
   }
 }
 
@@ -86,6 +90,9 @@ function draftToSection(draft: StudioDraft): { servers: unknown[] } {
       headers: pairsToDict(server.headers),
       toolCallTimeoutMs: server.toolCallTimeoutMs,
       failOnStartupError: server.failOnStartupError,
+      exposure: server.exposure,
+      proxyThreshold: server.proxyThreshold,
+      directTools: server.directTools,
     })),
   }
 }
@@ -119,6 +126,15 @@ export function validateDraft(section: StudioDraft): DraftError[] {
           errors.push(`server "${server.name}" url must use http or https`)
         }
       }
+    }
+    // Mirrors the Host check: a blank or duplicated directTools entry would register a
+    // broken or silently-overwritten promoted tool.
+    const promoted = new Set<string>()
+    for (const raw of server.directTools) {
+      const tool = raw.trim()
+      if (tool === '') errors.push(`server "${server.name || '(unnamed)'}" has a blank entry in directTools`)
+      else if (promoted.has(tool)) errors.push(`server "${server.name}" lists "${tool}" twice in directTools`)
+      promoted.add(tool)
     }
   }
   return errors
@@ -194,6 +210,9 @@ export class StudioController {
         headers: [],
         toolCallTimeoutMs: 60_000,
         failOnStartupError: false,
+        exposure: 'auto',
+        proxyThreshold: DEFAULT_PROXY_THRESHOLD,
+        directTools: [],
       }, ...base.servers],
     }
     this.failed = false
@@ -219,7 +238,7 @@ export class StudioController {
   }
 
   /** Parse pasted MCP-client JSON and stage every server entry as a new row. */
-  importMcpJson(text: string): { servers: number; warnings: string[] } | { error: string } {
+  importMcpJson(text: string): { servers: number; warnings: McpJsonError[] } | { error: McpJsonError } {
     const base = this.currentDraft()
     const result = parseMcpJson(text, base.servers.map(server => server.name))
     if ('error' in result) return { error: result.error }

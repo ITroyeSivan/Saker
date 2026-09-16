@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-semgrep-audit",
-  "version": "1.0.1",
+  "version": "1.0.4",
   "description": "DSH semgrep wrapper plugin (preset-plane, code-audit): local semgrep as a model tool with the preset's offline rule sets (java 402 built-in + php + oss 1096 auto-located), evidence-index landing, dual-writes hits to scan-reconcile.md/.csv as pending rows (hit != vuln — reconcile via register sourceOrigin), metrics off, local binary only — never auto-installs.",
   "files": [
     "lib",

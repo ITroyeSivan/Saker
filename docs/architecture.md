@@ -1,13 +1,13 @@
 # 架构：它是怎么搭起来的
 
 Saker 建在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 上，分知识层与能力层两半，可以整套装，也可以只装一部分。
-本页说明两层的分工、21 个插件的位置分布，以及一次完整作业的流转。
+本页说明两层的分工、23 个插件的位置分布，以及一次完整作业的流转。
 
 ---
 
 Saker建在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 上，本身分成两层，可以整套装，也可以只装其中一部分。
 
-**模式包 `dsh-saker`** 提供两种专业模式的persona、playbook和离线参考资料——这是「怎么测」的知识层。
+**模式包 `dsh-saker`** 提供三种专业模式的persona、playbook和离线参考资料——这是「怎么测」的知识层。
 
 **21个独立插件** 提供界面、工具接入、过程治理、成果记录和协作能力——这是「用什么测」的能力层。每个插件都是独立bundle，各有README，互不依赖。
 
@@ -33,7 +33,7 @@ Saker建在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 
 | 模式的性格和底线 | 模式包的persona段，或整套换掉 `dsh-saker` |
 | 作战手册的章节 | 模式包内playbook技能，按你的方法论重写 |
 | 覆盖矩阵的列 | AttackAtlas，列序就是你的方法论序 |
-| 知识库内容 | 用户层 `DSH_HOME/refs/` 同名覆盖，或整库导入自己的资料 |
+| 知识库内容 | 20 个知识包自动同步到 `DSH_HOME/refs/imports/`；用户层 `DSH_HOME/refs/` 同名覆盖，也可导入自己的资料 |
 | 界面组件 | 21个插件里任何一个都可以单独替换 |
 
 改完重新打包安装即可生效，不用动dsh宿主。

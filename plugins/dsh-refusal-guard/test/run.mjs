@@ -13,6 +13,7 @@ import {
 	consumeArm,
 	SECURITY_PRESETS
 } from "../lib/index.js";
+import { readFileSync } from "node:fs";
 
 let pass = 0, fail = 0;
 const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); } else { fail++; console.log(`FAIL ${label}`); } };
@@ -132,6 +133,21 @@ const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); 
 {
 	ok("nine security presets listed", ["pentest", "code-audit", "binary-analysis", "attack-defense", "av-evasion", "redteam", "incident-response", "cloud-security", "ctf-solver"].every((id) => SECURITY_PRESETS.has(id)));
 	ok("standard preset excluded", !SECURITY_PRESETS.has("standard"));
+}
+
+// ── 注入契约（源码级）────────────────────────────────────────────────────
+// 自动重试是在 ctx.on("session/event") 里注入的，而该事件在 Session.append 的发布临界区内
+// 同步派发；同步 followup 会被宿主以「session append cannot reenter」拒绝。
+// 原来写成 catch { /* 重试注入失败不阻塞；提醒照常 */ } —— 注释把「永远失败」
+// 误当成「失败也无妨」，于是这条路径从未生效。
+{
+	const src = readFileSync(new URL("../lib/index.js", import.meta.url), "utf8");
+	ok("自动重试的注入被 setTimeout 延后",
+		/setTimeout\(\(\) => \{\r?\n\s*try \{\r?\n\s*agent\.followup\(retryMsg\)/.test(src));
+	ok("投递失败走可见出口（计数 + console.error）",
+		src.includes("refusalInjectFailures") && src.includes("[refusal-guard] 重试消息注入失败"));
+	ok("不再把 followup 包在只有注释的 catch 里",
+		!/catch \{ \/\* 重试注入失败不阻塞；提醒照常 \*\/ \}/.test(src));
 }
 
 console.log(fail === 0 ? `\nall ${pass} tests passed` : `\n${fail} FAILED, ${pass} passed`);

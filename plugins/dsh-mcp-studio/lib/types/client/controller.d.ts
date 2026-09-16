@@ -1,6 +1,7 @@
 /** Staged form controller: edits stage a replacement section; Save writes it through the scope. */
 import type { DraftError, ServerDraft, SettingsScope, StudioDraft } from './contracts.js';
 import { type WritableStore } from './store.js';
+import { type McpJsonError } from './mcp-json.js';
 export interface StudioCardState {
     status: 'loading' | 'ready' | 'unavailable';
     writable: boolean;
@@ -16,9 +17,9 @@ export interface StudioCardActions {
     removeServer(id: string): void;
     importMcpJson(text: string): {
         servers: number;
-        warnings: string[];
+        warnings: McpJsonError[];
     } | {
-        error: string;
+        error: McpJsonError;
     };
     moveServer(id: string, targetId: string): void;
     save(): Promise<void>;
@@ -50,9 +51,9 @@ export declare class StudioController {
     /** Parse pasted MCP-client JSON and stage every server entry as a new row. */
     importMcpJson(text: string): {
         servers: number;
-        warnings: string[];
+        warnings: McpJsonError[];
     } | {
-        error: string;
+        error: McpJsonError;
     };
     /** Reorder: move `id` directly before `targetId` in the staged draft. */
     moveServer(id: string, targetId: string): void;

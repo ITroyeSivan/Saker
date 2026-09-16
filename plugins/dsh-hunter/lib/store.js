@@ -3,7 +3,7 @@
 //   - history：实测流水线历史（可审计）
 //   - authorized：用户标记授权的资产白名单（L1 验证只对这些资产执行）
 import { DatabaseSync } from "node:sqlite";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, existsSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
 
 const SCHEMA = `
@@ -32,8 +32,39 @@ CREATE TABLE IF NOT EXISTS authorized (
 const PLATFORMS = ["fofa", "hunter", "quake"];
 const nowIso = () => new Date().toISOString();
 
+/**
+ * 库文件坏了（不是 SQLite 格式）时的自愈：备份原文件再重建空库。
+ *
+ * 为什么必须有：`new DatabaseSync` 遇到坏文件会直接抛 `file is not a database`，
+ * 而 hunter 的**全部功能**（key 配置 / 历史 / 授权白名单）都挂在这个库上 —— 一抛全废。
+ * 磁盘满、进程被强杀、网盘/杀软回写、误把别的文件改名成 .db 都会造成这种文件。
+ * 数据已经读不出来，能做的是**保住原文件**（改名备份，不删）并让插件继续可用。
+ */
+function healCorruptDb(dbPath) {
+	if (dbPath === ":memory:") return;
+	let head = "";
+	try { head = readFileSync(dbPath).subarray(0, 16).toString("latin1"); } catch { return; }
+	if (head.startsWith("SQLite format 3")) return;   // 正常的库头
+	let bak = dbPath + ".corrupt-" + Date.now();
+	let n = 1;
+	while (existsSync(bak)) bak = dbPath + ".corrupt-" + Date.now() + "-" + n++;   // 绝不覆盖已有备份
+	try {
+		renameSync(dbPath, bak);
+		// WAL/SHM 属于**已损坏的那个库**：留着会被回放到新库上，导致新库也打不开。
+		for (const ext of ["-wal", "-shm"]) {
+			try { rmSync(dbPath + ext, { force: true }); } catch { /* 被占用：留给下次启动 */ }
+		}
+		console.error("[存储] hunter 数据库不是 SQLite 格式，已备份为 " + bak + " 并重建空库（原数据可从此文件找回）");
+	} catch (e) {
+		// EBUSY（文件被占用）时**不硬来**：如实抛出，让用户看到真实原因。
+		console.error("[存储] hunter 数据库损坏且无法备份：" + (e && e.message ? e.message : e) + "（文件被占用时请关闭其它 dsh 实例后重启）");
+		throw e;
+	}
+}
+
 export function openHunterStore(dbPath) {
 	if (dbPath !== ":memory:") mkdirSync(dirname(dbPath), { recursive: true });
+	healCorruptDb(dbPath);   // **必须在开库前**：坏文件会让 new DatabaseSync 直接抛
 	const db = new DatabaseSync(dbPath);
 	db.exec("PRAGMA journal_mode = WAL;");
 	db.exec(SCHEMA);

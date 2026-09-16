@@ -13,6 +13,7 @@ var CHANNEL = '/dsh-knowledge-hub';
 var MODES = [
   { id: 'pentest', label: '渗透测试' },
   { id: 'code-audit', label: '代码审计' },
+  { id: 'ctf-solver', label: 'CTF 解题' },
 ];
 
 function rpc(connection, endpoint, payload) {
@@ -192,10 +193,12 @@ function Editor(props) {
   var [dirty, setDirty] = useState(false);
   var [busy, setBusy] = useState(false);
   var [msg, setMsg] = useState(null);
+  // 删除的行内两段式确认（原生 confirm 会阻塞渲染进程，Agent 驱动的整页卡死）
+  var [confirmDel, setConfirmDel] = useState(false);
 
   useEffect(function () {
     if (!props.file) { setContent(''); setDirty(false); return; }
-    setBusy(true); setMsg(null);
+    setBusy(true); setMsg(null); setConfirmDel(false);
     rpc(props.connection, 'read', { source: props.file.source, mode: props.file.mode, path: props.file.path }).then(function (r) {
       setBusy(false);
       if (isOk(r)) { setContent(r.value.content); setDirty(false); }
@@ -217,7 +220,7 @@ function Editor(props) {
     });
   }
   function remove() {
-    if (!window.confirm('删除 ' + props.file.path + ' ？（仅删除 ' + meta.label + ' 层文件，不可恢复）')) return;
+    setConfirmDel(false);
     setBusy(true); setMsg(null);
     rpc(props.connection, 'remove', { source: props.file.source, mode: props.file.mode, path: props.file.path }).then(function (r) {
       setBusy(false);
@@ -238,7 +241,12 @@ function Editor(props) {
       React.createElement(TextArea, { value: content, readOnly: !writable, disabled: busy, spellCheck: false, onChange: function (v) { setContent(v); setDirty(true); } })),
     React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 } },
       writable ? React.createElement('button', { type: 'button', disabled: busy, style: btn(true), onClick: save }, busy ? '保存中…' : '保存（写用户层）') : null,
-      writable ? React.createElement('button', { type: 'button', disabled: busy, style: btn(false), onClick: remove }, '删除') : null,
+      writable ? (confirmDel
+        ? React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12 } },
+          '删除 ' + props.file.path + ' ？（仅删除 ' + meta.label + ' 层文件，不可恢复）',
+          React.createElement('button', { type: 'button', disabled: busy, style: btn(false, { borderColor: '#d1242f', background: '#fff5f5', color: '#d1242f', fontWeight: 700 }), onClick: remove }, '删除'),
+          React.createElement('button', { type: 'button', disabled: busy, style: btn(false), onClick: function () { setConfirmDel(false); } }, '取消'))
+        : React.createElement('button', { type: 'button', disabled: busy, style: btn(false), onClick: function () { setConfirmDel(true); } }, '删除')) : null,
       msg ? React.createElement('span', { style: msgStyle(msg.ok) }, msg.text) : null));
 }
 
@@ -344,10 +352,71 @@ function SearchBox(props) {
 
 // ── Page ────────────────────────────────────────────────────────────────────
 
+function PackCard(props) {
+  var [st, setSt] = useState({ loading: true });
+  var [busy, setBusy] = useState('');
+  var [notice, setNotice] = useState(null);
+  var [expanded, setExpanded] = useState(false);
+  function status() {
+    rpc(props.connection, 'packs-status', {}).then(function (r) {
+      setSt(isOk(r) ? r.value : { error: errText(r) });
+    });
+  }
+  useEffect(status, [props.reloadTick]);
+  function syncAll() {
+    setBusy('sync'); setNotice(null);
+    rpc(props.connection, 'packs-sync', { force: true }).then(function (r) {
+      setBusy('');
+      if (isOk(r)) {
+        setNotice({ ok: r.value.failed === 0, text: '同步完成：' + r.value.ok + ' 成功 / ' + r.value.failed + ' 失败' });
+        status(); props.onChanged();
+      } else setNotice({ ok: false, text: errText(r) });
+    }).catch(function (e) { setBusy(''); setNotice({ ok: false, text: String(e && e.message || e) }); });
+  }
+  function rebuild() {
+    setBusy('index'); setNotice(null);
+    rpc(props.connection, 'index-rebuild', {}).then(function (r) {
+      setBusy('');
+      if (isOk(r)) {
+        if (r.value.started) {
+          setNotice({ ok: true, text: '索引已在后台重建，完成后 knowledge_search 自动切换。' });
+          setTimeout(status, 3000);
+        } else {
+          setNotice({ ok: true, text: '索引完成：' + r.value.docs + ' 文档 / ' + r.value.chunks + ' chunks' });
+        }
+        status(); props.onChanged();
+      } else setNotice({ ok: false, text: errText(r) });
+    }).catch(function (e) { setBusy(''); setNotice({ ok: false, text: String(e && e.message || e) }); });
+  }
+  var failed = (st.packs || []).filter(function (p) { return p.error; });
+  var ready = st.installed || 0;
+  var total = st.total || 0;
+  return React.createElement('div', { style: { border: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', borderRadius: 8, padding: '6px 10px', margin: '0 0 8px', fontSize: 12, background: 'var(--dsw-alias-bg-layer-2,#fafafb)' } },
+    React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' } },
+      React.createElement('span', { style: { fontWeight: 700, color: ready === total && total ? '#1a7f37' : '#b45309' } }, '知识包 ' + ready + '/' + total),
+      React.createElement('span', { style: CSS.hint }, '自动同步 ' + (st.autoSyncIntervalDays || 7) + ' 天一次；按需加载，不常驻上下文'),
+      React.createElement('div', { style: { flex: 1 } }),
+      React.createElement('button', { type: 'button', disabled: !!busy, onClick: syncAll, style: btn(false, { padding: '4px 12px', fontSize: 12 }) }, busy === 'sync' ? '同步中…' : '同步全部'),
+      React.createElement('button', { type: 'button', disabled: !!busy, onClick: rebuild, style: btn(false, { padding: '4px 12px', fontSize: 12 }) }, busy === 'index' ? '重建中…' : '重建索引'),
+      React.createElement('button', { type: 'button', onClick: function () { setExpanded(!expanded); }, style: btn(false, { padding: '4px 12px', fontSize: 12 }) }, expanded ? '收起列表' : '查看列表')),
+    failed.length ? React.createElement('div', { style: { marginTop: 5, color: '#d1242f' } }, failed.length + ' 个知识包同步失败，展开查看原因') : null,
+    notice ? React.createElement('div', { style: msgStyle(notice.ok), marginTop: 5 }, notice.text) : null,
+    expanded ? React.createElement('div', { style: { marginTop: 6, maxHeight: 180, overflowY: 'auto', borderTop: '1px dashed var(--dsw-alias-border-l1,#e4e4e7)', paddingTop: 5 } },
+      (st.packs || []).map(function (p) {
+        return React.createElement('div', { key: p.id, style: { display: 'flex', gap: 6, padding: '2px 0' } },
+          React.createElement('span', { style: { color: p.installed ? '#1a7f37' : '#b45309', flex: '0 0 46px' } }, p.installed ? '已安装' : '未安装'),
+          React.createElement('span', { style: { fontWeight: 600, flex: '0 0 190px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, p.title || p.id),
+          React.createElement('span', { style: Object.assign({}, CSS.hint, { flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }) }, p.error || p.license || ''));
+      })) : null);
+}
+
 // ── Exploit-DB 状态卡（文件级组件，避免每次渲染重建导致状态重置）────────
 function EdbCard(props) {
   var [st, setSt] = useState({ loading: true });
   var [syncing, setSyncing] = useState(false);
+  // 下载结果与「说明」就地显示（原生 alert 会阻塞渲染进程，Agent 驱动的整页卡死）
+  var [notice, setNotice] = useState(null);
+  var [showHint, setShowHint] = useState(false);
   function status() {
     rpc(props.connection, 'edb-status', {}).then(function (r) { setSt(isOk(r) ? r.value : { error: errText(r) }); });
   }
@@ -358,12 +427,12 @@ function EdbCard(props) {
       setSyncing(false);
       if (r && r.ok && r.value && r.value.ok) {
         status();
-        window.alert('Exploit-DB 元数据下载完成，索引 ' + r.value.rows + ' 条。');
+        setNotice({ ok: true, text: 'Exploit-DB 元数据下载完成，索引 ' + r.value.rows + ' 条。' });
       } else {
         var msg = (r && r.value && r.value.results) ? r.value.results.map(function (x) { return x.name + ': ' + (x.ok ? 'OK' : x.error); }).join('；') : ((r && r.error && r.error.message) || '未知错误');
-        window.alert('下载失败：' + msg + '\n（需本机可访问 gitlab.com）');
+        setNotice({ ok: false, text: '下载失败：' + msg + '（需本机可访问 gitlab.com）' });
       }
-    }).catch(function (e) { setSyncing(false); window.alert('下载异常：' + String(e && e.message || e)); });
+    }).catch(function (e) { setSyncing(false); setNotice({ ok: false, text: '下载异常：' + String(e && e.message || e) }); });
   }
   var box = { border: '1px solid ' + (st.present ? '#bbf7d0' : 'var(--dsw-alias-border-l1,#e4e4e7)'), borderRadius: 8, padding: '6px 10px', margin: '0 0 8px', fontSize: 12, background: st.present ? '#f0fdf4' : 'var(--dsw-alias-bg-layer-2,#fafafb)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' };
   var tag = st.present
@@ -379,7 +448,9 @@ function EdbCard(props) {
       ? null
       : React.createElement('button', { type: 'button', disabled: syncing, onClick: sync, style: btn(false, { padding: '4px 12px', fontSize: 12 }) },
           syncing ? '下载中…（约 30MB）' : '下载官方索引'),
-    React.createElement('button', { type: 'button', onClick: function () { window.alert(st.hint || ''); }, style: btn(false, { padding: '4px 12px', fontSize: 12 }) }, '说明'));
+    React.createElement('button', { type: 'button', onClick: function () { setShowHint(!showHint); }, style: btn(false, { padding: '4px 12px', fontSize: 12 }) }, showHint ? '收起说明' : '说明'),
+    notice ? React.createElement('div', { style: { flex: '1 0 100%', fontSize: 12, color: notice.ok ? '#1a7f37' : '#d1242f' } }, notice.text) : null,
+    showHint ? React.createElement('div', { style: { flex: '1 0 100%', fontSize: 12, color: '#3f3f46', lineHeight: 1.6, whiteSpace: 'pre-wrap', borderTop: '1px dashed var(--dsw-alias-border-l1,#e4e4e7)', paddingTop: 6 } }, st.hint || '（暂无说明）') : null);
 }
 
 function Page(props) {
@@ -388,6 +459,11 @@ function Page(props) {
   var [activeFile, setActiveFile] = useState(null);
   var [statsV, setStatsV] = useState(null);
   var [reloadTick, setReloadTick] = useState(0);
+  // 新建文档的行内表单（原生 prompt 会阻塞渲染进程，Agent 驱动的整页卡死）
+  var [showNew, setShowNew] = useState(false);
+  var [newName, setNewName] = useState('my-note.md');
+  var [newDir, setNewDir] = useState('');
+  var [pageMsg, setPageMsg] = useState('');
 
   function loadStats() {
     rpc(conn, 'stats', {}).then(function (r) { if (isOk(r)) setStatsV(r.value); });
@@ -407,6 +483,7 @@ function Page(props) {
       React.createElement('span', { style: { color: '#c2410c', fontWeight: 600 } }, '随包 PATT ' + statsV.patt + ' 篇'),
       React.createElement('span', null, '用户 ' + statsV.user + ' 篇'),
       React.createElement('span', null, '导入 ' + statsV.imports + ' 篇'),
+      statsV.index ? React.createElement('span', null, '索引 ' + statsV.index.docs + ' 文档 / ' + statsV.index.chunks + ' chunks') : null,
       React.createElement('span', null, '合计 ' + statsV.total + ''));
   }
 
@@ -419,16 +496,16 @@ function Page(props) {
     }, m.label);
   }));
 
-  function newDoc() {
-    var fileName = window.prompt('新建文件名（放用户层 ' + mode + ' 根目录，.md 自动补）', 'my-note.md');
-    if (!fileName) return;
-    var fname = fileName.trim().toLowerCase().endsWith('.md') ? fileName.trim() : fileName.trim() + '.md';
-    var pathName = window.prompt('可选的子目录（如 web，留空放根目录）', '');
-    var dir = (pathName || '').trim().replace(/^\/+|\/+$/g, '');
+  function createDoc() {
+    var fileName = (newName || '').trim();
+    if (!fileName) { setPageMsg('请先填文件名'); return; }
+    var fname = fileName.toLowerCase().endsWith('.md') ? fileName : fileName + '.md';
+    var dir = (newDir || '').trim().replace(/^\/+|\/+$/g, '');
     var rel = dir ? dir + '/' + fname : fname;
     setActiveFile({ source: 'user', mode: mode, path: rel, name: fname });
     rpc(conn, 'write', { source: 'user', mode: mode, path: rel, content: '# ' + fname.replace(/\.md$/, '') + '\n\n' }).then(function (r) {
-      if (!isOk(r)) { window.alert('新建失败：' + errText(r)); return; }
+      if (!isOk(r)) { setPageMsg('新建失败：' + errText(r)); return; }
+      setPageMsg(''); setShowNew(false); setNewName('my-note.md'); setNewDir('');
       setReloadTick(reloadTick + 1);
     });
   }
@@ -437,8 +514,16 @@ function Page(props) {
     React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 12 } },
       React.createElement('div', { style: { fontSize: 14, fontWeight: 700 } }, '知识库'),
       React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } }, modeTabs),
-      React.createElement('button', { type: 'button', style: btn(false, { padding: '5px 10px', fontSize: 12 }), onClick: newDoc }, '+ 新建（用户层）')),
+      React.createElement('button', { type: 'button', style: btn(false, { padding: '5px 10px', fontSize: 12 }), onClick: function () { setShowNew(!showNew); setPageMsg(''); } }, showNew ? '取消新建' : '+ 新建（用户层）')),
+    showNew ? React.createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'center', margin: '6px 0 10px', fontSize: 12, flexWrap: 'wrap' } },
+      '文件名：',
+      React.createElement('input', { value: newName, onChange: function (e) { setNewName(e.target.value); }, placeholder: 'my-note.md', style: { padding: '4px 8px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', fontSize: 12 } }),
+      '子目录（可空）：',
+      React.createElement('input', { value: newDir, onChange: function (e) { setNewDir(e.target.value); }, placeholder: '如 web', style: { padding: '4px 8px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', fontSize: 12 } }),
+      React.createElement('button', { type: 'button', style: btn(true, { padding: '4px 12px', fontSize: 12 }), onClick: createDoc }, '创建'),
+      pageMsg ? React.createElement('span', { style: { color: '#d1242f' } }, pageMsg) : null) : null,
     statsLine,
+    React.createElement(PackCard, { connection: conn, reloadTick: reloadTick, onChanged: onChanged }),
     React.createElement(EdbCard, { connection: conn }),
     React.createElement('div', { style: { display: 'flex', gap: 16, alignItems: 'flex-start' } },
       React.createElement('div', { style: { flex: '0 0 330px', minWidth: 260, maxHeight: 580, overflowY: 'auto', borderRight: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', paddingRight: 10 } },

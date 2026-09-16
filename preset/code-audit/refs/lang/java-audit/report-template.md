@@ -94,7 +94,7 @@ CommonController.java:49-62
 
 ✅ 正确：
 **代码位置**：
-E:\工作代码\xx\xx\src\main\java\com\example\controller\CommonController.java:49-62
+src/main/java/com/example/controller/CommonController.java:49-62
 ```
 
 ---
@@ -388,8 +388,8 @@ MultipartFile file 来自用户输入导致存在 XXE 风险。该文件导入�
 **代码位置**：
 
 ```
-E:\工作代码\项目名\src\main\java\com\example\controller\ExcelController.java:35
-E:\工作代码\项目名\src\main\java\com\example\util\ExcelUtil.java:79
+src/main/java/com/example/controller/ExcelController.java:35
+src/main/java/com/example/util/ExcelUtil.java:79
 ```
 
 **问题代码展示**：
@@ -593,7 +593,7 @@ TemplateController.renderTemplate() 方法接收用户输入的 template 参数�
 **代码位置**：
 
 ```
-E:\工作代码\项目名\src\main\java\com\example\controller\TemplateController.java:45-52
+src/main/java/com/example/controller/TemplateController.java:45-52
 ```
 
 **问题代码展示**：

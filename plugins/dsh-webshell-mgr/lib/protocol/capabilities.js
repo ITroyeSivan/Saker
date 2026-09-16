@@ -15,6 +15,7 @@ import { runCommand as gjRun, fetchInfo as gjInfo, listDir as gjList, readFile a
 import { runCommand as axRun, fetchInfo as axInfo, listDir as axList, readFile as axRead, writeFile as axWrite } from "./behinder-aspx.js";
 import { runCommand as gaRun, fetchInfo as gaInfo, listDir as gaList, readFile as gaRead, writeFile as gaWrite, invalidate as gaInvalidate } from "./godzilla-aspx.js";
 import { evalPhp as godzillaEval, invalidate as godzillaInvalidate } from "./godzilla.js";
+import { run as memRun } from "./dsh-mem.js";
 import * as cb from "./command-build.js";
 import * as sn from "./snippets.js";
 import { unb64 } from "./http-client.js";

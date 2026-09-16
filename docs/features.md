@@ -16,7 +16,7 @@
 | 证据 | 请求/响应、工具输出、复现步骤 | 文件与行号、调用链、规则命中、动态验证结果 |
 | 交付 | 漏洞位置、影响、测试过程与修复建议 | 代码位置、完整链路、利用前提与修复建议 |
 
-两个模式各带独立persona、playbook和离线参考资料。安全方法不一次性塞满上下文，按当前任务读取相关内容，所以能长时间跑而不失真。
+三个模式各带独立persona、playbook和离线参考资料。安全方法不一次性塞满上下文，按当前任务读取相关内容，所以能长时间跑而不失真。
 
 除这两个专业模式外，宿主内置的 `standard` 模式同样保留在模式选择器中，供日常办公等非安全会话使用（安全插件只在安全模式下生效）。需要放开更多宿主模式时，用环境变量 `SAKER_VISIBLE_PRESETS` 追加。
 
@@ -52,7 +52,7 @@ AttackAtlas按目标记录每个攻击面的状态。四种终态会点亮：已
 - **persona** 是模式的身份定义，在模式包内 `preset/pentest/agent.cordis.yml` 的persona段：身份、主观念（漏洞面）、铁律（验证等级、误报责任、高危操作门禁、负面清单）、表达纪律、委派方式。改它，等于换掉这个模式的性格和底线。
 - **playbook** 是随模式走的作战手册技能，渗透862行、代码审计632行。它不常驻上下文，按当前任务读取相关章节，所以长会话里方法不会漂。
 - **方法** 由 `dsh-method-stack` 管，启用哪些方法、正文怎么写，都在你的控制范围内（见上一节）。
-- **共享技能** 目前6个：browser-recon（浏览器/网页交互作战）、web-fuzz（Web模糊测试）、independent-review（独立复核）、ecosystem-cooperation（生态协作）、red-team-command-doctrine（红队指挥条令）、redteam-boundary-policy（红队边界策略），两个模式都能引用。
+- **共享技能** 目前6个：browser-recon（浏览器/网页交互作战）、web-fuzz（Web模糊测试）、independent-review（独立复核）、ecosystem-cooperation（生态协作）、red-team-command-doctrine（红队指挥条令）、redteam-boundary-policy（红队边界策略），三个模式都能引用。
 
 这四层都在包里，改完重新打包安装即可生效。「设置 → 技能」列出共享、模式专属和已安装技能，支持上传zip/tgz安装到 `~/.dsh/skills` 并热载，用户层技能可卸载。面板提供一键复制引用串 `/<技能名>`：模型侧经 `skill` 工具按名加载，用户侧在输入框打 `/` 弹出候选，或直接贴 `/<技能名>` 注入当轮。
 
@@ -103,15 +103,17 @@ Hunter把FOFA、奇安信Hunter、360 Quake三家资产测绘聚合到一起：�
 
 ![WebShell管理界面2](images/12-webshell2.png)
 
-## 知识库随包，来源清晰可维护
+## 知识库自动扩展，离线混合检索
 
 离线资料随包即用：内置 [PayloadsAllTheThings](https://github.com/swisskyrepo/PayloadsAllTheThings) 全量文本快照（66个漏洞章节的README与payload清单，commit `3ac2790`，MIT），加上渗透（108篇）与代码审计（236篇）两套手册和Semgrep规则集，都不依赖外网。
 
 ![知识库分类浏览1](images/13-knowledge1.png)
 
-「设置 → 知识库」按来源和主题分类展示：随包PATT、随包手册、用户积累与导入源各自分组，每个分类带文件数徽章、可折叠展开。关键词检索先定位到文件与行号，再点开读原文。Exploit-DB的索引状态也在这里显示。
+「设置 → 知识库」内置 20 个高质量知识包，覆盖 CTF、Web、内网/AD、云/API、Windows/Linux 提权、移动、硬件、DFIR、应急响应和检测规则。插件启动后自动做 Git 稀疏同步，只拉 Markdown、规则、脚本等文本，不拉图片和大体积二进制；每个包保留来源、许可证、固定 commit 和本地路径。
 
-知识库是**分层可写**的：随包内容只读，用户层 `DSH_HOME/refs/` 同名文件覆盖包内（用户优先）；外部完整资产可以从Git仓库或本机文件夹整库导入到 `DSH_HOME/refs/imports/`，导入后完全离线可用。不同来源与许可证在目录内各有声明。
+检索不是简单子串扫描：后台构建 SQLite FTS5 索引，中文按 bigram 召回，英文/CVE/EDB-ID 精确定位，BM25 叠加标题、路径、知识包权重做混合排序。模型只拿 Top-N 片段，再用 `knowledge_read(chunkId)` 精读命中附近内容；首次全量索引在独立进程完成，不阻塞宿主启动或搜索。
+
+知识库是**分层可写**的：随包内容只读，用户层 `DSH_HOME/refs/` 同名文件覆盖包内（用户优先）；外部完整资产可以从Git仓库或本机文件夹整库导入到 `DSH_HOME/refs/imports/`，导入后完全离线可用。无许可证、非商业许可和 GPL 内容只进本地导入层，不混入 MIT 根包。
 
 Exploit-DB不随包，走导入层。把官方仓库或元数据快照放到 `DSH_HOME/refs/imports/exploitdb/`，识别到 `files_exploits.csv` 就自动建字段化索引；也可以直接点设置页的「下载官方索引」，从gitlab.com抓 `files_exploits.csv` 与 `files_shellcodes.csv`（合计约30MB，含16列完整元数据：标题、作者、类型、平台、CVE codes）。索引就绪后检索命中形如 `[EDB-12345]`，PoC原文按需读 `exploitdb/<path>`。只下索引不拉源码仓库时，描述和定位检索照常，读原文需要目录里确实有对应文件。
 
@@ -139,4 +141,4 @@ Exploit-DB不随包，走导入层。把官方仓库或元数据快照放到 `DS
 
 ## 新会话页
 
-`dsh-mode-group` 把两种专业模式（pentest / code-audit）排在最前，其余可见模式（宿主 `standard`，供日常办公会话）紧随其后，避免模式一多选择区拥挤。纯客户端表面，不改宿主行为。
+`dsh-mode-group` 把三种专业模式（pentest / code-audit / ctf-solver）排在最前，其余可见模式（宿主 `standard`，供日常办公会话）紧随其后，避免模式一多选择区拥挤。纯客户端表面，不改宿主行为。

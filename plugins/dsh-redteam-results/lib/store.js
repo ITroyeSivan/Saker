@@ -6,7 +6,7 @@
 //   session_meta 表存会话级任务元数据（审计对象/渗透范围、版本、scope）。
 // 测试注入 ":memory:"。
 
-import { mkdirSync } from "node:fs";
+import fs, { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -27,14 +27,21 @@ const MODE_STATUSES = {
 	"av-evasion": ["pending", "verified", "detected"],
 	"ctf-solver": ["pending", "stuck", "verified"],
 	"binary-analysis": ["pending", "suspect", "verified"]
-};
+	};
 const ALL_STATUSES = Array.from(new Set([].concat(...Object.values(MODE_STATUSES))));
 const statusesOf = (mode) => MODE_STATUSES[mode] ?? STATUSES;
 /** 证据等级四档（自高到低）：impact 影响已证（数据实际获取/业务动作实际达成）＞ confirmed 可复现（对照三件套齐）＞ partial 部分证据（工具输出/间接推断）＞ unknown 未知。 */
 const EVIDENCE_LEVELS = ["impact", "confirmed", "partial", "unknown"];
 const SOURCE_ORIGINS = ["manual", "scan-confirmed", "scan-false-positive"];
+/** 二次评级词表：由复核者独立给出，**不复用首次 severity 的结论**。
+ *  info=未能复现所声称的影响（保留记录但降为最低档，避免"疑似"混进结论）。 */
+const SECOND_RATINGS = ["critical", "high", "medium", "low", "info"];
+/** 严重度刻度（数字越大越严重）：用于比对两次评级。info 低于 low。 */
+const RATING_SCALE = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
+/** 二次评级依据的最低字数——低于此视为"走流程"，判定不成立。 */
+const SECOND_REVIEW_MIN_NOTE = 40;
 const DEFAULT_PAGE_SIZE = 10;
-const MODES = ["pentest", "code-audit"];
+const MODES = ["pentest", "code-audit", "ctf-solver"];
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS findings (
@@ -85,6 +92,8 @@ CREATE TABLE IF NOT EXISTS findings (
 	permission  TEXT NOT NULL DEFAULT '',
 	resource    TEXT NOT NULL DEFAULT '',
 	audit_mode  TEXT NOT NULL DEFAULT '',
+	second_rating TEXT NOT NULL DEFAULT '',
+	second_rating_note TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (session_id, id)
 );
 CREATE INDEX IF NOT EXISTS idx_findings_session_mode ON findings(session_id, mode, seq);
@@ -103,7 +112,7 @@ CREATE TABLE IF NOT EXISTS session_meta (
 );
 `;
 
-const COLS = "session_id,id,seq,mode,title,severity,status,evidence_level,type,target,summary,description,poc,chain,evidence,fix,verify_note,created_at,updated_at,verified_at,baseline,diff_evidence,marker_echo,impact,cvss,retest_note,retest_at,request_pkt,response_pkt,snippet_entry,snippet_sink,chain_tracer,chain_verdict,cwe,patch,source_origin,sample_hash,family,packer,iocs,detection_rule,timeline_at,entry,identity,permission,resource,audit_mode";
+const COLS = "session_id,id,seq,mode,title,severity,status,evidence_level,type,target,summary,description,poc,chain,evidence,fix,verify_note,created_at,updated_at,verified_at,baseline,diff_evidence,marker_echo,impact,cvss,retest_note,retest_at,request_pkt,response_pkt,snippet_entry,snippet_sink,chain_tracer,chain_verdict,cwe,patch,source_origin,sample_hash,family,packer,iocs,detection_rule,timeline_at,entry,identity,permission,resource,audit_mode,second_rating,second_rating_note";
 const N_COLS = COLS.split(",").length;
 
 /** 存量库新列（逐列 ALTER，已存在则忽略）。 */
@@ -113,7 +122,7 @@ const MIGRATION_COLUMNS = [
 	"cwe", "patch", "source_origin", "chain", "sample_hash", "family", "packer", "iocs", "detection_rule", "timeline_at",
 	"entry", "identity", "permission", "resource"
 
-	, "audit_mode"
+	, "audit_mode", "second_rating", "second_rating_note"
 ];
 
 /** 打开（或创建）库并预编译语句。dbPath 传 ":memory:" 供测试。 */
@@ -121,42 +130,106 @@ export function openStore(dbPath) {
 	// node:sqlite 不会自动创建父目录——首次运行（~/.dsh/redteam-results 尚不存在）
 	// 会直接抛 "unable to open database file"，这里与 attack-atlas 对齐补齐。
 	if (dbPath !== ":memory:") mkdirSync(path.dirname(dbPath), { recursive: true });
+	// 库文件坏了（不是 SQLite 格式）时的自愈：备份原文件再重建空库。
+	// 为什么不能直接抛："file is not a database" 会让插件的**全部功能**不可用，
+	// 而磁盘满/强杀/网盘回写/误改名都会造成这个问题。数据已经读不出来，
+	// 能做的是**保住原文件**（改名备份，不删）并让插件继续可用；
+	// 备份路径打到 stderr（只此一次），用户能据此找回或求助。
+	function healCorruptDb(dbPath) {
+		if (dbPath === ':memory:') return;
+		let head = '';
+		try { head = fs.readFileSync(dbPath).subarray(0, 16).toString("latin1"); } catch { return; }
+		if (head.startsWith("SQLite format 3")) return;   // 正常的库头
+		let bak = dbPath + ".corrupt-" + Date.now();
+		let n = 1;
+		while (fs.existsSync(bak)) bak = dbPath + ".corrupt-" + Date.now() + "-" + n++;   // 绝不覆盖已有备份
+		try {
+			fs.renameSync(dbPath, bak);
+			// WAL/SHM 属于**已损坏的那个库**：留着会被回放到新库上，导致新库也打不开。
+			// 它们只是未落盘的增量，主库已备份，这里一并清掉（清不掉不影响主流程）。
+			for (const ext of ["-wal", "-shm"]) {
+				try { fs.rmSync(dbPath + ext, { force: true }); } catch { /* 被占用：留给下次启动 */ }
+			}
+			console.error("[存储] 数据库文件不是 SQLite 格式，已备份为 " + bak + " 并重建空库（原数据可从此文件找回）");
+		} catch (e) {
+			// EBUSY 最常见：同进程内旧句柄还没释放（本插件缓存了 store）。
+			// 这时**不硬来**：原样让调用方抛，用户看到的是真实原因（文件被占用），
+			// 比"备份失败但装作没事"更诚实。
+			console.error("[存储] 数据库文件损坏且无法备份：" + (e && e.message ? e.message : e) + "（文件被占用时请关闭其它 dsh 实例后重启）");
+			throw e;
+		}
+	}
+
+healCorruptDb(dbPath);   // **必须在开库前**：坏文件会让 new DatabaseSync 直接抛
 	const db = new DatabaseSync(dbPath);
 	db.exec("PRAGMA journal_mode = WAL;");
 	db.exec("PRAGMA busy_timeout = 5000;"); // 多进程（两个 dsh web）并发写不直接抛 SQLITE_BUSY
 	db.exec(SCHEMA);
 	for (const col of MIGRATION_COLUMNS) {
-		try { db.exec(`ALTER TABLE findings ADD COLUMN ${col} TEXT NOT NULL DEFAULT ''`); } catch { /* 列已存在 */ }
+	try { db.exec(`ALTER TABLE findings ADD COLUMN ${col} TEXT NOT NULL DEFAULT ''`); } catch { /* 列已存在 */ }
 	}
 	// 旧库升级：counters 从既有 findings 初始化（INSERT OR IGNORE——已有计数不回退）
 	db.exec("INSERT OR IGNORE INTO counters (session_id, mode, last_seq) SELECT session_id, mode, MAX(seq) FROM findings GROUP BY session_id, mode");
 	return {
-		dbPath,
-		db,
-		insert: db.prepare(`INSERT INTO findings (${COLS}) VALUES (${"?,".repeat(N_COLS - 1)}?)`),
-		get: db.prepare(`SELECT ${COLS} FROM findings WHERE session_id = ? AND id = ?`),
-		counterGet: db.prepare("SELECT last_seq AS n FROM counters WHERE session_id = ? AND mode = ?"),
-		counterSet: db.prepare("INSERT INTO counters (session_id, mode, last_seq) VALUES (?, ?, ?) ON CONFLICT(session_id, mode) DO UPDATE SET last_seq = excluded.last_seq"),
-		update: db.prepare(`UPDATE findings SET title=?, severity=?, status=?, evidence_level=?, type=?, target=?, summary=?, description=?, poc=?, chain=?, evidence=?, fix=?, verify_note=?, updated_at=?, verified_at=?, baseline=?, diff_evidence=?, marker_echo=?, impact=?, cvss=?, retest_note=?, retest_at=?, request_pkt=?, response_pkt=?, snippet_entry=?, snippet_sink=?, chain_tracer=?, chain_verdict=?, cwe=?, patch=?, source_origin=?, sample_hash=?, family=?, packer=?, iocs=?, detection_rule=?, timeline_at=?, entry=?, identity=?, permission=?, resource=?, audit_mode=? WHERE session_id=? AND id=?`),
-		remove: db.prepare("DELETE FROM findings WHERE session_id = ? AND id = ?"),
-		listAll: db.prepare(`SELECT ${COLS} FROM findings WHERE session_id = ? AND mode = ? ORDER BY seq DESC`),
-		listAllAll: db.prepare(`SELECT ${COLS} FROM findings WHERE session_id = ? ORDER BY updated_at DESC, seq DESC`),
-		listGlobal: db.prepare(`SELECT ${COLS} FROM findings ORDER BY updated_at DESC, seq DESC`),
-		listGlobalMode: db.prepare(`SELECT ${COLS} FROM findings WHERE mode = ? ORDER BY updated_at DESC, seq DESC`),
-		countsAll: db.prepare("SELECT mode, COUNT(*) AS n FROM findings GROUP BY mode"),
-		counts: db.prepare("SELECT mode, COUNT(*) AS n FROM findings WHERE session_id = ? GROUP BY mode"),
-		metaGet: db.prepare("SELECT target_label, version, scope, updated_at FROM session_meta WHERE session_id = ?"),
-		metaSet: db.prepare("INSERT INTO session_meta (session_id, target_label, version, scope, updated_at) VALUES (?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET target_label=excluded.target_label, version=excluded.version, scope=excluded.scope, updated_at=excluded.updated_at"),
-		close: () => { try { db.close(); } catch { /* 已关闭 */ } }
+	dbPath,
+	db,
+	insert: db.prepare(`INSERT INTO findings (${COLS}) VALUES (${"?,".repeat(N_COLS - 1)}?)`),
+	get: db.prepare(`SELECT ${COLS} FROM findings WHERE session_id = ? AND id = ?`),
+	counterGet: db.prepare("SELECT last_seq AS n FROM counters WHERE session_id = ? AND mode = ?"),
+	counterSet: db.prepare("INSERT INTO counters (session_id, mode, last_seq) VALUES (?, ?, ?) ON CONFLICT(session_id, mode) DO UPDATE SET last_seq = excluded.last_seq"),
+	update: db.prepare(`UPDATE findings SET title=?, severity=?, status=?, evidence_level=?, type=?, target=?, summary=?, description=?, poc=?, chain=?, evidence=?, fix=?, verify_note=?, updated_at=?, verified_at=?, baseline=?, diff_evidence=?, marker_echo=?, impact=?, cvss=?, retest_note=?, retest_at=?, request_pkt=?, response_pkt=?, snippet_entry=?, snippet_sink=?, chain_tracer=?, chain_verdict=?, cwe=?, patch=?, source_origin=?, sample_hash=?, family=?, packer=?, iocs=?, detection_rule=?, timeline_at=?, entry=?, identity=?, permission=?, resource=?, audit_mode=?, second_rating=?, second_rating_note=? WHERE session_id=? AND id=?`),
+	remove: db.prepare("DELETE FROM findings WHERE session_id = ? AND id = ?"),
+	listAll: db.prepare(`SELECT ${COLS} FROM findings WHERE session_id = ? AND mode = ? ORDER BY seq DESC`),
+	listAllAll: db.prepare(`SELECT ${COLS} FROM findings WHERE session_id = ? ORDER BY updated_at DESC, seq DESC`),
+	listGlobal: db.prepare(`SELECT ${COLS} FROM findings ORDER BY updated_at DESC, seq DESC`),
+	listGlobalMode: db.prepare(`SELECT ${COLS} FROM findings WHERE mode = ? ORDER BY updated_at DESC, seq DESC`),
+	countsAll: db.prepare("SELECT mode, COUNT(*) AS n FROM findings GROUP BY mode"),
+	counts: db.prepare("SELECT mode, COUNT(*) AS n FROM findings WHERE session_id = ? GROUP BY mode"),
+	metaGet: db.prepare("SELECT target_label, version, scope, updated_at FROM session_meta WHERE session_id = ?"),
+	metaSet: db.prepare("INSERT INTO session_meta (session_id, target_label, version, scope, updated_at) VALUES (?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET target_label=excluded.target_label, version=excluded.version, scope=excluded.scope, updated_at=excluded.updated_at"),
+	close: () => { try { db.close(); } catch { /* 已关闭 */ } }
 	};
-}
+	}
 
 const nowIso = () => new Date().toISOString();
 const cleanEnum = (v, allowed, fallback) => (allowed.includes(v) ? v : fallback);
 const cleanText = (v, max = 20000) => {
 	const s = typeof v === "string" ? v.trim() : "";
 	return s.length > max ? s.slice(0, max) : s;
-};
+	};
+
+/**
+ * 二次复核成对校验（纯函数，供测试与存储层共用）：返回错误文案，或 null 表示放行。
+ *
+ * 规则：**首次**流转到 verified 终态时，必须同时给出独立二次评级与足量依据。
+ * 已 verified 的行只改其它字段时不再要求——否则二次编辑会被反复拦下。
+ * 为什么必须独立：首次评级来自发现者本人，自带确认偏误；二次评级若由同一次推理
+ * 顺手写上，就只是把同一个结论抄了一遍，对"报告能不能用"毫无增量。
+ */
+export function secondReviewError(mode, prev, patch) {
+	const statusSet = statusesOf(mode);
+	const next = cleanEnum(patch.status, statusSet, prev.status);
+	if (next !== "verified" || prev.status === "verified") return null;
+	if (cleanEnum(patch.secondRating, SECOND_RATINGS, "") === "") {
+	return `流转到 verified 须在同一次调用里给出二次评级 secondRating（${SECOND_RATINGS.join("/")}）——首次评级来自发现者，二次评级由复核独立给出，两者不一致时报告会标注；未能复现所声称的影响就评 info`;
+	}
+	const note = cleanText(patch.secondRatingNote);
+	if (note.length < SECOND_REVIEW_MIN_NOTE) {
+	return `二次评级的依据太短（当前 ${note.length} 字，至少 ${SECOND_REVIEW_MIN_NOTE} 字）——写清复核方式与观察到的现象：换观测通道重新触发一次的结果、或复现失败时实际看到什么`;
+	}
+	return null;
+	}
+
+/** 两次评级的比对结论（报告用）：unrated / match / downgrade / upgrade。 */
+export function secondReviewVerdict(finding) {
+	const second = finding.secondRating;
+	if (typeof second !== "string" || !(second in RATING_SCALE)) return "unrated";
+	if (!(finding.severity in RATING_SCALE)) return "unrated";
+	const first = RATING_SCALE[finding.severity];
+	const verified = RATING_SCALE[second];
+	if (verified === first) return "match";
+	return verified < first ? "downgrade" : "upgrade";
+	}
 
 /** 追加的可选富字段（camelCase → 列名映射）。 */
 const EXTRA_FIELDS = ["baseline", "diffEvidence", "markerEcho", "impact", "cvss", "retestNote", "retestAt", "requestPkt", "responsePkt", "snippetEntry", "snippetSink", "chainTracer", "chainVerdict", "cwe", "patch", "sampleHash", "family", "packer", "iocs", "detectionRule", "timelineAt", "entry", "identity", "permission", "resource", "auditMode"];
@@ -167,62 +240,71 @@ const COL_OF = {
 	chainTracer: "chain_tracer", chainVerdict: "chain_verdict", cwe: "cwe", patch: "patch",
 	sampleHash: "sample_hash", family: "family", packer: "packer", iocs: "iocs", detectionRule: "detection_rule",
 	timelineAt: "timeline_at", entry: "entry", identity: "identity", permission: "permission", resource: "resource", auditMode: "audit_mode"
-};
+	};
 
 function rowToFinding(row) {
 	const f = {
-		id: row.id, seq: row.seq, mode: row.mode,
-		title: row.title, severity: row.severity, status: row.status, evidenceLevel: row.evidence_level,
-		type: row.type, target: row.target, summary: row.summary, description: row.description,
-		poc: row.poc, chain: row.chain, evidence: row.evidence, fix: row.fix, verifyNote: row.verify_note,
-		createdAt: row.created_at, updatedAt: row.updated_at, verifiedAt: row.verified_at,
-		sourceOrigin: row.source_origin || "manual"
+	id: row.id, seq: row.seq, mode: row.mode,
+	title: row.title, severity: row.severity, status: row.status, evidenceLevel: row.evidence_level,
+	type: row.type, target: row.target, summary: row.summary, description: row.description,
+	poc: row.poc, chain: row.chain, evidence: row.evidence, fix: row.fix, verifyNote: row.verify_note,
+	createdAt: row.created_at, updatedAt: row.updated_at, verifiedAt: row.verified_at,
+	sourceOrigin: row.source_origin || "manual",
+	secondRating: row.second_rating ?? "",
+	secondRatingNote: row.second_rating_note ?? ""
 	};
 	for (const k of EXTRA_FIELDS) f[k] = row[COL_OF[k]] ?? "";
 	return f;
-}
+	}
 
 /** 登记一条 finding（会话内 mode 维度自增序号；mode 由宿主从会话推导，调用方不可指定他模式）。
  *  序号走 counters 独立计数器（永不复用——删除末尾行后新登记不回收 id，报告引用 finding id 不漂移）。 */
 export function registerFinding(store, sessionId, mode, input) {
-	const seq = (store.counterGet.get(sessionId, mode)?.n ?? 0) + 1;
-	store.counterSet.run(sessionId, mode, seq);
-	const id = `${mode}-${seq}`;
-	const now = nowIso();
 	// 状态词表按模式取（产物型=各自本体词）——与 update/mark 同源。
 	const status = cleanEnum(input.status, statusesOf(mode), "pending");
 	// 漏洞生命周期模式：fixed=已修复终态，不可在登记时直接写入（先登记、验证成立后经 update 流转）；
 	// redteam 台账语义 fixed=已路由——登记即已路由的任务合法。
 	if (mode !== "redteam" && status === "fixed") throw new Error("fixed 不可在登记时直接写入——先登记（pending/verified），经 update 流转标记 fixed（渗透/代审=已修复（修复复测不成功）；攻防=已交付；应急=已处置）");
+	// verified 是“独立复核完成”的终态，不允许登记时自带：
+	// 登记工具原先透传完整状态词表，调用方可用 status=verified 绕过二次评级成对校验。
+	if (status === "verified") throw new Error("verified 不可在登记时直接写入——先登记 pending，复核后用 update/mark 同一次给出 secondRating + secondRatingNote");
+	// 只有通过登记态校验后才消耗序号，失败请求不得在计数器里留下空洞。
+	const seq = (store.counterGet.get(sessionId, mode)?.n ?? 0) + 1;
+	store.counterSet.run(sessionId, mode, seq);
+	const id = `${mode}-${seq}`;
+	const now = nowIso();
 	const f = {
-		id, seq, mode,
-		title: cleanText(input.title, 200) || "未命名发现",
-		severity: cleanEnum(input.severity, SEVERITIES, "medium"),
-		status,
-		evidenceLevel: cleanEnum(input.evidenceLevel, EVIDENCE_LEVELS, "unknown"),
-		type: cleanText(input.type, 60),
-		target: cleanText(input.target, 500),
-		summary: cleanText(input.summary, 300),
-		description: cleanText(input.description),
-		poc: cleanText(input.poc),
-		chain: cleanText(input.chain),
-		evidence: cleanText(input.evidence),
-		fix: cleanText(input.fix),
-		verifyNote: "",
-		createdAt: now, updatedAt: now, verifiedAt: "",
-		sourceOrigin: cleanEnum(input.sourceOrigin, SOURCE_ORIGINS, "manual")
+	id, seq, mode,
+	title: cleanText(input.title, 200) || "未命名发现",
+	severity: cleanEnum(input.severity, SEVERITIES, "medium"),
+	status,
+	evidenceLevel: cleanEnum(input.evidenceLevel, EVIDENCE_LEVELS, "unknown"),
+	type: cleanText(input.type, 60),
+	target: cleanText(input.target, 500),
+	summary: cleanText(input.summary, 300),
+	description: cleanText(input.description),
+	poc: cleanText(input.poc),
+	chain: cleanText(input.chain),
+	evidence: cleanText(input.evidence),
+	fix: cleanText(input.fix),
+	verifyNote: "",
+	createdAt: now, updatedAt: now, verifiedAt: "",
+	sourceOrigin: cleanEnum(input.sourceOrigin, SOURCE_ORIGINS, "manual"),
+	secondRating: "",
+	secondRatingNote: ""
 	};
 	for (const k of EXTRA_FIELDS) f[k] = cleanText(input[k]);
 	if (mode === "code-audit") f.auditMode = ["static", "dynamic"].includes(f.auditMode) ? f.auditMode : ""; // 枚举清洗：错值清空（Web 通道无 schema 闸）
 	store.insert.run(
-		sessionId, f.id, f.seq, mode, f.title, f.severity, f.status, f.evidenceLevel, f.type, f.target, f.summary,
-		f.description, f.poc, f.chain, f.evidence, f.fix, f.verifyNote, f.createdAt, f.updatedAt, f.verifiedAt,
-		f.baseline, f.diffEvidence, f.markerEcho, f.impact, f.cvss, f.retestNote, f.retestAt, f.requestPkt,
-		f.responsePkt, f.snippetEntry, f.snippetSink, f.chainTracer, f.chainVerdict, f.cwe, f.patch, f.sourceOrigin,
-		f.sampleHash, f.family, f.packer, f.iocs, f.detectionRule, f.timelineAt, f.entry, f.identity, f.permission, f.resource, f.auditMode
+	sessionId, f.id, f.seq, mode, f.title, f.severity, f.status, f.evidenceLevel, f.type, f.target, f.summary,
+	f.description, f.poc, f.chain, f.evidence, f.fix, f.verifyNote, f.createdAt, f.updatedAt, f.verifiedAt,
+	f.baseline, f.diffEvidence, f.markerEcho, f.impact, f.cvss, f.retestNote, f.retestAt, f.requestPkt,
+	f.responsePkt, f.snippetEntry, f.snippetSink, f.chainTracer, f.chainVerdict, f.cwe, f.patch, f.sourceOrigin,
+	f.sampleHash, f.family, f.packer, f.iocs, f.detectionRule, f.timelineAt, f.entry, f.identity, f.permission, f.resource, f.auditMode,
+	f.secondRating, f.secondRatingNote
 	);
 	return f;
-}
+	}
 
 /** 按 (sessionId, mode, id) 更新——跨模式 id 一律 undefined（隔离由存储层强制）。 */
 export function updateFinding(store, sessionId, mode, id, patch = {}) {
@@ -233,65 +315,71 @@ export function updateFinding(store, sessionId, mode, id, patch = {}) {
 	// fixed 只接受"此前已验证真实存在"的流转：先 verified、修复后复测不成功才可标记——
 	// 仅漏洞生命周期模式适用；redteam 台账语义 fixed=已路由（收口的替代路径），无此前置。
 	if (mode !== "redteam" && statusSet.includes("fixed") && cleanEnum(patch.status, statusSet, prev.status) === "fixed" && prev.status !== "verified") {
-		throw new Error("fixed 仅可用于此前已验证（verified）真实存在的 finding——先验证成立再流转标记（渗透/代审=已修复（修复复测不成功）；攻防=已交付；应急=已处置）");
+	throw new Error("fixed 仅可用于此前已验证（verified）真实存在的 finding——先验证成立再流转标记（渗透/代审=已修复（修复复测不成功）；攻防=已交付；应急=已处置）");
 	}
+	// 二次复核成对校验：首次流转到 verified 必须同时给出独立二次评级与足量依据。
+	// 强制在"同一次调用"里给齐——分两次写等于把复核变成事后补笔记。
+	const reviewError = secondReviewError(mode, prev, patch);
+	if (reviewError !== null) throw new Error(reviewError);
 	const next = {
-		title: cleanText(patch.title, 200) || prev.title,
-		severity: cleanEnum(patch.severity, SEVERITIES, prev.severity),
-		status: cleanEnum(patch.status, statusSet, prev.status),
-		evidenceLevel: cleanEnum(patch.evidenceLevel, EVIDENCE_LEVELS, prev.evidenceLevel),
-		type: patch.type !== undefined ? cleanText(patch.type, 60) : prev.type,
-		target: patch.target !== undefined ? cleanText(patch.target, 500) : prev.target,
-		summary: patch.summary !== undefined ? cleanText(patch.summary, 300) : prev.summary,
-		description: patch.description !== undefined ? cleanText(patch.description) : prev.description,
-		poc: patch.poc !== undefined ? cleanText(patch.poc) : prev.poc,
-		chain: patch.chain !== undefined ? cleanText(patch.chain) : prev.chain,
-		evidence: patch.evidence !== undefined ? cleanText(patch.evidence) : prev.evidence,
-		fix: patch.fix !== undefined ? cleanText(patch.fix) : prev.fix,
-		verifyNote: patch.verifyNote !== undefined ? cleanText(patch.verifyNote) : prev.verifyNote,
-		updatedAt: nowIso(),
-		verifiedAt: prev.status !== "verified" && cleanEnum(patch.status, statusSet, prev.status) === "verified" ? nowIso() : prev.verifiedAt,
-		sourceOrigin: cleanEnum(patch.sourceOrigin, SOURCE_ORIGINS, prev.sourceOrigin)
+	title: cleanText(patch.title, 200) || prev.title,
+	severity: cleanEnum(patch.severity, SEVERITIES, prev.severity),
+	status: cleanEnum(patch.status, statusSet, prev.status),
+	evidenceLevel: cleanEnum(patch.evidenceLevel, EVIDENCE_LEVELS, prev.evidenceLevel),
+	type: patch.type !== undefined ? cleanText(patch.type, 60) : prev.type,
+	target: patch.target !== undefined ? cleanText(patch.target, 500) : prev.target,
+	summary: patch.summary !== undefined ? cleanText(patch.summary, 300) : prev.summary,
+	description: patch.description !== undefined ? cleanText(patch.description) : prev.description,
+	poc: patch.poc !== undefined ? cleanText(patch.poc) : prev.poc,
+	chain: patch.chain !== undefined ? cleanText(patch.chain) : prev.chain,
+	evidence: patch.evidence !== undefined ? cleanText(patch.evidence) : prev.evidence,
+	fix: patch.fix !== undefined ? cleanText(patch.fix) : prev.fix,
+	verifyNote: patch.verifyNote !== undefined ? cleanText(patch.verifyNote) : prev.verifyNote,
+	updatedAt: nowIso(),
+	verifiedAt: prev.status !== "verified" && cleanEnum(patch.status, statusSet, prev.status) === "verified" ? nowIso() : prev.verifiedAt,
+	sourceOrigin: cleanEnum(patch.sourceOrigin, SOURCE_ORIGINS, prev.sourceOrigin),
+	secondRating: patch.secondRating !== undefined ? cleanEnum(patch.secondRating, SECOND_RATINGS, prev.secondRating) : prev.secondRating,
+	secondRatingNote: patch.secondRatingNote !== undefined ? cleanText(patch.secondRatingNote) : prev.secondRatingNote
 	};
 	for (const k of EXTRA_FIELDS) next[k] = patch[k] !== undefined ? cleanText(patch[k]) : prev[k];
 	if (mode === "code-audit") next.auditMode = ["static", "dynamic"].includes(next.auditMode) ? next.auditMode : "";
 	store.update.run(
-		next.title, next.severity, next.status, next.evidenceLevel, next.type, next.target, next.summary,
-		next.description, next.poc, next.chain, next.evidence, next.fix, next.verifyNote, next.updatedAt, next.verifiedAt,
-		next.baseline, next.diffEvidence, next.markerEcho, next.impact, next.cvss, next.retestNote, next.retestAt,
-		next.requestPkt, next.responsePkt, next.snippetEntry, next.snippetSink, next.chainTracer, next.chainVerdict,
-		next.cwe, next.patch, next.sourceOrigin, next.sampleHash, next.family, next.packer, next.iocs, next.detectionRule, next.timelineAt,
-		next.entry, next.identity, next.permission, next.resource, next.auditMode, sessionId, id
+	next.title, next.severity, next.status, next.evidenceLevel, next.type, next.target, next.summary,
+	next.description, next.poc, next.chain, next.evidence, next.fix, next.verifyNote, next.updatedAt, next.verifiedAt,
+	next.baseline, next.diffEvidence, next.markerEcho, next.impact, next.cvss, next.retestNote, next.retestAt,
+	next.requestPkt, next.responsePkt, next.snippetEntry, next.snippetSink, next.chainTracer, next.chainVerdict,
+	next.cwe, next.patch, next.sourceOrigin, next.sampleHash, next.family, next.packer, next.iocs, next.detectionRule, next.timelineAt,
+	next.entry, next.identity, next.permission, next.resource, next.auditMode, next.secondRating, next.secondRatingNote, sessionId, id
 	);
 	return { ...prev, ...next };
-}
+	}
 
 /** 按 (sessionId, id) 删除（行不存在则无操作）。 */
 export function removeFinding(store, sessionId, id) {
 	store.remove.run(sessionId, id);
-}
+	}
 
 export function getFinding(store, sessionId, id) {
 	const row = store.get.get(sessionId, id);
 	return row === undefined ? undefined : rowToFinding(row);
-}
+	}
 
 export function allFindings(store, sessionId, mode) {
 	return store.listAll.all(sessionId, mode).map(rowToFinding);
-}
+	}
 
 export function listFindings(store, sessionId, mode, { page = 1, pageSize = DEFAULT_PAGE_SIZE, severity = "", status = "", q = "" } = {}) {
 	const needle = String(q ?? "").trim().toLowerCase();
 	const rows = allFindings(store, sessionId, mode)
-		.filter((f) => (severity ? f.severity === severity : true))
-		.filter((f) => (status ? f.status === status : true))
-		.filter((f) => (needle ? `${f.title} ${f.summary} ${f.target} ${f.type} ${f.cwe}`.toLowerCase().includes(needle) : true));
+	.filter((f) => (severity ? f.severity === severity : true))
+	.filter((f) => (status ? f.status === status : true))
+	.filter((f) => (needle ? `${f.title} ${f.summary} ${f.target} ${f.type} ${f.cwe}`.toLowerCase().includes(needle) : true));
 	const size = Math.max(1, Math.min(100, Number(pageSize) || DEFAULT_PAGE_SIZE));
 	const total = rows.length;
 	const pages = Math.max(1, Math.ceil(total / size));
 	const current = Math.min(pages, Math.max(1, Number(page) || 1));
 	return { rows: rows.slice((current - 1) * size, current * size), total, page: current, pageSize: size, pages };
-}
+	}
 
 /** 分组键（模式化）：binary-analysis 按关联样本聚合（sampleHash 为键——同一样本的产物归一组；
  *  未填 sampleHash 回落按 target 归组兼容旧行为）；cloud-security 按路径类型聚合（type 为键——
@@ -307,17 +395,17 @@ const groupKeyOf = (mode, f) => mode === "binary-analysis"
 export function groupByTarget(store, sessionId, mode, { severity = "", status = "", q = "" } = {}) {
 	const needle = String(q ?? "").trim().toLowerCase();
 	const rows = allFindings(store, sessionId, mode)
-		.filter((f) => (severity ? f.severity === severity : true))
-		.filter((f) => (status ? f.status === status : true))
-		.filter((f) => (needle ? `${f.title} ${f.summary} ${f.target} ${f.type} ${f.cwe}`.toLowerCase().includes(needle) : true));
+	.filter((f) => (severity ? f.severity === severity : true))
+	.filter((f) => (status ? f.status === status : true))
+	.filter((f) => (needle ? `${f.title} ${f.summary} ${f.target} ${f.type} ${f.cwe}`.toLowerCase().includes(needle) : true));
 	const groups = new Map();
 	for (const f of rows) {
-		const key = groupKeyOf(mode, f);
-		if (!groups.has(key)) groups.set(key, []);
-		groups.get(key).push(f);
+	const key = groupKeyOf(mode, f);
+	if (!groups.has(key)) groups.set(key, []);
+	groups.get(key).push(f);
 	}
 	return [...groups.entries()].map(([target, items]) => ({ target, count: items.length, items }));
-}
+	}
 
 /** 统计内核（会话版与全局版共用）：四档严重度、状态分布（词表按模式取，跨模式聚合取并集）、类型 top、CWE/来源/目标/家族/壳分布。 */
 function statsOf(all, mode = "") {
@@ -333,83 +421,83 @@ function statsOf(all, mode = "") {
 	const targetMap = new Map();
 	let lastAt = "";
 	for (const f of all) {
-		bySeverity[f.severity] += 1;
-		byStatus[f.status] = (byStatus[f.status] ?? 0) + 1;
-		byEvidence[f.evidenceLevel] += 1;
-		typeMap.set(f.type || "未分类", (typeMap.get(f.type || "未分类") ?? 0) + 1);
-		if (f.cwe) cweMap.set(f.cwe, (cweMap.get(f.cwe) ?? 0) + 1);
-		if (f.family) familyMap.set(f.family, (familyMap.get(f.family) ?? 0) + 1);
-		if (f.packer) packerMap.set(f.packer, (packerMap.get(f.packer) ?? 0) + 1);
-		sourceMap.set(f.sourceOrigin || "manual", (sourceMap.get(f.sourceOrigin || "manual") ?? 0) + 1);
-		if (f.auditMode) auditModeMap.set(f.auditMode, (auditModeMap.get(f.auditMode) ?? 0) + 1);
-		targetMap.set(f.target || "（未填）", (targetMap.get(f.target || "（未填）") ?? 0) + 1);
-		if (f.updatedAt > lastAt) lastAt = f.updatedAt;
+	bySeverity[f.severity] += 1;
+	byStatus[f.status] = (byStatus[f.status] ?? 0) + 1;
+	byEvidence[f.evidenceLevel] += 1;
+	typeMap.set(f.type || "未分类", (typeMap.get(f.type || "未分类") ?? 0) + 1);
+	if (f.cwe) cweMap.set(f.cwe, (cweMap.get(f.cwe) ?? 0) + 1);
+	if (f.family) familyMap.set(f.family, (familyMap.get(f.family) ?? 0) + 1);
+	if (f.packer) packerMap.set(f.packer, (packerMap.get(f.packer) ?? 0) + 1);
+	sourceMap.set(f.sourceOrigin || "manual", (sourceMap.get(f.sourceOrigin || "manual") ?? 0) + 1);
+	if (f.auditMode) auditModeMap.set(f.auditMode, (auditModeMap.get(f.auditMode) ?? 0) + 1);
+	targetMap.set(f.target || "（未填）", (targetMap.get(f.target || "（未填）") ?? 0) + 1);
+	if (f.updatedAt > lastAt) lastAt = f.updatedAt;
 	}
 	const top = (m, n) => [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, n).map(([key, count]) => ({ key, count }));
 	return {
-		total: all.length,
-		bySeverity,
-		byStatus,
-		byEvidence,
-		byType: top(typeMap, 8).map(({ key, count }) => ({ type: key, count })),
-		byCwe: top(cweMap, 8).map(({ key, count }) => ({ cwe: key, count })),
-		bySource: top(sourceMap, 4).map(({ key, count }) => ({ source: key, count })),
-		byAuditMode: top(auditModeMap, 2).map(({ key, count }) => ({ auditMode: key, count })),
-		byTarget: top(targetMap, 8).map(({ key, count }) => ({ target: key, count })),
-		byFamily: top(familyMap, 8).map(({ key, count }) => ({ family: key, count })),
-		byPacker: top(packerMap, 6).map(({ key, count }) => ({ packer: key, count })),
-		lastAt
+	total: all.length,
+	bySeverity,
+	byStatus,
+	byEvidence,
+	byType: top(typeMap, 8).map(({ key, count }) => ({ type: key, count })),
+	byCwe: top(cweMap, 8).map(({ key, count }) => ({ cwe: key, count })),
+	bySource: top(sourceMap, 4).map(({ key, count }) => ({ source: key, count })),
+	byAuditMode: top(auditModeMap, 2).map(({ key, count }) => ({ auditMode: key, count })),
+	byTarget: top(targetMap, 8).map(({ key, count }) => ({ target: key, count })),
+	byFamily: top(familyMap, 8).map(({ key, count }) => ({ family: key, count })),
+	byPacker: top(packerMap, 6).map(({ key, count }) => ({ packer: key, count })),
+	lastAt
 	};
-}
+	}
 
 /** 会话内统计（原语义保留；状态词表按模式取）。 */
 export function computeStats(store, sessionId, mode) {
 	return statsOf(allFindings(store, sessionId, mode), mode);
-}
+	}
 
 /** 跨会话统计：按登记时间（created_at）范围过滤后的全模式数据聚合。 */
 export function computeStatsAll(store, mode, { from = "", to = "" } = {}) {
 	const rows = store.listGlobalMode.all(mode)
-		.filter((row) => (from === "" || row.created_at >= from) && (to === "" || row.created_at <= to));
+	.filter((row) => (from === "" || row.created_at >= from) && (to === "" || row.created_at <= to));
 	return statsOf(rows, mode);
-}
+	}
 
 /** 跨会话模式计数（侧栏总数，全时域）。 */
 export function modeCountsAll(store) {
 	const out = Object.fromEntries(MODES.map((m) => [m, 0]));
 	for (const row of store.countsAll.all()) if (out[row.mode] !== undefined) out[row.mode] = row.n;
 	return out;
-}
+	}
 
 /** 跨会话清单：按 mode 全表 + 筛选（severity/status/q）+ created_at 范围 + 分页；行带 sessionId。 */
 export function listFindingsAll(store, mode, { page = 1, pageSize = DEFAULT_PAGE_SIZE, severity = "", status = "", q = "", from = "", to = "", all = false } = {}) {
 	const needle = String(q ?? "").trim().toLowerCase();
 	const rows = store.listGlobalMode.all(mode)
-		.map((row) => ({ ...rowToFinding(row), sessionId: row.session_id }))
-		.filter((f) => (severity ? f.severity === severity : true))
-		.filter((f) => (status ? f.status === status : true))
-		.filter((f) => (from === "" || f.createdAt >= from))
-		.filter((f) => (to === "" || f.createdAt <= to))
-		.filter((f) => (needle ? `${f.title} ${f.summary} ${f.target} ${f.type} ${f.cwe}`.toLowerCase().includes(needle) : true));
+	.map((row) => ({ ...rowToFinding(row), sessionId: row.session_id }))
+	.filter((f) => (severity ? f.severity === severity : true))
+	.filter((f) => (status ? f.status === status : true))
+	.filter((f) => (from === "" || f.createdAt >= from))
+	.filter((f) => (to === "" || f.createdAt <= to))
+	.filter((f) => (needle ? `${f.title} ${f.summary} ${f.target} ${f.type} ${f.cwe}`.toLowerCase().includes(needle) : true));
 	if (all) return { rows, total: rows.length, page: 1, pageSize: rows.length, pages: 1 }; // 内部全量路径（分组/导出）——不受分页钳制
 	const size = Math.max(1, Math.min(100, Number(pageSize) || DEFAULT_PAGE_SIZE));
 	const total = rows.length;
 	const pages = Math.max(1, Math.ceil(total / size));
 	const current = Math.min(pages, Math.max(1, Number(page) || 1));
 	return { rows: rows.slice((current - 1) * size, current * size), total, page: current, pageSize: size, pages };
-}
+	}
 
 /** 跨会话按目标分组（平铺分组视图共享；binary=按样本哈希跨会话聚合同一样本产物）。 */
 export function groupByTargetAll(store, mode, { severity = "", status = "", q = "", from = "", to = "" } = {}) {
 	const list = listFindingsAll(store, mode, { severity, status, q, from, to, all: true });
 	const groups = new Map();
 	for (const f of list.rows) {
-		const key = groupKeyOf(mode, f);
-		if (!groups.has(key)) groups.set(key, []);
-		groups.get(key).push(f);
+	const key = groupKeyOf(mode, f);
+	if (!groups.has(key)) groups.set(key, []);
+	groups.get(key).push(f);
 	}
 	return [...groups.entries()].map(([target, items]) => ({ target, count: items.length, items }));
-}
+	}
 
 
 /** 大屏聚合：全会话跨模式——模式/状态/等级/证据分布 + 最近流水（全部模式倒序）。 */
@@ -421,15 +509,15 @@ export function ledgerOverview(store, sessionId) {
 	const byEvidence = Object.fromEntries(EVIDENCE_LEVELS.map((s) => [s, 0]));
 	let lastAt = "";
 	for (const row of rows) {
-		if (byMode[row.mode] !== undefined) byMode[row.mode] += 1;
-		byStatus[row.status] = (byStatus[row.status] ?? 0) + 1;
-		if (bySeverity[row.severity] !== undefined) bySeverity[row.severity] += 1;
-		if (byEvidence[row.evidence_level] !== undefined) byEvidence[row.evidence_level] += 1;
-		if (row.updated_at > lastAt) lastAt = row.updated_at;
+	if (byMode[row.mode] !== undefined) byMode[row.mode] += 1;
+	byStatus[row.status] = (byStatus[row.status] ?? 0) + 1;
+	if (bySeverity[row.severity] !== undefined) bySeverity[row.severity] += 1;
+	if (byEvidence[row.evidence_level] !== undefined) byEvidence[row.evidence_level] += 1;
+	if (row.updated_at > lastAt) lastAt = row.updated_at;
 	}
 	const recent = rows.slice(0, 120).map(rowToFinding);
 	return { total: rows.length, byMode, byStatus, bySeverity, byEvidence, recent, lastAt };
-}
+	}
 
 /** 全局作战大屏聚合：跨会话（全部安全模式），按登记时间（created_at）过滤范围。
  * from/to 为 ISO 字符串（闭区间，空串=该侧不限）；recent 每条带 sessionId 供跨会话定位。 */
@@ -444,34 +532,34 @@ export function ledgerOverviewAll(store, { from = "", to = "" } = {}) {
 	let lastAt = "";
 	let total = 0;
 	for (const row of rows) {
-		if (!inRange(row)) continue;
-		total += 1;
-		sessions.add(row.session_id);
-		if (byMode[row.mode] !== undefined) byMode[row.mode] += 1;
-		byStatus[row.status] = (byStatus[row.status] ?? 0) + 1;
-		if (bySeverity[row.severity] !== undefined) bySeverity[row.severity] += 1;
-		if (byEvidence[row.evidence_level] !== undefined) byEvidence[row.evidence_level] += 1;
-		if (row.updated_at > lastAt) lastAt = row.updated_at;
+	if (!inRange(row)) continue;
+	total += 1;
+	sessions.add(row.session_id);
+	if (byMode[row.mode] !== undefined) byMode[row.mode] += 1;
+	byStatus[row.status] = (byStatus[row.status] ?? 0) + 1;
+	if (bySeverity[row.severity] !== undefined) bySeverity[row.severity] += 1;
+	if (byEvidence[row.evidence_level] !== undefined) byEvidence[row.evidence_level] += 1;
+	if (row.updated_at > lastAt) lastAt = row.updated_at;
 	}
 	const recent = rows.filter(inRange).slice(0, 120).map((row) => ({ ...rowToFinding(row), sessionId: row.session_id }));
 	return { total, sessions: sessions.size, byMode, byStatus, bySeverity, byEvidence, recent, lastAt, range: { from, to } };
-}
+	}
 
 export function modeCounts(store, sessionId) {
 	const out = Object.fromEntries(MODES.map((m) => [m, 0]));
 	for (const row of store.counts.all(sessionId)) if (out[row.mode] !== undefined) out[row.mode] = row.n;
 	return out;
-}
+	}
 
 /** 会话任务元数据（审计对象/渗透范围、版本/commit、scope）。 */
 export function getMeta(store, sessionId) {
 	const row = store.metaGet.get(sessionId);
 	return row === undefined ? { targetLabel: "", version: "", scope: "" } : { targetLabel: row.target_label, version: row.version, scope: row.scope };
-}
+	}
 
 export function setMeta(store, sessionId, { targetLabel = "", version = "", scope = "" } = {}) {
 	store.metaSet.run(sessionId, cleanText(targetLabel, 200), cleanText(version, 120), cleanText(scope, 500), nowIso());
 	return getMeta(store, sessionId);
-}
+	}
 
-export { SEVERITIES, STATUSES, MODE_STATUSES, ALL_STATUSES, EVIDENCE_LEVELS, SOURCE_ORIGINS, MODES, statusesOf };
+export { SEVERITIES, STATUSES, MODE_STATUSES, ALL_STATUSES, EVIDENCE_LEVELS, SOURCE_ORIGINS, MODES, statusesOf, SECOND_RATINGS, RATING_SCALE, SECOND_REVIEW_MIN_NOTE };

@@ -15,7 +15,7 @@ const NO_SHELL_META = /[;&|`$><\n]/;
 export const TOOL_DEFS = {
 	nmap: {
 		id: "nmap", bin: "nmap", name: "nmap_portscan", kind: "portscan", positional: "target",
-		summary: "Port/service scan (local nmap, conservative: -sT connect scan no-root + -sV, --max-rate 1000 by default; explicit rate override is audit-logged). Requires the target registered in the asset baseline (防盲打).",
+		summary: "端口/服务扫描（nmap；默认 -Pn -sT -sV --max-rate 1000）。目标须在资产基线登记。",
 		hint: "端口/服务扫描：-sT 连接扫描（免 root）+ -sV 服务版本，默认 --max-rate 1000 保守限速",
 		params: {
 			target: { type: "string", required: true, description: "Target host/IP (must be registered in the asset baseline)" },
@@ -45,7 +45,7 @@ export const TOOL_DEFS = {
 	},
 	masscan: {
 		id: "masscan", bin: "masscan", name: "masscan_portscan", kind: "portscan", positional: "target",
-		summary: "High-speed port scan (local masscan; conservative --rate 1000 by default, hard-capped; requires raw-socket privileges — falls back to nmap -sT without them). Requires the target registered in the asset baseline (防盲打).",
+		summary: "高速端口扫描（masscan；默认 --rate 1000，需 raw socket，无权限走 nmap 兜底）。目标须登记。",
 		hint: "高速端口扫（全网段快筛用）：默认 --rate 1000 保守；需 raw socket 权限（sudo），无权限直接降级 nmap -sT",
 		params: {
 			target: { type: "string", required: true, description: "Target IP/CIDR, e.g. 10.0.0.0/24 (must be registered)" },
@@ -71,7 +71,7 @@ export const TOOL_DEFS = {
 	},
 	subfinder: {
 		id: "subfinder", bin: "subfinder", name: "subfinder_enum", kind: "subdomain", positional: null,
-		summary: "Passive subdomain enumeration (local subfinder — passive sources only, does not touch the target; no asset registration required). Backfill the asset baseline with results.",
+		summary: "被动子域枚举（subfinder；不触达目标）。结果回填资产基线。",
 		hint: "被动子域枚举（多被动源聚合，不触达目标）",
 		params: {
 			domain: { type: "string", required: true, description: "Base domain, e.g. example.com" }
@@ -95,7 +95,7 @@ export const TOOL_DEFS = {
 	},
 	gau: {
 		id: "gau", bin: "gau", name: "gau_urls", kind: "passive-urls", positional: "domain",
-		summary: "Passive URL/history collection (local gau — fetches known URLs from public archives; never touches the target). Ideal for the passive-recon stage and JS/API surface building.",
+		summary: "被动 URL 采集（gau；公开档案，不触达目标）。用于 JS/API 面盘点。",
 		hint: "被动 URL 历史收集（wayback/otx/commoncrawl 公开档案；入口面盘点与 JS 专线的弹药库）",
 		params: {
 			domain: { type: "string", required: true, description: "Domain, e.g. example.com" },
@@ -121,7 +121,7 @@ export const TOOL_DEFS = {
 	},
 	whatweb: {
 		id: "whatweb", bin: "whatweb", name: "whatweb_fingerprint", kind: "fingerprint", positional: "target",
-		summary: "Light web fingerprint (local whatweb, -a 1 conservative by default; aggression capped at 3). Unregistered targets allowed (like httpx_probe); backfill the asset baseline.",
+		summary: "轻量 Web 指纹（whatweb -a 1）。可探测未登记目标，结果回填资产基线。",
 		hint: "轻量 Web 指纹（默认 -a 1 保守；回填资产基线）",
 		params: {
 			target: { type: "string", required: true, description: "Target URL/host" },
@@ -146,7 +146,7 @@ export const TOOL_DEFS = {
 	},
 	wafw00f: {
 		id: "wafw00f", bin: "wafw00f", name: "wafw00f_detect", kind: "waf", positional: "target",
-		summary: "WAF detection (local wafw00f, -a probes all known WAF signatures). Feeds the protection-profile stage BEFORE any active testing — rate budget and technique selection depend on it. Backfill the protection profile.",
+		summary: "WAF 识别（wafw00f -a）。活跃测试前先做防护画像。",
 		hint: "WAF 识别：防护画像阶段先判 WAF（速率预算与打法据此定——playbook 防护画像前置 doctrine 的工具落地）",
 		params: {
 			target: { type: "string", required: true, description: "Target URL/host" }
@@ -170,7 +170,7 @@ export const TOOL_DEFS = {
 	},
 	dirsearch: {
 		id: "dirsearch", bin: "dirsearch", name: "dirsearch_dirs", kind: "content-discovery", positional: null,
-		summary: "Dir/path discovery (local dirsearch; conservative -t 10 threads by default). Requires the target registered in the asset baseline (防盲打). Rate budget follows the WAF profile.",
+		summary: "目录/路径发现（dirsearch -t 10）。目标须登记，速率跟随 WAF 画像。",
 		hint: "目录/路径发现（与 ffuf 同域：dirsearch=自带字典上手快，ffuf=可配性更强；速率在 WAF 画像之后定）",
 		params: {
 			url: { type: "string", required: true, description: "Target base URL (must be registered)" },
@@ -201,7 +201,7 @@ export const TOOL_DEFS = {
 	},
 	sqlmap: {
 		id: "sqlmap", bin: "sqlmap", name: "sqlmap_inject", kind: "sqli", positional: null,
-		summary: "SQL injection verification (local sqlmap, always --batch non-interactive; conservative --level 1 --risk 1 --threads 1 by default). Data-minimization discipline: prefer --banner/--dbs/--count escalation; --dump or OS-level actions (--os-shell etc.) only on explicit user request, via the audited extra escape hatch. Requires the target registered in the asset baseline.",
+		summary: "SQL 注入验证（sqlmap --batch，默认 level/risk/threads=1）。目标须登记；先走 banner/dbs/count，--dump/OS 操作仅显式请求。",
 		hint: "注入验证：--batch 非交互、level/risk/threads 默认 1 最小强度；**数据最小化分级**——banner→dbs→count 逐级证明，--dump/--os-shell 仅用户明示后经 extra 留痕执行（playbook 敏感数据最小化纪律）",
 		params: {
 			url: { type: "string", required: true, description: "Target URL with the injectable parameter, e.g. http://host/page?id=1 (must be registered)" },
@@ -243,7 +243,7 @@ export const TOOL_DEFS = {
 	},
 	nikto: {
 		id: "nikto", bin: "nikto", name: "nikto_scan", kind: "webserver-scan", positional: null,
-		summary: "Web-server config/misconfig scan (local nikto, non-interactive; complementary to nuclei: nikto = server config & known issues, nuclei = template vulns). Noisy — expect IDS visibility; rate/discipline note applies. Requires the target registered in the asset baseline.",
+		summary: "Web 服务器配置扫描（nikto，非交互，噪声大）。目标须登记。",
 		hint: "Web 服务器配置类扫描（与 nuclei 分工：nikto=服务器配置/已知问题，nuclei=模板漏洞；噪声大，授权与速率纪律适用）",
 		params: {
 			host: { type: "string", required: true, description: "Target URL/host (must be registered)" },
@@ -269,7 +269,7 @@ export const TOOL_DEFS = {
 	},
 	hydra: {
 		id: "hydra", bin: "hydra", name: "hydra_brute", kind: "brute", positional: "target",
-		summary: "Login brute-force (local hydra; conservative -t 4 threads by default, stop-on-first-valid). Requires the target registered in the asset baseline; hard-coded-credential-first doctrine applies — brute only after cred reuse/dictionary candidates, with rate discipline and lockout awareness.",
+		summary: "登录爆破（hydra -t 4，首中即停）。目标须登记；先验硬编码/已知凭据，并注意锁定策略。",
 		hint: "登录爆破（默认 -t 4 保守+首中即停）：**硬编码凭据优先**——先走 JS/配置中的已获凭据与字典候选，爆破是后位手段；锁定策略与速率纪律适用",
 		params: {
 			target: { type: "string", required: true, description: "Target host + service, e.g. '10.0.0.5 ssh' / '10.0.0.5 rdp' / 'http-post-form 填模块串'（组合位置参数）" },
@@ -303,7 +303,7 @@ export const TOOL_DEFS = {
 	},
 	impacket: {
 		id: "impacket", bin: "impacket", bins: ["impacket-{module}", "{module}.py"], name: "impacket_suite", kind: "ad-exec", positional: "target", moduleParam: "module",
-		summary: "Impacket AD toolkit (local; module selectable: secretsdump / psexec / wmiexec / smbexec / atexec / GetUserSPNs / GetNPUsers; binary auto-resolves between 'impacket-<module>' and '<module>.py' install layouts). Credential-first doctrine: use obtained creds/hashes, DCSync single-request over bulk logins; lateral-execution modules leave traces — op-trace ledger applies. Requires the target registered in the asset baseline.",
+		summary: "Impacket AD 工具（secretsdump / psexec / wmiexec / smbexec / atexec / GetUserSPNs / GetNPUsers）。目标须登记；优先用已获凭据/哈希。",
 		hint: "AD 重兵器套件：secretsdump 凭据直取（DCSync 单请求优于批量登录）、psexec/wmiexec/smbexec/atexec 横向执行（痕迹管理纪律适用）、GetUserSPNs/GetNPUsers Roasting 线起点；双安装名自动解析",
 		params: {
 			module: { type: "string", required: true, enum: ["secretsdump", "psexec", "wmiexec", "smbexec", "atexec", "GetUserSPNs", "GetNPUsers"], description: "Impacket module to run" },
@@ -330,7 +330,7 @@ export const TOOL_DEFS = {
 	},
 	netexec: {
 		id: "netexec", bin: "netexec", bins: ["netexec", "nxc"], name: "netexec_scan", kind: "ad-recon", positional: "target", prefixParam: "protocol",
-		summary: "Network/AD protocol validation spray (local netexec, the maintained successor lineage; conservative -t 10 threads by default). Protocols: smb / winrm / ldap / ssh / mssql. Credential validation + situational enumeration (--sam/--shares/--users/--sessions/--pass-pol). Requires the target registered in the asset baseline; lockout awareness applies — spray with obtained cred candidates, not bulk.",
+		summary: "AD 协议验证与枚举（netexec -t 10；支持 sam/shares/users/sessions/pass-pol）。目标须登记，注意锁定策略。",
 		hint: "AD 协议验证喷洒：凭据候选有效性批量验证 + 态势枚举（SAM/共享/会话/密码策略）；**锁定意识**——用已获凭据候选定向验证而非 bulk；与 crackmapexec 同语法互为替代",
 		params: {
 			protocol: { type: "string", required: true, enum: ["smb", "winrm", "ldap", "ssh", "mssql"], description: "Target protocol" },
@@ -364,7 +364,7 @@ export const TOOL_DEFS = {
 	},
 	crackmapexec: {
 		id: "crackmapexec", bin: "crackmapexec", bins: ["crackmapexec", "cme"], name: "crackmapexec_scan", kind: "ad-recon", positional: "target", prefixParam: "protocol",
-		summary: "Network/AD protocol validation spray (local CrackMapExec, the original tool; same CLI grammar as its successor netexec; conservative -t 10 threads by default). Protocols: smb / winrm / ldap / ssh / mssql; --sam/--shares/--users/--sessions/--pass-pol enumeration. Requires the target registered in the asset baseline; lockout awareness applies.",
+		summary: "AD 协议验证与枚举（CrackMapExec，同 netexec 语法，已停更；优先 netexec）。目标须登记。",
 		hint: "AD 协议验证喷洒（原版，与 netexec 同语法互为替代；原版已停更——优先 netexec，本件为已装环境兼容）",
 		params: {
 			protocol: { type: "string", required: true, enum: ["smb", "winrm", "ldap", "ssh", "mssql"], description: "Target protocol" },

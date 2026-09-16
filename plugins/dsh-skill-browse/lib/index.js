@@ -55,26 +55,80 @@ function sakerRootCache() {
 }
 const sakerRootOf = sakerRootCache()
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---/
-const NAME_RE = /^name:\s*([a-z0-9][a-z0-9-]*)\s*$/m
+// name 允许带成对引号（`name: "my-skill"` 在 YAML 里是合法写法，值就是 my-skill）。
+const NAME_RE = /^name:\s*["']?([a-z0-9][a-z0-9-]*)["']?\s*$/m
 const DESC_RE = /^description:\s*(.+?)\s*$/m
 // 宿主 isSkillName 镜像：小写 kebab-case（/^[a-z0-9]+(?:-[a-z0-9]+)*$/）。
 // 上传名若不合此规则，filesystem 提供方不会把它暴露进会话目录——先拒绝更诚实。
 const SKILL_NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
+/**
+ * 去掉 YAML 标量最外层的成对引号。
+ *
+ * 为什么必须有：本插件用正则读 frontmatter，而**宿主用的是真 YAML 解析器** ——
+ * 引号在宿主侧不会进值，在正则里却会被当成普通字符。于是 `description: ""`
+ * 在正则看来是「两个引号字符」（非空），宿主解析出的却是空串 → 技能被宿主忽略，
+ * 而上传端报告「安装成功」（与「缺 description」同一类静默失效）。
+ * 顺带也修好「列表里带着多余引号显示」的观感问题。
+ * 不处理转义引号与块标量（`>` / `|`）——那些场景下值仍非空，不影响放行判定。
+ */
+function unquote(value) {
+  const t = String(value ?? '').trim()
+  if (t.length >= 2) {
+    const a = t[0]
+    const b = t[t.length - 1]
+    if ((a === '"' && b === '"') || (a === "'" && b === "'")) return t.slice(1, -1).trim()
+  }
+  return t
+}
+
+/**
+ * 解析一份 SKILL.md 的 frontmatter。**镜像宿主的加载判定**（`skill-filesystem/src/index.ts`）：
+ * 宿主对 name 与 description 都用 `stringField`（要求 `typeof === 'string' && length > 0`），
+ * 任一为空即 `skill file … ignored: frontmatter requires name and description` ——
+ * 只打一行 warn，**技能等于不存在**。
+ *
+ * 为什么这里必须同样严格（2026-09-13 修）：本插件原先把 description 当可选，
+ * 于是「缺 description 的包」会安装成功并在技能列表里显示，而宿主根本不加载它 ——
+ * 用户看到「已安装」却永远用不上，且没有任何报错。宁可安装时就明确拒掉。
+ *
+ * @returns {{name: string, description: string} | null} 不合规（宿主也不会加载）时返回 null。
+ */
 function readSkillMd(file) {
   try {
     const text = fs.readFileSync(file, 'utf8')
     const fm = FRONTMATTER_RE.exec(text)
     if (!fm) return null
-    const name = NAME_RE.exec(fm[1])?.[1]
+    const name = unquote(NAME_RE.exec(fm[1])?.[1])
     if (!name || !SKILL_NAME_RE.test(name)) return null
-    const description = (DESC_RE.exec(fm[1])?.[1] ?? '').trim()
+    // 与宿主一致：description 必须**非空**。先剥引号再判空 —— `description: ""`
+    // 在 YAML 里就是空串（宿主据此忽略该技能），正则直读却会看到两个引号字符。
+    const description = unquote(DESC_RE.exec(fm[1])?.[1])
+    if (!description) return null
     return { name, description }
   } catch { return null }
 }
 
 function dshHomeOf(config) {
   return config?.dshHome || process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
+}
+
+/**
+ * frontmatter 不合规的**具体原因**（供报错文案；判定与 readSkillMd 同一套规则）。
+ * 为什么值得细分：笼统的「缺少合法 frontmatter」会让上传者不知道自己该改哪一行，
+ * 而这里每一条都对应宿主的一条忽略原因 —— 照着提示改就能被宿主真正加载。
+ */
+function skillMdIssue(file) {
+  let text = ''
+  try { text = fs.readFileSync(file, 'utf8') } catch { return 'SKILL.md 无法读取' }
+  const fm = FRONTMATTER_RE.exec(text)
+  if (!fm) return 'SKILL.md 缺少 YAML frontmatter（需以 --- 开头、--- 结尾）'
+  const name = unquote(NAME_RE.exec(fm[1])?.[1])
+  if (!name) return 'frontmatter 缺 name，或 name 含非法字符（须小写字母/数字/连字符，如 my-skill）'
+  if (!SKILL_NAME_RE.test(name)) return 'name 不合法（须小写 kebab-case，如 my-skill）：' + name
+  const description = unquote(DESC_RE.exec(fm[1])?.[1])
+  if (!description) return 'frontmatter 缺非空 description —— 宿主要求 name 与 description 均非空，否则技能文件会被直接忽略（上传成功但用不上），请补一行 description: …（注意 description: "" 与全空白同样算空）'
+  return 'SKILL.md 不合规'
 }
 function userSkillRoot(config) {
   return path.join(dshHomeOf(config), 'skills')
@@ -196,12 +250,14 @@ export function probeSkillDir(tmpRoot) {
   const mdFiles = top.filter((e) => e.isFile() && e.name.toLowerCase().endsWith('.md'))
   const dirsWithSkill = top.filter((e) => e.isDirectory() && fs.existsSync(path.join(tmpRoot, e.name, 'SKILL.md')))
   if (dirsWithSkill.length === 1 && mdFiles.length === 0 && top.filter((e) => e.isDirectory()).length === 1) {
-    const meta = readSkillMd(path.join(tmpRoot, dirsWithSkill[0].name, 'SKILL.md'))
-    if (!meta) throw new Error('SKILL.md 缺少合法 frontmatter（name + description）')
+    const mdPath = path.join(tmpRoot, dirsWithSkill[0].name, 'SKILL.md')
+    const meta = readSkillMd(mdPath)
+    if (!meta) throw new Error(skillMdIssue(mdPath))
     name = meta.name; description = meta.description
   } else if (dirsWithSkill.length === 0 && mdFiles.length === 1 && top.length === 1) {
-    const meta = readSkillMd(path.join(tmpRoot, mdFiles[0].name))
-    if (!meta) throw new Error('SKILL.md 缺少合法 frontmatter（name + description）')
+    const mdPath = path.join(tmpRoot, mdFiles[0].name)
+    const meta = readSkillMd(mdPath)
+    if (!meta) throw new Error(skillMdIssue(mdPath))
     name = meta.name; description = meta.description
   } else {
     throw new Error('压缩包应含一个技能目录（含 SKILL.md）或一个顶层 <name>.md，且无多余顶层文件')

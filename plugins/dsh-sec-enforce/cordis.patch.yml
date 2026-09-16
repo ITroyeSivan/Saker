@@ -1,5 +1,5 @@
 # One installable bundle row: deterministic tool-call enforcement for the
-# pentest / code-audit security presets. Host plane — the guard resolves the
+# pentest / code-audit / ctf-solver security presets. Host plane — the guard resolves the
 # calling agent's preset at execution time and only fires for those presets;
 # every other session is untouched.
 #

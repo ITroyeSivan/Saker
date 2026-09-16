@@ -103,7 +103,21 @@ function ToggleSwitch(props) {
 // src/client/ServerCard.tsx
 var import_react2 = require("react");
 
+// src/client/contracts.ts
+var DEFAULT_PROXY_THRESHOLD = 10;
+
 // src/client/mcp-json.ts
+function jsonErrorDetail(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  const position = /at position (\d+)/.exec(message);
+  const lineColumn = /line (\d+) column (\d+)/.exec(message);
+  const token = /unexpected token '([^']*)'/i.exec(message);
+  return {
+    ...position === null ? {} : { position: Number(position[1]) },
+    ...lineColumn === null ? {} : { line: Number(lineColumn[1]), column: Number(lineColumn[2]) },
+    ...token === null ? {} : { token: token[1] }
+  };
+}
 var DEFAULT_TIMEOUT_MS = 6e4;
 function quoteArg(token) {
   if (token === "") return '""';
@@ -141,7 +155,10 @@ function parseServerEntry(name2, raw) {
     url: isHttp ? url : "",
     headers: isHttp ? toPairs(entry.headers) : [],
     toolCallTimeoutMs: DEFAULT_TIMEOUT_MS,
-    failOnStartupError: false
+    failOnStartupError: false,
+    exposure: "auto",
+    proxyThreshold: DEFAULT_PROXY_THRESHOLD,
+    directTools: []
   };
 }
 function isObject(value) {
@@ -158,13 +175,13 @@ var MCP_JSON_TEMPLATE = `{
 }`;
 function formatMcpJson(text) {
   const trimmed = text.trim();
-  if (trimmed === "") return { error: "empty input" };
+  if (trimmed === "") return { error: { code: "empty" } };
   try {
     const document2 = JSON.parse(trimmed);
     return { text: `${JSON.stringify(document2, null, 2)}
 ` };
   } catch (error) {
-    return { error: `invalid JSON: ${error instanceof Error ? error.message : String(error)}` };
+    return { error: { code: "badJson", ...jsonErrorDetail(error) } };
   }
 }
 function lineToArgs(line) {
@@ -224,14 +241,14 @@ function serversToMcpJson(servers) {
 }
 function parseMcpJson(text, existing = []) {
   const trimmed = text.trim();
-  if (trimmed === "") return { error: "empty input" };
+  if (trimmed === "") return { error: { code: "empty" } };
   let document2;
   try {
     document2 = JSON.parse(trimmed);
   } catch (error) {
-    return { error: `invalid JSON: ${error instanceof Error ? error.message : String(error)}` };
+    return { error: { code: "badJson", ...jsonErrorDetail(error) } };
   }
-  if (!isObject(document2)) return { error: "expected a JSON object" };
+  if (!isObject(document2)) return { error: { code: "notObject" } };
   const warnings = [];
   const collect = (map) => {
     const servers2 = [];
@@ -240,7 +257,7 @@ function parseMcpJson(text, existing = []) {
       if (rawName === "_meta" || rawName === "inputs" || rawName.startsWith("$")) continue;
       const draft = parseServerEntry(rawName, rawEntry);
       if (draft === void 0) {
-        warnings.push(`skipped "${rawName}": no command (stdio) or url (http)`);
+        warnings.push({ code: "skipped", name: rawName });
         continue;
       }
       servers2.push(draft);
@@ -269,7 +286,7 @@ function parseMcpJson(text, existing = []) {
   }
   if (servers === void 0 || servers.length === 0) {
     return {
-      error: warnings[0] ?? 'no server entries found: expected {"mcpServers": {...}}, {"servers": {...}}, a bare {name: config} map, or one server object'
+      error: warnings[0] ?? { code: "noServers" }
     };
   }
   const used = new Set(existing);
@@ -293,6 +310,14 @@ function parseMcpJson(text, existing = []) {
 var import_jsx_runtime2 = require("react/jsx-runtime");
 function transportDisplay(value) {
   return value === "stdio" ? "stdio" : "http";
+}
+function parseDirectTools(text) {
+  const out = [];
+  for (const raw of text.split(/[,，\s]+/)) {
+    const name2 = raw.trim();
+    if (name2 !== "" && !out.includes(name2)) out.push(name2);
+  }
+  return out;
 }
 function parseTransportInput(text) {
   const normalized = text.trim().toLowerCase().replace(/[\s_-]/g, "");
@@ -467,6 +492,7 @@ function ServerCard(props) {
           /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: `dsh-mcs-dot ${stateClass[state]}` }),
           /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "dsh-mcs-name", children: server.name === "" ? t("unnamedServer") : server.name }),
           /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: server.transport === "stdio" ? "dsh-mcs-chip" : "dsh-mcs-chip dsh-mcs-chip--http", children: server.transport === "stdio" ? "stdio" : "http" }),
+          live?.exposure === "proxy" && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "dsh-mcs-chip", title: t("exposureProxyBadgeHint"), children: "proxy" }),
           /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "dsh-mcs-cmd", children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("code", { children: summary }) }),
           /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: `dsh-mcs-state ${stateTextClass[state]}`, children: t(stateLabel[state]) }),
           state === "connected" && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
@@ -543,6 +569,42 @@ function ServerCard(props) {
               set({ toolCallTimeoutMs: Number.isFinite(value) ? Math.max(1e3, value) : 6e4 });
             }
           }
+        ) }),
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Field, { label: t("exposure"), hint: t("exposureHint"), children: /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+          "select",
+          {
+            value: server.exposure,
+            onChange: (event) => set({ exposure: event.target.value }),
+            children: [
+              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("option", { value: "auto", children: t("exposureAuto") }),
+              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("option", { value: "direct", children: t("exposureDirect") }),
+              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("option", { value: "proxy", children: t("exposureProxy") }),
+              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("option", { value: "hybrid", children: t("exposureHybrid") })
+            ]
+          }
+        ) }),
+        server.exposure === "auto" && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Field, { label: t("proxyThreshold"), hint: t("proxyThresholdHint"), children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+          "input",
+          {
+            type: "number",
+            min: 1,
+            max: 200,
+            step: 1,
+            value: server.proxyThreshold,
+            onChange: (event) => {
+              const value = Number.parseInt(event.target.value, 10);
+              set({ proxyThreshold: Number.isFinite(value) ? Math.min(200, Math.max(1, value)) : DEFAULT_PROXY_THRESHOLD });
+            }
+          }
+        ) }),
+        server.exposure === "hybrid" && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Field, { label: t("directTools"), hint: t("directToolsHint"), children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+          "input",
+          {
+            value: server.directTools.join(", "),
+            spellCheck: false,
+            placeholder: "scan_url, url_fetch",
+            onChange: (event) => set({ directTools: parseDirectTools(event.target.value) })
+          }
         ) })
       ] }),
       server.transport === "stdio" ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Field, { label: t("env"), hint: t("envHint"), children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(PairEditor, { pairs: server.env, t, onChange: (env) => set({ env }) }) }) : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Field, { label: t("headers"), hint: t("headersHint"), children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(PairEditor, { pairs: server.headers, t, onChange: (headers) => set({ headers }) }) }),
@@ -613,8 +675,8 @@ var SERVER_PRESETS = [
   {
     id: "chrome-devtools",
     label: "Chrome DevTools",
-    description: "Chrome DevTools MCP\uFF1A\u9875\u9762\u5FEB\u7167\u3001\u70B9\u51FB\u3001\u586B\u8868\u3001\u7F51\u7EDC\u4E0E\u63A7\u5236\u53F0\uFF08\u9ED8\u8BA4\u5173\u95ED\uFF1B\u5F00\u542F\u5373\u7ECF npx \u62C9\u8D77\uFF09",
-    json: '{\n  "mcpServers": {\n    "chrome-devtools": {\n      "command": "npx",\n      "args": ["-y", "chrome-devtools-mcp@latest"],\n      "disabled": true\n    }\n  }\n}'
+    description: "Chrome DevTools MCP\uFF1A\u9875\u9762\u5FEB\u7167\u3001\u70B9\u51FB\u3001\u586B\u8868\u3001\u7F51\u7EDC\u4E0E\u63A7\u5236\u53F0\uFF08\u9ED8\u8BA4\u5173\u95ED\uFF1B\u56FA\u5B9A 1.9.0\uFF0Cauto/proxy \u907F\u514D 29 \u4E2A\u5DE5\u5177\u8FDB\u5165\u63D0\u793A\u8BCD\uFF09",
+    json: '{\n  "mcpServers": {\n    "chrome-devtools": {\n      "command": "npx",\n      "args": ["-y", "chrome-devtools-mcp@1.9.0"],\n      "disabled": true\n    }\n  }\n}'
   },
   {
     id: "kali",
@@ -744,25 +806,44 @@ function createStudioPage(face, t, pollStatus, diagnose, clearExecutions) {
       }
       setPasteOpen(true);
     }, [pasteText, templateFilled]);
+    const mcpErrText = (0, import_react3.useCallback)((error) => {
+      switch (error.code) {
+        case "empty":
+          return t("errEmpty");
+        case "badJson":
+          if (error.line !== void 0 && error.column !== void 0) {
+            return t("errBadJsonAt", { line: error.line, column: error.column });
+          }
+          if (error.token !== void 0) return t("errBadJsonToken", { token: error.token });
+          if (error.position !== void 0) return t("errBadJsonPos", { position: error.position });
+          return t("errBadJson");
+        case "notObject":
+          return t("errNotObject");
+        case "noServers":
+          return t("errNoServers");
+        case "skipped":
+          return t("errSkipped", { name: error.name ?? "" });
+      }
+    }, [t]);
     const runFormat = (0, import_react3.useCallback)(() => {
       const result = formatMcpJson(pasteText);
       if ("error" in result) {
-        setPasteNote({ kind: "err", text: result.error });
+        setPasteNote({ kind: "err", text: mcpErrText(result.error) });
         return;
       }
       setPasteText(result.text);
       setPasteNote(void 0);
-    }, [pasteText]);
+    }, [pasteText, mcpErrText]);
     const runJsonImport = (0, import_react3.useCallback)(() => {
       const result = face.importMcpJson(pasteText);
       if ("error" in result) {
-        setPasteNote({ kind: "err", text: result.error });
+        setPasteNote({ kind: "err", text: mcpErrText(result.error) });
         return;
       }
       setPasteOpen(false);
       setPasteText("");
-      setPasteNote({ kind: "ok", text: `${t("importDone")} ${result.servers}${result.warnings.length > 0 ? ` \xB7 ${result.warnings.join("\uFF1B")}` : ""}` });
-    }, [face, pasteText, t]);
+      setPasteNote({ kind: "ok", text: `${t("importDone")} ${result.servers}${result.warnings.length > 0 ? ` \xB7 ${result.warnings.map(mcpErrText).join("\uFF1B")}` : ""}` });
+    }, [face, pasteText, t, mcpErrText]);
     const copyAll = (0, import_react3.useCallback)(() => {
       const json = serversToMcpJson(state.view.servers);
       void navigator.clipboard?.writeText(json).then(
@@ -906,6 +987,7 @@ function createStudioPage(face, t, pollStatus, diagnose, clearExecutions) {
           state.view.servers.length
         ] })
       ] }),
+      state.view.servers.length > 0 && visibleServers.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "dsh-mcs-empty", children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { children: t("noMatch") }) }) : null,
       state.view.servers.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "dsh-mcs-empty", children: [
         /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { children: t("empty") }),
         /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "dsh-mcs-toolbar", style: { justifyContent: "center" }, children: [
@@ -1105,7 +1187,10 @@ function serverToDraft(raw) {
     url: typeof server.url === "string" ? server.url : "",
     headers: dictToPairs(server.headers),
     toolCallTimeoutMs: typeof server.toolCallTimeoutMs === "number" ? server.toolCallTimeoutMs : 6e4,
-    failOnStartupError: server.failOnStartupError === true
+    failOnStartupError: server.failOnStartupError === true,
+    exposure: server.exposure === "direct" || server.exposure === "proxy" || server.exposure === "hybrid" ? server.exposure : "auto",
+    proxyThreshold: typeof server.proxyThreshold === "number" ? server.proxyThreshold : DEFAULT_PROXY_THRESHOLD,
+    directTools: Array.isArray(server.directTools) ? server.directTools.filter((tool) => typeof tool === "string") : []
   };
 }
 function sectionToDraft(section) {
@@ -1127,7 +1212,10 @@ function draftToSection(draft) {
       url: server.url,
       headers: pairsToDict(server.headers),
       toolCallTimeoutMs: server.toolCallTimeoutMs,
-      failOnStartupError: server.failOnStartupError
+      failOnStartupError: server.failOnStartupError,
+      exposure: server.exposure,
+      proxyThreshold: server.proxyThreshold,
+      directTools: server.directTools
     }))
   };
 }
@@ -1160,6 +1248,13 @@ function validateDraft(section) {
         }
       }
     }
+    const promoted = /* @__PURE__ */ new Set();
+    for (const raw of server.directTools) {
+      const tool = raw.trim();
+      if (tool === "") errors.push(`server "${server.name || "(unnamed)"}" has a blank entry in directTools`);
+      else if (promoted.has(tool)) errors.push(`server "${server.name}" lists "${tool}" twice in directTools`);
+      promoted.add(tool);
+    }
   }
   return errors;
 }
@@ -1169,7 +1264,6 @@ var StudioController = class {
     this.store = createStore(this.projection());
     this.scope.subscribe(() => this.publish());
   }
-  scope;
   store;
   staged;
   saving = false;
@@ -1227,7 +1321,10 @@ var StudioController = class {
         url: "",
         headers: [],
         toolCallTimeoutMs: 6e4,
-        failOnStartupError: false
+        failOnStartupError: false,
+        exposure: "auto",
+        proxyThreshold: DEFAULT_PROXY_THRESHOLD,
+        directTools: []
       }, ...base.servers]
     };
     this.failed = false;
@@ -1330,7 +1427,6 @@ var StudioScope = class {
     this.call = call;
     void this.load();
   }
-  call;
   snapshot = { status: "loading", value: void 0, base: void 0, user: void 0, revision: void 0, writable: false, mode: "host" };
   listeners = /* @__PURE__ */ new Set();
   tail = Promise.resolve();
@@ -1456,12 +1552,32 @@ var en = {
   toolCallTimeoutMs: "Tool-call timeout (ms)",
   failOnStartupError: "Fail mount on startup error",
   failOnStartupErrorHint: "Otherwise an unreachable server simply contributes no tools.",
+  exposure: "Tool exposure",
+  exposureHint: "Direct puts one tool per server tool into every turn. Proxy publishes only mcp_search / mcp_call and fetches metadata on demand \u2014 cheaper for servers with many tools.",
+  exposureAuto: "Auto (proxy at or above the threshold)",
+  exposureDirect: "Direct (one tool per server tool)",
+  exposureProxy: "Proxy (mcp_search / mcp_call only)",
+  exposureHybrid: "Hybrid (proxy + promoted tools)",
+  exposureProxyBadgeHint: "Proxied: its tools are reachable through mcp_search / mcp_call rather than as individual entries.",
+  proxyThreshold: "Proxy threshold (tools)",
+  proxyThresholdHint: "Auto proxies the server once it advertises at least this many tools.",
+  directTools: "Promoted tools",
+  directToolsHint: "Comma-separated raw tool names to keep as individual entries while the rest stay behind the proxy. Names not advertised by the server are skipped.",
   empty: "No MCP servers configured yet. Add one, or paste an existing config.",
+  noMatch: "No server matches the current filter or search. Clear them to see all servers.",
   pasteJson: "Paste JSON",
   pasteJsonHint: "Accepts Claude Desktop / VS Code / Cline / bare-map MCP config JSON; every entry becomes one row below.",
   pasteJsonPlaceholder: '{"mcpServers": {"github": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": {"GITHUB_TOKEN": "..."}}}}',
   importJson: "Import",
   importDone: "imported",
+  errEmpty: "Nothing to parse \u2014 paste or type a config first.",
+  errBadJson: "That is not valid JSON.",
+  errBadJsonAt: "Invalid JSON at line {line}, column {column}.",
+  errBadJsonPos: "Invalid JSON at character {position}.",
+  errBadJsonToken: "Invalid JSON: unexpected {token}.",
+  errNotObject: "The top level must be a JSON object.",
+  errNoServers: 'No server entries found. Expected {"mcpServers": {...}}, {"servers": {...}}, a bare {name: config} map, or a single server object.',
+  errSkipped: 'Skipped "{name}": stdio needs a command, http needs a url.',
   toolsTitle: "Tools",
   toolsSearchPlaceholder: "Filter tools\u2026",
   toolsEmpty: "No tool matches this filter.",
@@ -1546,12 +1662,32 @@ var zh = {
   toolCallTimeoutMs: "\u5355\u6B21\u5DE5\u5177\u8C03\u7528\u8D85\u65F6\uFF08\u6BEB\u79D2\uFF09",
   failOnStartupError: "\u542F\u52A8\u5931\u8D25\u5373\u62A5\u9519",
   failOnStartupErrorHint: "\u5173\u95ED\u65F6\uFF0C\u8FDE\u4E0D\u4E0A\u7684\u670D\u52A1\u5668\u53EA\u662F\u4E0D\u8D21\u732E\u4EFB\u4F55\u5DE5\u5177\u3002",
+  exposure: "\u5DE5\u5177\u66B4\u9732\u65B9\u5F0F",
+  exposureHint: "\u76F4\u8FDE=\u6BCF\u4E2A\u670D\u52A1\u7AEF\u5DE5\u5177\u90FD\u5355\u72EC\u8FDB\u6A21\u578B\u4E0A\u4E0B\u6587\uFF1B\u4EE3\u7406=\u53EA\u66B4\u9732 mcp_search / mcp_call \u4E24\u4E2A\u5165\u53E3\uFF0C\u5DE5\u5177\u5143\u6570\u636E\u6309\u9700\u62C9\u53D6\u2014\u2014\u5DE5\u5177\u591A\u7684\u670D\u52A1\u5668\u80FD\u7528\u8FD9\u4E2A\u7701\u4E0A\u4E0B\u6587\u3002",
+  exposureAuto: "\u81EA\u52A8\uFF08\u8FBE\u5230\u9608\u503C\u8D70\u4EE3\u7406\uFF09",
+  exposureDirect: "\u76F4\u8FDE\uFF08\u6BCF\u4E2A\u5DE5\u5177\u5355\u72EC\u66B4\u9732\uFF09",
+  exposureProxy: "\u4EE3\u7406\uFF08\u53EA\u7559 mcp_search / mcp_call\uFF09",
+  exposureHybrid: "\u6DF7\u5408\uFF08\u4EE3\u7406 + \u6307\u5B9A\u5DE5\u5177\u76F4\u8FDE\uFF09",
+  exposureProxyBadgeHint: "\u5DF2\u4EE3\u7406\uFF1A\u5B83\u7684\u5DE5\u5177\u901A\u8FC7 mcp_search / mcp_call \u8C03\u7528\uFF0C\u4E0D\u518D\u9010\u4E2A\u51FA\u73B0\u5728\u5DE5\u5177\u5217\u8868\u91CC\u3002",
+  proxyThreshold: "\u4EE3\u7406\u9608\u503C\uFF08\u5DE5\u5177\u6570\uFF09",
+  proxyThresholdHint: "\u81EA\u52A8\u6A21\u5F0F\u4E0B\uFF0C\u670D\u52A1\u7AEF\u5DE5\u5177\u6570\u8FBE\u5230\u8BE5\u503C\u5373\u6539\u8D70\u4EE3\u7406\u3002",
+  directTools: "\u76F4\u8FDE\u7684\u5DE5\u5177",
+  directToolsHint: "\u9017\u53F7\u5206\u9694\u7684\u539F\u59CB\u5DE5\u5177\u540D\uFF1A\u8FD9\u4E9B\u4ECD\u5355\u72EC\u66B4\u9732\uFF0C\u5176\u4F59\u8D70\u4EE3\u7406\u3002\u670D\u52A1\u7AEF\u6CA1\u6709\u7684\u5DE5\u5177\u540D\u4F1A\u88AB\u8DF3\u8FC7\u3002",
   empty: "\u8FD8\u6CA1\u6709\u914D\u7F6E MCP \u670D\u52A1\u5668\u3002\u6DFB\u52A0\u4E00\u4E2A\uFF0C\u6216\u76F4\u63A5\u7C98\u8D34\u73B0\u6210\u914D\u7F6E\u3002",
+  noMatch: "\u6CA1\u6709\u670D\u52A1\u5668\u5339\u914D\u5F53\u524D\u7684\u7B5B\u9009\u6216\u641C\u7D22\u6761\u4EF6\uFF0C\u6E05\u7A7A\u540E\u5373\u53EF\u770B\u5230\u5168\u90E8\u670D\u52A1\u5668\u3002",
   pasteJson: "\u7C98\u8D34 JSON",
   pasteJsonHint: "\u652F\u6301 Claude Desktop / VS Code / Cline / \u88F8\u6620\u5C04\u7B49\u5E38\u89C1 MCP \u914D\u7F6E\u683C\u5F0F\uFF0C\u6BCF\u4E00\u6761\u89E3\u6790\u4E3A\u4E0B\u65B9\u4E00\u884C\u3002",
   pasteJsonPlaceholder: '{"mcpServers": {"github": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": {"GITHUB_TOKEN": "..."}}}}',
   importJson: "\u5BFC\u5165",
   importDone: "\u5DF2\u5BFC\u5165",
+  errEmpty: "\u6CA1\u6709\u53EF\u89E3\u6790\u7684\u5185\u5BB9\uFF0C\u8BF7\u5148\u7C98\u8D34\u6216\u586B\u5199\u914D\u7F6E\u3002",
+  errBadJson: "\u8FD9\u4E0D\u662F\u5408\u6CD5\u7684 JSON\u3002",
+  errBadJsonAt: "JSON \u683C\u5F0F\u6709\u8BEF\uFF1A\u7B2C {line} \u884C\u7B2C {column} \u5217\u3002",
+  errBadJsonPos: "JSON \u683C\u5F0F\u6709\u8BEF\uFF1A\u7B2C {position} \u4E2A\u5B57\u7B26\u5904\u3002",
+  errBadJsonToken: "JSON \u683C\u5F0F\u6709\u8BEF\uFF1A\u51FA\u73B0\u610F\u5916\u5B57\u7B26 {token}\u3002",
+  errNotObject: "\u9876\u5C42\u5FC5\u987B\u662F\u4E00\u4E2A JSON \u5BF9\u8C61\u3002",
+  errNoServers: '\u6CA1\u6709\u627E\u5230\u670D\u52A1\u5668\u6761\u76EE\uFF1A\u652F\u6301 {"mcpServers": {...}}\u3001{"servers": {...}}\u3001\u88F8\u7684 {\u540D\u79F0: \u914D\u7F6E} \u6620\u5C04\uFF0C\u6216\u5355\u4E2A\u670D\u52A1\u5668\u5BF9\u8C61\u3002',
+  errSkipped: "\u5DF2\u8DF3\u8FC7\u300C{name}\u300D\uFF1Astdio \u9700\u8981 command\uFF0Chttp \u9700\u8981 url\u3002",
   toolsTitle: "\u5DE5\u5177",
   toolsSearchPlaceholder: "\u7B5B\u9009\u5DE5\u5177\u2026",
   toolsEmpty: "\u6CA1\u6709\u5339\u914D\u8BE5\u7B5B\u9009\u7684\u5DE5\u5177\u3002",
@@ -1616,8 +1752,8 @@ var CSS_TEXT = String.raw`
 .dsh-mcs-btn--danger{border-color:transparent;background:transparent;color:var(--dsw-alias-label-tertiary)}
 .dsh-mcs-btn--danger:hover:not(:disabled){color:var(--dsw-alias-state-error-primary)}
 .dsh-mcs-btn:disabled{opacity:.38;cursor:not-allowed}
-.dsh-mcs-dirty{color:var(--dsw-alias-state-warn-primary,#b8860b);font-size:11px;line-height:17px}
-.dsh-mcs-failed{color:var(--dsw-alias-state-error-primary);font-size:11px;line-height:17px}
+.dsh-mcs-dirty{color:var(--dsw-alias-state-warn-primary,#b8860b);font-size:11px;line-height:17px;order:9}
+.dsh-mcs-failed{color:var(--dsw-alias-state-error-primary);font-size:11px;line-height:17px;order:9}
 
 /* ---- overview strip ---- */
 .dsh-mcs-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
@@ -1635,7 +1771,7 @@ var CSS_TEXT = String.raw`
 .dsh-mcs-card:hover{border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 24%,var(--dsw-alias-border-l2))}
 .dsh-mcs-card.is-open{border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 30%,var(--dsw-alias-border-l2))}
 .dsh-mcs-card.is-off{opacity:.72}
-.dsh-mcs-card-head{display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;user-select:none;border-radius:12px 12px 0 0}
+.dsh-mcs-card-head{display:flex;align-items:center;gap:8px;padding:12px 16px;cursor:pointer;user-select:none;border-radius:12px 12px 0 0}
 .dsh-mcs-card-head:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .dsh-mcs-dot{flex:none;width:9px;height:9px;border-radius:50%;background:var(--dsw-alias-label-tertiary)}
 .dsh-mcs-dot--ok{background:var(--dsw-alias-state-success-primary);box-shadow:0 0 0 0 color-mix(in srgb,var(--dsw-alias-state-success-primary) 45%,transparent);animation:dsh-mcs-pulse 2.2s ease-out infinite}
@@ -1643,7 +1779,7 @@ var CSS_TEXT = String.raw`
 .dsh-mcs-dot--err{background:var(--dsw-alias-state-error-primary)}
 @keyframes dsh-mcs-pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--dsw-alias-state-success-primary) 45%,transparent)}70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
 .dsh-mcs-name{font-size:13px;font-weight:700;line-height:19px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px}
-.dsh-mcs-chip{flex:none;display:inline-block;padding:1px 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:999px;color:var(--dsw-alias-label-tertiary);font-size:9.5px;font-weight:700;line-height:15px;text-transform:uppercase;letter-spacing:.08em}
+.dsh-mcs-chip{flex:none;display:inline-block;padding:1px 6px;border:1px solid var(--dsw-alias-border-l2);border-radius:999px;color:var(--dsw-alias-label-tertiary);font-size:9.5px;font-weight:700;line-height:15px;text-transform:uppercase;letter-spacing:.08em}
 .dsh-mcs-chip--http{color:var(--dsw-alias-state-business-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 35%,var(--dsw-alias-border-l2))}
 .dsh-mcs-cmd{display:flex;min-width:0;flex:1;align-items:center;overflow:hidden;color:var(--dsw-alias-label-tertiary);font:11px/17px ui-monospace,SFMono-Regular,Menlo,monospace}
 .dsh-mcs-cmd code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:ltr}

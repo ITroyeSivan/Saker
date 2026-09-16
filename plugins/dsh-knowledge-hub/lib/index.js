@@ -1,6 +1,6 @@
 // dsh-knowledge-hub — host.
 //
-// Two-layer knowledge refs for the pentest / code-audit presets:
+// Two-layer knowledge refs for the pentest / code-audit / ctf-solver presets:
 //   bundle  <profile>/node_modules/dsh-saker/preset/<mode>/refs      read-only, ships with the root package
 //   user    DSH_HOME/refs/<mode>/<topic>/…                          writable, mirrors bundle topics
 //   import  DSH_HOME/refs/imports/<source-name>/…                    writable, external full assets (PATT etc.)
@@ -19,14 +19,16 @@ import os from 'node:os'
 import { spawn, spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { KnowledgeIndex, TEXT_EXTS } from './index-engine.js'
+import { loadCatalog, packRoots, packsStatus, syncPacks } from './packs.js'
+import { indexBuildStatus, indexDbPath, startBackgroundIndexBuild } from './index-build.js'
 
 export const name = 'dsh-knowledge-hub'
 export const inject = ['connection', 'tools', 'systemPrompt', 'webServer']
 
 const CHANNEL = '/dsh-knowledge-hub'
-const MODE_IDS = ['pentest', 'code-audit']
-const MODE_LABELS = { pentest: '渗透测试', 'code-audit': '代码审计' }
-const TEXT_EXTS = new Set(['.md', '.txt', '.yaml', '.yml'])
+const MODE_IDS = ['pentest', 'code-audit', 'ctf-solver']
+const MODE_LABELS = { pentest: '渗透测试', 'code-audit': '代码审计', 'ctf-solver': 'CTF 解题' }
 const MAX_READ_BYTES = 1024 * 1024 // 1 MiB single-file read cap
 const MAX_SEARCH_FILES = 500 // per search call
 const SMALL_FILE_LIMIT = 200 * 1024 // ≤200 KiB scanned fully; larger scans head + filename only
@@ -35,7 +37,6 @@ const HEAD_LINES = 1000 // lines scanned from large files
 // Exploit-DB：约定目录 imports/exploitdb（官方仓库或元数据快照）。识别标志=两个 CSV。
 // 检索=字段化索引（EDB-ID/平台/描述），不做整库 embedding；PoC 原文按需读。
 const EDB_DIRNAME = 'exploitdb'
-const EDB_INDEX_TTL = 120000
 
 /** 中文问句 → 英文/缩写同义词展开（轻量召回增强，不做语义检索）。 */
 const ALIASES = {
@@ -62,6 +63,14 @@ const ALIASES = {
   侦察: ['recon', 'reconnaissance', 'discovery', '侦察', '信息收集'],
   目录: ['directory', 'dir', 'path', '目录'],
   子域: ['subdomain', '子域名', '子域'],
+  'incident response': ['incident response', '应急响应', 'dfir', 'forensics', 'ransomware', 'containment', 'eradication'],
+  应急响应: ['incident response', '应急响应', 'dfir', 'forensics', 'ransomware', 'containment'],
+  ransomware: ['ransomware', '勒索', '应急响应', 'incident response'],
+  dfir: ['dfir', 'forensics', 'incident response', '应急响应', 'memory forensics', 'disk forensics'],
+  'active directory': ['active directory', 'ad', 'kerberos', 'ntlm', 'bloodhound', '域渗透'],
+  云安全: ['cloud security', 'aws', 'azure', 'gcp', 'kubernetes', 'cloud native'],
+  'cloud security': ['cloud security', 'aws', 'azure', 'gcp', 'kubernetes', '云安全'],
+  mobile: ['mobile', 'android', 'ios', 'frida', 'mastg', '移动安全'],
 }
 function expandTerms(query) {
   const q = String(query || '').trim().toLowerCase()
@@ -130,6 +139,137 @@ function pattRoot() {
   return pattRef
 }
 
+let knowledgeIndex = null
+let autoSyncPromise = null
+let lastSyncSummary = null
+
+function indexRoots() {
+  const roots = []
+  for (const source of bundleRefsRoots()) {
+    roots.push({
+      id: `bundle-${source.mode}`,
+      kind: 'bundle',
+      mode: source.mode,
+      root: source.root,
+      priority: 8,
+    })
+  }
+  if (pattRoot()) {
+    roots.push({
+      id: 'patt',
+      kind: 'patt',
+      mode: '',
+      root: pattRoot(),
+      priority: 5,
+    })
+  }
+  for (const mode of MODE_IDS) {
+    roots.push({
+      id: `user-${mode}`,
+      kind: 'user',
+      mode,
+      root: userModeDir(mode),
+      priority: 9,
+    })
+  }
+  roots.push(...packRoots(importsRoot(), loadCatalog()))
+  return roots
+}
+
+function getKnowledgeIndex() {
+  if (knowledgeIndex) return knowledgeIndex
+  knowledgeIndex = new KnowledgeIndex({
+    dbPath: indexDbPath(),
+    roots: indexRoots(),
+    logger: console,
+  })
+  return knowledgeIndex
+}
+
+function ensureKnowledgeIndex(force = false) {
+  const index = getKnowledgeIndex()
+  index.roots = indexRoots()
+  const build = indexBuildStatus()
+  if (force) {
+    if (build.status === 'running') return null
+    return index.countFiles() <= 2500 ? index.rebuild({ force: true }) && index : (startBackgroundIndexBuild(), null)
+  }
+  if (!fs.existsSync(indexDbPath())) {
+    if (build.status === 'running') return null
+    if (index.countFiles() > 2500) {
+      startBackgroundIndexBuild()
+      return null
+    }
+    index.rebuild({ force: true })
+    return index
+  }
+  if (build.status === 'running') return index
+  const status = index.status()
+  if (
+    status.dirty
+    && build.status === 'ok'
+    && build.finishedAt
+    && Date.parse(build.finishedAt) >= Number(status.dirtyAt || 0)
+    && status.version === 2
+  ) {
+    index.markClean()
+    return index
+  }
+  if (status.dirty || !status.indexedAt || status.version !== 2) index.rebuild({ force: false })
+  return index
+}
+
+function invalidateKnowledgeIndex() {
+  if (knowledgeIndex) knowledgeIndex.invalidate()
+}
+
+function closeKnowledgeIndex() {
+  if (!knowledgeIndex) return
+  knowledgeIndex.close()
+  knowledgeIndex = null
+}
+
+function knowledgeIndexStatus() {
+  const build = indexBuildStatus()
+  if (!fs.existsSync(indexDbPath())) {
+    return { ready: false, version: 2, docs: 0, chunks: 0, build }
+  }
+  const status = getKnowledgeIndex().status()
+  return { ...status, ready: true, build }
+}
+
+function autoSyncKnowledgePacks(force = false) {
+  if (process.env.DSH_KNOWLEDGE_AUTOSYNC === '0') {
+    return Promise.resolve({ skipped: true, reason: 'DSH_KNOWLEDGE_AUTOSYNC=0' })
+  }
+  if (autoSyncPromise) return autoSyncPromise
+  autoSyncPromise = (async () => {
+    try {
+      const summary = await syncPacks({ force, concurrency: 3 })
+      lastSyncSummary = summary
+      if (summary.ok > 0) {
+        invalidateKnowledgeIndex()
+        const build = indexBuildStatus()
+        if (build.status !== 'running') startBackgroundIndexBuild({ force: !fs.existsSync(indexDbPath()) })
+      }
+      return summary
+    } catch (error) {
+      const summary = {
+        requested: 0,
+        ok: 0,
+        failed: 1,
+        error: error instanceof Error ? error.message : String(error),
+      }
+      lastSyncSummary = summary
+      console.error('[dsh-knowledge-hub] auto sync failed: %s', summary.error)
+      return summary
+    } finally {
+      autoSyncPromise = null
+    }
+  })()
+  return autoSyncPromise
+}
+
 /**
  * Resolve `rel` under `base` and refuse any escape. Returns null when the path
  * leaves the base. Existence is NOT checked here — callers stat as needed.
@@ -163,7 +303,19 @@ function readRootOf(source, mode) {
 }
 
 function isTextFile(file) {
+  const rel = String(file).replace(/\\/g, '/')
   return TEXT_EXTS.has(path.extname(file).toLowerCase())
+    || path.extname(file).toLowerCase() === '.pdf'
+    || rel.startsWith('_gtfobins/')
+    || rel.includes('/_gtfobins/')
+}
+
+function readTextContent(file, st = null) {
+  if (path.extname(file).toLowerCase() === '.pdf') {
+    const title = path.basename(file, path.extname(file)).replace(/[-_]+/g, ' ')
+    return `# ${title}\n\nPDF document. Search matches its title and path; extract the PDF contents locally when the full text is needed.`
+  }
+  return fs.readFileSync(file, 'utf8')
 }
 
 function listEntries(root, dir) {
@@ -213,7 +365,10 @@ function walkFiles(root, maxFiles) {
     for (const it of items) {
       if (out.length >= maxFiles) return
       const rel = dir ? `${dir}/${it.name}` : it.name
-      if (it.isDirectory()) walk(rel)
+      if (it.isDirectory()) {
+        const name = it.name.toLowerCase()
+        if (name !== '.git' && name !== '.svn' && name !== '.index' && name !== 'node_modules') walk(rel)
+      }
       else if (it.isFile() && isTextFile(it.name)) out.push(rel)
     }
   }
@@ -227,8 +382,7 @@ function readHead(file, maxBytes) {
   try {
     const st = fs.statSync(file)
     if (st.size > MAX_READ_BYTES) return null
-    const buf = fs.readFileSync(file)
-    const text = buf.toString('utf8')
+    const text = readTextContent(file, st)
     const head = text.length > maxBytes ? text.slice(0, maxBytes) : text
     return { text: head, truncated: text.length > maxBytes }
   } catch {
@@ -277,17 +431,29 @@ function matchTermsIn(text, terms) {
 // port,date_added,date_updated,verified,codes,tags,...）自带完整描述与 CVE codes——
 // 单文件即可离线按 标题/类型/平台/CVE/EDB-ID 检索并定位 PoC 路径。
 // 兼容旧布局 exploits.csv（id,file,description,date,author,type,platform,port）作为兜底。
-let edbCache = { at: 0, rows: [] }
+let edbCache = { key: null, rows: [] }
 function edbDir() {
   return path.join(importsRoot(), EDB_DIRNAME)
 }
 function loadEdbIndex() {
-  const now = Date.now()
-  if (edbCache.at && now - edbCache.at < EDB_INDEX_TTL) return edbCache.rows
   const dir = edbDir()
-  const rows = []
   const fileCsv = path.join(dir, 'files_exploits.csv')
   const expCsv = path.join(dir, 'exploits.csv')
+  // 缓存键 = 实际命中文件的「路径 + mtime + size」，**不是**纯时间窗。
+  // 为什么必须这样：官方「下载索引」路径（edb-sync）会显式失效缓存，但
+  //   · 用户按提示手动 clone / 拷贝索引进 imports/exploitdb/
+  //   · 外部工具替换了索引文件
+  // 这两条路径都不会失效缓存 —— 纯 TTL 会让「文件已就位」期间检索与 edb-status
+  // 一致读不到新数据（实测：CSV 已落盘仍报 rows:0，且无任何提示），最长憋满 TTL。
+  // 换成文件版本键后：内容一变立刻重建，且同一版本只解析一次
+  //（比 TTL 更省——不再每 2 分钟无条件重解析一个约 10MB 的 CSV）。
+  // 键里同时放 mtime 与 size：单靠 size 挡不住等长覆盖，单靠 mtime 挡不住
+  // 同毫秒内的改写。
+  let key = ''
+  if (fs.existsSync(fileCsv)) key = versionKey(fileCsv)
+  else if (fs.existsSync(expCsv)) key = versionKey(expCsv)
+  if (edbCache.key === key) return edbCache.rows
+  const rows = []
   try {
     if (fs.existsSync(fileCsv)) {
       const text = fs.readFileSync(fileCsv, 'utf8')
@@ -319,8 +485,19 @@ function loadEdbIndex() {
       }
     }
   } catch { /* 解析失败返回空 */ }
-  edbCache = { at: now, rows }
+  edbCache = { key, rows }
   return rows
+}
+
+/** 文件的版本键（路径+mtime+size）。读不到 stat 时返回路径本身——
+ *  让「存在但 stat 失败」与「不存在（key='')」仍是两个不同的键，不会互相污染缓存。 */
+function versionKey(file) {
+  try {
+    const st = fs.statSync(file)
+    return `${file}|${st.mtimeMs}|${st.size}`
+  } catch {
+    return String(file)
+  }
 }
 /** CSV 行解析（支持带引号字段内的逗号）。 */
 function splitCsvLine(line) {
@@ -389,8 +566,8 @@ function searchLayer(dir, query, maxFiles, sourceLabel, mode) {
   return hits
 }
 
-/** Unified search: Exploit-DB 字段层优先，再 PATT/bundle/user/import 文本层。 */
-function searchAll(query, mode) {
+/** Legacy scanner kept as a fallback when SQLite/FTS5 cannot initialize. */
+function searchLegacy(query, mode, limit = 60) {
   if (!query || !query.trim()) return []
   const hits = []
   hits.push(...searchEdbLayer(query))
@@ -402,7 +579,52 @@ function searchAll(query, mode) {
   if (uRoot && fs.existsSync(uRoot)) hits.push(...searchLayer(uRoot, query, MAX_SEARCH_FILES, 'user', mode))
   const iRoot = importsRoot()
   if (iRoot && fs.existsSync(iRoot)) hits.push(...searchLayer(iRoot, query, MAX_SEARCH_FILES, 'import', ''))
-  return hits.slice(0, 60)
+  return hits.slice(0, limit)
+}
+
+/**
+ * Unified hybrid search:
+ *   · FTS5 + BM25 for local docs, with Chinese bigrams and metadata boosts
+ *   · alias expansion as a low-cost recall pass
+ *   · Exploit-DB exact/field hits merged deterministically
+ */
+function searchAll(query, mode, limit = 60) {
+  if (!query || !query.trim()) return []
+  const max = Math.max(1, Number(limit) || 60)
+  const merged = new Map()
+  const keyOf = (hit) => `${hit.source}\u0000${hit.mode || ''}\u0000${hit.path}\u0000${hit.line || 0}`
+  const add = (hit, bonus = 0) => {
+    const copy = { ...hit, score: Number(hit.score || 0) + bonus }
+    const key = keyOf(copy)
+    const previous = merged.get(key)
+    if (!previous || copy.score > previous.score) merged.set(key, copy)
+  }
+
+  let textHits = []
+  try {
+    const index = ensureKnowledgeIndex()
+    textHits = index.search(query, { mode, limit: max })
+    for (const hit of textHits) add(hit)
+    if (merged.size < max) {
+      for (const alias of expandTerms(query).slice(1, 5)) {
+        for (const hit of index.search(alias, { mode, limit: Math.max(4, Math.ceil(max / 2)) })) {
+          add(hit, -1.5)
+        }
+      }
+    }
+  } catch (error) {
+    console.error('[dsh-knowledge-hub] FTS index unavailable, using scanner: %s', error && error.message ? error.message : String(error))
+    for (const hit of searchLegacy(query, mode, max)) add(hit)
+  }
+
+  const edbHits = searchEdbLayer(query)
+  for (const hit of edbHits) {
+    const exact = /(?:edb[-_ ]?\d+|\d{4,})/i.test(query) || /cve[-_ ]?\d{4}[-_ ]?\d+/i.test(query)
+    add(hit, exact ? 1000 : 12)
+  }
+  return [...merged.values()]
+    .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))
+    .slice(0, max)
 }
 
 // ── stats ───────────────────────────────────────────────────────────────────
@@ -419,7 +641,12 @@ function countByExt(root, exts) {
       return
     }
     for (const it of items) {
-      if (it.isDirectory()) walk(dir ? `${dir}/${it.name}` : it.name)
+      const name = it.name.toLowerCase()
+      if (it.isDirectory()) {
+        if (name !== '.git' && name !== '.svn' && name !== '.index' && name !== 'node_modules') {
+          walk(dir ? `${dir}/${it.name}` : it.name)
+        }
+      }
       else if (it.isFile() && exts.has(path.extname(it.name).toLowerCase())) n++
     }
   }
@@ -434,7 +661,7 @@ function stats() {
     bundleMd += countByExt(b.root, new Set(['.md']))
     bundleRules += countByExt(b.root, new Set(['.yaml', '.yml']))
   }
-  const textExts = new Set(['.md', '.txt', '.yaml', '.yml'])
+  const textExts = TEXT_EXTS
   const patt = countByExt(pattRoot(), textExts)
   // user layer counts the two mode dirs only — imports/ lives beside them and is counted separately
   let user = 0
@@ -556,7 +783,7 @@ function topImportNames() {
   try {
     return fs
       .readdirSync(root, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
+      .filter((d) => d.isDirectory() && !d.name.startsWith('.') && d.name !== EDB_DIRNAME)
       .map((d) => d.name)
       .sort()
   } catch {
@@ -573,7 +800,44 @@ async function dispatch(endpoint, payload) {
 
   switch (endpoint) {
     case 'stats': {
-      return ok(stats())
+      return ok({ ...stats(), index: knowledgeIndexStatus() })
+    }
+
+    case 'packs-status': {
+      const status = packsStatus()
+      status.lastSync = lastSyncSummary
+      status.build = indexBuildStatus()
+      status.catalog = loadCatalog().packs.map((pack) => ({
+        id: pack.id,
+        title: pack.title,
+        license: pack.license,
+        distribution: pack.distribution,
+        modes: pack.modes,
+        domains: pack.domains,
+        autoInstall: pack.autoInstall,
+      }))
+      return ok(status)
+    }
+
+    case 'packs-sync': {
+      const ids = Array.isArray(p.ids) ? p.ids.map(String) : []
+      const summary = await syncPacks({ ids, force: p.force !== false, concurrency: 3 })
+      lastSyncSummary = summary
+      if (summary.ok > 0) {
+        invalidateKnowledgeIndex()
+        startBackgroundIndexBuild({ force: true })
+      }
+      return ok(summary)
+    }
+
+    case 'index-status': {
+      return ok(knowledgeIndexStatus())
+    }
+
+    case 'index-rebuild': {
+      const index = ensureKnowledgeIndex(true)
+      if (!index) return ok({ started: true, status: knowledgeIndexStatus() })
+      return ok({ started: false, ...index.status() })
     }
 
     case 'edb-status': {
@@ -631,7 +895,8 @@ async function dispatch(endpoint, payload) {
         return ok({ ok: false, results, error: e && e.message ? e.message : String(e) })
       }
       const allOk = results.length === urls.length && results.every((r) => r.ok)
-      edbCache = { at: 0, rows: [] } // 强制下次重建索引
+      // 显式失效：本次刚改写了 CSV，键必然变，但清零能让语义明确（不依赖 mtime 粒度）。
+      edbCache = { key: null, rows: [] }
       return ok({ ok: allOk, results, rows: allOk ? loadEdbIndex().length : 0 })
     }
 
@@ -667,7 +932,7 @@ async function dispatch(endpoint, payload) {
       }
       if (!st.isFile() || st.size > MAX_READ_BYTES) return fail('过大或非文件（仅支持 ≤1MiB 文本）')
       try {
-        const content = fs.readFileSync(target, 'utf8')
+        const content = readTextContent(target, st)
         return ok({ content, source, size: st.size })
       } catch (e) {
         return fail(`读取失败：${e && e.message ? e.message : String(e)}`)
@@ -684,6 +949,7 @@ async function dispatch(endpoint, payload) {
       try {
         fs.mkdirSync(path.dirname(target), { recursive: true })
         fs.writeFileSync(target, content, 'utf8')
+        invalidateKnowledgeIndex()
         return ok({ path: rel })
       } catch (e) {
         return fail(`写入失败：${e && e.message ? e.message : String(e)}`)
@@ -700,6 +966,7 @@ async function dispatch(endpoint, payload) {
         const st = fs.statSync(target)
         if (st.isDirectory()) fs.rmSync(target, { recursive: true, force: false })
         else fs.unlinkSync(target)
+        invalidateKnowledgeIndex()
         return ok({ removed: rel })
       } catch (e) {
         return fail(`删除失败：${e && e.message ? e.message : String(e)}`)
@@ -709,15 +976,19 @@ async function dispatch(endpoint, payload) {
     case 'search': {
       const { query, mode } = p
       const m = MODE_IDS.includes(mode) ? mode : 'pentest'
-      return ok({ hits: searchAll(query || '', m) })
+      return ok({ hits: searchAll(query || '', m, 20), index: knowledgeIndexStatus() })
     }
 
     case 'import_git': {
-      return await importGit(String(p.url || ''), String(p.name || ''))
+      const result = await importGit(String(p.url || ''), String(p.name || ''))
+      if (result.ok) invalidateKnowledgeIndex()
+      return result
     }
 
     case 'import_local': {
-      return await importLocal(String(p.path || ''), String(p.name || ''))
+      const result = await importLocal(String(p.path || ''), String(p.name || ''))
+      if (result.ok) invalidateKnowledgeIndex()
+      return result
     }
 
     default:
@@ -738,6 +1009,20 @@ export function apply(ctx, config = {}) {
   } catch (e) {
     console.error('[dsh-knowledge-hub] cannot create user refs roots: %s', e && e.message ? e.message : String(e))
   }
+
+  if (typeof ctx.effect === 'function') {
+    ctx.effect(() => () => {
+      if (knowledgeIndex) knowledgeIndex.close()
+    })
+  }
+
+  // Do not block host startup or model turns. Missing packs are synchronized
+  // in the background and the first explicit search builds the index.
+  setTimeout(() => {
+    autoSyncKnowledgePacks(false).catch((error) => {
+      console.error('[dsh-knowledge-hub] background sync rejected: %s', error && error.message ? error.message : String(error))
+    })
+  }, 3000)
 
   // Front-end RPC (loopback only, same channel style as sec-config).
   // 0.1.5-rc.1：必须用 ctx.inject([... 'webServer']) 作用域块（与 sec-config / mcp-studio 同写法）。
@@ -765,15 +1050,16 @@ export function apply(ctx, config = {}) {
   // Model tools: extension-layer lookup plus the bundled PATT payload library;
   // the other bundled handbook docs keep being read directly at their preset
   // paths by the playbooks.
-  const describeScope = `分层知识库：随包 PATT(payload 库，commit ${PATT_SNAPSHOT}) + 个人/团队积累 + 导入源（如本地/Git 导入的外部资产）。包内随包手册仍在预设 refs 路径直接读。`
+  const describeScope = `离线混合 RAG：随包手册/PATT + 用户积累 + 自动同步的知识包。先 knowledge_search 定位，再 knowledge_read 精读；不必整库载入上下文。`
   try {
     ctx.tools.register(
       defineTool({
         name: 'knowledge_search',
-        description: `按关键词定位知识库文档（先定位到文件/行，再 knowledge_read 原文）。${describeScope}返回命中的来源（patt/bundle/user/import）、相对路径、行号与预览行。`,
+        description: `检索知识库并返回少量高相关片段与 chunkId（再用 knowledge_read 精读）。${describeScope}`,
         parameters: {
-          query: { type: 'string', required: true, description: '检索关键词（大小写不敏感子串）' },
-          mode: { type: 'string', enum: MODE_IDS, description: '预设模式：pentest / code-audit（缺省 pentest；patt/import 为通用内容不受 mode 限制）' },
+          query: { type: 'string', required: true, description: '关键词、CVE/EDB-ID 或自然语言问题' },
+          mode: { type: 'string', enum: MODE_IDS, description: '预设模式（缺省 pentest）' },
+          limit: { type: 'number', description: '返回条数（默认 8，最大 20）' },
         },
         output: {
           schema: {
@@ -785,15 +1071,22 @@ export function apply(ctx, config = {}) {
             {
               type: 'text',
               text: v.ok
-                ? `知识库命中 ${v.value.hits.length} 条` + (v.value.hits.length ? '：' + v.value.hits.map((h) => `[${h.source}] ${h.mode || '通用'}/${h.path}:${h.line} ${h.preview}`).join(' | ') : '')
+                ? `知识库命中 ${v.value.hits.length} 条` + (v.value.hits.length
+                    ? '\n' + v.value.hits.map((h) => {
+                        const pack = h.packId ? ` pack=${h.packId}` : ''
+                        const title = h.title ? `${h.title} · ` : ''
+                        return `[${h.source}${pack}] ${h.path}:${h.line} chunk=${h.chunkId}\n${title}${h.preview}`
+                      }).join('\n---\n')
+                    : '')
                 : `检索失败：${v.error || ''}`,
             },
           ],
         },
         async execute(args) {
           const mode = MODE_IDS.includes(args && args.mode) ? args.mode : 'pentest'
-          const hits = searchAll(String((args && args.query) || ''), mode)
-          return { ok: true, value: { hits } }
+          const limit = Math.min(20, Math.max(1, Number((args && args.limit) || 8)))
+          const hits = searchAll(String((args && args.query) || ''), mode, limit)
+          return { ok: true, value: { hits, index: knowledgeIndexStatus() } }
         },
       }),
       'dsh-knowledge-hub: knowledge_search',
@@ -802,13 +1095,14 @@ export function apply(ctx, config = {}) {
     ctx.tools.register(
       defineTool({
         name: 'knowledge_read',
-        description: `按来源与相对路径读取知识库文档片段（禁整读大文件，按需给 offset/limit）。${describeScope}`,
+        description: `按 chunkId 精读知识片段，或按 source+path 读取指定行段。${describeScope}`,
         parameters: {
-          source: { type: 'string', required: true, enum: ['bundle', 'patt', 'user', 'import'], description: '来源层' },
-          mode: { type: 'string', enum: MODE_IDS, description: 'bundle/user 层需要（patt/import 忽略）' },
-          path: { type: 'string', required: true, description: '相对路径（/ 分隔），如 web/web-injection-ssrf.md' },
+          hitId: { type: 'string', description: 'knowledge_search 返回的 chunkId（优先）' },
+          source: { type: 'string', enum: ['bundle', 'patt', 'user', 'import'], description: '来源层（未给 hitId 时必填）' },
+          mode: { type: 'string', enum: MODE_IDS, description: 'bundle/user 层需要' },
+          path: { type: 'string', description: '相对路径（/ 分隔；未给 hitId 时必填）' },
           offset: { type: 'number', description: '起始行（1 起）' },
-          limit: { type: 'number', description: '读多少行（默认 120，最大 400）' },
+          limit: { type: 'number', description: '读多少行（默认 80，最大 240）' },
         },
         output: {
           schema: {
@@ -817,13 +1111,22 @@ export function apply(ctx, config = {}) {
             properties: { ok: { type: 'boolean', required: true } },
           },
           render: (_a, v) => [
-            { type: 'text', text: v.ok ? `[${v.value.source}] ${v.value.path} 行 ${v.value.from}-${v.value.to}` : `读取失败：${v.error || ''}` },
+            { type: 'text', text: v.ok ? `[${v.value.source}] ${v.value.path} 行 ${v.value.from}-${v.value.to}\n${v.value.text}` : `读取失败：${v.error || ''}` },
           ],
         },
         async execute(args) {
-          const source = String((args && args.source) || '')
+          let source = String((args && args.source) || '')
           const mode = MODE_IDS.includes(args && args.mode) ? args.mode : 'pentest'
-          const rel = String((args && args.path) || '')
+          let rel = String((args && args.path) || '')
+          let offset = Number((args && args.offset) || 0)
+          if (args && args.hitId) {
+            const chunk = getKnowledgeIndex().getChunk(args.hitId)
+            if (!chunk) return { ok: false, error: 'chunkId 不存在，请重新检索' }
+            source = chunk.kind
+            rel = chunk.path
+            if (!offset) offset = Math.max(1, Number(chunk.start_line || 1) - 30)
+          }
+          if (!source || !rel) return { ok: false, error: '需要 hitId，或 source + path' }
           const root = readRootOf(source, mode)
           if (!root) return { ok: false, error: '未知来源' }
           const target = safeResolve(root, rel)
@@ -836,9 +1139,9 @@ export function apply(ctx, config = {}) {
           }
           if (!st.isFile() || st.size > MAX_READ_BYTES) return { ok: false, error: '过大或非文件' }
           try {
-            const lines = fs.readFileSync(target, 'utf8').split(/\r?\n/)
-            const from = Math.max(1, Number((args && args.offset) || 1))
-            const limit = Math.min(400, Math.max(1, Number((args && args.limit) || 120)))
+            const lines = readTextContent(target, st).split(/\r?\n/)
+            const from = Math.max(1, offset || 1)
+            const limit = Math.min(240, Math.max(1, Number((args && args.limit) || 80)))
             const slice = lines.slice(from - 1, from - 1 + limit)
             return { ok: true, value: { source, path: rel, from, to: from - 1 + slice.length, text: slice.join('\n') } }
           } catch (e) {
@@ -852,10 +1155,10 @@ export function apply(ctx, config = {}) {
     ctx.tools.register(
       defineTool({
         name: 'knowledge_list',
-        description: `列出知识库目录结构（含来源），先摸清有什么再决定检索/读取。${describeScope}`,
+        description: `列出知识包、同步/索引状态与知识库目录，先确认有什么再检索。${describeScope}`,
         parameters: {
-          mode: { type: 'string', enum: MODE_IDS, description: 'pentest / code-audit（缺省 pentest）' },
-          area: { type: 'string', enum: ['patt', 'user', 'import', 'all'], description: '只看随包 PATT/用户层/导入层/全部（缺省 all）' },
+          mode: { type: 'string', enum: MODE_IDS, description: 'pentest / code-audit / ctf-solver（缺省 pentest）' },
+          area: { type: 'string', enum: ['patt', 'user', 'import', 'packs', 'index', 'all'], description: '查看区域（缺省 all）' },
         },
         output: {
           schema: {
@@ -877,6 +1180,18 @@ export function apply(ctx, config = {}) {
             lines.push(`- ${label}：分类目录 [${dirs || '无'}] 文件 [${files || '无'}]`)
           }
           lines.push(`模式：${mode}（${MODE_LABELS[mode]}）`)
+          if (area === 'all' || area === 'packs') {
+            const ps = packsStatus()
+            lines.push(`知识包：${ps.installed}/${ps.total} 已安装，${ps.failed} 个失败`)
+            for (const pack of ps.packs.filter((item) => item.installed || item.enabled).slice(0, 30)) {
+              lines.push(`- ${pack.installed ? '已装' : '未装'} ${pack.id}（${pack.license || 'license unknown'}）${pack.commit ? ` @${pack.commit}` : ''}${pack.error ? ` ⚠ ${pack.error}` : ''}`)
+            }
+          }
+          if (area === 'all' || area === 'index') {
+            const index = knowledgeIndexStatus()
+            const build = index.build && index.build.status !== 'idle' ? ` / 构建=${index.build.status}` : ''
+            lines.push(`索引：${index.ready ? '就绪' : '未就绪'} / ${index.docs} 文档 / ${index.chunks} chunks${index.indexedAt ? ` / ${index.indexedAt}` : ''}${build}${index.lastError ? ` / ⚠ ${index.lastError}` : ''}`)
+          }
           if (area === 'all' || area === 'patt') dump(`随包 PATT（commit ${PATT_SNAPSHOT}，MIT）`, pattRoot())
           if (area === 'all' || area === 'user') dump('用户层', userModeDir(mode))
           if (area === 'all' || area === 'import') dump('导入层', importsRoot())
@@ -910,8 +1225,12 @@ export function apply(ctx, config = {}) {
               (names.length ? `（来源：${names.slice(0, 8).join('、')}${names.length > 8 ? ' 等' : ''}）` : ''),
           )
         }
+        const packState = packsStatus()
+        if (packState.total > 0) parts.push(`推荐知识包 ${packState.installed}/${packState.total} 已同步`)
+        const indexState = knowledgeIndexStatus()
+        if (indexState.docs > 0) parts.push(`混合检索索引 ${indexState.docs} 文档 / ${indexState.chunks} chunks`)
         if (parts.length === 0) return ''
-        return `<dsh-knowledge-hub>知识库：${parts.join('，')}。用 knowledge_search / knowledge_read / knowledge_list 检索与读取（知识库含随包 PATT 时，source 用 patt；包内随包手册仍在 preset refs 路径直接读）。</dsh-knowledge-hub>`
+        return `<dsh-knowledge-hub>知识库：${parts.join('，')}。按需用 knowledge_search → knowledge_read；不要整库读取。</dsh-knowledge-hub>`
       },
     })
   } catch (error) {
@@ -919,5 +1238,4 @@ export function apply(ctx, config = {}) {
   }
 }
 
-export { dispatch, stats, searchAll }
-
+export { dispatch, stats, searchAll, ensureKnowledgeIndex, autoSyncKnowledgePacks, closeKnowledgeIndex }

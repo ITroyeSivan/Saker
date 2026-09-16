@@ -1,3 +1,9 @@
+import os from "node:os";
+
+// ── 平台数据根（$DSH_HOME）────────────────────────────────────────────
+// 宿主按 $DSH_HOME 装配 profiles/会话/存储；插件一律跟随，避免「一半落 A 一半落 B」。
+// 未设置时等价于 ~/.dsh，故对既有用户是零行为变更。
+const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
 // dsh-product-subagents — host-plane subagent providers for the local product CLIs.
 //
 // The security presets' composition rows name provider: "claude-code" and
@@ -52,7 +58,7 @@ const Config = z.object({
 
 /** claude 过程流的集中落盘目录（中央目录而非 cwd——任务工作区可能只读/会被清理）。 */
 export function tracesDir() {
-	return path.join(process.env.HOME || tmpdir(), ".dsh", "product-subagents", "traces");
+	return path.join(DSH_HOME, "product-subagents", "traces");
 }
 
 const OUTPUT_CAP = 2 * 1024 * 1024; // per-stream accumulation cap
@@ -163,7 +169,7 @@ export function runCli({ id, bin, args, input, env, cwd, timeoutMs, signal, coll
 			}
 			let finalText = stdout.trim();
 			if (collectFile) {
-				try { finalText = (await readFile(collectFile, "utf8")).trim() || finalText; } catch {}
+				try { finalText = (await readFile(collectFile, "utf8")).trim() || finalText; } catch { /* 回收文件读不到（CLI 没写/被清）：退回 stdout，属预期降级 */ }
 			} else if (finalFromStream && traceFile) {
 				// stream-json 模式：终稿以流的 result 事件为准（stdout 此模式下是 NDJSON 非终稿）；
 				// 无 result 事件（旧 CLI 不支持该格式/流损坏）回退原始 stdout。
@@ -176,7 +182,7 @@ export function runCli({ id, bin, args, input, env, cwd, timeoutMs, signal, coll
 				});
 				try {
 					finalText = finalTextFromStreamJson(await readFile(traceFile, "utf8")) ?? finalText;
-				} catch {}
+				} catch { /* 流留痕损坏/不可读：退回 stdout 终稿，非零退出仍会如实上报 */ }
 			}
 			// 留痕提示行：编排模型由此得知过程流位置（stream 模式才有；codex 本批无留痕）。
 			const meta = traceFile && finalFromStream ? `\n[claude 过程流已留痕：${traceFile}]` : "";

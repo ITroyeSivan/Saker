@@ -1,5 +1,5 @@
 // dsh-refusal-guard v0.2.0 — the refusal-repair runtime backstop for the
-// pentest / code-audit security presets, now with an escalation ladder.
+// pentest / code-audit / ctf-solver security presets, now with an escalation ladder.
 //
 // The persona carries the standing Expression-discipline clause, but a long
 // compacted session loses its proximity. This plugin is the runtime backstop:
@@ -327,6 +327,8 @@ async function apply(ctx, config) {
 		} catch { /* 审计失败不阻塞 */ }
 	};
 
+	// 注入失败计数：只对前两次发声（避免长会话刷屏），但绝不静默。
+	let refusalInjectFailures = 0;
 	ctx.on("session/event", (session, event) => {
 		const sid = String(session?.id ?? "");
 		if (!sid) return;
@@ -374,15 +376,31 @@ async function apply(ctx, config) {
 			level = 1;
 		}
 		if (level === 2 && cfg.retry) {
-			// Automatic retry: queue a marked plugin user-message on the
-			// next-turn inbox so the same request is re-driven. A failure
-			// here must never break the session — the reminder still lands.
-			try {
-				agent.followup(buildRetryMessage({
-					lastRequest: state.lastRequest,
-					excerptChars: cfg.excerptChars
-				}));
-			} catch { /* 重试注入失败不阻塞；提醒照常 */ }
+			// Automatic retry: queue a marked plugin user-message on the next-turn inbox
+			// so the same request is re-driven.
+			//
+			// **必须延后一拍（setTimeout 0）**：本处理器由 session/event 触发，而该事件由
+			// `Session.append` 在**发布临界区内同步派发**；在临界区里直接调 followup 会被宿主拒绝：
+			//   `Error: session append cannot reenter while another append is being published`
+			//   栈：Session.append ← ReactLoopInbox.splice ← Agent.send ← Agent.followup
+			// 原实现把这个异常 `catch {}` 掉了 —— 于是「自动重试」这条路径**从未生效过**。
+			// 注释写的是「A failure here must never break the session」，
+			// 把「永远失败」误当成了「失败也无妨」：失败被当成预期，所以没人发现功能是死的。
+			const retryMsg = buildRetryMessage({
+				lastRequest: state.lastRequest,
+				excerptChars: cfg.excerptChars
+			});
+			setTimeout(() => {
+				try {
+					agent.followup(retryMsg);
+				} catch (error) {
+					// 失败必须可见：否则又是一次静默失效
+					refusalInjectFailures += 1;
+					if (refusalInjectFailures <= 2) {
+						console.error(`[refusal-guard] 重试消息注入失败（第 ${refusalInjectFailures} 次）：${error && error.message ? error.message : error}`);
+					}
+				}
+			}, 0);
 		}
 		if (cfg.auditLog) {
 			const presetId = agent.session?.header?.agentPreset ?? "";

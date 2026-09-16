@@ -47,8 +47,18 @@ export interface HostSettingsService {
         path: string[];
     }>, expectedRevision?: number): Promise<void>;
 }
+/**
+ * dsh 0.1.5-rc.1: `connection.register(ctx, ...)` is the supported entry — it binds the
+ * route to the *calling* plugin's ctx so that `owner.webServer.register(...)` runs against
+ * the consuming plugin, not against the connection service's own ctx. `rpc.handle` (the
+ * 0.1.4 shape) silently fails to register under 0.1.5: the route 404s and the settings page
+ * hangs on "loading". Keep the legacy member on the type only so older hosts still typecheck.
+ */
 export interface HostConnectionHandle {
-    rpc: {
+    register(ctx: unknown, channel: string, handler: (endpoint: string, payload: unknown) => Promise<RpcResult>, options: {
+        authority: 'trusted-host' | 'loopback';
+    }): unknown;
+    rpc?: {
         handle(channel: string, handler: (endpoint: string, payload: unknown) => Promise<RpcResult>, options: {
             authority: 'trusted-host' | 'loopback';
         }): unknown;
@@ -82,6 +92,19 @@ export interface ServerStatus {
     readonly error?: string;
     readonly toolCount: number;
     readonly tools: readonly ToolView[];
+    /** Effective tool exposure for this row: `direct` or `proxy`. */
+    readonly exposure?: 'direct' | 'proxy';
+}
+/**
+ * Proxied servers contribute no `mcp__<name>__*` tools, so tool visibility can no longer
+ * be the health signal. The catalog is: if we can list it, the server is reachable.
+ */
+export interface ProxyView {
+    readonly catalog: (serverName: string) => ReadonlyArray<ToolView>;
+    readonly state: (serverName: string) => {
+        state: 'connecting' | 'ready' | 'error';
+        error?: string;
+    } | undefined;
 }
 export interface StudioStatus {
     readonly servers: readonly ServerStatus[];
@@ -101,7 +124,10 @@ export interface MountTracker {
         error?: string;
     }>;
 }
-/** Build the status getter: per enabled server, aggregate its `mcp__<name>__*` tools out of the registry view. */
-export declare function createStatusHandler(section: () => StudioSection, viewOf: () => unknown, tracker: MountTracker, executions?: ExecutionRing): () => Promise<RpcResult>;
-export declare function registerStudioRpc(connection: HostConnectionHandle, settings: HostSettingsService, ns: string, status: () => Promise<RpcResult>, diagnose?: (id: string) => Promise<RpcResult>, clearExecutions?: () => void): void;
+/** Build the status getter: per enabled server, aggregate its tools out of the registry view (direct) or its catalog (proxy). */
+export declare function createStatusHandler(section: () => StudioSection, viewOf: () => unknown, tracker: MountTracker, executions?: ExecutionRing, proxy?: {
+    view: ProxyView;
+    exposureOf: (server: ServerEntry) => 'direct' | 'proxy';
+}): () => Promise<RpcResult>;
+export declare function registerStudioRpc(ctx: unknown, connection: HostConnectionHandle, settings: HostSettingsService, ns: string, status: () => Promise<RpcResult>, diagnose?: (id: string) => Promise<RpcResult>, clearExecutions?: () => void, debug?: () => unknown): void;
 export type { ServerEntry };

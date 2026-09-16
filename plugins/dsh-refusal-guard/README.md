@@ -1,6 +1,6 @@
 # dsh-refusal-guard
 
-安全预设（pentest / code-audit）表达纪律的**拒答修复运行时后盾**，v0.2.0 起带升级梯。
+安全预设（pentest / code-audit / ctf-solver）表达纪律的**拒答修复运行时后盾**，v0.2.0 起带升级梯。
 
 persona 常驻 Expression-discipline 条款在长会话压缩后丢失临近性——本插件补上运行时闭环：
 **检测 → 升级梯修复 → 审计落盘**。
@@ -26,7 +26,7 @@ persona 常驻 Expression-discipline 条款在长会话压缩后丢失临近性�
    - `escalate: false` 时退化为 v0.1 行为（只重锚提醒，无升级）。
 3. **一次性语义**：RuntimeContextProjection **只在文本变化时投递**——空→提醒是一次变化
    （恰好一条快照落位），修复后的干净轮回空（不再投递）——绝不循环自我强化。
-4. **过滤**：`agent.session.header.agentPreset` 不在 pentest / code-audit 预设内渲染空文本（非安全会话零干扰）。
+4. **过滤**：`agent.session.header.agentPreset` 不在 pentest / code-audit / ctf-solver 预设内渲染空文本（非安全会话零干扰）。
 5. **配置**：cordis.patch.yml 为 base 层，`settings` 命名空间 `dsh-refusal-guard` 运行时
    解析覆盖（`installSettingsSection` 标准接线；settings 服务缺失时回退 patch 配置）。
 

@@ -1,4 +1,9 @@
-// dsh-session-pulse — 会话状态面板宿主插件（两模式：渗透测试/代码审计）。
+
+// ── 平台数据根（$DSH_HOME）────────────────────────────────────────────
+// 宿主按 $DSH_HOME 装配 profiles/会话/存储；插件一律跟随，避免「一半落 A 一半落 B」。
+// 未设置时等价于 ~/.dsh，故对既有用户是零行为变更。
+const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
+// dsh-session-pulse — 会话状态面板宿主插件（渗透测试 / 代码审计 / CTF 解题）。
 //
 // 服务端极薄：唯一职责是 session.mode 端点——列表源的 agentPreset 在宿主重启后会
 // 退化为组合名，客户端门控拿不准时问一次真相（agents 注册表 → composedPreset，
@@ -22,7 +27,7 @@ export function checkCsrf(req, token) {
 	return String(req?.headers?.["x-dsh-csrf"] ?? "") === String(token ?? "");
 }
 const MAX_BODY = 1024 * 1024;
-const SESSIONS_ROOT = () => path.join(os.homedir(), ".dsh", "sessions");
+const SESSIONS_ROOT = () => path.join(DSH_HOME, "sessions");
 const SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9-]{7,63}$/;
 
 /** 多帧 zstd 会话日志全量解压（宿主每次落盘一个独立帧，单帧 API 只解第一帧）。 */
@@ -37,7 +42,7 @@ function decompressFrames(buf) {
 }
 
 /**
- * 子代理运行内容转写：定位 ~/.dsh/sessions 下的 <工作区目录>/<sessionId>/session.jsonl.zstd 并提取。
+ * 子代理运行内容转写：定位 $DSH_HOME/sessions 下的 <工作区目录>/<sessionId>/session[.vN].jsonl.zstd 并提取。
  * sessionId 只作目录名匹配（白名单字符），解析后仍校验父目录确为会话根——无路径穿越面。
  */
 export function subagentTranscript(sessionId, sessionsRoot) {
@@ -46,7 +51,18 @@ export function subagentTranscript(sessionId, sessionsRoot) {
 	const root = sessionsRoot ?? SESSIONS_ROOT();
 	for (const dir of fs.readdirSync(root, { withFileTypes: true })) {
 		if (!dir.isDirectory()) continue;
-		const file = path.join(root, dir.name, sid, "session.jsonl.zstd");
+		const sessionDir = path.join(root, dir.name, sid);
+		let names = [];
+		try { names = fs.readdirSync(sessionDir); } catch { continue; }
+		const candidates = names
+			.filter((name) => /^session(?:\.v\d+)?\.jsonl\.zstd$/.test(name))
+			.sort((left, right) => {
+				const lv = Number(/^session\.v(\d+)\./.exec(left)?.[1] ?? 0);
+				const rv = Number(/^session\.v(\d+)\./.exec(right)?.[1] ?? 0);
+				return rv - lv || right.localeCompare(left);
+			});
+		if (candidates.length === 0) continue;
+		const file = path.join(sessionDir, candidates[0]);
 		let stat;
 		try { stat = fs.statSync(file); } catch { continue; }
 		if (!stat.isFile() || stat.size > 64 * 1024 * 1024) continue;

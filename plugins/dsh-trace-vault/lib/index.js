@@ -1,7 +1,12 @@
-// dsh-trace-vault — 过程库宿主插件（pentest / code-audit）。
+
+// ── 平台数据根（$DSH_HOME）────────────────────────────────────────────
+// 宿主按 $DSH_HOME 装配 profiles/会话/存储；插件一律跟随，避免「一半落 A 一半落 B」。
+// 未设置时等价于 ~/.dsh，故对既有用户是零行为变更。
+const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
+// dsh-trace-vault — 过程库宿主插件（pentest / code-audit / ctf-solver）。
 //
 // 自动留痕：监听 session/event 的 tool/call + tool/result（callId 配对），把
-// pentest / code-audit 会话的每一次工具调用落 SQLite——调用参数、结果文本、出局分类（ok/blocked/error）、
+// 三个安全模式会话的每一次工具调用落 SQLite——调用参数、结果文本、出局分类（ok/blocked/error）、
 // 耗时。零行为改变：不拦截、不改写、不注入提示；模型与用户无感。
 //
 // 价值三连：
@@ -24,7 +29,7 @@ import { openStore, insertTrace, searchTraces, getTrace, listRecent, statsTraces
 const name = "dsh-trace-vault";
 const inject = ["tools", "agentPresets", "systemPrompt"];
 
-export const MODE_IDS = ["pentest", "code-audit"];
+export const MODE_IDS = ["pentest", "code-audit", "ctf-solver"];
 
 const Config = z.object({
 	capture: z.boolean().default(true),
@@ -43,7 +48,7 @@ export function buildOutcomeHint(stats, { windowMinutes = 30, threshold = 2 } = 
 	return `<${ENVELOPE_TAG}>拦截信号：近 ${windowMinutes} 分钟 blocked ${stats.blocked} 次（403/WAF/429/验证码类）——连续受阻先换路径/降速/换 UA 再硬撞；trace_search 可检索拦截响应原文。</${ENVELOPE_TAG}>`;
 }
 
-const DB_PATH = path.join(os.homedir(), ".dsh", "trace-vault", "traces.db");
+const DB_PATH = path.join(DSH_HOME, "trace-vault", "traces.db");
 /** 在途配对表上限：超过即整表清空（防事件风暴下内存无界；丢的是未完成调用的配对，非落库数据）。 */
 const INFLIGHT_CAP = 4096;
 /** 插件自注入 followup 的 id 前缀（这些"用户消息"不是真人介入，画像统计须排除）。 */
@@ -151,6 +156,11 @@ function sessionOfExec(ctx, exec) {
 }
 
 function apply(ctx, config) {
+	// 插件卸载时释放库句柄。句柄悬着会锁住 -wal/-shm —— Windows 上表现为这个库文件
+	// 既删不掉也改不了名（备份/迁移/损坏自愈都要 rename 它）。
+	// 对照 campaign-memory：它一直有这条 ctx.effect，其余插件此前都缺，
+	// 插件重载/HMR 会因此留下永不回收的句柄（实测同进程二次 openStore 会 EBUSY）。
+	ctx.effect(() => () => { try { store?.close?.(); } catch { /* 已关或句柄失效 */ } store = undefined; }, "dsh-trace-vault: store handle");
 	const cfg = { capture: true, tools: true, envelope: true, retentionDays: 14, maxRows: 50000, ...config };
 	let capture;
 	if (cfg.capture) {
@@ -190,7 +200,7 @@ function apply(ctx, config) {
 
 	ctx.tools.register(defineTool({
 		name: "trace_search",
-		description: "过程检索：按关键词在历史工具调用的参数与响应文本里找命中（子串匹配，新到旧）。用途——上下文被压缩/轮次久远后找回「曾经出现过」的过程观察：某次报错原文、WAF/拦截响应片段、回显、响应头、某工具当时怎么调的。返回命中行（工具/时间/出局分类/长度），全文用 trace_get 按 id 取。可加 tool/session 过滤。仅安全模式会话可用；本地过程库（自动留痕，未成形观察的检索面——结构化成果用战役记忆）。",
+		description: "在历史工具调用的参数与响应中按子串检索；返回命中行，全文用 trace_get 取。仅安全模式可用。",
 		parameters: {
 			query: { type: "string", required: true, description: "关键词（子串命中调用参数或响应文本；大小写不敏感由库保证一致行为）" },
 			tool: { type: "string", description: "按工具名过滤（如 bash / fetch）" },
@@ -216,7 +226,7 @@ function apply(ctx, config) {
 
 	ctx.tools.register(defineTool({
 		name: "trace_get",
-		description: "取一条历史工具调用的完整过程（调用参数全文 + 响应文本全文，落库上限内）。id 来自 trace_search / trace_recent 的命中行。",
+		description: "按 id 取一条历史工具调用的完整参数与响应。",
 		parameters: {
 			id: { type: "string", required: true, description: "调用 id（trace_search/trace_recent 返回的 id）" }
 		},
@@ -239,7 +249,7 @@ function apply(ctx, config) {
 
 	ctx.tools.register(defineTool({
 		name: "trace_recent",
-		description: "最近工具调用一览（新到旧）：某工具/某会话最近都调了什么、出局分类（ok/blocked/error）如何。blocked 聚集=WAF/限速拦截信号（换路径/降速）；error 聚集=环境或命令问题。",
+		description: "查看最近工具调用及 ok / blocked / error 分类，用于识别拦截或环境问题。",
 		parameters: {
 			tool: { type: "string", description: "按工具名过滤" },
 			session_id: { type: "string", description: "限定会话（默认=当前会话）" },
@@ -265,7 +275,7 @@ function apply(ctx, config) {
 
 	ctx.tools.register(defineTool({
 		name: "trace_stats",
-		description: "会话画像统计（评估指标最小集）：本会话工具调用成败分布与成功率、自救信号（blocked 之后是否推进到 ok）、人工介入次数、受阻工具 top。收口自评与运营复盘用；成功率低于 85% 提示工具面工程化问题，blocked 高且无自救=路径僵持信号。",
+		description: "查看本会话工具调用成功率、blocked 后自救、人工介入和受阻工具统计。",
 		parameters: {
 			session_id: { type: "string", description: "限定会话（默认=当前会话）" }
 		},

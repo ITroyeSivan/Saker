@@ -155,7 +155,7 @@ const fakeSpawn = (script) => (bin, args, opts) => {
 	};
 	const providers = createProviders(Config({ claudeCode: { bin: "claude", env: { TEST_MARKER: "prodsub" } } }), child);
 	await providers.find((p) => p.name === "claude-code").start({ prompt: "x", signal: null });
-	ok("config env merged over process env", seenEnv.TEST_MARKER === "prodsub" && seenEnv.PATH === process.env.PATH);
+	ok("config env merged over process env", seenEnv.TEST_MARKER === "prodsub" && (seenEnv.PATH || seenEnv.Path) === (process.env.PATH || process.env.Path));
 }
 
 // 13. codex provider builds a full run (argv includes exec/-o, temp file collected)

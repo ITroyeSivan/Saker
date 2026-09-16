@@ -149,6 +149,7 @@ function makeGuard(overrides = {}, gateLog = "") {
 	const passLog = "| 2026-08-18T00:00:00Z | pentest/P3 | pass | - |\n";
 	const openState = { criteria: [{ id: "g1", status: "met" }, { id: "g2", status: "open" }] };
 	const allMet = { criteria: [{ id: "g1", status: "met" }, { id: "g2", status: "met" }] };
+	const failedState = { criteria: [{ id: "g1", status: "met" }, { id: "g2", status: "failed" }] };
 	const mk = (state) => buildGuard({
 		readGateLog: () => passLog,
 		readOperationState: () => state,
@@ -158,6 +159,7 @@ function makeGuard(overrides = {}, gateLog = "") {
 	const w = { name: "write", arguments: { file_path: path.join(WS, "reports/01.md") }, agent: fakeAgent("pentest") };
 	ok("open criteria blocks report write despite gate pass", typeof mk(openState)(w) === "string" && mk(openState)(w).includes("目标契约"));
 	ok("all-met criteria allows report write", mk(allMet)(w) === undefined);
+	ok("failed is a closed terminal and allows report write", mk(failedState)(w) === undefined);
 	ok("no operation state keeps old behavior", (() => { const g = buildGuard({ readGateLog: () => passLog, appendLog: () => {}, resolveMode: (a) => a.ctx.scope }); return g(w) === undefined; })());
 	ok("gate missing still takes priority over criteria check", (() => { const g = buildGuard({ readGateLog: () => "", readOperationState: () => openState, appendLog: () => {}, resolveMode: (a) => a.ctx.scope }); return typeof g(w) === "string" && g(w).includes("stage_gate"); })());
 }

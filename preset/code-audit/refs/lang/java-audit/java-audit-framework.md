@@ -1555,7 +1555,7 @@ CommonController.java:49-62
 
 ✅ 正确：
 **代码位置**：
-E:\工作代码\xx\xx\src\main\java\com\example\controller\CommonController.java:49-62
+src/main/java/com/example/controller/CommonController.java:49-62
 ```
 
 #### 2. 漏洞分析必须详细完整（300字以上）
@@ -2107,4 +2107,3 @@ foreach ($file in $files) {
 | v1.9.0 | 2026-04-02 | 依赖安全检查重构（mvnrepository.com 联网核实）、新增质量校验脚本 |
 | v1.8.0 | 2026-04-01 | 重构报告格式：h1漏洞名称 + 漏洞列表 + 审计进度 + 三段式漏洞详情 |
 | v1.7.0 | 2026-03-31 | 初始版本
-

@@ -10,17 +10,21 @@ description: 浏览器/网页交互作战技能：JS 抓取、SPA 渲染、登�
 
 ## 通道前提（浏览器运行时不由本技能提供）
 
-本技能是**操作指令文本**，本身不含浏览器运行时。真实浏览器自动化需要先在本机
-挂载一个**浏览器类 MCP 服务**（例如 ChromeDevTools MCP、Playwright MCP、或 Burp
-的内置浏览器），让平台出现 `mcp__<server>__*` 工具后本技能才有可用通道。若会话
-没有可用的浏览器 MCP，按「通道阶梯」降级到静态/CLI 抓取（curl/httpx/接口枚举），
-不得谎称"打开了浏览器"。
+本技能是**操作指令文本**，本身不含浏览器运行时。真实浏览器自动化优先使用宿主
+`0.1.6-alpha.1` 提供的能力：
+
+- 若 profile 已启用实验性 Browser Use，优先使用宿主 `mcp__playwright-mcp__*` /
+  `mcp__chrome-devtools-mcp__*` 工具或 Stagehand 的 `stagehand_*` 工具。
+- 若没有 Browser Use，使用 Saker「MCP 工作台」接入 Chrome DevTools、Playwright
+  或 Burp/Yakit 浏览器 MCP；`auto`/proxy 模式优先，避免 29 个浏览器工具全部进入提示词。
+- 只有在上述通道都不可用时，才按「通道阶梯」降级到静态/CLI 抓取
+  （curl/httpx/接口枚举），不得谎称“打开了浏览器”。
 
 ## 通道阶梯
 
 | 场景 | 默认通道 | 降级链（缺失时） |
 |---|---|---|
-| 自动化巡页 / 抓 JS / 提取 API | **Chrome MCP**（真实浏览器指纹，免 webdriver 标记） | webdriver 消指纹链（`--disable-blink-features=AutomationControlled` + 真实 UA/分辨率）→ curl 拉首屏 HTML（异步 chunk 缺失需标注） |
+| 自动化巡页 / 抓 JS / 提取 API | **宿主 Browser Use 或 Chrome MCP**（真实浏览器指纹，免 webdriver 标记） | webdriver 消指纹链（`--disable-blink-features=AutomationControlled` + 真实 UA/分辨率）→ curl 拉首屏 HTML（异步 chunk 缺失需标注） |
 | 登录后改包 / 拦截重放 | **burp / yakit MCP**（保 Cookie，可改可重放） | mitmproxy → curl 带凭据直发（能发不能拦，登记损失） |
 | 客户端加密 / 签名抓取 | **frida** hook 关键函数离线重放 | 反编译静态分析（wxapkg / apk / asar）→ 加密流量侧录 |
 

@@ -1,12 +1,23 @@
 /** One server card: status dot, name, transport chip, summary, tool-count badge (opens a preview popover), switch, and delete. Config expands only on manual click. */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import type { DiagnoseReport, ServerDraft, ServerLive, Translate } from './contracts.js'
+import { DEFAULT_PROXY_THRESHOLD } from './contracts.js'
 import { Field, PairEditor, ToggleSwitch } from './components.js'
 import { serversToMcpJson } from './mcp-json.js'
 
 /** Manual transport entry: typed text maps onto the two supported transports. */
 function transportDisplay(value: 'stdio' | 'streamable-http'): string {
   return value === 'stdio' ? 'stdio' : 'http'
+}
+
+/** Comma/space-separated tool names → list. Trimmed and de-duplicated, order preserved. */
+function parseDirectTools(text: string): string[] {
+  const out: string[] = []
+  for (const raw of text.split(/[,，\s]+/)) {
+    const name = raw.trim()
+    if (name !== '' && !out.includes(name)) out.push(name)
+  }
+  return out
 }
 
 function parseTransportInput(text: string): 'stdio' | 'streamable-http' | undefined {
@@ -202,6 +213,9 @@ export function ServerCard(props: {
         <span className={server.transport === 'stdio' ? 'dsh-mcs-chip' : 'dsh-mcs-chip dsh-mcs-chip--http'}>
           {server.transport === 'stdio' ? 'stdio' : 'http'}
         </span>
+        {live?.exposure === 'proxy' && (
+          <span className="dsh-mcs-chip" title={t('exposureProxyBadgeHint')}>proxy</span>
+        )}
         <span className="dsh-mcs-cmd"><code>{summary}</code></span>
         <span className={`dsh-mcs-state ${stateTextClass[state]}`}>{t(stateLabel[state])}</span>
         {state === 'connected' && (
@@ -280,6 +294,42 @@ export function ServerCard(props: {
                 }}
               />
             </Field>
+            <Field label={t('exposure')} hint={t('exposureHint')}>
+              <select
+                value={server.exposure}
+                onChange={event => set({ exposure: event.target.value as ServerDraft['exposure'] })}
+              >
+                <option value="auto">{t('exposureAuto')}</option>
+                <option value="direct">{t('exposureDirect')}</option>
+                <option value="proxy">{t('exposureProxy')}</option>
+                <option value="hybrid">{t('exposureHybrid')}</option>
+              </select>
+            </Field>
+            {server.exposure === 'auto' && (
+              <Field label={t('proxyThreshold')} hint={t('proxyThresholdHint')}>
+                <input
+                  type="number"
+                  min={1}
+                  max={200}
+                  step={1}
+                  value={server.proxyThreshold}
+                  onChange={event => {
+                    const value = Number.parseInt(event.target.value, 10)
+                    set({ proxyThreshold: Number.isFinite(value) ? Math.min(200, Math.max(1, value)) : DEFAULT_PROXY_THRESHOLD })
+                  }}
+                />
+              </Field>
+            )}
+            {server.exposure === 'hybrid' && (
+              <Field label={t('directTools')} hint={t('directToolsHint')}>
+                <input
+                  value={server.directTools.join(', ')}
+                  spellCheck={false}
+                  placeholder="scan_url, url_fetch"
+                  onChange={event => set({ directTools: parseDirectTools(event.target.value) })}
+                />
+              </Field>
+            )}
           </div>
           {server.transport === 'stdio' ? (
             <Field label={t('env')} hint={t('envHint')}>

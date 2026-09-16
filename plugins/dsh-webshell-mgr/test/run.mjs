@@ -6,8 +6,8 @@
 //      php -S 回路 detect→exec→文件→数据库→插件全链路
 // 运行：node test/run.mjs
 
-import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, writeFileSync, mkdirSync, existsSync, rmSync, readFileSync } from "node:fs";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync, mkdirSync, existsSync, rmSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -122,6 +122,7 @@ await ok("dsh-aes 信封：加解密往返 + PKCS7 与 openssl 语义一致", as
 import { patchClass, readFieldValues, classNameOf } from "../lib/protocol/javapatch.js";
 import { JAVA_PAYLOADS } from "../lib/protocol/payloads-java.js";
 import { decodeSeg } from "../lib/protocol/dsh-mem.js";
+import { runCommand as capRunCommand } from "../lib/protocol/capabilities.js";
 
 await ok("javapatch：五载荷嵌入 + 补丁/改名往返 + 未知字段报错", () => {
 	for (const name of ["WsmProbe", "WsmCmd", "WsmList", "WsmRead", "WsmWrite"]) {
@@ -185,6 +186,19 @@ await ok("dsh-mem 回显段解码：b64 段解码 + 原文段直通", () => {
 	if (decodeSeg(Buffer.from("whoami-out").toString("base64")) !== "whoami-out") throw new Error("b64 段");
 	if (decodeSeg("sh: command not found") !== "sh: command not found") throw new Error("原文段");
 	if (decodeSeg("") !== "") throw new Error("空段");
+});
+
+await ok("capabilities：dsh-mem 命令执行接到真实通道", async () => {
+	let sentCommand = "";
+	const srv = http.createServer((req, res) => {
+		sentCommand = String(req.headers["x-c"] ?? "");
+		res.setHeader("content-type", "text/plain");
+		res.end(Buffer.from("memory-ok").toString("base64"));
+	});
+	await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+	const out = await capRunCommand({ protocol: "dsh-mem", url: `http://127.0.0.1:${srv.address().port}/x`, timeoutMs: 3000 }, "whoami");
+	srv.close();
+	if (sentCommand !== "whoami" || out !== "memory-ok") throw new Error(`sent=${sentCommand} out=${out}`);
 });
 
 //#endregion
@@ -286,7 +300,7 @@ await ok("phpLs 片段：参数 base64 内嵌", () => {
 
 //#region 4. store
 
-import { openStore, saveConn, listConns, getConn, deleteConn, saveDbProfile, listDbProfiles, logOp, listOps } from "../lib/store.js";
+import { openStore, saveConn, listConns, getConn, deleteConn, saveDbProfile, listDbProfiles, logOp, listOps, recordGeneration, listGenerations } from "../lib/store.js";
 
 await ok("store：连接 CRUD + 档案 + op_log", () => {
 	const st = openStore(":memory:");
@@ -303,6 +317,65 @@ await ok("store：连接 CRUD + 档案 + op_log", () => {
 	if (listConns(st).length !== 0 || listDbProfiles(st, c.id).length !== 0) throw new Error("cascade delete");
 });
 
+await ok("生成器：delete 产物使用真实 store，不抛未定义变量", () => {
+	const st = openStore(":memory:");
+	const rec = recordGeneration(st, { name: "probe", lang: "php", kind: "basic", filePath: "/tmp/probe.php", meta: {} });
+	const r = genCore("delete", { id: rec.id }, st);
+	if (!r.ok || listGenerations(st).length !== 0) throw new Error(JSON.stringify({ r, left: listGenerations(st).length }));
+	st.close();
+});
+
+await ok("settings：宿主 schema 注册成功（非降级）", () => {
+	const r = spawnSync(process.execPath, ["--import", "../../scripts/test-stub-register.mjs", "test/_settings-probe.mjs"], {
+		cwd: join(dirname(fileURLToPath(import.meta.url)), ".."), encoding: "utf8",
+	});
+	if (r.status !== 0 || !r.stdout.includes("ok settings schema")) throw new Error(`${r.stdout}\n${r.stderr}`);
+});
+
+// 库损坏自愈（2026-09-13 夜：与另外 5 个插件同类的孪生 bug）────────────────
+// 背景：`new DatabaseSync` 遇到坏文件直接抛 `file is not a database`，
+// 而本插件的**全部功能**（自有马库 / 已登记连接 / 操作日志）都挂在这个库上 —— 一抛全废。
+{
+	const dir = mkdtempSync(join(tmpdir(), "wsm-heal-"));
+	const dbPath = join(dir, "webshell.db");
+
+	await ok("坏库（垃圾字节）不抛异常，且功能可用", () => {
+		writeFileSync(dbPath, Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe, 0x7f, 0x00, 0x42]));
+		const st = openStore(dbPath);                  // 修复前：这里抛 file is not a database
+		const c = saveConn(st, { name: "heal-t", url: "http://a/b.php", protocol: "dsh-aes" });
+		if (!getConn(st, c.id)) throw new Error("自愈后应能正常读写");
+		st.close();
+	});
+
+	await ok("坏库被改名备份（原文件不丢，可人工找回）", () => {
+		const backups = readdirSync(dir).filter((f) => f.includes(".corrupt-"));
+		if (backups.length !== 1) throw new Error(`应恰好有 1 个备份，实际 ${backups.length}`);
+	});
+
+	await ok("备份内容就是原始垃圾字节（没被覆盖或清空）", () => {
+		const bak = readdirSync(dir).find((f) => f.includes(".corrupt-"));
+		const bytes = readFileSync(join(dir, bak));
+		if (bytes.length !== 8) throw new Error("备份应与原文件等长，实际 " + bytes.length);
+		if (bytes[3] !== 0xff) throw new Error("字节内容应原样保留，实际 " + bytes[3]);
+	});
+
+	await ok("正常库不会被误判为坏库（幂等）", () => {
+		const st = openStore(dbPath);                  // 第二次打开：库头已是 SQLite
+		if (listConns(st).length !== 1) throw new Error("原数据应还在");
+		st.close();
+		const backups = readdirSync(dir).filter((f) => f.includes(".corrupt-"));
+		if (backups.length !== 1) throw new Error("不应新增备份，实际 " + backups.length);
+	});
+
+	await ok(":memory: 不走自愈路径（不报错）", () => {
+		const st = openStore(":memory:");
+		if (listConns(st).length !== 0) throw new Error("应空库");
+		st.close();
+	});
+
+	rmSync(dir, { recursive: true, force: true });
+}
+
 //#endregion
 
 //#region 4b. 库列举同源（界面侧 self-list == 模型侧 webshell_library_list）
@@ -310,7 +383,7 @@ await ok("store：连接 CRUD + 档案 + op_log", () => {
 // 回归锁：曾出现「目录里 17 个马，模型 webshell_library_list 报自有马 0 个」——
 // 模型工具只读已登记元数据，而界面走目录扫描，两者不同源。这里锁定：目录里的
 // 马（含从未在设置页登记过的）必须对模型可见，且噪音文件不进库。
-import { listLibraryShells, findLibraryShell } from "../lib/index.js";
+import { listLibraryShells, findLibraryShell, genCore } from "../lib/index.js";
 
 await ok("库列举同源：目录里的马对模型可见（含未登记）+ 噪音过滤 + 语言归类", () => {
 	const dir = mkdtempSync(join(tmpdir(), "wsm-lib-"));
@@ -596,6 +669,69 @@ await ok("CSRF 头校验：匹配放行/缺失或错值拒", () => {
 	if (checkCsrf({ headers: { "x-dsh-csrf": "X" } }, "T") !== false) throw new Error("错值应拒");
 	if (checkCsrf({}, "T") !== false) throw new Error("缺头应拒");
 });
+
+//#region 客户端载荷契约（回归锁）
+// 单一库视图里的条目来自「目录即库」的扫描结果，并不在 WS_CFG.selfShells 里；
+// 后端 self-content-get / self-content-set / self-update 都按 id-or-file 解析，
+// 只给 id 一律落空（self-content-* 直接报「缺 file」）。历史故障：只传 id →
+// 后端回 ok:false → 连接层判为 invalid server-response result 而 reject →
+// 编辑器没有 catch，永远停在「加载中…」，读和写全废。
+const CLIENT_SRC = readFileSync(join(PKG, "lib", "client.js"), "utf8");
+const payloadOf = (endpoint) => {
+	const m = CLIENT_SRC.match(new RegExp(`"${endpoint}",\\s*\\{([^}]*)\\}`));
+	if (!m) throw new Error(`lib/client.js 里找不到 ${endpoint} 的调用`);
+	return m[1];
+};
+
+await ok("编辑内容：self-content-get 载荷同时带 id 与 file", () => {
+	const p = payloadOf("self-content-get");
+	if (!/file\s*:/.test(p)) throw new Error(`载荷缺 file：{${p}}`);
+});
+await ok("保存：self-content-set 载荷同时带 id 与 file", () => {
+	const p = payloadOf("self-content-set");
+	if (!/file\s*:/.test(p)) throw new Error(`载荷缺 file：{${p}}`);
+});
+await ok("组改名：按 id 的 self-update 载荷带 file（否则整组静默不改）", () => {
+	// 注意：self-update 有多处调用（改密那处只有 file、没有 id），必须锚定「按 id 整组改名」这处，
+	// 否则正则会先命中改密那处，测试变成永远通过的空锁。
+	// 另注：组改名的入口已从 window.prompt 换成应用内 FormModal，载荷构造点随之改名（s → it2），
+	// 故这里按「所有带 id 的 self-update 载荷」匹配，不绑定具体变量名。
+	const all = [...CLIENT_SRC.matchAll(/"self-update",\s*\{([^}]*)\}/g)].map((m) => m[1]);
+	const withId = all.filter((p) => /id\s*:/.test(p));
+	if (!withId.length) throw new Error("找不到「按 id 整组改名」的 self-update 调用");
+	if (!withId.some((p) => /file\s*:/.test(p))) {
+		throw new Error(`按 id 的 self-update 载荷缺 file：${JSON.stringify(withId)}`);
+	}
+});
+await ok("编辑内容读失败要有 catch，不允许静默停在「加载中…」", () => {
+	if (!CLIENT_SRC.includes('}).catch(function (e) { setMsg("读取失败：')) {
+		throw new Error("self-content-get 的 then 后面没有 catch");
+	}
+	if (!CLIENT_SRC.includes('}).catch(function (e) { setMsg("保存失败：')) {
+		throw new Error("self-content-set 的 then 后面没有 catch");
+	}
+});
+//#endregion
+
+//#region 7. 内置模板参数占位符不自相矛盾
+// 客户端曾把 hint 再拼一次「（留空=默认）」，于是 hint 本身已含该说明的字段显示成
+// 「留空=生成时随机（留空=默认）」—— 既说留空随机、又说留空取默认，4 个字段全都如此。
+{
+	const INDEX_SRC = readFileSync(join(PKG, "lib", "index.js"), "utf8");
+	await ok("客户端不再给参数 hint 拼后缀", () => {
+		if (!CLIENT_SRC.includes("placeholder: f.hint")) throw new Error("客户端没在用裸 hint");
+		if (CLIENT_SRC.includes("（留空=默认）")) throw new Error("客户端仍硬拼「（留空=默认）」");
+	});
+	await ok("hint 自带「（留空=默认）」，信息没有丢", () => {
+		const n = (INDEX_SRC.match(/（留空=默认）/g) || []).length;
+		if (n !== 4) throw new Error(`index.js 里「（留空=默认）」出现 ${n} 次，期望 4`);
+	});
+	await ok("不存在双后缀 / 矛盾后缀", () => {
+		if (/（留空=默认）（留空=默认）/.test(INDEX_SRC)) throw new Error("双后缀");
+		if (/留空=生成时随机（留空=默认）/.test(INDEX_SRC)) throw new Error("矛盾：留空既随机又默认");
+	});
+}
+//#endregion
 
 console.log(`\n结果：${results.pass} 通过 / ${results.fail} 失败 / ${results.skip} 跳过`);
 process.exit(results.fail ? 1 : 0);

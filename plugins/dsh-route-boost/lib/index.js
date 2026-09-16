@@ -1,5 +1,5 @@
 // dsh-route-boost — the per-turn governance envelope for the security presets
-// (two modes: pentest / code-audit).
+// (pentest / code-audit / ctf-solver).
 //
 // The envelope pushes a route envelope + discipline reminders into every
 // user turn via a UserPromptSubmit hook. DSH's native equivalent is the dynamic
@@ -213,6 +213,7 @@ export function buildEnvelopeDetailed({ presetId, mode, phase, refsHits, evidenc
 			: "gates: 本模式无自建门——总控只消费专业模式 gate-pass 落盘产物；台账终态见 router-playbook",
 		`boundary: ${mode.boundary}`,
 		...(surface === "wrap" ? ["工具面: 收尾相位——subagent/workflow 派单已收起（收口台账与报告优先，新方向须用户明示）"] : []),
+		"conclude: 收工前 operation_conclude 申请结束——结束条件由系统判定（准则/意图仍 open 会被驳回并给出待收口清单；failed 是有效终态，如实收口不要为过闸造假）",
 		`review: ${mode.review ?? "关键 finding 双签 = DSH 独立复核 + subagent_claude_code 复核一致；仅确认/挑战二选一"}`,
 		`evidence: ${evidence}（confirmed=按已验证引用；partial/unknown=下结论前先补证据）`
 	];
@@ -248,7 +249,7 @@ export function buildEnvelopeDetailed({ presetId, mode, phase, refsHits, evidenc
 		if ((op.constraints ?? []).length) {
 			lines.splice(2, 0, `约束红线: ${op.constraints.join("；")}${op.constraintsNote ?? ""}`);
 		}
-		lines.splice(1, 0, `operation 恢复: goal=${String(op.goal ?? "").slice(0, 80) || "（未登记）"}｜准则 ${op.met ?? 0}/${op.total ?? 0} met${(op.openIds ?? []).length ? `（未收口 ${op.openIds.join(",")}）` : ""}${cov}${intents}｜待办 ${(op.pending ?? []).length}｜最近门 ${lastGate}——先读 operation-state.json 对齐；准则全 met+报告门过才可写 reports/（scope 已登记时报告须声明一致「覆盖：M/N」）；压缩续接先读四件套（WORKSPACE.md/gate-log 尾/evidence-index 认知节/findings）再动门禁`);
+		lines.splice(1, 0, `operation 恢复: goal=${String(op.goal ?? "").slice(0, 80) || "（未登记）"}｜准则 ${op.met ?? 0}/${op.total ?? 0} met${op.failed ? ` / failed ${op.failed}` : ""}${(op.openIds ?? []).length ? `（未收口 ${op.openIds.join(",")}）` : ""}${cov}${intents}｜待办 ${(op.pending ?? []).length}｜最近门 ${lastGate}——先读 operation-state.json 对齐；准则均有结论（met/failed）+报告门过才可写 reports/（scope 已登记时报告须声明一致「覆盖：M/N」）；压缩续接先读四件套（WORKSPACE.md/gate-log 尾/evidence-index 认知节/findings）再动门禁`);
 	}
 	if (negated) {
 		lines.push("语境: 学习/防御语境——攻击执行相位已抑制，按讲解/防御口径作答");
@@ -305,9 +306,9 @@ export function envelopeRev(text) {
 }
 
 /** 注入量记账（JSONL，一行一次快照投递）：模式/相位/rev/字符数/被丢节/refs 命中——
- *  refs 按节读取与信封预算调参的数据面。路径固定在 ~/.dsh/route-boost/。 */
-export function accountingPath(home = os.homedir()) {
-	return path.join(home, ".dsh", "route-boost", "injections.jsonl");
+ *  refs 按节读取与信封预算调参的数据面。路径跟随平台数据根 `$DSH_HOME`。 */
+export function accountingPath(home = process.env.DSH_HOME || path.join(os.homedir(), ".dsh")) {
+	return path.join(home, "route-boost", "injections.jsonl");
 }
 export function appendAccounting(file, record) {
 	try {
@@ -326,6 +327,30 @@ export function buildAuditRow(nowIso, modeId, phaseId, trigger) {
 	return `| ${nowIso} | ${modeId} | ${phaseId} | ${t.replace(/\|/g, "/")} |`;
 }
 
+/** 审计文件表头（首写时落一次）。 */
+const AUDIT_HEADER = `# 路由决策审计（route-boost 自动留痕）\n\n| 时间 | 模式 | 相位 | 触发输入 |\n|---|---|---|---|\n`;
+
+/**
+ * 往审计文件追加一行；文件不存在时**原子地**建表头。
+ *
+ * 为什么不用 `existsSync` 预检 + `writeFileSync`（原实现）：
+ * 预检与写入之间存在窗口，两个进程同时首写时**都会**判定「不存在」，
+ * 于是各自 writeFileSync 整份文件 —— 后写者把先写者的行覆盖掉，
+ * 且此后双方都走 append 分支追加到被覆盖的文件上 → **审计行静默丢失、无任何报错**。
+ * 改用 `flag: "wx"`（存在即失败）：创建本身是原子的，只有一个赢家写表头，
+ * 输家立刻落到 append 分支；不再有「判定」与「写入」之间的窗口。
+ *
+ * 导出以便测试直接喂真并发（见 test/run.mjs 的 audit 并发段）。
+ */
+export function appendAuditLine(file, row) {
+	try {
+		fs.writeFileSync(file, AUDIT_HEADER + row + "\n", { flag: "wx" });
+	} catch {
+		// 已存在（或并发创建者刚赢）→ 纯追加。真实 IO 错误由调用方兜住。
+		fs.appendFileSync(file, `${row}\n`);
+	}
+}
+
 /** 读工作区 operation-state.json 的恢复盘摘要（无契约/读取失败返回 undefined——信封不投递该行）。
  * 仅在有「未收口准则、待办、覆盖度未测项、或未收口意图」时投递：全收口的终态契约不占信封预算。 */
 function readOperationSummary(cwd) {
@@ -333,7 +358,9 @@ function readOperationSummary(cwd) {
 	try {
 		const st = JSON.parse(fs.readFileSync(path.join(cwd, "operation-state.json"), "utf8"));
 		if (!st || !Array.isArray(st.criteria) || st.criteria.length === 0) return undefined;
-		const openIds = st.criteria.filter((c) => c && c.status !== "met").map((c) => c.id);
+		const openIds = st.criteria.filter((c) => c && c.status !== "met" && c.status !== "failed").map((c) => c.id);
+		const met = st.criteria.filter((c) => c && c.status === "met").length;
+		const failed = st.criteria.filter((c) => c && c.status === "failed").length;
 		const pending = Array.isArray(st.pending) ? st.pending : [];
 		// 覆盖度台账（scope/tested）：登记即纳入摘要——有未测项时即使准则全 met 也投递
 		const scope = Array.isArray(st.scope) ? st.scope.filter((s) => s && typeof s.id === "string") : [];
@@ -344,7 +371,7 @@ function readOperationSummary(cwd) {
 		// 约束台账：登记即投递独立行（防压缩丢失——用户红线必须每轮可见）
 		const constraints = Array.isArray(st.constraints) ? st.constraints.filter((c) => c && (c.kind === "deny" || c.kind === "allow") && typeof c.text === "string" && c.text.trim()) : [];
 		if (openIds.length === 0 && pending.length === 0 && openIntents.length === 0 && constraints.length === 0 && (scope.length === 0 || untestedIds.length === 0)) return undefined;
-		return { goal: st.goal, total: st.criteria.length, met: st.criteria.length - openIds.length, openIds, pending, gates: st.gates, coverage: scope.length > 0 ? { scope: scope.length, tested: scope.length - untestedIds.length, untestedIds } : undefined, openIntents, constraints: constraints.slice(0, 6).map((c) => `${c.kind === "deny" ? "禁" : "允"}：${String(c.text).slice(0, 60)}`) };
+		return { goal: st.goal, total: st.criteria.length, met, failed, openIds, pending, gates: st.gates, coverage: scope.length > 0 ? { scope: scope.length, tested: scope.length - untestedIds.length, untestedIds } : undefined, openIntents, constraints: constraints.slice(0, 6).map((c) => `${c.kind === "deny" ? "禁" : "允"}：${String(c.text).slice(0, 60)}`) };
 	} catch { /* 无状态或损坏：不投递 */ }
 	return undefined;
 }
@@ -355,7 +382,7 @@ async function apply(ctx, config) {
 		// Bundle layout guarantees the sibling plugin; the try keeps a partial
 		// hand-install degradeable instead of bricking the host.
 		({ GATES: gates } = await import("../../dsh-stage-gate/lib/index.js"));
-	} catch {}
+	} catch { /* 兄弟插件缺失（手工装的半截包）：退回内置 FALLBACK_GATES，不 brick 宿主 */ }
 	// Per-agent routing state: latest human text + last inferred phase (sticky).
 	const agentState = new Map();
 	latestUserTracker(ctx, agentState);
@@ -373,13 +400,8 @@ async function apply(ctx, config) {
 		try {
 			const cwd = agent?.session?.header?.cwd;
 			if (!cwd) return;
-			const file = path.join(cwd, "route-audit.md");
 			const row = buildAuditRow(new Date().toISOString(), modeId, phaseId, trigger);
-			if (!fs.existsSync(file)) {
-				fs.writeFileSync(file, `# 路由决策审计（route-boost 自动留痕）\n\n| 时间 | 模式 | 相位 | 触发输入 |\n|---|---|---|---|\n${row}\n`);
-			} else {
-				fs.appendFileSync(file, `${row}\n`);
-			}
+			appendAuditLine(path.join(cwd, "route-audit.md"), row);
 		} catch { /* 审计失败不阻塞 */ }
 	};
 	const logFile = accountingPath();

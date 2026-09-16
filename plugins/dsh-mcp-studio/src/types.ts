@@ -6,8 +6,18 @@ import type { Config as McpClientConfig } from '@deepseek-ai/dsh-mcp-client'
 export const ID_PATTERN = /^[A-Za-z0-9_-]{1,32}$/
 /** Default per-tool-call timeout passed to the mcp-client bridge (ms). */
 export const DEFAULT_TOOL_CALL_TIMEOUT_MS = 60_000
+/** `auto` switches to proxy at or above this many tools per server. */
+export const DEFAULT_PROXY_THRESHOLD = 10
 
 export type Transport = 'stdio' | 'streamable-http'
+/**
+ * How a server's tools reach the model.
+ * - `auto`   — proxy when the server carries at least `proxyThreshold` tools, direct below that.
+ * - `direct` — one model-facing tool per server tool (`mcp__<server>__<tool>`).
+ * - `proxy`  — only `mcp_search` / `mcp_call`; metadata is fetched on demand.
+ * - `hybrid` — `proxy`, plus `directTools` promoted back to real `mcp__<server>__<tool>` entries.
+ */
+export type Exposure = 'auto' | 'direct' | 'proxy' | 'hybrid'
 
 /** One user-configured MCP server row. */
 export interface ServerEntry {
@@ -34,6 +44,12 @@ export interface ServerEntry {
   readonly toolCallTimeoutMs: number
   /** Reject the mount when the initial connection or tool sync fails. */
   readonly failOnStartupError: boolean
+  /** Which tools reach the model; see {@link Exposure}. */
+  readonly exposure: Exposure
+  /** `auto` threshold: at or above this many tools the server is proxied. */
+  readonly proxyThreshold: number
+  /** `hybrid` only: raw tool names kept as real `mcp__<name>__<tool>` entries. */
+  readonly directTools: string[]
 }
 
 /** The whole `mcp-studio` settings section. */
@@ -54,6 +70,9 @@ export const ServerEntrySchema = z.object({
   headers: z.dict(z.string()),
   toolCallTimeoutMs: z.number().step(1_000).min(1_000).max(3_600_000).default(DEFAULT_TOOL_CALL_TIMEOUT_MS),
   failOnStartupError: z.boolean().default(false),
+  exposure: z.union([z.const('auto'), z.const('direct'), z.const('proxy'), z.const('hybrid')]).default('auto'),
+  proxyThreshold: z.number().step(1).min(1).max(200).default(DEFAULT_PROXY_THRESHOLD),
+  directTools: z.array(z.string()).default([]),
 }) as unknown as z<ServerEntry>
 
 export const Config = z.object({
@@ -157,6 +176,17 @@ export function validateSection(value: StudioSection): void {
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
         throw new Error(`mcp-studio: server "${server.name}" url must use http or https`)
       }
+    }
+    // directTools only means anything under hybrid; an empty entry would register a tool
+    // literally named `mcp__<name>__`, and a duplicate would silently overwrite the first.
+    // Defaulted defensively: validateSection also sees the raw patch baseline, which may
+    // predate the field.
+    const promoted = new Set<string>()
+    for (const raw of server.directTools ?? []) {
+      const name = raw.trim()
+      if (name === '') throw new Error(`mcp-studio: server "${server.name}" has a blank entry in directTools`)
+      if (promoted.has(name)) throw new Error(`mcp-studio: server "${server.name}" lists "${name}" twice in directTools`)
+      promoted.add(name)
     }
   }
 }

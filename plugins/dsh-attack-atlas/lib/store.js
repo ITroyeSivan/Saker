@@ -57,7 +57,9 @@ CREATE TABLE IF NOT EXISTS chain_edges (
 	dst        TEXT NOT NULL,
 	label      TEXT NOT NULL DEFAULT "",
 	edge_type  TEXT NOT NULL DEFAULT "",
+	status     TEXT NOT NULL DEFAULT "",
 	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL DEFAULT "",
 	PRIMARY KEY (session_id, mode, target, src, dst, label)
 );
 CREATE TABLE IF NOT EXISTS targets (
@@ -117,14 +119,14 @@ const TARGET_KIND_LABELS = { domain: "域名", web: "Web 站点", ip: "IP/主机
 
 export function targetKindLabel(kind) {
 	return TARGET_KIND_LABELS[kind] || "其他";
-}
+	}
 
 function tableExists(db, name) {
 	return !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(name);
-}
+	}
 function pkHas(db, table, col) {
 	return db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col && c.pk > 0);
-}
+	}
 
 /** 旧库迁移（覆盖态无 target 维度 → 按目标分账）：旧表 rename 为 *_legacy 保留不删（零数据
  *  丢失风险），新表按「单目标会话归属、多目标留公共 scope」启发式回填拷贝。幂等：新库/已迁移跳过。
@@ -135,48 +137,81 @@ function prepareLegacy(db) {
 	try { db.exec("ALTER TABLE coverage ADD COLUMN target TEXT NOT NULL DEFAULT ''"); } catch { /* 列已存在 */ }
 	try { db.exec("ALTER TABLE chain_nodes ADD COLUMN finding_ref TEXT NOT NULL DEFAULT ''"); } catch { /* 列已存在 */ }
 	try { db.exec("ALTER TABLE chain_edges ADD COLUMN edge_type TEXT NOT NULL DEFAULT ''"); } catch { /* 列已存在 */ }
+	try { db.exec("ALTER TABLE chain_edges ADD COLUMN status TEXT NOT NULL DEFAULT ''"); } catch { /* 列已存在 */ }
+	try { db.exec("ALTER TABLE chain_edges ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''"); } catch { /* 列已存在 */ }
 	if (pkHas(db, "coverage", "target")) return false; // 已迁移
 	db.exec("ALTER TABLE coverage RENAME TO coverage_legacy");
 	if (tableExists(db, "stages")) db.exec("ALTER TABLE stages RENAME TO stages_legacy");
 	if (tableExists(db, "chain_nodes")) db.exec("ALTER TABLE chain_nodes RENAME TO chain_nodes_legacy");
 	if (tableExists(db, "chain_edges")) db.exec("ALTER TABLE chain_edges RENAME TO chain_edges_legacy");
 	return true;
-}
+	}
 
 function copyLegacy(db) {
 	// 恰一个登记目标的 (会话,模式)：未归属行归它；多目标会话留公共 scope（''）——「全部」聚合视图可见
 	db.exec("CREATE TEMP TABLE single_tgt AS SELECT session_id, mode, label FROM targets WHERE (session_id, mode) IN (SELECT session_id, mode FROM targets GROUP BY session_id, mode HAVING COUNT(*) = 1)");
 	db.exec(`INSERT INTO coverage (session_id, mode, target, key, state, reason, finding_refs, updated_at)
-		SELECT session_id, mode,
-			CASE WHEN target != '' THEN target
-				ELSE COALESCE((SELECT s.label FROM single_tgt s WHERE s.session_id = coverage_legacy.session_id AND s.mode = coverage_legacy.mode), '') END,
-			key, state, reason, finding_refs, updated_at
-		FROM coverage_legacy`);
+	SELECT session_id, mode,
+	CASE WHEN target != '' THEN target
+	ELSE COALESCE((SELECT s.label FROM single_tgt s WHERE s.session_id = coverage_legacy.session_id AND s.mode = coverage_legacy.mode), '') END,
+	key, state, reason, finding_refs, updated_at
+	FROM coverage_legacy`);
 	if (tableExists(db, "stages_legacy")) {
-		db.exec(`INSERT INTO stages (session_id, mode, target, stage, state, updated_at)
-			SELECT session_id, mode,
-				COALESCE((SELECT s.label FROM single_tgt s WHERE s.session_id = stages_legacy.session_id AND s.mode = stages_legacy.mode), ''),
-				stage, state, updated_at
-			FROM stages_legacy`);
+	db.exec(`INSERT INTO stages (session_id, mode, target, stage, state, updated_at)
+	SELECT session_id, mode,
+	COALESCE((SELECT s.label FROM single_tgt s WHERE s.session_id = stages_legacy.session_id AND s.mode = stages_legacy.mode), ''),
+	stage, state, updated_at
+	FROM stages_legacy`);
 	}
 	if (tableExists(db, "chain_nodes_legacy")) {
-		db.exec(`INSERT INTO chain_nodes (session_id, mode, target, id, label, kind, seg, note, major, finding_ref, created_at)
-			SELECT session_id, mode,
-				COALESCE((SELECT s.label FROM single_tgt s WHERE s.session_id = chain_nodes_legacy.session_id AND s.mode = chain_nodes_legacy.mode), ''),
-				id, label, kind, seg, note, major, finding_ref, created_at
-			FROM chain_nodes_legacy`);
+	db.exec(`INSERT INTO chain_nodes (session_id, mode, target, id, label, kind, seg, note, major, finding_ref, created_at)
+	SELECT session_id, mode,
+	COALESCE((SELECT s.label FROM single_tgt s WHERE s.session_id = chain_nodes_legacy.session_id AND s.mode = chain_nodes_legacy.mode), ''),
+	id, label, kind, seg, note, major, finding_ref, created_at
+	FROM chain_nodes_legacy`);
 	}
 	if (tableExists(db, "chain_edges_legacy")) {
-		db.exec(`INSERT INTO chain_edges (session_id, mode, target, src, dst, label, edge_type, created_at)
-			SELECT session_id, mode,
-				COALESCE((SELECT s.label FROM single_tgt s WHERE s.session_id = chain_edges_legacy.session_id AND s.mode = chain_edges_legacy.mode), ''),
-				src, dst, label, edge_type, created_at
-			FROM chain_edges_legacy`);
+	db.exec(`INSERT INTO chain_edges (session_id, mode, target, src, dst, label, edge_type, created_at)
+	SELECT session_id, mode,
+	COALESCE((SELECT s.label FROM single_tgt s WHERE s.session_id = chain_edges_legacy.session_id AND s.mode = chain_edges_legacy.mode), ''),
+	src, dst, label, edge_type, created_at
+	FROM chain_edges_legacy`);
 	}
-}
+	}
 
 export function openStore(dbPath) {
 	if (dbPath !== ":memory:") fs.mkdirSync(path.dirname(dbPath), { recursive: true }); // node:sqlite 不建父目录
+	// 库文件坏了（不是 SQLite 格式）时的自愈：备份原文件再重建空库。
+	// 为什么不能直接抛："file is not a database" 会让插件的**全部功能**不可用，
+	// 而磁盘满/强杀/网盘回写/误改名都会造成这个问题。数据已经读不出来，
+	// 能做的是**保住原文件**（改名备份，不删）并让插件继续可用；
+	// 备份路径打到 stderr（只此一次），用户能据此找回或求助。
+	function healCorruptDb(dbPath) {
+		if (dbPath === ':memory:') return;
+		let head = '';
+		try { head = fs.readFileSync(dbPath).subarray(0, 16).toString("latin1"); } catch { return; }
+		if (head.startsWith("SQLite format 3")) return;   // 正常的库头
+		let bak = dbPath + ".corrupt-" + Date.now();
+		let n = 1;
+		while (fs.existsSync(bak)) bak = dbPath + ".corrupt-" + Date.now() + "-" + n++;   // 绝不覆盖已有备份
+		try {
+			fs.renameSync(dbPath, bak);
+			// WAL/SHM 属于**已损坏的那个库**：留着会被回放到新库上，导致新库也打不开。
+			// 它们只是未落盘的增量，主库已备份，这里一并清掉（清不掉不影响主流程）。
+			for (const ext of ["-wal", "-shm"]) {
+				try { fs.rmSync(dbPath + ext, { force: true }); } catch { /* 被占用：留给下次启动 */ }
+			}
+			console.error("[存储] 数据库文件不是 SQLite 格式，已备份为 " + bak + " 并重建空库（原数据可从此文件找回）");
+		} catch (e) {
+			// EBUSY 最常见：同进程内旧句柄还没释放（本插件缓存了 store）。
+			// 这时**不硬来**：原样让调用方抛，用户看到的是真实原因（文件被占用），
+			// 比"备份失败但装作没事"更诚实。
+			console.error("[存储] 数据库文件损坏且无法备份：" + (e && e.message ? e.message : e) + "（文件被占用时请关闭其它 dsh 实例后重启）");
+			throw e;
+		}
+	}
+
+healCorruptDb(dbPath);   // **必须在开库前**：坏文件会让 new DatabaseSync 直接抛
 	const db = new DatabaseSync(dbPath);
 	db.exec("PRAGMA journal_mode = WAL");
 	const legacy = prepareLegacy(db);
@@ -188,33 +223,33 @@ export function openStore(dbPath) {
 	// （旧代码 INSERT 不含 active 列、默认 0）的残留——锚定最小 seq。一次性回填盖不住这类漂移。
 	db.exec("UPDATE targets SET active = 1 WHERE rowid IN (SELECT MIN(rowid) FROM targets WHERE (session_id, mode) IN (SELECT session_id, mode FROM targets GROUP BY session_id, mode HAVING MAX(active) = 0) GROUP BY session_id, mode)");
 	return {
-		db,
-		close() { db.close(); }
+	db,
+	close() { db.close(); }
 	};
-}
+	}
 
 function now() {
 	return new Date().toISOString().replace("T", " ").slice(0, 19);
-}
+	}
 
 function clean(s, max) {
 	return String(s ?? "").trim().slice(0, max);
-}
+	}
 
 /** 归属解析：显式 target 须为已登记 label（报错带已登记清单——堵自由文本脏归属）；
  *  缺省=当前激活目标；无激活（未登记任何目标）落会话公共 scope（''）。 */
 function resolveTargetScope(st, sessionId, mode, target) {
 	const t = clean(target, 120);
 	if (t) {
-		const registered = listTargets(st, sessionId, mode);
-		if (!registered.some((x) => x.label === t)) {
-			throw new Error(`目标未登记：${t}（已登记：${registered.map((x) => x.label).join("、") || "无"}；先 redteam_atlas_target 登记或省略 target 归当前锚定）`);
-		}
-		return t;
+	const registered = listTargets(st, sessionId, mode);
+	if (!registered.some((x) => x.label === t)) {
+	throw new Error(`目标未登记：${t}（已登记：${registered.map((x) => x.label).join("、") || "无"}；先 redteam_atlas_target 登记或省略 target 归当前锚定）`);
+	}
+	return t;
 	}
 	const act = getActiveTarget(st, sessionId, mode);
 	return act ? act.label : "";
-}
+	}
 
 /** 格子终态落库（upsert，按目标分账：同格每目标各一行，互不覆盖）。
  *  na/budget-stop 必附原因——覆盖规则的硬约束在存储层强制。
@@ -222,9 +257,9 @@ function resolveTargetScope(st, sessionId, mode, target) {
 export function markCell(st, sessionId, mode, key, { state, reason = "", findingRefs = "", target = "" }) {
 	const k = clean(key, 120);
 	if (!k.includes("/")) {
-		if (!/^[a-z0-9-]+$/.test(k)) throw new Error(`非法主类 key：${k}`);
+	if (!/^[a-z0-9-]+$/.test(k)) throw new Error(`非法主类 key：${k}`);
 	} else if (!/^[a-z0-9-]+\/[a-z0-9-]+$/.test(k)) {
-		throw new Error(`非法格子 key：${k}`);
+	throw new Error(`非法格子 key：${k}`);
 	}
 	if (!CELL_STATES.includes(state)) throw new Error(`state 必须是 ${CELL_STATES.join("/")}`);
 	const r = clean(reason, 500);
@@ -232,11 +267,11 @@ export function markCell(st, sessionId, mode, key, { state, reason = "", finding
 	const refs = clean(findingRefs, 300);
 	const tgt = resolveTargetScope(st, sessionId, mode, target);
 	st.db.prepare(
-		"INSERT INTO coverage (session_id, mode, target, key, state, reason, finding_refs, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n" +
-		"ON CONFLICT (session_id, mode, target, key) DO UPDATE SET state = excluded.state, reason = excluded.reason, finding_refs = excluded.finding_refs, updated_at = excluded.updated_at"
+	"INSERT INTO coverage (session_id, mode, target, key, state, reason, finding_refs, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n" +
+	"ON CONFLICT (session_id, mode, target, key) DO UPDATE SET state = excluded.state, reason = excluded.reason, finding_refs = excluded.finding_refs, updated_at = excluded.updated_at"
 	).run(String(sessionId), String(mode), tgt, k, state, r, refs, now());
 	return { key: k, state, reason: r, findingRefs: refs, target: tgt };
-}
+	}
 
 /** 阶段推进（active=进行中 / done=完成），按目标分账；target 归属语义同 markCell。 */
 export function markStage(st, sessionId, mode, stage, state, target = "") {
@@ -245,21 +280,21 @@ export function markStage(st, sessionId, mode, stage, state, target = "") {
 	if (!STAGE_STATES.includes(state)) throw new Error(`state 必须是 ${STAGE_STATES.join("/")}`);
 	const tgt = resolveTargetScope(st, sessionId, mode, target);
 	st.db.prepare(
-		"INSERT INTO stages (session_id, mode, target, stage, state, updated_at) VALUES (?, ?, ?, ?, ?, ?)\n" +
-		"ON CONFLICT (session_id, mode, target, stage) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at"
+	"INSERT INTO stages (session_id, mode, target, stage, state, updated_at) VALUES (?, ?, ?, ?, ?, ?)\n" +
+	"ON CONFLICT (session_id, mode, target, stage) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at"
 	).run(String(sessionId), String(mode), tgt, s, state, now());
 	return { stage: s, state, target: tgt };
-}
+	}
 
 /** 全量读取（会话 × 模式，含全部目标 scope）：格子 + 阶段 + 目标（带 active）。 */
 export function getCoverage(st, sessionId, mode) {
 	const cells = st.db.prepare("SELECT key, state, reason, finding_refs AS findingRefs, target, updated_at AS updatedAt FROM coverage WHERE session_id = ? AND mode = ?")
-		.all(String(sessionId), String(mode));
+	.all(String(sessionId), String(mode));
 	const stages = st.db.prepare("SELECT stage, state, target, updated_at AS updatedAt FROM stages WHERE session_id = ? AND mode = ?")
-		.all(String(sessionId), String(mode));
+	.all(String(sessionId), String(mode));
 	const targets = listTargets(st, sessionId, mode);
 	return { cells, stages, targets };
-}
+	}
 
 /** 目标登记（与资产清单基线同步维护；一个会话可多目标）。首个登记目标自动成为当前锚定
  *  （active），并把公共 scope（''）存量行扫入它——此前无目标时期的作业隐含关于它；
@@ -272,37 +307,37 @@ export function addTarget(st, sessionId, mode, { label, kind = "other", note = "
 	const seq = row.n;
 	const first = seq === 1;
 	st.db.prepare("INSERT INTO targets (session_id, mode, seq, label, kind, note, active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-		.run(String(sessionId), String(mode), seq, l, k, clean(note, 300), first ? 1 : 0, now());
+	.run(String(sessionId), String(mode), seq, l, k, clean(note, 300), first ? 1 : 0, now());
 	if (first) {
-		for (const tbl of ["coverage", "stages", "chain_nodes", "chain_edges"]) {
-			st.db.prepare(`UPDATE ${tbl} SET target = ? WHERE session_id = ? AND mode = ? AND target = ''`).run(l, String(sessionId), String(mode));
-		}
+	for (const tbl of ["coverage", "stages", "chain_nodes", "chain_edges"]) {
+	st.db.prepare(`UPDATE ${tbl} SET target = ? WHERE session_id = ? AND mode = ? AND target = ''`).run(l, String(sessionId), String(mode));
+	}
 	}
 	return { seq, label: l, kind: k, note: clean(note, 300), active: first };
-}
+	}
 
 /** 当前锚定目标（每会话×模式至多一个；无登记/无激活返回 null）。 */
 export function getActiveTarget(st, sessionId, mode) {
 	return st.db.prepare("SELECT seq, label, kind, note FROM targets WHERE session_id = ? AND mode = ? AND active = 1 ORDER BY seq LIMIT 1")
-		.get(String(sessionId), String(mode)) ?? null;
-}
+	.get(String(sessionId), String(mode)) ?? null;
+	}
 
 /** 切换当前锚定目标（按 seq 或 label）：回写缺省归属、派单信封、UI 视图随锚更新。不迁移数据。 */
 export function switchTarget(st, sessionId, mode, seqOrLabel) {
 	const rows = listTargets(st, sessionId, mode);
 	const hit = typeof seqOrLabel === "number"
-		? rows.find((t) => t.seq === seqOrLabel)
-		: rows.find((t) => t.label === clean(seqOrLabel, 120));
+	? rows.find((t) => t.seq === seqOrLabel)
+	: rows.find((t) => t.label === clean(seqOrLabel, 120));
 	if (!hit) throw new Error(`目标不存在：${seqOrLabel}（已登记：${rows.map((t) => t.label).join("、") || "无"}）`);
 	st.db.prepare("UPDATE targets SET active = CASE WHEN seq = ? THEN 1 ELSE 0 END WHERE session_id = ? AND mode = ?")
-		.run(hit.seq, String(sessionId), String(mode));
+	.run(hit.seq, String(sessionId), String(mode));
 	return hit;
-}
+	}
 
 export function listTargets(st, sessionId, mode) {
 	return st.db.prepare("SELECT seq, label, kind, note, active, created_at AS createdAt FROM targets WHERE session_id = ? AND mode = ? ORDER BY seq")
-		.all(String(sessionId), String(mode)).map((r) => ({ ...r, active: !!r.active }));
-}
+	.all(String(sessionId), String(mode)).map((r) => ({ ...r, active: !!r.active }));
+	}
 
 export const CHAIN_NODE_KINDS = ["entry", "host", "segment", "bastion", "dc", "cred", "attacker", "infra", "pivot", "exfil", "identity", "secret", "resource", "orgroot", "other"];
 const CHAIN_KIND_LABELS = { entry: "入口", host: "主机", segment: "网段关口", bastion: "堡垒机", dc: "域控", cred: "凭据", attacker: "攻击者", infra: "C2/基础设施", pivot: "跳板/横向", exfil: "外传/扩散", identity: "身份/角色", secret: "密钥面", resource: "云资源", orgroot: "组织根/KMS", other: "资产" };
@@ -317,10 +352,10 @@ export function addChainNode(st, sessionId, mode, { id, label, kind = "host", se
 	const fr = clean(findingRef, 60); // 关联成果 finding id（与「redteam 成果」页互链；空=无关联）
 	const tgt = resolveTargetScope(st, sessionId, mode, target);
 	st.db.prepare("INSERT INTO chain_nodes (session_id, mode, target, id, label, kind, seg, note, major, finding_ref, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n" +
-		"ON CONFLICT (session_id, mode, target, id) DO UPDATE SET label = excluded.label, kind = excluded.kind, seg = excluded.seg, note = excluded.note, major = excluded.major, finding_ref = excluded.finding_ref")
-		.run(String(sessionId), String(mode), tgt, nid, l, k, clean(seg, 60), clean(note, 300), major ? 1 : 0, fr, now());
+	"ON CONFLICT (session_id, mode, target, id) DO UPDATE SET label = excluded.label, kind = excluded.kind, seg = excluded.seg, note = excluded.note, major = excluded.major, finding_ref = excluded.finding_ref")
+	.run(String(sessionId), String(mode), tgt, nid, l, k, clean(seg, 60), clean(note, 300), major ? 1 : 0, fr, now());
 	return { id: nid, label: l, kind: k, major: !!major, findingRef: fr, target: tgt };
-}
+	}
 
 /** 链路边类型学（黑板关系边五型）：类型化边让拓扑可按边语义聚合检索，label 仍是自由补充细节。
  *  空串=未分类（旧数据兼容）。 */
@@ -330,23 +365,34 @@ export const CHAIN_EDGE_TYPES = {
 	"enables": "使可行",
 	"depends_on": "前置依赖",
 	"leads_to": "导致"
-};
+	};
 
-export function addChainEdge(st, sessionId, mode, { src, dst, label = "", edgeType = "", target = "" }) {
+/** 边的可信度：suspected 疑似 / confirmed 已确认 / refuted 已证伪 / '' 未标注。
+ *  为什么要这一维：攻击图里"看着像通路"与"真的打通了"是两回事——不区分，图就退化成猜测堆叠。
+ *  confirmed 须有对应证据（请求回显/凭据可用/权限到手）；refuted 保留在图里但置灰，避免重复试同一死路。 */
+export const CHAIN_EDGE_STATUSES = {
+	"suspected": "疑似",
+	"confirmed": "已确认",
+	"refuted": "已证伪"
+	};
+
+export function addChainEdge(st, sessionId, mode, { src, dst, label = "", edgeType = "", status = "", target = "" }) {
 	const a = clean(src, 60), b = clean(dst, 60), l = clean(label, 80);
 	if (!a || !b) throw new Error("src/dst required");
 	const et = Object.hasOwn(CHAIN_EDGE_TYPES, String(edgeType ?? "")) ? String(edgeType) : "";
+	const stt = Object.hasOwn(CHAIN_EDGE_STATUSES, String(status ?? "")) ? String(status) : "";
 	const tgt = resolveTargetScope(st, sessionId, mode, target);
 	for (const n of [a, b]) {
-		// 同目标面内引用校验：边与节点须同 scope（跨 scope 悬挂边在聚合视图会误连）
-		const hit = st.db.prepare("SELECT id FROM chain_nodes WHERE session_id = ? AND mode = ? AND target = ? AND id = ?").get(String(sessionId), String(mode), tgt, n);
-		if (!hit) throw new Error(`边引用未登记节点：${n}（先 add-node）`);
+	// 同目标面内引用校验：边与节点须同 scope（跨 scope 悬挂边在聚合视图会误连）
+	const hit = st.db.prepare("SELECT id FROM chain_nodes WHERE session_id = ? AND mode = ? AND target = ? AND id = ?").get(String(sessionId), String(mode), tgt, n);
+	if (!hit) throw new Error(`边引用未登记节点：${n}（先 add-node）`);
 	}
-	st.db.prepare("INSERT INTO chain_edges (session_id, mode, target, src, dst, label, edge_type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n" +
-		"ON CONFLICT (session_id, mode, target, src, dst, label) DO UPDATE SET label = excluded.label, edge_type = excluded.edge_type")
-		.run(String(sessionId), String(mode), tgt, a, b, l, et, now());
-	return { src: a, dst: b, label: l, edgeType: et, target: tgt };
-}
+	// status 未显式给出时不覆盖既有值（重登记边不等于重新判断可信度）
+	st.db.prepare("INSERT INTO chain_edges (session_id, mode, target, src, dst, label, edge_type, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n" +
+	"ON CONFLICT (session_id, mode, target, src, dst, label) DO UPDATE SET label = excluded.label, edge_type = excluded.edge_type, status = CASE WHEN excluded.status = '' THEN chain_edges.status ELSE excluded.status END, updated_at = excluded.updated_at")
+	.run(String(sessionId), String(mode), tgt, a, b, l, et, stt, now(), now());
+	return { src: a, dst: b, label: l, edgeType: et, status: stt, target: tgt };
+	}
 
 /** 链路读取：target 省略 = 全目标并集（stage-gate/results 消费方兼容）；显式串按 scope 过滤
  *  （'' = 会话公共 scope——存量迁移的多目标未归属行）。节点/边带 target 字段供分目标渲染。 */
@@ -354,9 +400,10 @@ export function listChain(st, sessionId, mode, target) {
 	const flt = target === undefined ? "" : " AND target = ?";
 	const args = target === undefined ? [String(sessionId), String(mode)] : [String(sessionId), String(mode), String(target)];
 	const nodes = st.db.prepare(`SELECT id, label, kind, seg, note, major, finding_ref AS findingRef, target, created_at AS createdAt FROM chain_nodes WHERE session_id = ? AND mode = ?${flt} ORDER BY created_at, id`).all(...args);
-	const edges = st.db.prepare(`SELECT src, dst, label, edge_type AS edgeType, target FROM chain_edges WHERE session_id = ? AND mode = ?${flt} ORDER BY created_at`).all(...args);
+	// status + createdAt 一并带回：状态供图着色，createdAt 供时间线回放排序
+	const edges = st.db.prepare(`SELECT src, dst, label, edge_type AS edgeType, status, target, created_at AS createdAt FROM chain_edges WHERE session_id = ? AND mode = ?${flt} ORDER BY created_at`).all(...args);
 	return { nodes, edges };
-}
+	}
 
 /** 反查互链：该模式下各 finding 被哪些链路节点引用（键=`${sessionId}:${findingRef}`——
  *  「redteam 成果」页跨会话模式页 Detail 的「链路节点」行用）。 */
@@ -365,7 +412,17 @@ export function chainRefIndex(st, mode) {
 	const idx = {};
 	for (const r of rows) (idx[`${r.sessionId}:${r.findingRef}`] ||= []).push(r);
 	return idx;
-}
+	}
+
+/** 标注一条边的可信度（边的主键是 session+mode+target+src+dst+label）。 */
+export function setChainEdgeStatus(st, sessionId, mode, { src, dst, label = "", status = "", target = "" }) {
+	const s = Object.hasOwn(CHAIN_EDGE_STATUSES, String(status ?? "")) ? String(status) : "";
+	const tgt = resolveTargetScope(st, sessionId, mode, target);
+	const r = st.db.prepare("UPDATE chain_edges SET status = ?, updated_at = ? WHERE session_id = ? AND mode = ? AND target = ? AND src = ? AND dst = ? AND label = ?")
+	.run(s, now(), String(sessionId), String(mode), tgt, clean(src, 60), clean(dst, 60), clean(label, 80));
+	if (r.changes === 0) throw new Error(`边不存在：${src} → ${dst}${label ? "（" + label + "）" : ""}`);
+	return { src: clean(src, 60), dst: clean(dst, 60), label: clean(label, 80), status: s, target: tgt };
+	}
 
 export function clearChain(st, sessionId, mode, target) {
 	const flt = target === undefined ? "" : " AND target = ?";
@@ -373,23 +430,23 @@ export function clearChain(st, sessionId, mode, target) {
 	st.db.prepare(`DELETE FROM chain_nodes WHERE session_id = ? AND mode = ?${flt}`).run(...args);
 	st.db.prepare(`DELETE FROM chain_edges WHERE session_id = ? AND mode = ?${flt}`).run(...args);
 	return { cleared: "chain" };
-}
+	}
 
 /** 删除目标并级联清理其全部作战数据（该目标的覆盖终态/阶段/链路行）——错登清理语义；
  *  做完的目标归档用 switch 切走即可，勿删。删的是激活目标时自动锚定剩余最小 seq。 */
 export function removeTarget(st, sessionId, mode, seq) {
 	const owner = st.db.prepare("SELECT seq, label, active FROM targets WHERE session_id = ? AND mode = ? AND seq = ?").get(String(sessionId), String(mode), Number(seq));
 	if (owner) {
-		for (const tbl of ["coverage", "stages", "chain_nodes", "chain_edges"]) {
-			st.db.prepare(`DELETE FROM ${tbl} WHERE session_id = ? AND mode = ? AND target = ?`).run(String(sessionId), String(mode), owner.label);
-		}
-		st.db.prepare("DELETE FROM targets WHERE session_id = ? AND mode = ? AND seq = ?").run(String(sessionId), String(mode), owner.seq);
-		if (owner.active) {
-			st.db.prepare("UPDATE targets SET active = 1 WHERE rowid = (SELECT MIN(rowid) FROM targets WHERE session_id = ? AND mode = ?)").run(String(sessionId), String(mode));
-		}
+	for (const tbl of ["coverage", "stages", "chain_nodes", "chain_edges"]) {
+	st.db.prepare(`DELETE FROM ${tbl} WHERE session_id = ? AND mode = ? AND target = ?`).run(String(sessionId), String(mode), owner.label);
+	}
+	st.db.prepare("DELETE FROM targets WHERE session_id = ? AND mode = ? AND seq = ?").run(String(sessionId), String(mode), owner.seq);
+	if (owner.active) {
+	st.db.prepare("UPDATE targets SET active = 1 WHERE rowid = (SELECT MIN(rowid) FROM targets WHERE session_id = ? AND mode = ?)").run(String(sessionId), String(mode));
+	}
 	}
 	return { removed: Number(seq) };
-}
+	}
 
 /** 清除一条格子记录（回退到未测）；key 缺省 = 清空该会话该模式全部覆盖态。
  *  target 省略 = 全部目标 scope（历史语义）；显式串（含 ''=公共 scope）按 scope 清。 */
@@ -397,13 +454,13 @@ export function clearCoverage(st, sessionId, mode, key, target) {
 	const scope = target === undefined ? "" : " AND target = ?";
 	const scopeArgs = target === undefined ? [] : [String(target)];
 	if (key === undefined || key === "") {
-		st.db.prepare(`DELETE FROM coverage WHERE session_id = ? AND mode = ?${scope}`).run(String(sessionId), String(mode), ...scopeArgs);
-		st.db.prepare(`DELETE FROM stages WHERE session_id = ? AND mode = ?${scope}`).run(String(sessionId), String(mode), ...scopeArgs);
-		return { cleared: "all" };
+	st.db.prepare(`DELETE FROM coverage WHERE session_id = ? AND mode = ?${scope}`).run(String(sessionId), String(mode), ...scopeArgs);
+	st.db.prepare(`DELETE FROM stages WHERE session_id = ? AND mode = ?${scope}`).run(String(sessionId), String(mode), ...scopeArgs);
+	return { cleared: "all" };
 	}
 	st.db.prepare(`DELETE FROM coverage WHERE session_id = ? AND mode = ?${scope} AND key = ?`).run(String(sessionId), String(mode), ...scopeArgs, clean(key, 120));
 	return { cleared: clean(key, 120) };
-}
+	}
 
 export { CELL_STATES, STAGE_STATES };
 
@@ -414,7 +471,7 @@ const METHOD_PER_MODE = 50;
 
 function newMethodId() {
 	return `m-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-}
+	}
 
 /** 模板保存（upsert）。graph 为对象；体积/数量硬上限在存储层兜底强制。 */
 export function saveMethod(st, { id, mode, name, target = "", notes = "", graph }) {
@@ -431,49 +488,49 @@ export function saveMethod(st, { id, mode, name, target = "", notes = "", graph 
 	if (existing && existing.mode !== m) throw new Error(`模板属于 ${existing.mode}，不得跨模式覆盖`);
 	if (!existing) nodeId = newMethodId();
 	st.db.prepare(
-		"INSERT INTO methods (id, mode, name, target, notes, graph, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n" +
-		"ON CONFLICT(id) DO UPDATE SET name = excluded.name, target = excluded.target, notes = excluded.notes, graph = excluded.graph, updated_at = excluded.updated_at"
+	"INSERT INTO methods (id, mode, name, target, notes, graph, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n" +
+	"ON CONFLICT(id) DO UPDATE SET name = excluded.name, target = excluded.target, notes = excluded.notes, graph = excluded.graph, updated_at = excluded.updated_at"
 	).run(nodeId, m, nm, clean(target, 120), clean(notes, 2000), text, now(), now());
 	return { id: nodeId, created: !existing };
-}
+	}
 
 function parseGraphSafe(text) {
 	try {
-		const g = JSON.parse(text);
-		return { nodes: Array.isArray(g.nodes) ? g.nodes.length : 0 };
+	const g = JSON.parse(text);
+	return { nodes: Array.isArray(g.nodes) ? g.nodes.length : 0 };
 	} catch { return { nodes: 0, broken: true }; }
-}
+	}
 
 export function listMethods(st, mode) {
 	const rows = st.db.prepare("SELECT id, mode, name, target, notes, graph, updated_at AS updatedAt FROM methods WHERE mode = ? ORDER BY updated_at DESC").all(String(mode));
 	return rows.map((r) => ({ id: r.id, mode: r.mode, name: r.name, target: r.target, notes: r.notes, graph: (() => { try { return JSON.parse(r.graph); } catch { return { nodes: [], edges: [] }; } })(), updatedAt: r.updatedAt, nodeCount: parseGraphSafe(r.graph).nodes }));
-}
+	}
 
 export function getMethod(st, id) {
 	const r = st.db.prepare("SELECT id, mode, name, target, notes, graph, updated_at AS updatedAt FROM methods WHERE id = ?").get(String(id ?? ""));
 	if (!r) return undefined;
 	return { id: r.id, mode: r.mode, name: r.name, target: r.target, notes: r.notes, graph: (() => { try { return JSON.parse(r.graph); } catch { return { nodes: [], edges: [] }; } })(), updatedAt: r.updatedAt };
-}
+	}
 
 export function removeMethod(st, id) {
 	const r = st.db.prepare("DELETE FROM methods WHERE id = ?").run(String(id ?? ""));
 	if (r.changes === 0) throw new Error(`模板不存在：${id}`);
 	return { removed: String(id) };
-}
+	}
 
 export function copyMethod(st, id) {
 	const src = getMethod(st, id);
 	if (!src) throw new Error(`模板不存在：${id}`);
 	return saveMethod(st, { mode: src.mode, name: `${src.name} 副本`, target: src.target, notes: src.notes, graph: src.graph });
-}
+	}
 
 /** 导出（可按模式）：不含 id/时间戳，graph 展开为对象——跨机器通用格式。 */
 export function exportMethods(st, mode) {
 	const rows = mode
-		? st.db.prepare("SELECT mode, name, target, notes, graph FROM methods WHERE mode = ? ORDER BY updated_at").all(String(mode))
-		: st.db.prepare("SELECT mode, name, target, notes, graph FROM methods ORDER BY mode, updated_at").all();
+	? st.db.prepare("SELECT mode, name, target, notes, graph FROM methods WHERE mode = ? ORDER BY updated_at").all(String(mode))
+	: st.db.prepare("SELECT mode, name, target, notes, graph FROM methods ORDER BY mode, updated_at").all();
 	return rows.map((r) => ({ mode: r.mode, name: r.name, target: r.target, notes: r.notes, graph: (() => { try { return JSON.parse(r.graph); } catch { return { nodes: [], edges: [] }; } })() }));
-}
+	}
 
 /** 导入：逐行校验（mode 白名单/graph 形状/数量上限），坏行跳过并说明原因；id 一律重新生成。 */
 export function importMethods(st, rows, validModes) {
@@ -481,21 +538,21 @@ export function importMethods(st, rows, validModes) {
 	const skipped = [];
 	const list = Array.isArray(rows) ? rows.slice(0, 100) : [];
 	for (const row of list) {
-		const nm = clean(row?.name, 40);
-		const m = clean(row?.mode, 40);
-		if (!nm || !m) { skipped.push({ name: nm || "(无名)", reason: "缺名称或模式" }); continue; }
-		if (!validModes.includes(m)) { skipped.push({ name: nm, reason: `未知模式 ${m}` }); continue; }
-		let g = row?.graph ?? { nodes: [], edges: [] };
-		if (typeof g === "string") { try { g = JSON.parse(g); } catch { g = null; } }
-		if (!g || !Array.isArray(g.nodes) || g.nodes.length === 0) { skipped.push({ name: nm, reason: "图数据缺失或为空" }); continue; }
-		if (g.nodes.length > 60) { skipped.push({ name: nm, reason: "模块数超上限" }); continue; }
-		const count = st.db.prepare("SELECT COUNT(*) AS n FROM methods WHERE mode = ?").get(m).n;
-		if (count >= METHOD_PER_MODE) { skipped.push({ name: nm, reason: `模式 ${m} 模板数已达上限 ${METHOD_PER_MODE}` }); continue; }
-		const saved = saveMethod(st, { mode: m, name: nm, target: clean(row?.target, 120), notes: clean(row?.notes, 2000), graph: g });
-		imported.push({ id: saved.id, name: nm, mode: m });
+	const nm = clean(row?.name, 40);
+	const m = clean(row?.mode, 40);
+	if (!nm || !m) { skipped.push({ name: nm || "(无名)", reason: "缺名称或模式" }); continue; }
+	if (!validModes.includes(m)) { skipped.push({ name: nm, reason: `未知模式 ${m}` }); continue; }
+	let g = row?.graph ?? { nodes: [], edges: [] };
+	if (typeof g === "string") { try { g = JSON.parse(g); } catch { g = null; } }
+	if (!g || !Array.isArray(g.nodes) || g.nodes.length === 0) { skipped.push({ name: nm, reason: "图数据缺失或为空" }); continue; }
+	if (g.nodes.length > 60) { skipped.push({ name: nm, reason: "模块数超上限" }); continue; }
+	const count = st.db.prepare("SELECT COUNT(*) AS n FROM methods WHERE mode = ?").get(m).n;
+	if (count >= METHOD_PER_MODE) { skipped.push({ name: nm, reason: `模式 ${m} 模板数已达上限 ${METHOD_PER_MODE}` }); continue; }
+	const saved = saveMethod(st, { mode: m, name: nm, target: clean(row?.target, 120), notes: clean(row?.notes, 2000), graph: g });
+	imported.push({ id: saved.id, name: nm, mode: m });
 	}
 	return { imported, skipped };
-}
+	}
 
 //#endregion
 
@@ -507,7 +564,7 @@ const CAPS_LIMIT = { categories: 20, items: 100 };
 
 function capKey() {
 	return "u-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-}
+	}
 
 /** 保存能力（upsert）。category 行：cat=自身体系 key（新建自动 u- 前缀）；item 行：cat=所属主类 key、item=子类短 key。 */
 export function saveCap(st, { id, mode, kind, cat, item, label, desc = "", template = "", ref = "", pb = "", forms = "" }) {
@@ -522,51 +579,51 @@ export function saveCap(st, { id, mode, kind, cat, item, label, desc = "", templ
 	if (rowId && !existing) throw new Error(`能力不存在：${rowId}`);
 	let catKey = "", itemKey = "";
 	if (k === "category") {
-		if (existing) {
-			if (existing.kind !== "category") throw new Error("类型不可变更");
-			catKey = st.db.prepare("SELECT cat FROM capabilities WHERE id = ?").get(rowId).cat;
-		} else {
-			const n = st.db.prepare("SELECT COUNT(*) AS n FROM capabilities WHERE mode = ? AND kind = 'category'").get(m).n;
-			if (n >= CAPS_LIMIT.categories) throw new Error(`自定义主类已达上限 ${CAPS_LIMIT.categories}`);
-			catKey = capKey();
-		}
+	if (existing) {
+	if (existing.kind !== "category") throw new Error("类型不可变更");
+	catKey = st.db.prepare("SELECT cat FROM capabilities WHERE id = ?").get(rowId).cat;
 	} else {
-		const c = clean(cat, 60);
-		if (!CAP_KEY_RE.test(c)) throw new Error(`所属主类 key 非法：${c || "(空)"}`);
-		let oldCat = "";
-		if (existing) {
-			if (existing.kind !== "item") throw new Error("类型不可变更");
-			const prevRow = st.db.prepare("SELECT cat, item FROM capabilities WHERE id = ?").get(rowId);
-			itemKey = prevRow.item;
-			oldCat = prevRow.cat;
-		} else {
-			const n = st.db.prepare("SELECT COUNT(*) AS n FROM capabilities WHERE mode = ? AND kind = 'item'").get(m).n;
-			if (n >= CAPS_LIMIT.items) throw new Error(`自定义子类已达上限 ${CAPS_LIMIT.items}`);
-			itemKey = capKey();
-		}
-		catKey = c;
-		// 换主类：既有终态行随迁（旧 cat/item → 新 cat/item），矩阵不留幽灵行；
-		// 新 key 已有终态时（UPDATE OR IGNORE 落空）删旧行去重——状态以新格子现存为准。
-		if (oldCat && oldCat !== catKey) {
-			const oldKey = `${oldCat}/${itemKey}`, newKey = `${catKey}/${itemKey}`;
-			st.db.prepare("UPDATE OR IGNORE coverage SET key = ? WHERE mode = ? AND key = ?").run(newKey, m, oldKey);
-			st.db.prepare("DELETE FROM coverage WHERE mode = ? AND key = ?").run(m, oldKey);
-		}
+	const n = st.db.prepare("SELECT COUNT(*) AS n FROM capabilities WHERE mode = ? AND kind = 'category'").get(m).n;
+	if (n >= CAPS_LIMIT.categories) throw new Error(`自定义主类已达上限 ${CAPS_LIMIT.categories}`);
+	catKey = capKey();
+	}
+	} else {
+	const c = clean(cat, 60);
+	if (!CAP_KEY_RE.test(c)) throw new Error(`所属主类 key 非法：${c || "(空)"}`);
+	let oldCat = "";
+	if (existing) {
+	if (existing.kind !== "item") throw new Error("类型不可变更");
+	const prevRow = st.db.prepare("SELECT cat, item FROM capabilities WHERE id = ?").get(rowId);
+	itemKey = prevRow.item;
+	oldCat = prevRow.cat;
+	} else {
+	const n = st.db.prepare("SELECT COUNT(*) AS n FROM capabilities WHERE mode = ? AND kind = 'item'").get(m).n;
+	if (n >= CAPS_LIMIT.items) throw new Error(`自定义子类已达上限 ${CAPS_LIMIT.items}`);
+	itemKey = capKey();
+	}
+	catKey = c;
+	// 换主类：既有终态行随迁（旧 cat/item → 新 cat/item），矩阵不留幽灵行；
+	// 新 key 已有终态时（UPDATE OR IGNORE 落空）删旧行去重——状态以新格子现存为准。
+	if (oldCat && oldCat !== catKey) {
+	const oldKey = `${oldCat}/${itemKey}`, newKey = `${catKey}/${itemKey}`;
+	st.db.prepare("UPDATE OR IGNORE coverage SET key = ? WHERE mode = ? AND key = ?").run(newKey, m, oldKey);
+	st.db.prepare("DELETE FROM coverage WHERE mode = ? AND key = ?").run(m, oldKey);
+	}
 	}
 	const rid = rowId || ("c-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
 	st.db.prepare(
-		"INSERT INTO capabilities (id, mode, kind, cat, item, label, descr, template, ref, pb, forms, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n" +
-		"ON CONFLICT(id) DO UPDATE SET cat = excluded.cat, label = excluded.label, descr = excluded.descr, template = excluded.template, ref = excluded.ref, pb = excluded.pb, forms = excluded.forms, updated_at = excluded.updated_at"
+	"INSERT INTO capabilities (id, mode, kind, cat, item, label, descr, template, ref, pb, forms, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n" +
+	"ON CONFLICT(id) DO UPDATE SET cat = excluded.cat, label = excluded.label, descr = excluded.descr, template = excluded.template, ref = excluded.ref, pb = excluded.pb, forms = excluded.forms, updated_at = excluded.updated_at"
 	).run(rid, m, k, catKey, itemKey, l, clean(desc, 300), clean(template, 2000), clean(ref, 120), clean(pb, 120), clean(forms, 120), now(), now());
 	return { id: rid, kind: k, cat: catKey, item: itemKey };
-}
+	}
 
 export function listCaps(st, mode) {
 	return st.db.prepare(
-		"SELECT id, mode, kind, cat, item, label, descr, template, ref, pb, forms, updated_at AS updatedAt FROM capabilities WHERE mode = ? " +
-		"ORDER BY CASE kind WHEN 'category' THEN 0 ELSE 1 END, created_at, id"
+	"SELECT id, mode, kind, cat, item, label, descr, template, ref, pb, forms, updated_at AS updatedAt FROM capabilities WHERE mode = ? " +
+	"ORDER BY CASE kind WHEN 'category' THEN 0 ELSE 1 END, created_at, id"
 	).all(String(mode));
-}
+	}
 
 /** 删除：自定义主类级联删除其全部自定义子类，并清理对应覆盖终态孤儿行；返回级联数。 */
 export function removeCap(st, id) {
@@ -574,24 +631,24 @@ export function removeCap(st, id) {
 	if (!row) throw new Error(`能力不存在：${id}`);
 	let cascaded = 0;
 	if (row.kind === "category") {
-		const r = st.db.prepare("DELETE FROM capabilities WHERE mode = ? AND kind = 'item' AND cat = ?").run(row.mode, row.cat);
-		cascaded = r.changes;
-		// 主类与其全部子类格子（cat 及 cat/*）的终态行跨会话清理——矩阵本就不渲染自定义主类
-		st.db.prepare("DELETE FROM coverage WHERE mode = ? AND (key = ? OR key LIKE ? || '/%')").run(row.mode, row.cat, row.cat);
+	const r = st.db.prepare("DELETE FROM capabilities WHERE mode = ? AND kind = 'item' AND cat = ?").run(row.mode, row.cat);
+	cascaded = r.changes;
+	// 主类与其全部子类格子（cat 及 cat/*）的终态行跨会话清理——矩阵本就不渲染自定义主类
+	st.db.prepare("DELETE FROM coverage WHERE mode = ? AND (key = ? OR key LIKE ? || '/%')").run(row.mode, row.cat, row.cat);
 	} else if (row.item) {
-		st.db.prepare("DELETE FROM coverage WHERE mode = ? AND key = ?").run(row.mode, row.cat + "/" + row.item);
+	st.db.prepare("DELETE FROM coverage WHERE mode = ? AND key = ?").run(row.mode, row.cat + "/" + row.item);
 	}
 	st.db.prepare("DELETE FROM capabilities WHERE id = ?").run(row.id);
 	return { removed: row.id, cascaded };
-}
+	}
 
 /** 导出（可按模式）：保留 cat/item 体系 key（跨机器方法论模板引用可续）；行 id/时间戳不入包。 */
 export function exportCaps(st, mode) {
 	const rows = mode
-		? st.db.prepare("SELECT mode, kind, cat, item, label, descr, template, ref, pb, forms FROM capabilities WHERE mode = ? ORDER BY kind, created_at").all(String(mode))
-		: st.db.prepare("SELECT mode, kind, cat, item, label, descr, template, ref, pb, forms FROM capabilities ORDER BY mode, kind, created_at").all();
+	? st.db.prepare("SELECT mode, kind, cat, item, label, descr, template, ref, pb, forms FROM capabilities WHERE mode = ? ORDER BY kind, created_at").all(String(mode))
+	: st.db.prepare("SELECT mode, kind, cat, item, label, descr, template, ref, pb, forms FROM capabilities ORDER BY mode, kind, created_at").all();
 	return rows.map((r) => ({ mode: r.mode, kind: r.kind, cat: r.cat, item: r.item, label: r.label, desc: r.descr, template: r.template, ref: r.ref, pb: r.pb, forms: r.forms }));
-}
+	}
 
 /** 导入：格式/数量/同 key 去重检查，坏行跳过说明原因；体系 key 尽量保留，非法时新生成。 */
 export function importCaps(st, rows, validModes) {
@@ -599,33 +656,33 @@ export function importCaps(st, rows, validModes) {
 	const skipped = [];
 	const list = Array.isArray(rows) ? rows.slice(0, 200) : [];
 	for (const row of list) {
-		const m = clean(row?.mode, 40), k = clean(row?.kind, 10), l = clean(row?.label, 60);
-		if (!l) { skipped.push({ name: "(无名)", reason: "缺名称" }); continue; }
-		if (!m || !validModes.includes(m)) { skipped.push({ name: l, reason: `未知模式 ${m || "(空)"}` }); continue; }
-		if (!CAP_KINDS.includes(k)) { skipped.push({ name: l, reason: "kind 非法" }); continue; }
-		if (k === "category") {
-			const key = CAP_KEY_RE.test(clean(row?.cat, 60)) ? clean(row?.cat, 60) : capKey();
-			if (st.db.prepare("SELECT id FROM capabilities WHERE mode = ? AND kind = 'category' AND cat = ?").get(m, key)) { skipped.push({ name: l, reason: "同名主类标识已存在（重复导入）" }); continue; }
-			const n = st.db.prepare("SELECT COUNT(*) AS n FROM capabilities WHERE mode = ? AND kind = 'category'").get(m).n;
-			if (n >= CAPS_LIMIT.categories) { skipped.push({ name: l, reason: `模式 ${m} 自定义主类已达上限` }); continue; }
-			const rid = "c-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-			st.db.prepare("INSERT INTO capabilities (id, mode, kind, cat, item, label, descr, template, ref, pb, forms, created_at, updated_at) VALUES (?, ?, 'category', ?, '', ?, ?, ?, ?, ?, ?, ?, ?)")
-				.run(rid, m, key, l, clean(row?.desc, 300), clean(row?.template, 2000), clean(row?.ref, 120), clean(row?.pb, 120), clean(row?.forms, 120), now(), now());
-			imported.push({ id: rid, name: l, mode: m });
-		} else {
-			const ck = clean(row?.cat, 60), ik = clean(row?.item, 60);
-			if (!CAP_KEY_RE.test(ck) || !CAP_KEY_RE.test(ik)) { skipped.push({ name: l, reason: "所属主类或子类 key 非法" }); continue; }
-			if (st.db.prepare("SELECT id FROM capabilities WHERE mode = ? AND kind = 'item' AND cat = ? AND item = ?").get(m, ck, ik)) { skipped.push({ name: l, reason: "同 key 子类已存在（重复导入）" }); continue; }
-			const n = st.db.prepare("SELECT COUNT(*) AS n FROM capabilities WHERE mode = ? AND kind = 'item'").get(m).n;
-			if (n >= CAPS_LIMIT.items) { skipped.push({ name: l, reason: `模式 ${m} 自定义子类已达上限` }); continue; }
-			const rid = "c-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-			st.db.prepare("INSERT INTO capabilities (id, mode, kind, cat, item, label, descr, template, ref, pb, forms, created_at, updated_at) VALUES (?, ?, 'item', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-				.run(rid, m, ck, ik, l, clean(row?.desc, 300), clean(row?.template, 2000), clean(row?.ref, 120), clean(row?.pb, 120), clean(row?.forms, 120), now(), now());
-			imported.push({ id: rid, name: l, mode: m });
-		}
+	const m = clean(row?.mode, 40), k = clean(row?.kind, 10), l = clean(row?.label, 60);
+	if (!l) { skipped.push({ name: "(无名)", reason: "缺名称" }); continue; }
+	if (!m || !validModes.includes(m)) { skipped.push({ name: l, reason: `未知模式 ${m || "(空)"}` }); continue; }
+	if (!CAP_KINDS.includes(k)) { skipped.push({ name: l, reason: "kind 非法" }); continue; }
+	if (k === "category") {
+	const key = CAP_KEY_RE.test(clean(row?.cat, 60)) ? clean(row?.cat, 60) : capKey();
+	if (st.db.prepare("SELECT id FROM capabilities WHERE mode = ? AND kind = 'category' AND cat = ?").get(m, key)) { skipped.push({ name: l, reason: "同名主类标识已存在（重复导入）" }); continue; }
+	const n = st.db.prepare("SELECT COUNT(*) AS n FROM capabilities WHERE mode = ? AND kind = 'category'").get(m).n;
+	if (n >= CAPS_LIMIT.categories) { skipped.push({ name: l, reason: `模式 ${m} 自定义主类已达上限` }); continue; }
+	const rid = "c-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+	st.db.prepare("INSERT INTO capabilities (id, mode, kind, cat, item, label, descr, template, ref, pb, forms, created_at, updated_at) VALUES (?, ?, 'category', ?, '', ?, ?, ?, ?, ?, ?, ?, ?)")
+	.run(rid, m, key, l, clean(row?.desc, 300), clean(row?.template, 2000), clean(row?.ref, 120), clean(row?.pb, 120), clean(row?.forms, 120), now(), now());
+	imported.push({ id: rid, name: l, mode: m });
+	} else {
+	const ck = clean(row?.cat, 60), ik = clean(row?.item, 60);
+	if (!CAP_KEY_RE.test(ck) || !CAP_KEY_RE.test(ik)) { skipped.push({ name: l, reason: "所属主类或子类 key 非法" }); continue; }
+	if (st.db.prepare("SELECT id FROM capabilities WHERE mode = ? AND kind = 'item' AND cat = ? AND item = ?").get(m, ck, ik)) { skipped.push({ name: l, reason: "同 key 子类已存在（重复导入）" }); continue; }
+	const n = st.db.prepare("SELECT COUNT(*) AS n FROM capabilities WHERE mode = ? AND kind = 'item'").get(m).n;
+	if (n >= CAPS_LIMIT.items) { skipped.push({ name: l, reason: `模式 ${m} 自定义子类已达上限` }); continue; }
+	const rid = "c-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+	st.db.prepare("INSERT INTO capabilities (id, mode, kind, cat, item, label, descr, template, ref, pb, forms, created_at, updated_at) VALUES (?, ?, 'item', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+	.run(rid, m, ck, ik, l, clean(row?.desc, 300), clean(row?.template, 2000), clean(row?.ref, 120), clean(row?.pb, 120), clean(row?.forms, 120), now(), now());
+	imported.push({ id: rid, name: l, mode: m });
+	}
 	}
 	return { imported, skipped };
-}
+	}
 
 //#endregion
 
@@ -634,19 +691,19 @@ export function importCaps(st, rows, validModes) {
 /** 未命中落库（best-effort：任何失败静默——统计面不阻塞业务路径）。kind: cell/stage。 */
 export function recordMiss(st, { mode, kind, query, error = "", sessionId = "" }) {
 	try {
-		st.db.prepare("INSERT INTO misses (mode, kind, query, error, session_id, created_at) VALUES (?, ?, ?, ?, ?, ?)")
-			.run(clean(mode, 40), clean(kind, 20), clean(query, 120), clean(error, 500), clean(sessionId, 80), now());
+	st.db.prepare("INSERT INTO misses (mode, kind, query, error, session_id, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+	.run(clean(mode, 40), clean(kind, 20), clean(query, 120), clean(error, 500), clean(sessionId, 80), now());
 	} catch { /* 统计面尽力而为 */ }
-}
+	}
 
 /** 聚合视图：按 (mode, kind, query) 计数 + 最近出现，频次降序——高频未命中即「值得建自定义模块」清单。 */
 export function missSummary(st, { limit = 50 } = {}) {
 	const rows = st.db.prepare(
-		`SELECT mode, kind, query, COUNT(*) AS n, MAX(created_at) AS last_at
-		 FROM misses GROUP BY mode, kind, query ORDER BY n DESC, last_at DESC LIMIT ?`
+	`SELECT mode, kind, query, COUNT(*) AS n, MAX(created_at) AS last_at
+	 FROM misses GROUP BY mode, kind, query ORDER BY n DESC, last_at DESC LIMIT ?`
 	).all(Math.min(Math.max(Number(limit) || 50, 1), 200));
 	const total = st.db.prepare("SELECT COUNT(*) AS n FROM misses").get().n;
 	return { total, rows };
-}
+	}
 
 //#endregion

@@ -6,20 +6,26 @@ const PACKAGE_ID = '@dsh-external/dsh-mcp-studio'
 
 await rm('lib', { recursive: true, force: true })
 
-const rootNames = ts.sys.readDirectory('src', ['.ts', '.tsx'])
+// Type declarations are emitted from the same compiler options the editor uses.
+// Read tsconfig.json instead of restating the options here: a duplicated set drifts,
+// and when it drifts the build fails on something the editor says is fine — which is
+// how people end up hand-editing lib/ instead of fixing src/.
+const configPath = 'tsconfig.json'
+const configFile = ts.readConfigFile(configPath, ts.sys.readFile)
+if (configFile.error !== undefined) {
+  process.stderr.write(ts.formatDiagnosticsWithColorAndContext([configFile.error], {
+    getCanonicalFileName: (file) => file,
+    getCurrentDirectory: () => process.cwd(),
+    getNewLine: () => '\n',
+  }))
+  process.exit(1)
+}
+const parsedConfig = ts.parseJsonConfigFileContent(configFile.config, ts.sys, process.cwd())
+
 const program = ts.createProgram({
-  rootNames,
+  rootNames: parsedConfig.fileNames,
   options: {
-    target: ts.ScriptTarget.ES2023,
-    module: ts.ModuleKind.ESNext,
-    moduleResolution: ts.ModuleResolutionKind.Bundler,
-    allowImportingTsExtensions: true,
-    lib: ['lib.es2023.d.ts', 'lib.dom.d.ts', 'lib.dom.iterable.d.ts'],
-    jsx: ts.JsxEmit.ReactJSX,
-    strict: true,
-    noUncheckedIndexedAccess: true,
-    skipLibCheck: true,
-    verbatimModuleSyntax: true,
+    ...parsedConfig.options,
     declaration: true,
     emitDeclarationOnly: true,
     outDir: 'lib/types',

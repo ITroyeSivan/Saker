@@ -40,7 +40,8 @@ function api(endpoint, payload) {
 
 var ATLAS_MODES = [
 	{ id: "pentest", label: "渗透测试模式" },
-	{ id: "code-audit", label: "代码审计模式" }
+	{ id: "code-audit", label: "代码审计模式" },
+	{ id: "ctf-solver", label: "CTF 解题模式" }
 ];
 var STATE_META = {
 	todo: { label: "未测", cls: "is-todo" },
@@ -681,13 +682,16 @@ function ChainModal(props) {
 							if (!a || !b) return null;
 							var gold = (g.byId[e.dst] || {}).major;
 							var typeColor = ({ "discovered_on": "#38d4ff", "exploits": "#ff6b6b", "enables": "#2ecc8f", "depends_on": "#b48cff", "leads_to": "#ff9f43" })[e.edgeType];
+							// 可信度优先于边类型着色：未确认的路径不该看起来和已打通的一样
+							var stMeta = ({ "confirmed": { color: "#2ecc8f", dash: null, w: 2.0, op: 1 }, "suspected": { color: "#f5c542", dash: "5 3", w: 1.4, op: .9 }, "refuted": { color: "#8d99ab", dash: "2 4", w: 1.2, op: .42 } })[e.status] || null;
+							var lineColor = stMeta ? stMeta.color : (typeColor || (gold ? "#f5c542" : "rgba(120,170,220,.55)"));
 							var x1 = a.x + g.W, y1 = a.y + g.H / 2, x2 = b.x, y2 = b.y + g.H / 2;
 							var mx = (x1 + x2) / 2;
 							var d = "M" + x1 + "," + y1 + " C" + mx + "," + y1 + " " + mx + "," + y2 + " " + x2 + "," + y2;
 							var typeLabel = e.edgeType ? ({ "discovered_on": "在…发现", "exploits": "利用", "enables": "使可行", "depends_on": "前置依赖", "leads_to": "导致" })[e.edgeType] : "";
 							return React.createElement("g", { key: "e" + i },
-								React.createElement("path", { d: d, fill: "none", stroke: typeColor || (gold ? "#f5c542" : "rgba(120,170,220,.55)"), strokeWidth: gold ? 1.8 : 1.3, markerEnd: "url(#" + (gold ? "dsh-ata-arrow-gold" : "dsh-ata-arrow") + ")" }),
-								(typeLabel || e.label) ? React.createElement("text", { x: mx, y: (y1 + y2) / 2 - 6, textAnchor: "middle", fontSize: 10, fill: typeColor || (gold ? "#ffe9ad" : "#8fb4d9"), stroke: "rgba(6,17,36,.9)", strokeWidth:  3, paintOrder: "stroke" }, (typeLabel ? "◆" + typeLabel : "") + (e.label ? (typeLabel ? "·" : "") + e.label : "")) : null);
+								React.createElement("path", { d: d, fill: "none", stroke: lineColor, strokeWidth: stMeta && stMeta.w ? stMeta.w : (gold ? 1.8 : 1.3), strokeDasharray: stMeta && stMeta.dash ? stMeta.dash : null, opacity: stMeta ? stMeta.op : 1, markerEnd: "url(#" + (gold ? "dsh-ata-arrow-gold" : "dsh-ata-arrow") + ")" }),
+								(typeLabel || e.label || stMeta) ? React.createElement("text", { x: mx, y: (y1 + y2) / 2 - 6, textAnchor: "middle", fontSize: 10, fill: lineColor, stroke: "rgba(6,17,36,.9)", strokeWidth:  3, paintOrder: "stroke" }, (stMeta ? "●" + ({ "confirmed": "已确认", "suspected": "疑似", "refuted": "已证伪" })[e.status] + " " : "") + (typeLabel ? "◆" + typeLabel : "") + (e.label ? (typeLabel ? "·" : "") + e.label : "")) : null);
 						}),
 						g.nodes.map(function (n) {
 							var p = g.pos[n.id];

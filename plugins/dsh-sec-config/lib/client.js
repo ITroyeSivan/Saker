@@ -42,6 +42,24 @@ function rpc(connection, endpoint, payload) {
   return connection.rpc.call(CHANNEL, endpoint, payload);
 }
 
+/**
+ * RPC 失败时 `res.error` 是 `{code, message, details}` **对象**，不是字符串。
+ * 直接拿它当 React 子节点渲染会抛 React #31（Objects are not valid as a React child），
+ * 而宿主 SlotErrorBoundary 会把整个「安全配置」区吞成空白占位 —— 一个原本只该显示
+ * 一行红字的小错误，代价是整块面板消失。所有错误文案必须过这里。
+ */
+function errText(res, fallback) {
+  var e = res && res.error;
+  if (!e) return fallback;
+  if (typeof e === 'string') return e;
+  var head = e.message || e.code || fallback;
+  if (e.details === undefined || e.details === null) return head;
+  var raw = typeof e.details === 'string' ? e.details : JSON.stringify(e.details);
+  // 空对象/空数组是宿主信封的占位，不是有效信息 —— 显示出来只会变成「（{}）」这种噪音
+  if (!raw || raw === '{}' || raw === '[]') return head;
+  return head + '（' + raw.slice(0, 200) + '）';
+}
+
 function fieldStyle() {
   return { display: 'block', width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l1, #d9d9de)', background: 'var(--dsw-alias-bg-base, #fff)', color: 'var(--dsw-alias-label-primary, #1a1a1a)', fontSize: 13, boxSizing: 'border-box' };
 }
@@ -128,7 +146,7 @@ function ToolLibrary(props) {
       if (!r) { up({ msg: '请先输入工具根目录路径' }); return; }
       if (roots.indexOf(r) >= 0) { up({ rootInput: '', msg: '该目录已在列表中' }); return; }
       patchCfg({ roots: roots.concat([r]) });
-      up({ rootInput: '', msg: '目录已添加，点「探测并自动导入」开始' });
+      up({ rootInput: '', msg: '目录已添加，点「探测并自动导入」开始', msgOk: true });
     } catch (err) { up({ msg: '添加目录出错：' + String(err && err.message || err) }); }
   };
   var removeRoot = function (r) { patchCfg({ roots: roots.filter(function (x) { return x !== r; }) }); };
@@ -183,11 +201,11 @@ function ToolLibrary(props) {
       added.push({ key: key, name: displayNameOf(f), path: f.path, category: pv.catOverride[f.path] || f.category || CAT_FALLBACK });
     });
     if (added.length === 0) {
-      up({ msg: dup > 0 ? '所选均已在库（跳过重复 ' + dup + ' 项）' : '没有勾选可导入的条目' });
+      up({ msg: dup > 0 ? '所选均已在库（跳过重复 ' + dup + ' 项）' : '没有勾选可导入的条目', msgOk: dup > 0 });
       return;
     }
     patchCfg({ entries: entries.concat(added) });
-    up({ preview: null, msg: '已导入 ' + added.length + ' 项' + (dup ? '（跳过重复 ' + dup + '）' : '') + '，点「保存配置」生效' });
+    up({ msgOk: true, preview: null, msg: '已导入 ' + added.length + ' 项' + (dup ? '（跳过重复 ' + dup + '）' : '') + '，点「保存配置」生效' });
   };
   var importOne = function (f) {
     if (entries.some(function (e) { return e.path === f.path; })) { up({ msg: '该工具已在库中' }); return; }
@@ -196,7 +214,7 @@ function ToolLibrary(props) {
     var name = displayNameOf(f);
     patchCfg({ entries: entries.concat([{ key: key, name: name, path: f.path, category: f.category || CAT_FALLBACK }]) });
     var pv = S.preview;
-    if (pv) up({ preview: Object.assign({}, pv, { files: pv.files.filter(function (x) { return x.path !== f.path; }) }), msg: '已导入 ' + name });
+    if (pv) up({ preview: Object.assign({}, pv, { files: pv.files.filter(function (x) { return x.path !== f.path; }) }), msg: '已导入 ' + name, msgOk: true });
   };
 
   var removeEntry = function (key) { patchCfg({ entries: entries.filter(function (e) { return e.key !== key; }) }); };
@@ -208,7 +226,7 @@ function ToolLibrary(props) {
     if (!p) { up({ msg: '请填写工具绝对路径' }); return; }
     if (entries.some(function (e) { return e.path === p || e.key === name; })) { up({ msg: '该路径或名称已在库中' }); return; }
     patchCfg({ entries: entries.concat([{ key: name, name: name, path: p, category: S.manual.cat || CAT_FALLBACK }]) });
-    up({ manual: { cat: S.manual.cat || CAT_FALLBACK, name: '', path: '' }, msg: '已加入，点「保存配置」生效' });
+    up({ manual: { cat: S.manual.cat || CAT_FALLBACK, name: '', path: '' }, msg: '已加入，点「保存配置」生效', msgOk: true });
   };
   var addCategory = function () {
     var c = S.newCat.trim();
@@ -285,7 +303,7 @@ function ToolLibrary(props) {
     var kids = rows.map(function (e) {
           return el('div', { key: e.key, style: { display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0', fontSize: 13 } },
             el('span', { style: { flex: '0 0 150px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, e.name || e.key),
-            el('span', { style: { flex: 1, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 } }, e.path),
+            el('span', { title: e.path, style: { flex: 1, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 } }, e.path),
             el('select', { value: e.category, style: { fontSize: 11 }, onChange: function (ev) { setEntryCat(e.key, ev.target.value); } }, cats.map(function (cc) { return el('option', { key: cc, value: cc }, cc); })),
             el('button', { type: 'button', style: rowBtnStyle({ color: '#d1242f' }), onClick: function () { removeEntry(e.key); } }, '移除'));
         });
@@ -312,7 +330,7 @@ function ToolLibrary(props) {
   children.push(el('div', { key: 'cats', style: { borderTop: '1px solid var(--dsw-alias-border-l1,#d9d9de)', marginTop: 10, paddingTop: 8 } },
     el('div', { style: { fontWeight: 600, fontSize: 13, margin: '6px 0' } }, '分类管理'),
     el('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' } }, catKids)));
-  if (S.msg) children.push(el('div', { key: 'msg', style: msgStyle(true) }, S.msg));
+  if (S.msg) children.push(el('div', { key: 'msg', style: msgStyle(S.msgOk === true) }, S.msg));
   return el('div', null, children);
 }
 function hintStyle() { return { fontSize: 12, color: 'var(--dsw-alias-label-tertiary, #6e6e73)', marginBottom: 6, lineHeight: 1.6 }; }
@@ -532,7 +550,7 @@ function ModelLink(props) {
       if (res && res.ok && res.value) {
         setMsg({ ok: true, text: '已写入 ' + res.value.baseURL + ' —— 重启 dsh 后生效' });
         load();
-      } else setMsg({ ok: false, text: (res && res.error) || '写入失败' });
+      } else setMsg({ ok: false, text: errText(res, '写入失败') });
     });
   }
 
@@ -544,7 +562,7 @@ function ModelLink(props) {
         var r = res.value;
         setProbe(r);
         setMsg({ ok: r.ok, text: (r.ok ? '连通正常' : '连不通') + ' · HTTP ' + r.status + ' · ' + r.ms + 'ms' + (r.error ? ' · ' + r.error : '') });
-      } else setMsg({ ok: false, text: (res && res.error) || '探测失败' });
+      } else setMsg({ ok: false, text: errText(res, '探测失败') });
     });
   }
 
@@ -560,7 +578,7 @@ function ModelLink(props) {
         if (action !== 'stop' && bp.error) text += '：' + bp.error;
         setMsg({ ok: !!up, text: text + (up && p.health ? '（build ' + (p.health.build || p.health.kind) + '）' : '') });
         load();
-      } else setMsg({ ok: false, text: (res && res.error) || '操作失败' });
+      } else setMsg({ ok: false, text: errText(res, '操作失败') });
     });
   }
 
@@ -641,8 +659,190 @@ function ModelLink(props) {
       : null);
 }
 
+var EP_KINDS = [
+  { id: 'proxy', label: '本机代理' },
+  { id: 'upstream', label: '直连上游' },
+  { id: 'baseline', label: '初始地址' },
+  { id: 'default', label: '清除覆盖（仅内建 provider）' },
+  { id: 'custom', label: '自定义' },
+];
+
+/**
+ * 端点档案：把「换供应商」变成一次点击。
+ *
+ * 动机：上游（OpenCode Go 等）随时可能改鉴权方式，或某天 dsh 原生就能接——
+ * 那时不该去「设置 → 模型」手改 baseURL，而应该点一下就切过去、且能一键切回来。
+ *
+ * 「切回来」靠的是**初始地址快照**，不是「清除覆盖」：
+ * 实测宿主会以 `provider "custom" model "glm-5.3-flash" needs a baseURL;
+ * the installed catalog does not describe this route` 拒绝清空自定义 provider 的地址——
+ * 自定义模型 id 不在 dsh 内建目录里，baseURL 就是必填，没有「默认端点」可回退。
+ */
+function EndpointProfiles(props) {
+  var [st, setSt] = useState({ status: 'loading', value: null });
+  var [busy, setBusy] = useState('');
+  var [msg, setMsg] = useState(null);
+  var [form, setForm] = useState({ name: '', baseURL: '', kind: 'custom' });
+
+  function load() {
+    rpc(props.connection, 'model/endpoints', {}).then(function (res) {
+      if (res && res.ok && res.value) setSt({ status: 'ready', value: res.value });
+      else setSt({ status: 'error', value: null });
+    });
+  }
+  useEffect(load, []);
+
+  function use(id) {
+    setBusy('use:' + id); setMsg(null);
+    rpc(props.connection, 'model/endpoint-use', { id: id }).then(function (res) {
+      setBusy('');
+      if (res && res.ok && res.value) {
+        var v = res.value;
+        setMsg({ ok: true, text: '已切到「' + v.used + '」' + (v.op === 'unset' ? '（已清除 baseURL 覆盖，回到 dsh 默认）' : ' → ' + v.baseURL) + ' · 重启 dsh 后生效' });
+        load();
+        if (props.onChanged) props.onChanged();
+      } else setMsg({ ok: false, text: errText(res, '切换失败') });
+    });
+  }
+
+  function save(p, silent) {
+    setBusy('save'); if (!silent) setMsg(null);
+    rpc(props.connection, 'model/endpoint-save', { profile: p }).then(function (res) {
+      setBusy('');
+      if (res && res.ok && res.value) {
+        if (!silent) setMsg({ ok: true, text: '档案已保存：' + (res.value.saved && res.value.saved.name) });
+        load();
+      } else setMsg({ ok: false, text: errText(res, '保存失败') });
+    });
+  }
+
+  function del(id) {
+    setBusy('del:' + id); setMsg(null);
+    rpc(props.connection, 'model/endpoint-delete', { id: id }).then(function (res) {
+      setBusy('');
+      if (res && res.ok) load();
+      else setMsg({ ok: false, text: errText(res, '删除失败') });
+    });
+  }
+
+  function captureBaseline() {
+    setBusy('baseline'); setMsg(null);
+    rpc(props.connection, 'model/endpoint-baseline', {}).then(function (res) {
+      setBusy('');
+      if (res && res.ok && res.value) {
+        setMsg({ ok: true, text: '已把当前地址记为初始地址：' + res.value.baseline.baseURL });
+        load();
+      } else setMsg({ ok: false, text: errText(res, '记录失败') });
+    });
+  }
+
+  if (st.status === 'loading') return React.createElement('div', { style: { fontSize: 13 } }, '端点档案加载中…');
+  if (st.status === 'error') return null;
+  var v = st.value;
+  var rows = (v.profiles && v.profiles.length) ? v.profiles.map(function (p) { return { p: p, saved: true }; })
+    : (v.suggestions || []).map(function (p) { return { p: p, saved: false }; });
+
+  function kindLabel(k) {
+    var hit = null;
+    EP_KINDS.forEach(function (x) { if (x.id === k) hit = x; });
+    return hit ? hit.label : k;
+  }
+
+  function row(item) {
+    var p = item.p;
+    var active = v.activeProfileId === p.id;
+    return React.createElement('div', {
+      key: p.id,
+      style: { display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderBottom: '1px solid var(--dsw-alias-border-l1,#f0f0f2)' },
+    },
+      React.createElement('div', { style: { flex: 1, minWidth: 0 } },
+        React.createElement('div', { style: { fontSize: 13, fontWeight: 600, color: 'var(--dsw-alias-label-primary,#1a1a1a)' } },
+          p.name,
+          ' ',
+          React.createElement('span', { style: { fontSize: 11, fontWeight: 400, color: 'var(--dsw-alias-label-tertiary,#6e6e73)' } }, '· ' + kindLabel(p.kind)),
+          active ? React.createElement('span', { style: { fontSize: 11, marginLeft: 6, color: '#1a7f37' } }, '● 当前') : null),
+        React.createElement('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', wordBreak: 'break-all' } },
+          p.baseURL || '（无 baseURL 覆盖）', p.note ? ' · ' + p.note : '')),
+      React.createElement('button', {
+        type: 'button', style: btnStyle(!active), disabled: busy !== '' || active,
+        onClick: function () { use(p.id); },
+      }, active ? '已生效' : (busy === 'use:' + p.id ? '切换中…' : '切到这一档')),
+      item.saved
+        ? React.createElement('button', {
+            type: 'button', style: btnStyle(false), disabled: busy !== '',
+            onClick: function () { del(p.id); },
+          }, busy === 'del:' + p.id ? '删除中…' : '删除')
+        : React.createElement('button', {
+            type: 'button', style: btnStyle(false), disabled: busy !== '',
+            onClick: function () { save({ name: p.name, baseURL: p.baseURL, kind: p.kind, note: p.note }, false); },
+          }, '存为档案'));
+  }
+
+  return React.createElement(Group, { title: '模型端点档案（一键切换供应商）' },
+    React.createElement('div', { style: hintStyle() },
+      '把常用的上游地址存成档案，换供应商时点一下就切过去，不用去「设置 → 模型」手改 baseURL。当前 provider：',
+      React.createElement('code', null, v.provider),
+      v.namespaceReady ? null : React.createElement('span', { style: { color: '#d1242f' } }, '（该 provider 未注册，先在「设置 → 模型」建好）')),
+    React.createElement('div', { style: hintStyle() },
+      '「回得去」靠的是「恢复初始地址」档：自定义 provider 的模型不在 dsh 内建目录里，baseURL 是必填项，清掉会被宿主判为非法配置。',
+      '想切回原来的地址就用它（', v.baseline && v.baseline.baseURL ? '当前记录：' + v.baseline.baseURL : '尚未记录，点下方按钮记一次', '）。'),
+    React.createElement('div', { style: { fontSize: 12, lineHeight: 1.9, marginBottom: 8, color: 'var(--dsw-alias-label-tertiary, #6e6e73)' } },
+      React.createElement('div', null, '当前生效：',
+        React.createElement('code', null, v.installedBaseUrl === null ? '（未读到）' : (v.installedBaseUrl || '（无覆盖）'))),
+      React.createElement('div', null, '命中档位：',
+        React.createElement('code', null, v.activeProfileName || '（不匹配任何档案）'),
+        v.isDefault ? React.createElement('span', { style: { marginLeft: 6, color: '#1a7f37' } }, '● 无覆盖') : null)),
+    rows.length
+      ? React.createElement('div', null, rows.map(row))
+      : React.createElement('div', { style: hintStyle() }, '（还没有档案）'),
+    React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' } },
+      React.createElement('button', {
+        type: 'button', style: btnStyle(false), disabled: busy !== '' || !v.installedBaseUrl,
+        onClick: captureBaseline,
+      }, busy === 'baseline' ? '记录中…' : '把当前生效地址记为初始地址')),
+    React.createElement('div', { style: { marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)' } },
+      React.createElement('div', { style: { fontSize: 13, fontWeight: 600, marginBottom: 2 } }, '新增/更新档案'),
+      React.createElement('label', { style: labelStyle() }, '档案名（同 id 即更新；新档案填个新的名字即可）'),
+      React.createElement(Input, {
+        value: form.name, placeholder: '例如：OpenCode Go（代理）',
+        onChange: function (t) { setForm(Object.assign({}, form, { name: t })); },
+      }),
+      React.createElement('label', { style: labelStyle() }, '类型'),
+      React.createElement('div', { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } },
+        EP_KINDS.map(function (k) {
+          var on = form.kind === k.id;
+          return React.createElement('button', {
+            key: k.id, type: 'button', disabled: busy !== '',
+            onClick: function () { setForm(Object.assign({}, form, { kind: k.id })); },
+            style: { padding: '5px 10px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
+              border: '1px solid ' + (on ? '#2f81f7' : 'var(--dsw-alias-border-l1,#d9d9de)'),
+              background: on ? '#e8f1fe' : 'transparent', color: on ? '#1d4ed8' : 'var(--dsw-alias-label-primary,#1a1a1a)' },
+          }, k.label);
+        })),
+      form.kind === 'default'
+        ? React.createElement('div', { style: { marginTop: 6, fontSize: 11, color: '#9a6700' } }, '这一档不需要地址：切换时清除 baseURL 覆盖。⚠️ 仅当该 provider 的模型在 dsh 内建目录里才成立；自定义 provider 会被宿主判为缺 baseURL 而拒绝（届时会给出提示，配置不会被改坏）。')
+        : React.createElement('div', null,
+            React.createElement('label', { style: labelStyle() }, '端点地址（写到 /v1 为止）'),
+            React.createElement(Input, {
+              value: form.baseURL, placeholder: 'http://127.0.0.1:8788/v1',
+              onChange: function (t) { setForm(Object.assign({}, form, { baseURL: t })); },
+            })),
+      React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' } },
+        React.createElement('button', {
+          type: 'button', style: btnStyle(true), disabled: busy !== '',
+          onClick: function () {
+            save({ name: form.name, baseURL: form.baseURL, kind: form.kind }, false);
+            setForm({ name: '', baseURL: '', kind: 'custom' });
+          },
+        }, busy === 'save' ? '保存中…' : '保存档案'),
+        React.createElement('button', { type: 'button', style: btnStyle(false), disabled: busy !== '', onClick: load }, '刷新'))),
+    msg ? React.createElement('div', { style: msgStyle(msg.ok) }, msg.text) : null);
+}
+
 function Page(props) {
   var [state, setState] = useState({ status: 'loading', value: null });
+  // 切档后要刷新 ModelLink 的「当前生效」——用 key 触发重挂载，避免把两处状态耦合起来。
+  var [rev, setRev] = useState(0);
 
   function load() {
     rpc(props.connection, 'settings/get', {}).then(function (res) {
@@ -658,7 +858,9 @@ function Page(props) {
   return React.createElement('div', { style: { maxWidth: 620 } },
     React.createElement(ConfigForm, { connection: props.connection, value: state.value, onChange: function (v) { setState({ status: 'ready', value: v }); }, onSaved: load }),
     React.createElement('hr', { style: { border: 'none', borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', margin: '20px 0' } }),
-    React.createElement(ModelLink, { connection: props.connection }),
+    React.createElement(ModelLink, { key: 'model-' + rev, connection: props.connection }),
+    React.createElement('hr', { style: { border: 'none', borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', margin: '20px 0' } }),
+    React.createElement(EndpointProfiles, { connection: props.connection, onChanged: function () { setRev(function (n) { return n + 1; }); } }),
     React.createElement('hr', { style: { border: 'none', borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', margin: '20px 0' } }),
     React.createElement(PasswordForm, { connection: props.connection }));
 }

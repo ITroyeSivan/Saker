@@ -121,7 +121,7 @@ const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); 
 }
 
 // 7. 模式清单完整性（Saker 发行版的两个安全模式）
-ok("安全模式清单", Array.isArray(MODE_IDS) && MODE_IDS.length === 2 && MODE_IDS.includes("pentest") && MODE_IDS.includes("code-audit"));
+ok("安全模式清单", Array.isArray(MODE_IDS) && MODE_IDS.length === 3 && MODE_IDS.includes("pentest") && MODE_IDS.includes("code-audit") && MODE_IDS.includes("ctf-solver"));
 
 // 8. apply 装配：defineTool 方言冒烟（真 dsh-tools）+ 事件接线 + 模式门禁
 //    库走 DSH_TRACE_VAULT_DB 临时文件，不碰真实过程库。
@@ -137,7 +137,11 @@ ok("安全模式清单", Array.isArray(MODE_IDS) && MODE_IDS.length === 2 && MOD
 		tools: { register: (tool) => registered.push(tool) },
 		systemPrompt: { context: (c) => contexts.push(c) },
 		agentPresets: { composedPreset: (agentCtx) => agentCtx?.preset ?? "pentest" },
-		get: () => undefined
+		get: () => undefined,
+		// 真实宿主一定有 effect（插件用它挂卸载钩子）：fake ctx 缺了会让 apply 抛。
+		// 本插件有一条 ctx.effect 用于释放 SQLite 句柄 —— 句柄悬着会锁住库文件，
+		// 导致备份/迁移/损坏自愈（rename）在 Windows 上失败。
+		effect: () => ({ dispose: () => {} })
 	};
 	let threw = null;
 	try { mod.apply(fakeCtx, {}); } catch (e) { threw = e; }
@@ -191,7 +195,11 @@ ok("安全模式清单", Array.isArray(MODE_IDS) && MODE_IDS.length === 2 && MOD
 		tools: { register: () => {} },
 		systemPrompt: { context: (c) => contexts.push(c) },
 		agentPresets: { composedPreset: (agentCtx) => agentCtx?.preset ?? "pentest" },
-		get: () => undefined
+		get: () => undefined,
+		// 真实宿主一定有 effect（插件用它挂卸载钩子）：fake ctx 缺了会让 apply 抛。
+		// 本插件有一条 ctx.effect 用于释放 SQLite 句柄 —— 句柄悬着会锁住库文件，
+		// 导致备份/迁移/损坏自愈（rename）在 Windows 上失败。
+		effect: () => ({ dispose: () => {} })
 	};
 	mod.apply(fakeCtx, {});
 	ok("信封节已注册", contexts.length === 1 && contexts[0].name === "trace-vault");

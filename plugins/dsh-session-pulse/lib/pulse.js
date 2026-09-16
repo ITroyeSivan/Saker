@@ -3,14 +3,14 @@
 // 本文件是可测的单一事实源：client.js 内为镜像实现（client 侧无法相对引用本文件，
 // 改动须双侧同步并保持逐行为等价——test/run.mjs 以本文件为准）。
 
-/** 两模式名单（会话状态面板的作用域）。 */
-export const PULSE_MODES = ["pentest", "code-audit"];
+/** 三种安全模式名单（会话状态面板的作用域）。 */
+export const PULSE_MODES = ["pentest", "code-audit", "ctf-solver"];
 
 export const MODE_LABELS = {
-	pentest: "渗透测试", "code-audit": "代码审计"
+	pentest: "渗透测试", "code-audit": "代码审计", "ctf-solver": "CTF 解题"
 };
 
-/** 会话摘要上的 agentPreset 是否属于两模式（列表源重启后可能退化为组合名，须走服务端兜底）。 */
+/** 会话摘要上的 agentPreset 是否属于安全模式（列表源重启后可能退化为组合名，须走服务端兜底）。 */
 export function modeOk(agentPreset, serverMode) {
 	if (PULSE_MODES.includes(agentPreset)) return true;
 	if (serverMode && PULSE_MODES.includes(serverMode)) return true;

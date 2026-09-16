@@ -14,7 +14,7 @@ Saker/
 │   ├── skills/                   # 两个专业模式共享的协作与复核技能（6 个）
 │   ├── refs/                     # 共享参考资料
 │   └── scripts/                  # 工具面辅助脚本
-├── plugins/                      # 21 个独立功能插件
+├── plugins/                      # 23 个独立功能插件
 ├── scripts/                      # 全量打包（pack-all）与安装（install-all）
 ├── lib/preset-root.js            # 模式注册入口
 ├── cordis.patch.yml              # bundle 加载配置
@@ -52,7 +52,7 @@ plugins/dsh-<名字>/
 ## 打包与安装
 
 ```bash
-node scripts/pack-all.mjs        # 生成根模式包和 21 个插件包
+node scripts/pack-all.mjs        # 生成根模式包和 23 个插件包
 node scripts/install-all.mjs     # 装进 dsh 的 web profile
 ```
 

@@ -38,7 +38,7 @@
 
 **设置页操作**：勾选组合、克隆官方方法到用户层编辑、保存自定义组合、恢复默认、预览渲染结果、编辑开头语（opening）。
 
-**组合持久化**：`~/.dsh/method-stack/profiles/<presetId>.yml`。组合内容变化递增 `rev`，并追加 `~/.dsh/method-stack/audit.log`（时间 / 模式 / 组合 / rev），改动可追溯。
+**组合持久化**：`~/.dsh/method-stack/profiles/<presetId>.json`。组合内容变化递增 `rev`，并追加 `~/.dsh/method-stack/audit.log`（时间 / 模式 / 组合 / rev），改动可追溯。
 
 ## 会话内使用
 

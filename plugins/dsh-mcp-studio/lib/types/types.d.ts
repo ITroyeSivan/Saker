@@ -5,7 +5,17 @@ import type { Config as McpClientConfig } from '@deepseek-ai/dsh-mcp-client';
 export declare const ID_PATTERN: RegExp;
 /** Default per-tool-call timeout passed to the mcp-client bridge (ms). */
 export declare const DEFAULT_TOOL_CALL_TIMEOUT_MS = 60000;
+/** `auto` switches to proxy at or above this many tools per server. */
+export declare const DEFAULT_PROXY_THRESHOLD = 10;
 export type Transport = 'stdio' | 'streamable-http';
+/**
+ * How a server's tools reach the model.
+ * - `auto`   — proxy when the server carries at least `proxyThreshold` tools, direct below that.
+ * - `direct` — one model-facing tool per server tool (`mcp__<server>__<tool>`).
+ * - `proxy`  — only `mcp_search` / `mcp_call`; metadata is fetched on demand.
+ * - `hybrid` — `proxy`, plus `directTools` promoted back to real `mcp__<server>__<tool>` entries.
+ */
+export type Exposure = 'auto' | 'direct' | 'proxy' | 'hybrid';
 /** One user-configured MCP server row. */
 export interface ServerEntry {
     /** Stable row identity used to diff mounted instances. */
@@ -31,6 +41,12 @@ export interface ServerEntry {
     readonly toolCallTimeoutMs: number;
     /** Reject the mount when the initial connection or tool sync fails. */
     readonly failOnStartupError: boolean;
+    /** Which tools reach the model; see {@link Exposure}. */
+    readonly exposure: Exposure;
+    /** `auto` threshold: at or above this many tools the server is proxied. */
+    readonly proxyThreshold: number;
+    /** `hybrid` only: raw tool names kept as real `mcp__<name>__<tool>` entries. */
+    readonly directTools: string[];
 }
 /** The whole `mcp-studio` settings section. */
 export interface StudioSection {

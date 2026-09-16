@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import url from "node:url";
-import { runGate, listGates, tableRows, setGoal, updateProgress, setScope, markTested, coverageCheck, syncOperationState, registerIntent, intentSummary, validateAnchor, setConstraints, constraintSummary, deriveScopeDraft, DECOMPOSITION, readOperationState as ros } from "../lib/index.js";
+import { runGate, listGates, tableRows, setGoal, updateProgress, setScope, markTested, coverageCheck, syncOperationState, registerIntent, intentSummary, validateAnchor, setConstraints, constraintSummary, deriveScopeDraft, DECOMPOSITION, conclusionVerdict, apply, readOperationState as ros } from "../lib/index.js";
 
 const F = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), "fixture");
 let failed = 0;
@@ -214,6 +214,8 @@ import os from "node:os";
 	expect("operation_progress rejects unknown id", threw);
 	s = updateProgress(ws, { met: "g3", pending: "复测 g2\n导出报告" });
 	expect("operation_progress all-met verdict", s.verdict === "all-met" && s.pending.length === 2, JSON.stringify(s));
+	s = updateProgress(ws, { failed: "g3" });
+	expect("operation_progress failed is closed and counted separately", s.verdict === "all-met" && s.open === 0 && s.failed === 1 && s.met === 2, JSON.stringify(s));
 	// 门禁自动同步：无契约时落骨架，已有契约保留 criteria
 	syncOperationState(ws, { mode: "pentest", stage: "P1", pass: true });
 	st = ros(fs, ws);
@@ -389,6 +391,27 @@ import os from "node:os";
 	expect("scope render 含分母语义", scope.output.render(null, s1)[0].text.includes("cloud-security 分母语义") && scope.output.render(null, s1)[0].text.includes("账号/区域/服务面"));
 	const c1 = await cons.execute({ workspace: tmp, items: "deny: x" }, { agent: { ctx: { preset: "ctf-solver" }, session: { id: "s1", header: {} } } });
 	expect("constraints render 含约束面提示", cons.output.render(null, c1)[0].text.includes("ctf-solver 约束面提示") && cons.output.render(null, c1)[0].text.includes("不猜不撞"));
+
+	// ── operation_intent：execute **必须返回可序列化对象**（实跑抓到的真 bug）────────
+	// 曾经写成 `execute(args, exec) { (async () => { … return {…} })() }` 的 fire-and-forget：
+	// 外层没有 return → execute 返回 undefined → 真 defineTool 的
+	// `validateJsonSchemaValue(output.schema, undefined)` 判违反必填 ok：
+	//   Error: tool "operation_intent" returned invalid output: value is not lossless JSON
+	// 后果：**意图其实已异步登记成功，但模型收到的是「调用失败」**（真实会话里连续两次都报）。
+	const intent = registered.find((x) => x?.name === "operation_intent");
+	expect("operation_intent 已注册", !!intent);
+	const i1 = await intent.execute(
+		{ workspace: tmp, summary: "追一条线索", anchor_kind: "boot" },
+		{ agent: { ctx: { preset: "pentest" }, session: { id: "s1", header: {} } } },
+	);
+	expect("operation_intent.execute 返回了值（不是 undefined）", i1 !== undefined && i1 !== null);
+	expect("返回值是 JSON 可序列化的普通对象", typeof i1 === "object" && JSON.stringify(i1) !== undefined);
+	expect("返回值带 ok 字段（输出 schema 的必填项）", typeof i1.ok === "boolean");
+	expect("成功时回带 id/anchor/open/total", i1.ok && typeof i1.id === "string" && typeof i1.anchor === "string" && Number.isInteger(i1.open) && Number.isInteger(i1.total));
+	// 反向锚：若哪天又改回 fire-and-forget，第一条就会亮红
+	expect("没有 fire-and-forget 的 execute（(async () => {…})() 且顶层无 return）",
+		!/execute\(args, exec\) \{\s*\n\s*\(async \(\) => \{/.test(fs.readFileSync(new URL("../lib/index.js", import.meta.url), "utf8")));
+
 	fs.rmSync(tmp, { recursive: true, force: true });
 }
 
@@ -425,6 +448,161 @@ import os from "node:os";
 	const parsed = ros(fs, fresh);
 	fs.rmSync(fresh, { recursive: true, force: true });
 	fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+// ── 行为级体检的回归锁（独立文件 test/behavior-locks.mjs 也能单跑）──────────
+// 锁的都是「实战才暴露、静态看不出来」的形态：
+//   ① 定时器回调抛异常会**打挂整个宿主进程**（不是坏一个面板）
+//   ② SQLite 库文件损坏时应备份+重建，而不是抛（磁盘满/强杀/网盘回写都会造成）
+//   ③ 库句柄必须释放（悬着会锁住文件，Windows 上 rename 必 EBUSY）
+//   ④ 释放钩子必须在 apply() 内（放模块顶层会 ReferenceError: ctx is not defined）
+{
+	const P = path.resolve(path.dirname(F), "../..");
+	// ① mcp-studio 看门狗
+	{
+		const src = fs.readFileSync(`${P}/dsh-mcp-studio/lib/index.js`, "utf8");
+		expect("mcp-studio: watchdog 回调有异常隔离（定时器抛错会打挂宿主）",
+			/const watchdogTick = \(\) => \{[\s\S]{0,200}?try \{[\s\S]{0,80}?tickOnce\(\)/.test(src));
+		expect("mcp-studio: watchdog 失败有可见出口", src.includes("mcp-studio: watchdog tick failed"));
+		expect("mcp-studio: 读 servers 走永不抛的 serversOf()", src.includes("const serversOf = () => {"));
+		expect("mcp-studio: 没有未保护的 current().servers 迭代", !/for \(const server of current\(\)\.servers\)/.test(src));
+	}
+	// ②③④ 四个 SQLite 插件
+	for (const p of ["dsh-campaign-memory", "dsh-attack-atlas", "dsh-redteam-results", "dsh-trace-vault"]) {
+		const store = fs.readFileSync(`${P}/${p}/lib/store.js`, "utf8");
+		expect(`${p}: 库损坏时自愈（备份+重建而非抛）`, store.includes("healCorruptDb"));
+		expect(`${p}: 自愈在开库前调用`, /healCorruptDb\(dbPath\);[\s\S]{0,120}?new DatabaseSync\(dbPath\)/.test(store));
+		expect(`${p}: 自愈清掉 -wal/-shm 残留`, store.includes('"-wal", "-shm"'));
+		expect(`${p}: 备份名冲突不覆盖`, store.includes("while (fs.existsSync(bak))"));
+		expect(`${p}: 备份失败如实抛出（不装作自愈成功）`, /catch \(e\) \{[\s\S]{0,320}?throw e;/.test(store));
+		const idx = fs.readFileSync(`${P}/${p}/lib/index.js`, "utf8");
+		// 两种正确写法都认：模块级 closeStore() 或 store 单例上的 .close()
+		expect(`${p}: 有库句柄释放钩子`,
+			/ctx\.effect\(\(\) => \(\) => \{[\s\S]{0,140}?(store\?\.close\?\.\(\)|closeStore\(\))/.test(idx) && idx.includes(': store handle"'));
+		// 钩子必须在 apply 内（放模块顶层会 ReferenceError: ctx is not defined）
+		expect(`${p}: 释放钩子在 apply() 内`, idx.search(/^function apply\(/m) < idx.indexOf(': store handle"'));
+	}
+	// 全仓：没有第二个 fire-and-forget 的 execute
+	{
+		const dirs = ["dsh-attack-atlas", "dsh-auto-advance", "dsh-campaign-memory", "dsh-ctf-observer", "dsh-hunter",
+			"dsh-knowledge-hub", "dsh-method-stack", "dsh-product-subagents", "dsh-redteam-results", "dsh-refusal-guard",
+			"dsh-route-boost", "dsh-scanner-tools", "dsh-sec-config", "dsh-sec-enforce", "dsh-semgrep-audit",
+			"dsh-session-pulse", "dsh-skill-browse", "dsh-trace-vault", "dsh-webshell-mgr"];
+		const bad = dirs.filter((d) => {
+			const f = `${P}/${d}/lib/index.js`;
+			if (!fs.existsSync(f)) return false;
+			return /execute\s*\([^)]*\)\s*\{\s*\n?\s*\(async \(\) => \{/.test(fs.readFileSync(f, "utf8"));
+		});
+		expect("全仓无第二个 fire-and-forget 的 execute", bad.length === 0);
+	}
+}
+
+// ── 结束条件判定（P1-2「结束条件外置」）───────────────────────────────────
+// 判据设计要点，逐条锁住：
+//   · 只拦「没结论」，不拦「失败」—— failed 是有效终态（如实收口），卡它等于逼模型造假
+//   · done / blocked / dropped 都是意图终态，只有 open 拦
+//   · 无台账的会话不该被闸门管（普通对话没有 operation_goal）
+{
+	const mk = (criteria, intents) => ({ version: 1, goal: "g", criteria, intents });
+
+	// 1. 无台账 → 放行
+	let v = conclusionVerdict(null);
+	expect("conclusion: 无台账放行", v.canConclude === true && v.blockers.length === 0, JSON.stringify(v));
+
+	// 2. 全 met → 放行
+	v = conclusionVerdict(mk([{ id: "g1", text: "a", status: "met" }], []));
+	expect("conclusion: 全 met 放行", v.canConclude === true, JSON.stringify(v));
+
+	// 3. ★ open 准则 → 拦（这是整个机制的核心）
+	v = conclusionVerdict(mk([{ id: "g1", text: "a", status: "met" }, { id: "g2", text: "b", status: "open" }], []));
+	expect("conclusion: open 准则拦下", v.canConclude === false, JSON.stringify(v));
+	expect("conclusion: 拦下时点名是哪条", v.blockers.some((b) => b.kind === "criterion" && b.id === "g2"), JSON.stringify(v.blockers));
+	expect("conclusion: reason 给出可执行的下一步", /operation_progress/.test(v.reason), v.reason);
+
+	// 4. ★ failed 也放行（不逼模型造假）—— 反向锁：若改成只认 met，这条必红
+	v = conclusionVerdict(mk([{ id: "g1", text: "a", status: "failed" }], []));
+	expect("conclusion: failed 视为已收口（不逼造假）", v.canConclude === true, JSON.stringify(v));
+
+	// 5. open 意图 → 拦
+	v = conclusionVerdict(mk([{ id: "g1", text: "a", status: "met" }],
+		[{ id: "i1", summary: "查这个线索", status: "open" }]));
+	expect("conclusion: open 意图拦下", v.canConclude === false, JSON.stringify(v));
+	expect("conclusion: 意图 blocker 带摘要", v.blockers.some((b) => b.kind === "intent" && b.id === "i1" && b.text.includes("线索")), JSON.stringify(v.blockers));
+
+	// 6. 意图三种终态都放行
+	for (const stx of ["done", "blocked", "dropped"]) {
+		v = conclusionVerdict(mk([{ id: "g1", text: "a", status: "met" }], [{ id: "i1", summary: "x", status: stx }]));
+		expect(`conclusion: 意图 ${stx} 放行`, v.canConclude === true, JSON.stringify(v));
+	}
+
+	// 7. 准则与意图都拦 → blockers 两类都在，计数正确
+	v = conclusionVerdict(mk(
+		[{ id: "g1", text: "a", status: "open" }, { id: "g2", text: "b", status: "open" }],
+		[{ id: "i1", summary: "x", status: "open" }]));
+	expect("conclusion: 两类 blocker 都在", v.blockers.length === 3, JSON.stringify(v.blockers));
+	expect("conclusion: 计数正确", v.criteria.open === 2 && v.intents.open === 1, JSON.stringify(v));
+
+	// 8. 坏数据不抛（缺 status / 非数组 / 缺字段）
+	for (const bad of [mk([], []), mk([{ id: "g1" }], []), { criteria: [], intentSummary: 1 }, { criteria: "x" }, {}]) {
+		let threw = false;
+		try { v = conclusionVerdict(bad); } catch { threw = true; }
+		expect(`conclusion: 坏数据不抛（${JSON.stringify(bad).slice(0, 28)}）`, threw === false && typeof v.canConclude === "boolean");
+	}
+	// 9. 空准则但有台账 → 放行（异常但可收尾，reason 说明）
+	v = conclusionVerdict(mk([], []));
+	expect("conclusion: 无准则放行且 reason 说明", v.canConclude === true && /无准则/.test(v.reason), v.reason);
+
+	// 10. **行为级**：真调 operation_conclude，断言「系统放行才 concludeTurn」。
+	// 为什么要真调而不是 grep 源码：源码里有 `exec?.concludeTurn?.()` 这行文本，
+	// 并不等于**在正确分支上真的会执行**（把 if (canConclude) 改成 if (false)，
+	// 文本检查照样通过 —— 第一版反向验证就抓到了这个假锁）。
+	{
+		const tools = [];
+		apply({ tools: { register: (t) => tools.push(t) } });
+		const tool = tools.find((t) => t.name === "operation_conclude");
+		expect("conclusion: operation_conclude 已注册", !!tool);
+
+		const ws = fs.mkdtempSync(path.join(os.tmpdir(), "sg-conclude-"));
+		const writeState = (st) => fs.writeFileSync(path.join(ws, "operation-state.json"), JSON.stringify(st), "utf8");
+		const call = async () => {
+			let concluded = 0;
+			const out = await tool.execute({ workspace: ws }, { concludeTurn: () => { concluded++; } });
+			return { out, concluded };
+		};
+
+		// 10a 全收口 → 放行 + 真的 concludeTurn
+		writeState(mk([{ id: "g1", text: "a", status: "met" }], [{ id: "i1", summary: "x", status: "done" }]));
+		let r = await call();
+		expect("conclusion(行为): 全收口放行", r.out.ok === true && r.out.canConclude === true, JSON.stringify(r.out).slice(0, 120));
+		expect("conclusion(行为): 放行时调了一次 concludeTurn（宿主级收尾）", r.concluded === 1, `concluded=${r.concluded}`);
+
+		// 10b 有 open 准则 → 驳回 + **不调** concludeTurn
+		writeState(mk([{ id: "g1", text: "a", status: "open" }], []));
+		r = await call();
+		expect("conclusion(行为): open 准则被驳回", r.out.ok === true && r.out.canConclude === false, JSON.stringify(r.out).slice(0, 120));
+		expect("conclusion(行为): 驳回时**没有** concludeTurn（否则闸门失效）", r.concluded === 0, `concluded=${r.concluded}`);
+		expect("conclusion(行为): 驳回返回可执行的 blocker 清单",
+			Array.isArray(r.out.blockers) && r.out.blockers.some((b) => b.id === "g1"), JSON.stringify(r.out.blockers));
+
+		// 10c 无台账 → 放行（普通会话不受闸门管辖）
+		fs.rmSync(path.join(ws, "operation-state.json"), { force: true });
+		r = await call();
+		expect("conclusion(行为): 无台账放行且收尾", r.out.canConclude === true && r.concluded === 1, JSON.stringify(r.out).slice(0, 120));
+
+		// 10d 老宿主没有 concludeTurn API → 不抛错（降级为普通结果）
+		writeState(mk([{ id: "g1", text: "a", status: "met" }], []));
+		let threw = false;
+		let out2;
+		try { out2 = await tool.execute({ workspace: ws }, {}); } catch { threw = true; }
+		expect("conclusion(行为): 宿主无 concludeTurn 时安全降级", threw === false && out2.ok === true && out2.canConclude === true);
+
+		// 10e 缺 workspace 参数 → 可读的错误，不是 TypeError
+		let e2;
+		try { await tool.execute({}, {}); e2 = null; } catch (e) { e2 = e; }
+		expect("conclusion(行为): 缺参给出可读错误", e2 === null || !(e2 instanceof TypeError), String(e2 && e2.message).slice(0, 80));
+
+		fs.rmSync(ws, { recursive: true, force: true });
+	}
 }
 
 process.exit(failed ? 1 : 0);

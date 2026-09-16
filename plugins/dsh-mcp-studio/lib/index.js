@@ -6,6 +6,7 @@ import * as mcpClient from "@deepseek-ai/dsh-mcp-client";
 import z from "@deepseek-ai/schemastery";
 var ID_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
 var DEFAULT_TOOL_CALL_TIMEOUT_MS = 6e4;
+var DEFAULT_PROXY_THRESHOLD = 10;
 var ServerEntrySchema = z.object({
   id: z.string().required().pattern(ID_PATTERN),
   enabled: z.boolean().default(true),
@@ -18,18 +19,21 @@ var ServerEntrySchema = z.object({
   url: z.string().default(""),
   headers: z.dict(z.string()),
   toolCallTimeoutMs: z.number().step(1e3).min(1e3).max(36e5).default(DEFAULT_TOOL_CALL_TIMEOUT_MS),
-  failOnStartupError: z.boolean().default(false)
+  failOnStartupError: z.boolean().default(false),
+  exposure: z.union([z.const("auto"), z.const("direct"), z.const("proxy"), z.const("hybrid")]).default("auto"),
+  proxyThreshold: z.number().step(1).min(1).max(200).default(DEFAULT_PROXY_THRESHOLD),
+  directTools: z.array(z.string()).default([])
 });
 var Config = z.object({
   servers: z.array(ServerEntrySchema).default([])
 });
-function splitArgs(line2) {
+function splitArgs(line) {
   const tokens = [];
   let current = "";
   let quote;
   let started = false;
-  for (let index = 0; index < line2.length; index += 1) {
-    const char = line2[index];
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
     if (quote === void 0) {
       if (char === " " || char === "	") {
         if (started) {
@@ -39,8 +43,8 @@ function splitArgs(line2) {
         }
         continue;
       }
-      if (char === "\\" && index + 1 < line2.length) {
-        current += line2[++index];
+      if (char === "\\" && index + 1 < line.length) {
+        current += line[++index];
         started = true;
         continue;
       }
@@ -55,8 +59,8 @@ function splitArgs(line2) {
       if (char === "'") quote = void 0;
       else current += char;
     } else {
-      if (char === "\\" && index + 1 < line2.length) {
-        current += line2[++index];
+      if (char === "\\" && index + 1 < line.length) {
+        current += line[++index];
       } else if (char === '"') {
         quote = void 0;
       } else {
@@ -115,6 +119,13 @@ function validateSection(value) {
       if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
         throw new Error(`mcp-studio: server "${server.name}" url must use http or https`);
       }
+    }
+    const promoted = /* @__PURE__ */ new Set();
+    for (const raw of server.directTools ?? []) {
+      const name2 = raw.trim();
+      if (name2 === "") throw new Error(`mcp-studio: server "${server.name}" has a blank entry in directTools`);
+      if (promoted.has(name2)) throw new Error(`mcp-studio: server "${server.name}" lists "${name2}" twice in directTools`);
+      promoted.add(name2);
     }
   }
 }
@@ -176,7 +187,7 @@ function asToolsViewHandle(view) {
   if (!(visible instanceof Map)) return void 0;
   return view;
 }
-function createStatusHandler(section, viewOf, tracker, executions) {
+function createStatusHandler(section, viewOf, tracker, executions, proxy) {
   return async () => {
     const current = section();
     const view = asToolsViewHandle(viewOf());
@@ -186,7 +197,15 @@ function createStatusHandler(section, viewOf, tracker, executions) {
     for (const server of current.servers) {
       const prefix = `mcp__${server.name}__`;
       const tools = [];
-      if (view !== void 0 && server.enabled) {
+      const effective = server.enabled && proxy !== void 0 ? proxy.exposureOf(server) : "direct";
+      let proxiedState;
+      let proxiedError;
+      if (server.enabled && effective === "proxy" && proxy !== void 0) {
+        for (const tool of proxy.view.catalog(server.name)) tools.push({ name: tool.name, description: tool.description });
+        tools.sort((left, right) => left.name.localeCompare(right.name));
+        proxiedState = proxy.view.state(server.name);
+        proxiedError = proxiedState?.error;
+      } else if (view !== void 0 && server.enabled) {
         for (const [name2, definition] of view.visible) {
           if (!name2.startsWith(prefix)) continue;
           tools.push({ name: name2.slice(prefix.length), description: typeof definition.description === "string" ? definition.description : "" });
@@ -197,7 +216,13 @@ function createStatusHandler(section, viewOf, tracker, executions) {
       let state;
       let error;
       if (!server.enabled) state = "disabled";
-      else if (tools.length > 0) state = "connected";
+      else if (effective === "proxy") {
+        if (proxiedState === void 0) state = "unreachable";
+        else if (proxiedState.state === "ready") state = "connected";
+        else if (proxiedState.state === "connecting") state = "mounting";
+        else state = "error";
+        error = proxiedError;
+      } else if (tools.length > 0) state = "connected";
       else if (note?.state === "error") {
         state = "error";
         error = note.error;
@@ -212,7 +237,8 @@ function createStatusHandler(section, viewOf, tracker, executions) {
         state,
         ...error === void 0 ? {} : { error },
         toolCount: tools.length,
-        tools
+        tools,
+        exposure: effective
       });
     }
     const enabled = servers.filter((server) => server.state !== "disabled").length;
@@ -226,10 +252,6 @@ function createStatusHandler(section, viewOf, tracker, executions) {
 function registerStudioRpc(ctx, connection, settings, ns, status, diagnose, clearExecutions, debug) {
   connection.register(ctx, STUDIO_CHANNEL, async (endpoint, rawPayload) => {
     if (endpoint === "status") return status();
-    // 只读诊断面：把「徽章为什么是这个状态」的依据摊开——工具视图是否拿到、
-    // 全局视图里有没有 mcp__ 前缀的工具、每个 server 的挂载备注（mounting /
-    // mounted / error）。徽章本身只反映「工具可见性」，排障时必须能看到中间量，
-    // 否则「诊断能连上、界面显示不可达」这类分歧无从定位。
     if (endpoint === "debug") {
       if (debug === void 0) return badRequest("debug unavailable");
       return ok(debug());
@@ -272,53 +294,120 @@ function registerStudioRpc(ctx, connection, settings, ns, status, diagnose, clea
   }, { authority: "loopback" });
 }
 
-// src/diagnose.ts
+// src/transport.ts
 import { spawn } from "node:child_process";
-var TIMEOUT_MS = 1e4;
-function line(obj) {
-  return `${JSON.stringify(obj)}
-`;
-}
-function stdioTransport(server) {
-  const args = splitArgs(server.argsLine);
-  const child = spawn(server.command, args, {
+var DEFAULT_REQUEST_TIMEOUT_MS = 1e4;
+function stdioChannel(server) {
+  const child = spawn(server.command, splitArgs(server.argsLine), {
     cwd: server.cwd === "" ? void 0 : server.cwd,
     env: { ...process.env, ...server.env },
     stdio: ["pipe", "pipe", "pipe"]
   });
+  const pending = /* @__PURE__ */ new Map();
   let buffer = "";
-  const listeners = [];
-  child.stdout.setEncoding("utf8");
-  child.stdout.on("data", (chunk) => {
+  let nextId = 1;
+  let alive = true;
+  let closedReason;
+  const failAll = (reason) => {
+    if (!alive) return;
+    alive = false;
+    closedReason = reason;
+    for (const [id, entry] of pending) {
+      clearTimeout(entry.timer);
+      entry.reject(new Error(reason));
+      pending.delete(id);
+    }
+  };
+  child.stdout?.setEncoding("utf8");
+  child.stdout?.on("data", (chunk) => {
     buffer += chunk;
     let nl;
     while ((nl = buffer.indexOf("\n")) >= 0) {
       const frame = buffer.slice(0, nl).trim();
       buffer = buffer.slice(nl + 1);
       if (frame === "") continue;
+      let message;
       try {
-        const message = JSON.parse(frame);
-        for (const listener of listeners) listener(message);
+        message = JSON.parse(frame);
+      } catch {
+        continue;
+      }
+      const id = typeof message.id === "number" ? message.id : void 0;
+      if (id === void 0) continue;
+      const entry = pending.get(id);
+      if (entry === void 0) continue;
+      pending.delete(id);
+      clearTimeout(entry.timer);
+      if (message.error !== void 0) entry.reject(new Error(JSON.stringify(message.error)));
+      else entry.resolve(message.result);
+    }
+  });
+  child.stderr?.setEncoding("utf8");
+  child.stderr?.on("data", () => {
+  });
+  child.on("error", (error) => failAll(`child process error: ${error.message}`));
+  child.on("exit", (code, signal) => failAll(`server exited (code ${String(code)}, signal ${String(signal)})`));
+  child.stdin?.on("error", (error) => failAll(`stdio write failed: ${error.message}`));
+  child.stdin?.on("close", () => failAll("stdio input closed"));
+  const write = (payload) => {
+    if (!alive) throw new Error(closedReason ?? "channel closed");
+    const stdin = child.stdin;
+    if (stdin === null || stdin.destroyed || !stdin.writable) throw new Error("stdio input is not writable");
+    stdin.write(`${JSON.stringify(payload)}
+`);
+  };
+  return {
+    get alive() {
+      return alive;
+    },
+    get closedReason() {
+      return closedReason;
+    },
+    request(method, params, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS) {
+      return new Promise((resolve, reject) => {
+        if (!alive) {
+          reject(new Error(closedReason ?? "channel closed"));
+          return;
+        }
+        const id = nextId++;
+        const timer = setTimeout(() => {
+          pending.delete(id);
+          reject(new Error(`request "${method}" timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+        pending.set(id, { resolve, reject, timer });
+        try {
+          write({ jsonrpc: "2.0", id, method, ...params === void 0 ? {} : { params } });
+        } catch (error) {
+          clearTimeout(timer);
+          pending.delete(id);
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      });
+    },
+    notify(method, params) {
+      try {
+        write({ jsonrpc: "2.0", method, ...params === void 0 ? {} : { params } });
+      } catch {
+      }
+    },
+    close() {
+      failAll("channel closed by caller");
+      try {
+        child.kill();
       } catch {
       }
     }
-  });
-  child.stderr.setEncoding("utf8");
-  child.stderr.on("data", () => {
-  });
-  return {
-    send: (payload) => child.stdin.write(payload),
-    onMessage: (handler) => listeners.push(handler),
-    close: () => {
-      child.kill();
-    }
   };
 }
-async function httpTransport(server, messages) {
+function httpChannel(server) {
   const url = new URL(server.url);
-  const responses = [];
-  let sessionId = String(Object.entries(server.headers ?? {}).find(([k]) => k.toLowerCase() === "mcp-session-id")?.[1] ?? "").trim();
-  for (const message of messages) {
+  let sessionId = String(
+    Object.entries(server.headers ?? {}).find(([key]) => key.toLowerCase() === "mcp-session-id")?.[1] ?? ""
+  ).trim();
+  let nextId = 1;
+  let alive = true;
+  let closedReason;
+  const post = async (message, timeoutMs) => {
     const isNotification = typeof message.method === "string" && message.id === void 0;
     const response = await fetch(url, {
       method: "POST",
@@ -329,114 +418,574 @@ async function httpTransport(server, messages) {
         ...server.headers
       },
       body: JSON.stringify(message),
-      signal: AbortSignal.timeout(TIMEOUT_MS)
+      signal: AbortSignal.timeout(timeoutMs)
     });
     if (!sessionId) {
       const issued = response.headers.get("mcp-session-id")?.trim();
       if (issued) sessionId = issued;
     }
-    if (isNotification) continue;
+    if (isNotification) return [];
     if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
     const contentType = response.headers.get("content-type") ?? "";
     const text = await response.text();
     if (text.trim() === "") throw new Error(`empty response body from ${server.url}`);
+    const out = [];
     if (contentType.includes("text/event-stream")) {
       for (const frame of text.split("\n")) {
         if (!frame.startsWith("data:")) continue;
         const payload = frame.slice(5).trim();
         if (payload === "") continue;
         try {
-          responses.push(JSON.parse(payload));
+          out.push(JSON.parse(payload));
         } catch {
         }
       }
     } else {
-      responses.push(JSON.parse(text));
+      out.push(JSON.parse(text));
     }
-  }
-  return responses;
+    return out;
+  };
+  return {
+    get alive() {
+      return alive;
+    },
+    get closedReason() {
+      return closedReason;
+    },
+    async request(method, params, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS) {
+      if (!alive) throw new Error(closedReason ?? "channel closed");
+      const id = nextId++;
+      let responses;
+      try {
+        responses = await post({ jsonrpc: "2.0", id, method, ...params === void 0 ? {} : { params } }, timeoutMs);
+      } catch (error) {
+        if (error instanceof Error && !/^HTTP 4\d\d/.test(error.message)) {
+          alive = false;
+          closedReason = error.message;
+        }
+        throw error instanceof Error ? error : new Error(String(error));
+      }
+      const match = responses.find((candidate) => candidate.id === id);
+      if (match === void 0) throw new Error(`no response for "${method}" (id ${id})`);
+      if (match.error !== void 0) throw new Error(JSON.stringify(match.error));
+      return match.result;
+    },
+    notify(method, params) {
+      if (!alive) return;
+      void post({ jsonrpc: "2.0", method, ...params === void 0 ? {} : { params } }, DEFAULT_REQUEST_TIMEOUT_MS).catch(() => {
+      });
+    },
+    close() {
+      alive = false;
+      closedReason = "channel closed by caller";
+    }
+  };
 }
+function openChannel(server) {
+  return server.transport === "streamable-http" ? httpChannel(server) : stdioChannel(server);
+}
+async function handshake(channel, clientName = "dsh-mcp-studio", timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS) {
+  const result = await channel.request("initialize", {
+    protocolVersion: "2025-06-18",
+    capabilities: {},
+    clientInfo: { name: clientName, version: "0.1.0" }
+  }, timeoutMs);
+  channel.notify("notifications/initialized");
+  const info = result ?? {};
+  const serverInfo = info.serverInfo ?? {};
+  return {
+    ...typeof info.protocolVersion === "string" ? { protocolVersion: info.protocolVersion } : {},
+    ...typeof serverInfo.name === "string" ? { serverName: serverInfo.name } : {},
+    ...typeof serverInfo.version === "string" ? { serverVersion: serverInfo.version } : {}
+  };
+}
+async function listTools(channel, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS) {
+  const result = await channel.request("tools/list", {}, timeoutMs);
+  const tools = result?.tools;
+  if (!Array.isArray(tools)) return [];
+  return tools.filter((tool) => typeof tool === "object" && tool !== null).map((tool) => ({
+    name: typeof tool.name === "string" ? tool.name : "",
+    description: typeof tool.description === "string" ? tool.description : "",
+    inputSchema: tool.inputSchema ?? {}
+  })).filter((tool) => tool.name !== "");
+}
+
+// src/diagnose.ts
 async function diagnoseServer(server) {
   const started = Date.now();
+  const channel = openChannel(server);
   try {
-    if (server.transport === "streamable-http") {
-      const messages = [
-        { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "dsh-mcp-studio-diag", version: "0.1.0" } } },
-        { jsonrpc: "2.0", method: "notifications/initialized" },
-        { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }
-      ];
-      const responses = await httpTransport(server, messages);
-      const init = responses.find((message) => message.id === 1);
-      const tools = responses.find((message) => message.id === 2);
-      if (init === void 0 || init.result === void 0 && init.error !== void 0) {
-        throw new Error(`initialize failed: ${JSON.stringify(init?.error ?? "no response")}`);
-      }
-      const info = init.result ?? {};
-      const serverInfo = info.serverInfo ?? {};
-      const toolList = Array.isArray(tools?.result?.tools) ? (tools?.result).tools.length : void 0;
-      return {
-        ok: true,
-        elapsedMs: Date.now() - started,
-        protocolVersion: typeof info.protocolVersion === "string" ? info.protocolVersion : void 0,
-        serverName: typeof serverInfo.name === "string" ? serverInfo.name : void 0,
-        serverVersion: typeof serverInfo.version === "string" ? serverInfo.version : void 0,
-        toolCount: toolList
-      };
-    }
-    return await new Promise((resolve, reject) => {
-      const transport = stdioTransport(server);
-      const timer = setTimeout(() => {
-        transport.close();
-        reject(new Error(`handshake timed out after ${TIMEOUT_MS}ms`));
-      }, TIMEOUT_MS);
-      let protocolVersion;
-      let serverName;
-      let serverVersion;
-      let toolCount;
-      transport.onMessage((message) => {
-        if (message.id === 1 && message.result !== void 0) {
-          const info = message.result;
-          const serverInfo = info.serverInfo ?? {};
-          protocolVersion = typeof info.protocolVersion === "string" ? info.protocolVersion : void 0;
-          serverName = typeof serverInfo.name === "string" ? serverInfo.name : void 0;
-          serverVersion = typeof serverInfo.version === "string" ? serverInfo.version : void 0;
-          transport.send(line({ jsonrpc: "2.0", method: "notifications/initialized" }));
-          transport.send(line({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }));
-        } else if (message.id === 2 && message.result !== void 0) {
-          const tools = message.result.tools;
-          toolCount = Array.isArray(tools) ? tools.length : 0;
-          clearTimeout(timer);
-          transport.close();
-          resolve({
-            ok: true,
-            elapsedMs: Date.now() - started,
-            ...protocolVersion === void 0 ? {} : { protocolVersion },
-            ...serverName === void 0 ? {} : { serverName },
-            ...serverVersion === void 0 ? {} : { serverVersion },
-            toolCount
-          });
-        } else if (message.error !== void 0) {
-          clearTimeout(timer);
-          transport.close();
-          reject(new Error(JSON.stringify(message.error)));
-        }
-      });
-      transport.onMessage(() => {
-      });
-      transport.send(line({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "dsh-mcp-studio-diag", version: "0.1.0" } } }));
-    });
+    const info = await handshake(channel, "dsh-mcp-studio-diag", DEFAULT_REQUEST_TIMEOUT_MS);
+    const tools = await listTools(channel, DEFAULT_REQUEST_TIMEOUT_MS);
+    return {
+      ok: true,
+      elapsedMs: Date.now() - started,
+      ...info,
+      toolCount: tools.length
+    };
   } catch (error) {
     return {
       ok: false,
       elapsedMs: Date.now() - started,
       error: error instanceof Error ? error.message : String(error)
     };
+  } finally {
+    channel.close();
   }
 }
 
+// src/proxy.ts
+import { defineTool } from "@deepseek-ai/dsh-tools";
+var META_TOOL_SEARCH = "mcp_search";
+var META_TOOL_CALL = "mcp_call";
+var CATALOG_TTL_MS = 5 * 6e4;
+var SEARCH_DEFAULT_LIMIT = 8;
+var SEARCH_MAX_LIMIT = 30;
+var HIT_DESCRIPTION_CHARS = 140;
+var RETRY_BACKOFF_MS = 1e4;
+function decideExposure(server, toolCount) {
+  if (server.exposure === "direct") return "direct";
+  if (server.exposure === "proxy" || server.exposure === "hybrid") return "proxy";
+  if (toolCount === void 0) return "pending";
+  return toolCount >= server.proxyThreshold ? "proxy" : "direct";
+}
+function tokenize(query) {
+  return String(query ?? "").toLowerCase().split(/[\s,;|/]+/).map((token) => token.trim()).filter((token) => token !== "");
+}
+function scoreTool(meta, tokens) {
+  if (tokens.length === 0) return 1;
+  const name2 = meta.name.toLowerCase();
+  const description = meta.description.toLowerCase();
+  let score = 0;
+  for (const token of tokens) {
+    if (name2 === token) return 1e3;
+    if (name2.startsWith(token)) score += 60;
+    else if (name2.includes(token)) score += 40;
+    if (description.includes(token)) score += 8;
+  }
+  return score;
+}
+function rankTools(metas, options = {}) {
+  const tokens = tokenize(options.query);
+  const serverFilter = String(options.server ?? "").trim().toLowerCase();
+  const rawLimit = Number(options.limit);
+  const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), SEARCH_MAX_LIMIT) : SEARCH_DEFAULT_LIMIT;
+  const pool = serverFilter === "" ? metas : metas.filter((meta) => meta.server.toLowerCase() === serverFilter);
+  return pool.map((meta) => ({ meta, score: scoreTool(meta, tokens) })).filter((entry) => entry.score > 0).sort((left, right) => right.score - left.score || left.meta.server.localeCompare(right.meta.server) || left.meta.name.localeCompare(right.meta.name)).slice(0, limit).map((entry) => entry.meta);
+}
+function paramHint(inputSchema) {
+  const schema = inputSchema ?? {};
+  const properties = typeof schema.properties === "object" && schema.properties !== null ? Object.keys(schema.properties) : [];
+  const required = new Set(Array.isArray(schema.required) ? schema.required.map(String) : []);
+  const parts = properties.map((key) => required.has(key) ? key : `${key}?`);
+  if (schema.additionalProperties === true) parts.push("\u2026");
+  return parts.join(", ");
+}
+function toolLine(meta) {
+  const hint = paramHint(meta.inputSchema);
+  const description = meta.description.replace(/\s+/g, " ").trim().slice(0, HIT_DESCRIPTION_CHARS);
+  return `- ${meta.server}.${meta.name}(${hint})${description === "" ? "" : ` \u2014 ${description}`}`;
+}
+function renderSearchText(matches, context) {
+  const query = String(context.query ?? "").trim();
+  if (matches.length === 0) {
+    return query === "" ? "\u5F53\u524D\u6CA1\u6709\u542F\u7528\u4EFB\u4F55\u88AB\u4EE3\u7406\u7684 MCP \u5DE5\u5177\uFF08\u7F16\u76EE 0 \u6761\uFF09\u3002" : `\u6CA1\u6709\u5339\u914D\u300C${query}\u300D\u7684 MCP \u5DE5\u5177\uFF08\u672C\u8F6E\u7F16\u76EE ${context.total} \u6761\uFF09\u3002\u6362\u4E2A\u5173\u952E\u8BCD\uFF0C\u6216\u4E0D\u5E26\u5173\u952E\u8BCD\u5217\u51FA\u5168\u90E8\u3002`;
+  }
+  return [
+    `\u547D\u4E2D ${matches.length} \u6761\uFF08\u7F16\u76EE\u5171 ${context.total} \u6761\uFF09\uFF1A`,
+    ...matches.map(toolLine),
+    "",
+    `\u8C03\u7528\uFF1A${META_TOOL_CALL}(server=..., tool=..., args={...})\uFF1Bargs \u662F\u6309\u4E0A\u9762\u62EC\u53F7\u91CC\u7684\u53C2\u6570\u540D\u7EC4\u6210\u7684\u5BF9\u8C61\u3002`
+  ].join("\n");
+}
+function summarizeCatalog(metas) {
+  const counts = /* @__PURE__ */ new Map();
+  for (const meta of metas) counts.set(meta.server, (counts.get(meta.server) ?? 0) + 1);
+  return [...counts.entries()].map(([server, tools]) => ({ server, tools })).sort((left, right) => left.server.localeCompare(right.server));
+}
+var SCALAR_TYPES = /* @__PURE__ */ new Set(["string", "number", "integer", "boolean"]);
+function toParameterDeclaration(property) {
+  const node = property ?? {};
+  const description = typeof node.description === "string" ? node.description.replace(/\s+/g, " ").trim() : "";
+  const withDescription = (declaration2) => description === "" ? declaration2 : { ...declaration2, description };
+  if (node.type === "array") return withDescription({ type: "array" });
+  if (node.type === "object") return withDescription({ type: "object", additionalProperties: true });
+  if (typeof node.type !== "string" || !SCALAR_TYPES.has(node.type)) {
+    const note = "\uFF08\u539F schema \u4E3A\u590D\u6742/\u8054\u5408\u7C7B\u578B\uFF0C\u6309 JSON \u503C\u4F20\u5165\uFF09";
+    return { type: "json", description: description === "" ? note : `${description}${note}` };
+  }
+  const declaration = { type: node.type };
+  if (Array.isArray(node.enum)) declaration.enum = node.enum;
+  return withDescription(declaration);
+}
+function toToolParameters(inputSchema) {
+  const schema = inputSchema ?? {};
+  const properties = typeof schema.properties === "object" && schema.properties !== null ? schema.properties : {};
+  const required = new Set(Array.isArray(schema.required) ? schema.required.map(String) : []);
+  const parameters = {};
+  for (const [key, property] of Object.entries(properties)) {
+    parameters[key] = { ...toParameterDeclaration(property), ...required.has(key) ? { required: true } : {} };
+  }
+  return parameters;
+}
+var ProxyRegistry = class {
+  mounts = /* @__PURE__ */ new Map();
+  /**
+   * Last successfully listed tool count per server name, keyed by the row's connection
+   * fingerprint. Sticky on purpose. `auto` decides from this number, and the moment it
+   * decides "small, mount directly" the server leaves the proxy set — so a count read off
+   * the live mount alone forgets itself the instant it is used. That produced a live-only
+   * oscillation: pending → proxy (list 3) → direct → pending (count gone) → proxy → … with
+   * the direct mount torn down on every lap and the server's tools never staying visible.
+   * A learning that survives the mount is what makes the decision a one-way door; editing
+   * the row (its fingerprint changes) or calling dropServer() is what opens it again.
+   */
+  learned = /* @__PURE__ */ new Map();
+  section;
+  log;
+  constructor(section, log = () => {
+  }) {
+    this.section = section;
+    this.log = log;
+  }
+  /**
+   * What makes two versions of a row "the same server" for the purposes of a learned count.
+   * Deliberately excludes exposure/proxyThreshold/directTools: toggling a row between `auto`
+   * and `proxy` must not throw away what we already learned about its catalog size.
+   */
+  fingerprintOf(server) {
+    return JSON.stringify([
+      server.name,
+      server.transport,
+      server.command,
+      server.argsLine,
+      server.url,
+      server.cwd,
+      server.env
+    ]);
+  }
+  /** All catalogs, concatenated. */
+  catalog() {
+    const out = [];
+    for (const mount of this.mounts.values()) out.push(...mount.note.tools);
+    return out;
+  }
+  /** One server's catalog (`[]` when unlisted). */
+  catalogFor(serverName) {
+    const mount = this.mountByName(serverName);
+    return mount === void 0 ? [] : mount.note.tools;
+  }
+  /**
+   * A server's catalog size, or `undefined` while it has never answered.
+   * The distinction matters: `auto` must not treat "connect not attempted" as "zero tools"
+   * and permanently fall back to a direct mount without ever looking.
+   *
+   * A live reading wins, but a learned one is used when the server is no longer mounted by
+   * the proxy — which is the normal state of every `auto` row that resolved to `direct`.
+   */
+  listedCount(serverName) {
+    const mount = this.mountByName(serverName);
+    if (mount !== void 0 && mount.note.state === "ready") return mount.note.tools.length;
+    const row = this.section().servers.find((server) => server.name === serverName);
+    if (row === void 0) return void 0;
+    const learned = this.learned.get(serverName);
+    if (learned === void 0 || learned.fingerprint !== this.fingerprintOf(row)) return void 0;
+    return learned.count;
+  }
+  /** Per-server catalog state, for the status page. */
+  stateOf(serverName) {
+    const mount = this.mountByName(serverName);
+    if (mount === void 0) return void 0;
+    return { state: mount.note.state, ...mount.note.error === void 0 ? {} : { error: mount.note.error } };
+  }
+  /** Whether a server has a usable catalog — the proxied equivalent of "its tools are visible". */
+  hasCatalog(serverName) {
+    const mount = this.mountByName(serverName);
+    return mount !== void 0 && mount.note.state === "ready" && mount.note.tools.length > 0;
+  }
+  /** Per-server state for the status page and `debug`. */
+  snapshot() {
+    return [...this.mounts.values()].map((mount) => ({
+      id: mount.id,
+      name: mount.name,
+      state: mount.note.state,
+      tools: mount.note.tools.length,
+      ...mount.note.error === void 0 ? {} : { error: mount.note.error }
+    }));
+  }
+  mountByName(serverName) {
+    for (const mount of this.mounts.values()) if (mount.name === serverName) return mount;
+    return void 0;
+  }
+  serverOf(id) {
+    return this.section().servers.find((server) => server.id === id);
+  }
+  closeMount(id) {
+    const mount = this.mounts.get(id);
+    if (mount === void 0) return;
+    try {
+      mount.channel.close();
+    } catch {
+    }
+    this.mounts.delete(id);
+  }
+  /** Close everything (plugin unload). */
+  closeAll() {
+    for (const id of [...this.mounts.keys()]) this.closeMount(id);
+  }
+  /**
+   * Reconcile mounts against `list` (the rows whose exposure may be proxied).
+   * A row that leaves `list` or changes its name is torn down; a new row gets a channel.
+   *
+   * Only rows present in `list` are examined for staleness — a row that left because `auto`
+   * resolved it to `direct` must keep its learned count, or the decision it just made would
+   * be erased on the next reconcile.
+   */
+  syncServers(list) {
+    const wanted = /* @__PURE__ */ new Map();
+    for (const server of list) if (server.enabled) wanted.set(server.id, server);
+    for (const [id, mount] of [...this.mounts]) {
+      const server = wanted.get(id);
+      if (server !== void 0 && server.name === mount.name && this.fingerprintOf(server) === mount.fingerprint) continue;
+      this.closeMount(id);
+    }
+    for (const [id, server] of wanted) {
+      const learned = this.learned.get(server.name);
+      if (learned !== void 0 && learned.fingerprint !== this.fingerprintOf(server)) {
+        this.learned.delete(server.name);
+      }
+      if (this.mounts.has(id)) continue;
+      const fingerprint = this.fingerprintOf(server);
+      this.mounts.set(id, {
+        id,
+        name: server.name,
+        fingerprint,
+        channel: openChannel(server),
+        handshaken: false,
+        note: { state: "connecting", tools: [], listedAt: 0, nextRetryAt: 0 }
+      });
+    }
+  }
+  /** Forget one mount by server name (used when `auto` resolves to a direct mount instead). */
+  dropServer(serverName) {
+    const mount = this.mountByName(serverName);
+    if (mount !== void 0) this.closeMount(mount.id);
+    this.learned.delete(serverName);
+  }
+  /**
+   * Make sure a server's catalog is loaded and fresh. Never throws: failures land in the
+   * server's note so `mcp_search` can report them instead of the caller seeing a crash.
+   */
+  async ensure(serverName, options = {}) {
+    const mount = this.mountByName(serverName);
+    if (mount === void 0) return void 0;
+    const server = this.serverOf(mount.id);
+    if (server === void 0) return void 0;
+    const fresh = mount.channel.alive && mount.note.state === "ready" && Date.now() - mount.note.listedAt < CATALOG_TTL_MS;
+    if (fresh && options.force !== true) return mount.note;
+    if (mount.note.state === "error" && Date.now() < mount.note.nextRetryAt) return mount.note;
+    const timeoutMs = Math.max(server.toolCallTimeoutMs, DEFAULT_REQUEST_TIMEOUT_MS);
+    try {
+      if (!mount.channel.alive) {
+        try {
+          mount.channel.close();
+        } catch {
+        }
+        mount.channel = openChannel(server);
+        mount.handshaken = false;
+      }
+      if (!mount.handshaken) {
+        await handshake(mount.channel, "dsh-mcp-studio-proxy", timeoutMs);
+        mount.handshaken = true;
+      }
+      const raw = await listTools(mount.channel, timeoutMs);
+      mount.note = {
+        state: "ready",
+        tools: raw.map((tool) => ({
+          server: server.name,
+          name: tool.name,
+          description: tool.description,
+          inputSchema: tool.inputSchema
+        })),
+        listedAt: Date.now(),
+        nextRetryAt: 0
+      };
+      this.learned.set(server.name, { count: mount.note.tools.length, fingerprint: this.fingerprintOf(server) });
+      return mount.note;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      mount.note = { state: "error", error: message, tools: [], listedAt: Date.now(), nextRetryAt: Date.now() + RETRY_BACKOFF_MS };
+      this.log('mcp-studio: proxy list for "%s" failed: %s', server.name, message);
+      return mount.note;
+    }
+  }
+  /** Load every proxied server's catalog (mount-time warm-up). */
+  async ensureAll() {
+    for (const mount of [...this.mounts.values()]) await this.ensure(mount.name);
+  }
+  /** Search across all catalogs, refreshing missing or stale ones first. */
+  async search(options = {}) {
+    const serverName = String(options.server ?? "").trim();
+    if (serverName !== "" && this.mountByName(serverName) !== void 0) await this.ensure(serverName);
+    else await this.ensureAll();
+    const catalog = this.catalog();
+    return {
+      matches: rankTools(catalog, options),
+      total: catalog.length,
+      errors: this.snapshot().filter((entry) => entry.state === "error").map((entry) => ({ name: entry.name, error: entry.error ?? "unknown error" }))
+    };
+  }
+  /** Forward one `tools/call`. */
+  async call(serverName, tool, args) {
+    const name2 = String(serverName ?? "").trim();
+    if (name2 === "") return { ok: false, text: "", error: `${META_TOOL_CALL} \u9700\u8981 server \u53C2\u6570\uFF08\u7528 ${META_TOOL_SEARCH} \u67E5\u540D\u5B57\uFF09` };
+    const toolName = String(tool ?? "").trim();
+    if (toolName === "") return { ok: false, text: "", error: `${META_TOOL_CALL} \u9700\u8981 tool \u53C2\u6570` };
+    const mount = this.mountByName(name2);
+    if (mount === void 0) {
+      const known = [...this.mounts.values()].map((candidate) => candidate.name);
+      return {
+        ok: false,
+        text: "",
+        error: known.length === 0 ? "\u6CA1\u6709\u53EF\u8C03\u7528\u7684\u88AB\u4EE3\u7406 MCP server\u3002" : `\u672A\u77E5 server\u300C${name2}\u300D\uFF1B\u5F53\u524D\u88AB\u4EE3\u7406\u7684 server\uFF1A${known.join(", ")}`
+      };
+    }
+    const server = this.serverOf(mount.id);
+    if (server === void 0) return { ok: false, text: "", error: `server\u300C${name2}\u300D\u7684\u914D\u7F6E\u884C\u5DF2\u4E0D\u5B58\u5728` };
+    const note = await this.ensure(name2);
+    if (note === void 0 || note.state !== "ready") {
+      return { ok: false, text: "", error: `server\u300C${name2}\u300D\u4E0D\u53EF\u7528\uFF1A${note?.error ?? "\u76EE\u5F55\u672A\u5C31\u7EEA"}` };
+    }
+    if (!note.tools.some((candidate) => candidate.name === toolName)) {
+      const near = note.tools.map((candidate) => candidate.name).filter((candidate) => candidate.includes(toolName)).slice(0, 5);
+      return {
+        ok: false,
+        text: "",
+        error: `server\u300C${name2}\u300D\u6CA1\u6709\u5DE5\u5177\u300C${toolName}\u300D${near.length === 0 ? "" : `\uFF1B\u540D\u5B57\u63A5\u8FD1\u7684\u6709\uFF1A${near.join(", ")}`}\uFF08\u5148\u7528 ${META_TOOL_SEARCH} \u786E\u8BA4\u540D\u5B57\uFF09`
+      };
+    }
+    try {
+      const result = await mount.channel.request("tools/call", { name: toolName, arguments: args ?? {} }, server.toolCallTimeoutMs);
+      const payload = result ?? {};
+      const text = (payload.content ?? []).filter((block) => typeof block?.text === "string").map((block) => String(block.text)).join("\n");
+      if (payload.isError === true) return { ok: false, text, error: text === "" ? `\u5DE5\u5177\u300C${toolName}\u300D\u8FD4\u56DE\u9519\u8BEF` : text };
+      return { ok: true, text: text === "" ? "(\u8BE5\u5DE5\u5177\u6CA1\u6709\u8FD4\u56DE\u6587\u672C\u5185\u5BB9)" : text, structured: payload.structuredContent ?? null };
+    } catch (error) {
+      return { ok: false, text: "", error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+  /**
+   * Register `mcp_search` + `mcp_call` against the host tool registry.
+   * @returns one disposer per registration, so a reconcile that leaves no proxied server
+   *   can withdraw the pair rather than leaving two dead tools in the prompt.
+   */
+  registerMetaTools(ctx) {
+    const disposers = [];
+    const keep = (disposable) => {
+      if (typeof disposable === "function") disposers.push(disposable);
+    };
+    keep(ctx.tools.register(defineTool({
+      name: META_TOOL_SEARCH,
+      description: `\u68C0\u7D22\u5DF2\u63A5\u5165\u7684 MCP server \u5DE5\u5177\u76EE\u5F55\uFF08\u5173\u952E\u8BCD\u5339\u914D\u5DE5\u5177\u540D\u4E0E\u63CF\u8FF0\uFF0C\u8FD4\u56DE\u5DE5\u5177\u540D\u3001\u53C2\u6570\u540D\u4E0E\u4E00\u53E5\u8BDD\u8BF4\u660E\uFF09\u3002\u88AB\u4EE3\u7406\uFF08proxy/hybrid/auto\uFF09\u7684 server \u4E0D\u4F1A\u628A\u6BCF\u4E2A\u5DE5\u5177\u5355\u72EC\u66B4\u9732\u7ED9\u6A21\u578B\uFF0C\u6240\u4EE5\u8C03\u7528\u524D\u5148\u7528\u672C\u5DE5\u5177\u627E\u540D\u5B57\u3002\u4E0D\u5E26 query \u5217\u51FA\u5168\u90E8\uFF08\u53D7 limit \u9650\u5236\uFF09\uFF1B\u53EA\u7ED9 server \u5219\u5217\u51FA\u8BE5 server \u7684\u5168\u90E8\u5DE5\u5177\u3002\u67E5\u5230\u540E\u7528 ${META_TOOL_CALL} \u8C03\u7528\u3002`,
+      parameters: {
+        query: { type: "string", description: "\u5173\u952E\u8BCD\uFF08\u7A7A\u683C\u5206\u9694\u591A\u4E2A\uFF0C\u5982\uFF1Ascan url\uFF09\uFF1B\u7559\u7A7A\u5217\u51FA\u5168\u90E8" },
+        server: { type: "string", description: "\u9650\u5B9A\u67D0\u4E2A server\uFF08\u914D\u7F6E\u91CC\u7684 name\uFF09" },
+        limit: { type: "number", description: `\u8FD4\u56DE\u6761\u6570\uFF08\u9ED8\u8BA4 ${SEARCH_DEFAULT_LIMIT}\uFF0C\u4E0A\u9650 ${SEARCH_MAX_LIMIT}\uFF09` }
+      },
+      output: {
+        schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
+        render: (_args, value) => [{ type: "text", text: typeof value.text === "string" ? String(value.text) : "" }]
+      },
+      execute: async (args) => {
+        const result = await this.search({ query: args.query, server: args.server, limit: args.limit });
+        const base = renderSearchText(result.matches, { query: args.query, total: result.total });
+        const suffix = result.errors.length === 0 ? "" : `
+
+\u4EE5\u4E0B server \u6682\u65F6\u53D6\u4E0D\u5230\u76EE\u5F55\uFF08\u4E0D\u5F71\u54CD\u5176\u5B83 server\uFF09\uFF1A
+${result.errors.map((entry) => `- ${entry.name}\uFF1A${entry.error}`).join("\n")}`;
+        return { ok: true, count: result.matches.length, total: result.total, text: base + suffix };
+      }
+    })));
+    keep(ctx.tools.register(defineTool({
+      name: META_TOOL_CALL,
+      description: `\u8C03\u7528\u88AB\u4EE3\u7406\u7684 MCP server \u4E0A\u7684\u67D0\u4E2A\u5DE5\u5177\uFF08server/tool \u7528 ${META_TOOL_SEARCH} \u67E5\u5230\u7684\u540D\u5B57\uFF1Bargs \u662F\u6309\u8BE5\u5DE5\u5177\u53C2\u6570\u540D\u7EC4\u6210\u7684\u5BF9\u8C61\uFF09\u3002\u5DE5\u5177\u540D\u5199\u9519\u4F1A\u5728\u672C\u5730\u5C31\u88AB\u62E6\u4E0B\u5E76\u7ED9\u51FA\u76F8\u8FD1\u540D\u5B57\uFF0C\u4E0D\u4F1A\u6253\u5230 server\u3002\u8FD4\u56DE\u503C\u539F\u6837\u5E26\u56DE\u3002`,
+      parameters: {
+        server: { type: "string", required: true, description: "server \u540D\uFF08\u914D\u7F6E\u91CC\u7684 name\uFF09" },
+        tool: { type: "string", required: true, description: "\u5DE5\u5177\u540D\uFF08server \u4FA7\u539F\u59CB\u540D\uFF0C\u4E0D\u542B mcp__ \u524D\u7F00\uFF09" },
+        args: { type: "json", description: '\u8BE5\u5DE5\u5177\u7684\u8C03\u7528\u53C2\u6570\u5BF9\u8C61\uFF0C\u5982 {"url":"http://x"}' }
+      },
+      output: {
+        schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
+        render: (_args, value) => [{
+          type: "text",
+          text: typeof value.text === "string" && String(value.text) !== "" ? String(value.text) : String(value.error ?? "")
+        }]
+      },
+      execute: async (args) => {
+        const result = await this.call(args.server, args.tool, args.args);
+        if (result.ok) {
+          return {
+            ok: true,
+            text: result.text,
+            ...result.structured === void 0 || result.structured === null ? {} : { structured: result.structured }
+          };
+        }
+        return { ok: false, error: result.error ?? "call failed", text: result.error ?? "call failed" };
+      }
+    })));
+    return disposers;
+  }
+  /**
+   * Register the `directTools` of a hybrid server as real `mcp__<server>__<tool>` entries.
+   * @returns the registered names, the names with no metadata (server does not advertise
+   *   them), and a disposer per registration so a reconfigure can undo it.
+   */
+  registerPromotedTools(ctx, server) {
+    const catalog = this.catalogFor(server.name);
+    const registered = [];
+    const missing = [];
+    const disposers = [];
+    for (const rawName of server.directTools) {
+      const meta = catalog.find((candidate) => candidate.name === rawName);
+      if (meta === void 0) {
+        missing.push(rawName);
+        continue;
+      }
+      const publicName = `mcp__${server.name}__${rawName}`;
+      const description = meta.description.trim() === "" ? `MCP \u5DE5\u5177 ${server.name}.${rawName}\uFF08server \u672A\u63D0\u4F9B\u63CF\u8FF0\uFF09\u3002` : meta.description;
+      const dispose = ctx.tools.register(defineTool({
+        name: publicName,
+        description,
+        parameters: toToolParameters(meta.inputSchema),
+        output: {
+          schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
+          render: (_args, value) => [{
+            type: "text",
+            text: typeof value.text === "string" && String(value.text) !== "" ? String(value.text) : String(value.error ?? "")
+          }]
+        },
+        execute: async (args) => {
+          const result = await this.call(server.name, rawName, args);
+          if (result.ok) {
+            return {
+              ok: true,
+              text: result.text,
+              ...result.structured === void 0 || result.structured === null ? {} : { structured: result.structured }
+            };
+          }
+          return { ok: false, error: result.error ?? "call failed", text: result.error ?? "call failed" };
+        }
+      }));
+      if (typeof dispose === "function") disposers.push(dispose);
+      registered.push(publicName);
+    }
+    return { registered, missing, disposers };
+  }
+};
+
 // src/index.ts
 var name = "dsh-mcp-studio";
-var inject = ["tools", "settings", "webServer"];
+var inject = ["tools", "settings"];
 var STUDIO_SETTINGS_NAMESPACE = "mcp-studio";
 function signatureOf(server) {
   return JSON.stringify(toMcpClientConfig(server));
@@ -446,12 +995,39 @@ function apply(ctx, config) {
   let alive = true;
   const mounts = /* @__PURE__ */ new Map();
   const tracker = { states: /* @__PURE__ */ new Map() };
+  const proxy = new ProxyRegistry(
+    () => current(),
+    (format, ...args) => ctx.logger.info(format, ...args)
+  );
+  const decide = (server) => decideExposure(server, proxy.listedCount(server.name));
+  const promotions = /* @__PURE__ */ new Map();
+  let metaTools;
+  let settling = false;
+  const settleProxy = async () => {
+    if (!alive || settling) return;
+    settling = true;
+    try {
+      await proxy.ensureAll();
+      if (alive) reconcile();
+    } finally {
+      settling = false;
+    }
+  };
+  const serversOf = () => {
+    try {
+      const list = current()?.servers;
+      return Array.isArray(list) ? list : [];
+    } catch {
+      return [];
+    }
+  };
   const reconcile = () => {
     if (!alive) return;
-    const section = current();
+    const enabled = serversOf().filter((server) => server.enabled);
+    proxy.syncServers(enabled.filter((server) => decide(server) !== "direct"));
     const wanted = /* @__PURE__ */ new Map();
-    for (const server of section.servers) {
-      if (server.enabled) wanted.set(server.id, server);
+    for (const server of enabled) {
+      if (decide(server) === "direct") wanted.set(server.id, server);
     }
     for (const [id, mount] of [...mounts]) {
       const server = wanted.get(id);
@@ -484,45 +1060,130 @@ function apply(ctx, config) {
         }
       );
     }
-    for (const server of section.servers) {
+    for (const server of serversOf()) {
       if (!mounts.has(server.id)) tracker.states.delete(server.id);
     }
+    const wantedPromotions = /* @__PURE__ */ new Set();
+    for (const server of enabled) {
+      if (server.exposure !== "hybrid" || decide(server) !== "proxy") continue;
+      const signature = JSON.stringify([server.name, server.directTools]);
+      const existing = promotions.get(server.id);
+      if (existing !== void 0 && existing.signature === signature) {
+        wantedPromotions.add(server.id);
+        continue;
+      }
+      if (existing !== void 0) {
+        for (const dispose of existing.disposers) {
+          try {
+            dispose();
+          } catch {
+          }
+        }
+        promotions.delete(server.id);
+      }
+      if (proxy.listedCount(server.name) === void 0) continue;
+      let result;
+      try {
+        result = proxy.registerPromotedTools(ctx, server);
+      } catch (error) {
+        ctx.logger.warn('mcp-studio: promoting tools for "%s" failed: %s', server.name, String(error));
+        continue;
+      }
+      if (result.missing.length > 0) {
+        ctx.logger.warn('mcp-studio: "%s" does not advertise directTools: %s', server.name, result.missing.join(", "));
+      }
+      promotions.set(server.id, { signature, disposers: result.disposers, names: result.registered });
+      wantedPromotions.add(server.id);
+    }
+    for (const [id, promotion] of [...promotions]) {
+      if (wantedPromotions.has(id)) continue;
+      for (const dispose of promotion.disposers) {
+        try {
+          dispose();
+        } catch {
+        }
+      }
+      promotions.delete(id);
+    }
+    const anyProxied = enabled.some((server) => decide(server) === "proxy");
+    if (anyProxied && metaTools === void 0) {
+      try {
+        metaTools = proxy.registerMetaTools(ctx);
+      } catch (error) {
+        ctx.logger.warn("mcp-studio: registering proxy meta-tools failed: %s", String(error));
+      }
+    } else if (!anyProxied && metaTools !== void 0) {
+      for (const dispose of metaTools) {
+        try {
+          dispose();
+        } catch {
+        }
+      }
+      metaTools = void 0;
+    }
+    if (enabled.some((server) => decide(server) === "pending")) void settleProxy();
   };
-
-  // ── 自愈看门狗：已挂载但一个工具都没贡献 → 强制重挂（指数退避，封顶 5 分钟）──
-  //
-  // 为什么必须有：挂载只在 apply 时与「配置签名变化」时触发一次。操作者的典型时序是
-  // **先起 dsh、后起 Burp/Yakit**——此时首次连接注定失败，而 reconcile 不会因服务
-  // 后来上线而重试；`note.state` 停在 "mounted"，状态页却因「无可见工具」显示
-  // 「不可达」，且界面的「立即挂载」在配置未变时是空操作（签名相同 → 不重建挂载），
-  // 于是永久卡在不可达，只能重启宿主。实测踩到：服务早已可用，界面一直红。
-  // 这里以「工具可见性」为准做判定——它才是真正对模型有意义的事实。
-  const retryBackoff = new Map(); // serverId -> { attempts, nextAt }
-  const WATCHDOG_MS = 15000;
+  const retryBackoff = /* @__PURE__ */ new Map();
+  const WATCHDOG_MS = 15e3;
   const watchdogTick = () => {
     if (!alive) return;
-    // 已被删除/停用的 server 一并清掉重试记录，别让账留在表里。
+    try {
+      tickOnce();
+    } catch (error) {
+      ctx.logger?.warn?.(`mcp-studio: watchdog tick failed: ${error?.message ?? error}`);
+    }
+  };
+  const tickOnce = () => {
     for (const id of [...retryBackoff.keys()]) {
-      if (!current().servers.some((s) => s.id === id && s.enabled)) retryBackoff.delete(id);
+      if (!serversOf().some((server) => server.id === id && server.enabled)) retryBackoff.delete(id);
     }
     let view;
-    try { view = ctx.get("tools")?.view?.(void 0); } catch { view = void 0; }
-    const visible = view !== void 0 && view.visible instanceof Map ? view.visible : void 0;
+    try {
+      view = ctx.get("tools")?.view(void 0);
+    } catch {
+      view = void 0;
+    }
+    const visible = typeof view === "object" && view !== null && view.visible instanceof Map ? view.visible : void 0;
     const now = Date.now();
     let forced = false;
-    for (const server of current().servers) {
-      if (!server.enabled || !mounts.has(server.id)) continue;
+    for (const server of serversOf()) {
+      if (!server.enabled) continue;
       const prefix = `mcp__${server.name}__`;
       let count = 0;
-      if (visible !== void 0) for (const toolName of visible.keys()) if (toolName.startsWith(prefix)) count += 1;
-      if (count > 0) { retryBackoff.delete(server.id); continue; }
+      if (visible !== void 0) {
+        for (const toolName of visible.keys()) if (toolName.startsWith(prefix)) count += 1;
+      }
+      if (decide(server) !== "direct") {
+        if (proxy.hasCatalog(server.name)) {
+          retryBackoff.delete(server.id);
+          continue;
+        }
+        const state2 = retryBackoff.get(server.id) ?? { attempts: 0, nextAt: 0 };
+        if (now < state2.nextAt) continue;
+        state2.attempts += 1;
+        state2.nextAt = now + Math.min(WATCHDOG_MS * 2 ** (state2.attempts - 1), 3e5);
+        retryBackoff.set(server.id, state2);
+        ctx.logger.info('mcp-studio: proxy catalog for "%s" unavailable \u2014 re-list attempt %d (retry in %dms)', server.name, state2.attempts, state2.nextAt - now);
+        void proxy.ensure(server.name, { force: true }).then(() => {
+          if (alive) reconcile();
+        });
+        continue;
+      }
+      if (!mounts.has(server.id)) continue;
+      if (count > 0) {
+        retryBackoff.delete(server.id);
+        continue;
+      }
       const state = retryBackoff.get(server.id) ?? { attempts: 0, nextAt: 0 };
       if (now < state.nextAt) continue;
       state.attempts += 1;
-      state.nextAt = now + Math.min(WATCHDOG_MS * 2 ** (state.attempts - 1), 300000);
+      state.nextAt = now + Math.min(WATCHDOG_MS * 2 ** (state.attempts - 1), 3e5);
       retryBackoff.set(server.id, state);
-      ctx.logger.info('mcp-studio: "%s" 已挂载但无可见工具，第 %d 次重挂（%dms 后重试）', server.name, state.attempts, state.nextAt - now);
-      try { mounts.get(server.id)?.dispose(); } catch { /* 已释放则忽略 */ }
+      ctx.logger.info('mcp-studio: "%s" mounted but no visible tools \u2014 remount attempt %d (retry in %dms)', server.name, state.attempts, state.nextAt - now);
+      try {
+        mounts.get(server.id)?.dispose();
+      } catch {
+      }
       mounts.delete(server.id);
       tracker.states.delete(server.id);
       forced = true;
@@ -531,7 +1192,6 @@ function apply(ctx, config) {
   };
   const watchdog = setInterval(watchdogTick, WATCHDOG_MS);
   ctx.effect(() => () => clearInterval(watchdog), "mcp-studio: watchdog");
-
   ctx.effect(() => () => {
     alive = false;
     for (const mount of mounts.values()) {
@@ -543,6 +1203,25 @@ function apply(ctx, config) {
     }
     mounts.clear();
     tracker.states.clear();
+    for (const promotion of promotions.values()) {
+      for (const dispose of promotion.disposers) {
+        try {
+          dispose();
+        } catch {
+        }
+      }
+    }
+    promotions.clear();
+    if (metaTools !== void 0) {
+      for (const dispose of metaTools) {
+        try {
+          dispose();
+        } catch {
+        }
+      }
+      metaTools = void 0;
+    }
+    proxy.closeAll();
   }, "mcp-studio: lifecycle");
   try {
     const scope = ctx.settings.register(STUDIO_SETTINGS_NAMESPACE, Config, {
@@ -555,7 +1234,6 @@ function apply(ctx, config) {
     });
   } catch (error) {
     ctx.logger.warn("mcp-studio: settings provider unavailable, keeping patch baseline: %s", String(error));
-    console.error("[dsh-mcp-studio] REGISTER FAILED:", error && error.message ? error.message : String(error));
   }
   const executions = createExecutionRing(200);
   const inflight = /* @__PURE__ */ new Map();
@@ -605,12 +1283,18 @@ function apply(ctx, config) {
     }
   }));
   ctx.inject(["connection", "settings", "webServer"], (web) => {
+    const scope = web;
     const { connection, settings } = web;
+    const proxyView = {
+      catalog: (serverName) => proxy.catalogFor(serverName).map((meta) => ({ name: meta.name, description: meta.description })),
+      state: (serverName) => proxy.stateOf(serverName)
+    };
     const status = createStatusHandler(
       () => current(),
       () => ctx.get("tools")?.view(void 0),
       tracker,
-      executions
+      executions,
+      { view: proxyView, exposureOf: (server) => decide(server) === "proxy" ? "proxy" : "direct" }
     );
     const diagnose = async (id) => {
       const server = current().servers.find((row) => row.id === id);
@@ -623,23 +1307,41 @@ function apply(ctx, config) {
     const debug = () => {
       const toolsSvc = ctx.get("tools");
       let view;
-      try { view = toolsSvc?.view?.(void 0); } catch { view = "threw"; }
-      const names = view && view !== "threw" && view.visible instanceof Map ? [...view.visible.keys()] : null;
+      try {
+        view = toolsSvc?.view?.(void 0);
+      } catch {
+        view = "threw";
+      }
+      const names = view !== "threw" && typeof view === "object" && view !== null && view.visible instanceof Map ? [...view.visible.keys()] : null;
       return {
         hasToolsService: Boolean(toolsSvc),
         hasViewMethod: typeof toolsSvc?.view === "function",
         viewKind: view === void 0 ? "undefined" : view === "threw" ? "threw" : typeof view,
         globalViewSize: names === null ? null : names.length,
-        mcpPrefixed: names === null ? null : names.filter((n) => n.startsWith("mcp__")).slice(0, 12),
+        mcpPrefixed: names === null ? null : names.filter((name2) => name2.startsWith("mcp__")).slice(0, 12),
         sampleNames: names === null ? null : names.slice(0, 12),
+        // Tool-surface accounting: this is the number the proxy mode is meant to bring down.
+        metaTools: names === null ? null : names.filter((name2) => name2 === META_TOOL_SEARCH || name2 === META_TOOL_CALL),
+        promoted: [...promotions.entries()].map(([id, promotion]) => ({ id, tools: promotion.names })),
+        proxy: { mounts: proxy.snapshot(), catalog: summarizeCatalog(proxy.catalog()) },
         notes: [...tracker.states.entries()].map(([id, note]) => ({ id, ...note })),
-        // 自愈重试状态：attempts=0 表示该服务工具可见（看门狗不会碰它）。
-        retry: [...retryBackoff.entries()].map(([id, s]) => ({ id, attempts: s.attempts, nextInMs: Math.max(0, s.nextAt - Date.now()) })),
+        // Self-healing retry ledger: attempts=0 (absent) means the server's tools are visible,
+        // so the watchdog leaves it alone.
+        retry: [...retryBackoff.entries()].map(([id, state]) => ({ id, attempts: state.attempts, nextInMs: Math.max(0, state.nextAt - Date.now()) })),
         mountedIds: [...mounts.keys()],
-        servers: current().servers.map((s) => ({ id: s.id, name: s.name, enabled: s.enabled, transport: s.transport }))
+        servers: current().servers.map((server) => ({
+          id: server.id,
+          name: server.name,
+          enabled: server.enabled,
+          transport: server.transport,
+          exposure: server.exposure,
+          effective: decide(server),
+          proxyThreshold: server.proxyThreshold,
+          directTools: server.directTools
+        }))
       };
     };
-    registerStudioRpc(ctx, connection, settings, STUDIO_SETTINGS_NAMESPACE, status, diagnose, () => executions.clear(), debug);
+    registerStudioRpc(scope, connection, settings, STUDIO_SETTINGS_NAMESPACE, status, diagnose, () => executions.clear(), debug);
   });
   reconcile();
 }

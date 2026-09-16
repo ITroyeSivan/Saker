@@ -1,4 +1,4 @@
-# dsh-attack-atlas：AttackAtlas（pentest / code-audit 双模式覆盖点亮 + 攻击链图）。
+# dsh-attack-atlas：AttackAtlas（pentest / code-audit / ctf-solver 覆盖点亮 + 攻击链图）。
 # 宿主平面：模型经 redteam_coverage_mark / redteam_coverage_stage / redteam_coverage_list
 # 回写覆盖终态；Web 会话标签页「攻击面图谱」读体系/读终态/双击派单进当前会话。
 - insert:

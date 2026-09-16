@@ -4,9 +4,15 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { openStore as atlasOpen, addChainNode as atlasAddNode } from "@dsh-external/dsh-attack-atlas/store";
-import { openStore, registerFinding, updateFinding, removeFinding, getFinding, listFindings, listFindingsAll, computeStats, computeStatsAll, modeCounts, modeCountsAll, groupByTarget, groupByTargetAll, setMeta, getMeta, ledgerOverviewAll } from "../lib/store.js";
-import { verifyMessage, isTrustedRequest, dispatch, checkCsrf } from "../lib/index.js";
+import { openStore as atlasOpen, addChainNode as atlasAddNode, listChain as atlasListChain } from "@dsh-external/dsh-attack-atlas/store";
+import { openStore, registerFinding, updateFinding, removeFinding, getFinding, allFindings, listFindings, listFindingsAll, computeStats, computeStatsAll, modeCounts, modeCountsAll, groupByTarget, groupByTargetAll, setMeta, getMeta, ledgerOverviewAll, secondReviewError, secondReviewVerdict, SECOND_RATINGS, RATING_SCALE } from "../lib/store.js";
+import { verifyMessage, isTrustedRequest, dispatch, checkCsrf, releaseChainRefs, registerFindingWithLink, autoLinkFinding, reconcileChain, renderChainReconcile } from "../lib/index.js";
+
+// 二次复核成对参数：verified 是各模式通用的「验证类终态」，首次流转须在同一次调用里
+// 同时给出独立二次评级与足量依据——上游用例原先只流转状态，此处统一以 ...RV 补齐。
+const NOTE_OK = "复核方式：换一条观测通道重新触发一次并留存原始响应，现象与首次报告一致，影响范围可复现";
+if (NOTE_OK.length < 40) throw new Error("NOTE_OK 必须 >= 40 字");
+const RV = { secondRating: "high", secondRatingNote: NOTE_OK };
 
 let passed = 0;
 let skipped = 0;
@@ -58,7 +64,7 @@ ok("状态语义：code-reviewed 可用、不记 verifiedAt；fixed 需先 verif
 	let threw = false;
 	try { updateFinding(st, SID, "code-audit", "code-audit-1", { status: "fixed" }); } catch { threw = true; }
 	assert.ok(threw, "未 verified 直接 fixed 应抛错");
-	updateFinding(st, SID, "code-audit", "code-audit-1", { status: "verified", verifyNote: "本地复现 EXP 生效" });
+	updateFinding(st, SID, "code-audit", "code-audit-1", { status: "verified", verifyNote: "本地复现 EXP 生效" , ...RV });
 	const f2 = updateFinding(st, SID, "code-audit", "code-audit-1", { status: "fixed", retestNote: "修复后复测不成功" });
 	assert.equal(f2.status, "fixed");
 	st.close();
@@ -89,7 +95,7 @@ ok("update 状态翻转落 verifiedAt，字段白名单修订，模式/会话隔
 	const st = openStore(":memory:");
 	registerFinding(st, SID, "pentest", { title: "x" });
 	registerFinding(st, "session-other", "pentest", { title: "y" });
-	const u = updateFinding(st, SID, "pentest", "pentest-1", { status: "verified", verifyNote: "差分翻转+marker 回显", severity: "high" });
+	const u = updateFinding(st, SID, "pentest", "pentest-1", { status: "verified", verifyNote: "差分翻转+marker 回显", severity: "high" , ...RV });
 	assert.equal(u.status, "verified");
 	assert.ok(u.verifiedAt.length > 0);
 	assert.equal(u.severity, "high");
@@ -124,7 +130,8 @@ ok("list 倒序 + 等级/状态/关键词筛选 + 分页钳制", () => {
 
 ok("stats 四档/状态/类型分布与最近时间", () => {
 	const st = openStore(":memory:");
-	registerFinding(st, SID, "pentest", { title: "a", severity: "critical", type: "SQLi", status: "verified" });
+	const verified = registerFinding(st, SID, "pentest", { title: "a", severity: "critical", type: "SQLi" });
+	updateFinding(st, SID, "pentest", verified.id, { status: "verified", ...RV });
 	registerFinding(st, SID, "pentest", { title: "b", severity: "critical", type: "SQLi" });
 	registerFinding(st, SID, "pentest", { title: "c", severity: "low", type: "XSS" });
 	const s = computeStats(st, SID, "pentest");
@@ -207,7 +214,7 @@ ok("渗透富字段往返：三件套/影响/CVSS/请求包/复测", () => {
 		title: "SQLi", baseline: "正常 12 行", diffEvidence: "注入后 3 行", markerEcho: "r9t2k1",
 		impact: "脱库 users 5 行", cvss: "CVSS:3.1/AV:N (8.6)", requestPkt: "GET /?id=1'", responsePkt: "HTTP/1.1 200"
 	});
-	updateFinding(st, SID, "pentest", f.id, { status: "verified", verifyNote: "差分翻转+marker 回显" });
+	updateFinding(st, SID, "pentest", f.id, { status: "verified", verifyNote: "差分翻转+marker 回显" , ...RV });
 	const u = updateFinding(st, SID, "pentest", f.id, { status: "fixed", retestNote: "复测已修复", retestAt: "2026-08-18T00:00:00Z" });
 	assert.equal(u.baseline, "正常 12 行");
 	assert.equal(u.markerEcho, "r9t2k1");
@@ -317,7 +324,7 @@ ok("cloud-security 登记：攻击路径四要素读回正确，缺省为空串"
 ok("updateFinding 可回写云路径四要素", () => {
 	const st = openStore(":memory:");
 	const f = registerFinding(st, SID, "cloud-security", { title: "路径一", entry: "e0" });
-	const up = updateFinding(st, SID, "cloud-security", f.id, { entry: "e1", permission: "AdministratorAccess", status: "verified", verifyNote: "API 响应证据确凿" });
+	const up = updateFinding(st, SID, "cloud-security", f.id, { entry: "e1", permission: "AdministratorAccess", status: "verified", verifyNote: "API 响应证据确凿" , ...RV });
 	assert.equal(up.entry, "e1");
 	assert.equal(up.permission, "AdministratorAccess");
 	assert.equal(up.status, "verified");
@@ -408,14 +415,14 @@ ok("listFindingsAll 跨会话按模式聚合（行带 sessionId，范围过滤�
 	ok("分模式状态：ctf=未解/卡点/已解（stuck 合法、verified 落 verifiedAt）", () => {
 		const r = registerFinding(st, "s-ctf", "ctf-solver", { title: "web1", target: "board#1", summary: "题", type: "hard" });
 		assert.equal(updateFinding(st, "s-ctf", "ctf-solver", r.id, { status: "stuck" }).status, "stuck");
-		const u2 = updateFinding(st, "s-ctf", "ctf-solver", r.id, { status: "verified" });
+		const u2 = updateFinding(st, "s-ctf", "ctf-solver", r.id, { status: "verified" , ...RV });
 		assert.equal(u2.status, "verified");
 		assert.ok(u2.verifiedAt, "已解（verified）落 verifiedAt");
 	});
 	ok("分模式状态：binary=分析中/疑似/已定论；漏洞型 fixed 前置规则不变", () => {
 		const r = registerFinding(st, "s-bin", "binary-analysis", { title: "样本A", target: "sha256:ab", summary: "家族分析" });
 		assert.equal(updateFinding(st, "s-bin", "binary-analysis", r.id, { status: "suspect" }).status, "suspect");
-		assert.equal(updateFinding(st, "s-bin", "binary-analysis", r.id, { status: "verified" }).status, "verified");
+		assert.equal(updateFinding(st, "s-bin", "binary-analysis", r.id, { status: "verified" , ...RV }).status, "verified");
 		const v = registerFinding(st, "s-v", "code-audit", { title: "X", target: "t", summary: "s" });
 		assert.throws(() => updateFinding(st, "s-v", "code-audit", v.id, { status: "fixed" }), /此前已验证/, "漏洞型 fixed 需先 verified 的旧规则保留");
 	});
@@ -463,7 +470,7 @@ ok("CSRF 头校验：匹配放行/缺失或错值拒", () => {
 	});
 	const av = registerFinding(st, "s-m", "code-audit", { title: "载荷", status: "detected" });
 	const pen = registerFinding(st, "s-m", "pentest", { title: "注入" });
-	const m1 = await dispatch(null, st, "finding.mark", { sessionId: "s-m", id: av.id, status: "verified" });
+	const m1 = await dispatch(null, st, "finding.mark", { sessionId: "s-m", id: av.id, status: "verified" , ...RV });
 	ok("mark 按模式词表：av verified 合法", () => { assert.equal(m1.ok, true); assert.equal(m1.status, "verified"); });
 	const m2 = await dispatch(null, st, "finding.mark", { sessionId: "s-m", id: av.id, status: "false-positive" });
 	ok("mark 按模式词表：av 无 false-positive 词——拒绝（不再静默回落报成功）", () => { assert.equal(m2.ok, false); assert.match(m2.error, /status 必须/); });
@@ -471,6 +478,14 @@ ok("CSRF 头校验：匹配放行/缺失或错值拒", () => {
 	ok("mark 漏洞型 false-positive 合法", () => { assert.equal(m3.ok, true); assert.equal(m3.status, "false-positive"); });
 	const m4 = await dispatch(null, st, "finding.mark", { sessionId: "s-m", id: av.id, status: "detected" });
 	ok("mark 产物型本体词（detected）可标——旧白名单根本不含", () => { assert.equal(m4.ok, true); assert.equal(m4.status, "detected"); });
+	// 人工复核兜底通道（finding.mark）必须透传二次评级——否则 UI「标记已验证」在成对校验上线后永久失败。
+	const pk = registerFinding(st, "s-mark", "redteam", { title: "兜底标记", target: "http://t/x", summary: "s", severity: "medium" });
+	let markRejected = "";
+	try { await dispatch(null, st, "finding.mark", { sessionId: "s-mark", id: pk.id, status: "verified", verifyNote: NOTE_OK }); } catch (e) { markRejected = String((e && e.message) || e); }
+	ok("mark 兜底：缺 secondRating 被拒（守卫对兜底通道同样生效）", () => { assert.match(markRejected, /secondRating/); });
+	const m5 = await dispatch(null, st, "finding.mark", { sessionId: "s-mark", id: pk.id, status: "verified", verifyNote: NOTE_OK, secondRating: "low" });
+	ok("mark 兜底：成对给齐则放行并回写二次评级", () => { assert.equal(m5.ok, true); assert.equal(m5.secondRating, "low"); assert.equal(m5.verdict, "downgrade", "medium→low 应判降级"); });
+	ok("mark 兜底：verifyNote 自动镜像进 secondRatingNote（既有视图不断档）", () => { assert.equal(getFinding(st, "s-mark", pk.id).secondRatingNote, NOTE_OK); });
 	const res = await dispatch(null, st, "findings.list", { scope: "all", mode: "pentest", sessionId: "s-m" });
 	ok("scope:all 返回请求会话 meta（模式页元数据栏不再永远未设置）", () => { assert.notEqual(res.meta, undefined); assert.equal(res.list.total, 1); });
 	const resG = await dispatch(null, st, "findings.groups", { scope: "all", mode: "pentest", sessionId: "s-m" });
@@ -499,7 +514,7 @@ ok("CSRF 头校验：匹配放行/缺失或错值拒", () => {
 		assert.equal(r.status, "pending", "code-reviewed 不在战果词表——回落 pending");
 		assert.throws(() => registerFinding(st, "s-ad", "attack-defense", { title: "X", status: "fixed" }), /攻防=已交付/);
 		assert.throws(() => updateFinding(st, "s-ad", "attack-defense", r.id, { status: "fixed" }), /已交付/);
-		updateFinding(st, "s-ad", "attack-defense", r.id, { status: "verified" });
+		updateFinding(st, "s-ad", "attack-defense", r.id, { status: "verified" , ...RV });
 		assert.equal(updateFinding(st, "s-ad", "attack-defense", r.id, { status: "fixed" }).status, "fixed", "verified→已交付");
 	});
 	ok("verifyMessage ad 分支：确定性信号菜单+获取路径标签（不再用代审『工人链』）", () => {
@@ -528,6 +543,8 @@ ok("CSRF 头校验：匹配放行/缺失或错值拒", () => {
 		st.close();
 	} finally {
 		delete process.env.DSH_ATLAS_DB;
+		// 互链句柄为进程级缓存：不显式释放则 Windows 上 atlas.db 被占用，rmSync 抛 EBUSY。
+		releaseChainRefs();
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
 }
@@ -578,7 +595,7 @@ ok("CSRF 头校验：匹配放行/缺失或错值拒", () => {
 		assert.equal(r.status, "pending", "code-reviewed 不在路径词表——回落 pending");
 		assert.throws(() => registerFinding(st, "s-cl", "cloud-security", { title: "X", status: "fixed" }), /fixed/);
 		assert.throws(() => updateFinding(st, "s-cl", "cloud-security", r.id, { status: "fixed" }), /已修复|verified/);
-		updateFinding(st, "s-cl", "cloud-security", r.id, { status: "verified" });
+		updateFinding(st, "s-cl", "cloud-security", r.id, { status: "verified" , ...RV });
 		assert.equal(updateFinding(st, "s-cl", "cloud-security", r.id, { status: "fixed" }).status, "fixed", "verified→已修复");
 	});
 	ok("cloud 分组键=type 路径类型：同类型路径归一组（分组标签名实相符）", () => {
@@ -639,5 +656,240 @@ ok("verifyMessage IR 分支：取证复核纪律+fixed=已处置，不再落渗�
 	assert.ok(!msg.includes("复测不成功才可标记"), "fixed 不再教渗透修复语义");
 	st.close();
 });
+
+
+// ── 二次复核成对校验（首次流转 verified 必须同一次调用给齐独立评级 + 足量依据） ──
+ok("二次复核：首次流转 verified 缺 secondRating 被拒", () => {
+	const st = openStore(":memory:");
+	const f = registerFinding(st, "s-sr1", "pentest", { title: "SQL 注入", type: "sql-injection", target: "http://t/api", summary: "s", severity: "high" });
+	assert.throws(() => updateFinding(st, "s-sr1", "pentest", f.id, { status: "verified" }), /secondRating/);
+	assert.equal(getFinding(st, "s-sr1", f.id).status, "pending", "被拒后状态不得改动");
+	st.close();
+});
+
+ok("二次复核：登记时不能直接写入 verified 绕过成对校验", () => {
+	const st = openStore(":memory:");
+	assert.throws(
+		() => registerFinding(st, "s-sr-register", "pentest", { title: "绕过", severity: "high", status: "verified" }),
+		/不可在登记时直接写入/,
+	);
+	const f = registerFinding(st, "s-sr-register", "pentest", { title: "正常登记" });
+	assert.equal(f.id, "pentest-1", "被拒的非法登记不得消耗序号");
+	assert.equal(f.status, "pending");
+	st.close();
+});
+
+ok("二次复核：secondRatingNote 不足 40 字被拒", () => {
+	const st = openStore(":memory:");
+	const f = registerFinding(st, "s-sr2", "pentest", { title: "越权", type: "broken-access-control", target: "http://t/api", summary: "s", severity: "high" });
+	assert.throws(() => updateFinding(st, "s-sr2", "pentest", f.id, { status: "verified", secondRating: "high", secondRatingNote: "复核过了" }), /依据太短/);
+	assert.equal(getFinding(st, "s-sr2", f.id).status, "pending");
+	st.close();
+});
+
+ok("二次复核：成对给齐则放行且回读一致", () => {
+	const st = openStore(":memory:");
+	const f = registerFinding(st, "s-sr3", "pentest", { title: "弱口令", type: "weak-password", target: "http://t/admin", summary: "s", severity: "critical" });
+	const up = updateFinding(st, "s-sr3", "pentest", f.id, { status: "verified", secondRating: "medium", secondRatingNote: NOTE_OK });
+	assert.equal(up.status, "verified");
+	const back = getFinding(st, "s-sr3", f.id);
+	assert.equal(back.status, "verified");
+	assert.equal(back.secondRating, "medium", "二次评级须落库");
+	assert.equal(back.secondRatingNote, NOTE_OK, "二次依据须落库");
+	assert.ok(back.verifiedAt.length > 0, "verifiedAt 须写入");
+	assert.equal(secondReviewVerdict(back), "downgrade", "critical→medium 应判降级");
+	st.close();
+});
+
+ok("二次复核：已 verified 的行再改其它字段不再被拦", () => {
+	const st = openStore(":memory:");
+	const f = registerFinding(st, "s-sr4", "pentest", { title: "信息泄露", type: "info-disclosure", target: "http://t/x", summary: "s", severity: "medium" });
+	updateFinding(st, "s-sr4", "pentest", f.id, { status: "verified", secondRating: "medium", secondRatingNote: NOTE_OK });
+	const again = updateFinding(st, "s-sr4", "pentest", f.id, { summary: "补齐复现步骤" });
+	assert.equal(again.summary, "补齐复现步骤");
+	assert.equal(again.status, "verified", "状态不得被二次编辑带回");
+	st.close();
+});
+
+ok("二次复核：红队台账模式同样受约束（fixed 语义=已路由）", () => {
+	const st = openStore(":memory:");
+	const f = registerFinding(st, "s-sr5", "redteam", { title: "边界突破", type: "内网", target: "10.0.0.1", summary: "s", severity: "high" });
+	assert.throws(() => updateFinding(st, "s-sr5", "redteam", f.id, { status: "verified" }), /secondRating/);
+	const up = updateFinding(st, "s-sr5", "redteam", f.id, { status: "verified", secondRating: "info", secondRatingNote: NOTE_OK });
+	assert.equal(up.status, "verified");
+	assert.equal(secondReviewVerdict(up), "downgrade", "high→info 应判降级");
+	st.close();
+});
+
+ok("secondReviewVerdict：一致 / 降级 / 升级 / 未评级四态", () => {
+	const mk = (sev, second) => ({ severity: sev, secondRating: second });
+	assert.equal(secondReviewVerdict(mk("high", "high")), "match");
+	assert.equal(secondReviewVerdict(mk("critical", "low")), "downgrade");
+	assert.equal(secondReviewVerdict(mk("low", "critical")), "upgrade");
+	assert.equal(secondReviewVerdict(mk("high", "info")), "downgrade");
+	assert.equal(secondReviewVerdict(mk("high", "")), "unrated");
+	assert.equal(secondReviewVerdict(mk("high", "nonsense")), "unrated");
+	assert.equal(secondReviewVerdict({ severity: "high" }), "unrated", "字段缺失不得抛");
+});
+
+ok("secondReviewError：非 verified 目标与已 verified 前置一律放行", () => {
+	assert.equal(secondReviewError("pentest", { status: "pending" }, { status: "code-reviewed" }), null);
+	assert.equal(secondReviewError("pentest", { status: "verified" }, { status: "verified" }), null);
+	assert.equal(secondReviewError("pentest", { status: "pending" }, {}), null);
+	assert.equal(secondReviewError("redteam", { status: "pending" }, { status: "fixed" }), null, "fixed 非 verified 终态，不该套二次复核");
+	assert.match(secondReviewError("pentest", { status: "pending" }, { status: "verified" }), /secondRating/);
+});
+
+ok("二次评级词表与刻度自洽：info 低于 low，五档齐备", () => {
+	assert.deepEqual(SECOND_RATINGS, ["critical", "high", "medium", "low", "info"]);
+	assert.ok(RATING_SCALE.info < RATING_SCALE.low, "info 必须低于 low");
+	assert.ok(RATING_SCALE.critical > RATING_SCALE.high);
+	assert.equal(Object.keys(RATING_SCALE).length, SECOND_RATINGS.length, "两表须一一对应");
+});
+
+
+// ── P1-2 步 1：登记成果自动上图（真实临时 atlas 库，端到端） ──
+{
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rtr-autolink-"));
+	const seed = atlasOpen(path.join(dir, "atlas.db"));
+	seed.close(); // 只借它建库；之后让 autoLinkFinding 自己的句柄成为唯一持有者
+	process.env.DSH_ATLAS_DB = path.join(dir, "atlas.db");
+	let chain = { nodes: [] };
+	try {
+		const st = openStore(":memory:");
+		const { finding, node } = await registerFindingWithLink(st, "s-al", "attack-defense", { title: "域控成果", type: "域控成果", target: "DC01", summary: "s", severity: "high" });
+		ok("自动上图：登记即补链路节点，id=finding id 且 findingRef 自填", () => {
+			assert.equal(node.id, finding.id);
+			assert.equal(node.findingRef, finding.id);
+			assert.equal(node.label, "域控成果");
+		});
+		// 端到端：走 dispatch 的真实读取路径（joinChainRefs 反查）
+		const res = await dispatch(null, st, "findings.list", { scope: "all", mode: "attack-defense", sessionId: "s-al" });
+		ok("自动上图：成果页行经 atlas 反查拿回 chainNodes（图与发现天然同步）", () => {
+			assert.ok(res.list.rows[0].chainNodes, "行带 chainNodes");
+			assert.equal(res.list.rows[0].chainNodes[0].id, finding.id);
+		});
+		await autoLinkFinding("s-al", "attack-defense", finding); // 再触发一次
+		const peek = atlasOpen(process.env.DSH_ATLAS_DB);
+		chain = atlasListChain(peek, "s-al", "attack-defense");
+		peek.close();
+		ok("自动上图：重复触发不产生重复节点（按 (session,mode,target,id) upsert）", () => {
+			assert.equal(chain.nodes.filter((n) => n.findingRef === finding.id).length, 1);
+		});
+		ok("自动上图：节点 note 记录来源与类型（可追溯是自动补的）", () => {
+			const n = chain.nodes.find((x) => x.id === finding.id);
+			assert.match(n.note, /自动补登自成果/);
+			assert.match(n.note, /类型：域控成果/);
+		});
+		st.close();
+	} finally {
+		delete process.env.DSH_ATLAS_DB;
+		releaseChainRefs();
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+// 库不存在时，不得为「不用图」的用户凭空建库
+{
+	const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), "rtr-nolink-"));
+	const missing = path.join(dir2, "attack-atlas", "atlas.db");
+	process.env.DSH_ATLAS_DB = missing;
+	const st = openStore(":memory:");
+	const { finding, node } = await registerFindingWithLink(st, "s-nl", "pentest", { title: "XSS", target: "http://t", summary: "s" });
+	delete process.env.DSH_ATLAS_DB;
+	ok("自动上图：atlas 库不存在时跳过且不建库（不给不用图的用户凭空造文件）", () => {
+		assert.equal(node, undefined);
+		assert.equal(fs.existsSync(missing), false);
+	});
+	ok("自动上图：跳过时登记本身照常成功（上图绝不阻塞成果登记）", () => {
+		assert.equal(getFinding(st, "s-nl", finding.id).title, "XSS");
+	});
+	st.close();
+	fs.rmSync(dir2, { recursive: true, force: true });
+}
+
+
+// ── P1-2 步 2：攻击图 ↔ 成果 只读对账 ──
+ok("对账：两边一致时两清单皆空", () => {
+	const findings = [{ sessionId: "s1", id: "pentest-1", title: "SQLi", status: "verified", severity: "high", target: "http://a" }];
+	const nodes = [{ sessionId: "s1", id: "pentest-1", label: "SQLi", findingRef: "pentest-1", target: "" }];
+	const r = reconcileChain({ findings, nodes, sessionId: "s1" });
+	assert.equal(r.unlinked.length, 0);
+	assert.equal(r.dangling.length, 0);
+	assert.deepEqual(r.checked, { findings: 1, nodes: 1 });
+});
+
+ok("对账：有成果未上图 → 进 unlinked（图会失真，门禁据此判断）", () => {
+	const findings = [
+		{ sessionId: "s1", id: "pentest-1", title: "SQLi", status: "verified", severity: "high", target: "http://a" },
+		{ sessionId: "s1", id: "pentest-2", title: "越权", status: "pending", severity: "medium", target: "http://b" }
+	];
+	const nodes = [{ sessionId: "s1", id: "pentest-1", label: "SQLi", findingRef: "pentest-1", target: "" }];
+	const r = reconcileChain({ findings, nodes, sessionId: "s1" });
+	assert.deepEqual(r.unlinked.map((f) => f.id), ["pentest-2"]);
+	assert.equal(r.unlinked[0].title, "越权");
+	assert.equal(r.dangling.length, 0);
+});
+
+ok("对账：节点指向不存在/他会话的成果 → 进 dangling 且区分成因", () => {
+	const findings = [{ sessionId: "s1", id: "pentest-1", title: "SQLi", status: "verified", severity: "high", target: "http://a" }];
+	const nodes = [
+		{ sessionId: "s1", id: "pentest-1", label: "SQLi", findingRef: "pentest-1", target: "" },
+		{ sessionId: "s1", id: "ghost", label: "幽灵", findingRef: "pentest-9", target: "" },
+		{ sessionId: "s2", id: "cross", label: "跨会话", findingRef: "pentest-1", target: "" }
+	];
+	const r = reconcileChain({ findings, nodes, sessionId: "s1" });
+	assert.equal(r.dangling.length, 2);
+	assert.match(r.dangling.find((d) => d.nodeId === "ghost").reason, /本会话不存在/);
+	assert.match(r.dangling.find((d) => d.nodeId === "cross").reason, /他会话/);
+});
+
+ok("对账：无 findingRef 的纯资产节点不算脏", () => {
+	const findings = [{ sessionId: "s1", id: "pentest-1", title: "SQLi", status: "verified", severity: "high", target: "http://a" }];
+	const nodes = [
+		{ sessionId: "s1", id: "pentest-1", label: "SQLi", findingRef: "pentest-1", target: "" },
+		{ sessionId: "s1", id: "dc-01", label: "DC01", findingRef: "", target: "" }
+	];
+	const r = reconcileChain({ findings, nodes, sessionId: "s1" });
+	assert.equal(r.dangling.length, 0);
+	assert.equal(r.unlinked.length, 0);
+});
+
+ok("对账渲染：超过 12 条悬挂引用时不因省略行抛错", () => {
+	const dangling = Array.from({ length: 13 }, (_, i) => ({ nodeId: `n${i}`, findingRef: `f${i}`, reason: "missing" }));
+	const text = renderChainReconcile({ ok: true, unlinked: [], dangling, checked: { findings: 0, nodes: 13 } });
+	assert.match(text, /另有 1 处/);
+});
+
+// 端到端：自动上图之后，该成果不该再出现在 unlinked 里（真实 atlas 库）
+{
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rtr-rc-"));
+	const seed = atlasOpen(path.join(dir, "atlas.db"));
+	seed.close();
+	process.env.DSH_ATLAS_DB = path.join(dir, "atlas.db");
+	try {
+		const st = openStore(":memory:");
+		const { finding } = await registerFindingWithLink(st, "s-rc", "pentest", { title: "上传绕过", target: "http://u", summary: "s", severity: "high" });
+		const findings = allFindings(st, "s-rc", "pentest").map((f) => ({ ...f, sessionId: "s-rc" }));
+		const peek = atlasOpen(process.env.DSH_ATLAS_DB);
+		const chain = atlasListChain(peek, "s-rc", "pentest");
+		peek.close();
+		const before = reconcileChain({ findings, nodes: [], sessionId: "s-rc" });
+		ok("端到端：自动上图前，该成果确实被对账列为未上图", () => {
+			assert.deepEqual(before.unlinked.map((f) => f.id), [finding.id]);
+		});
+		const after = reconcileChain({ findings, nodes: chain.nodes, sessionId: "s-rc" });
+		ok("端到端：自动上图后，对账两边一致（图与发现同步）", () => {
+			assert.equal(after.unlinked.length, 0);
+			assert.equal(after.dangling.length, 0);
+			assert.equal(after.checked.nodes, 1);
+		});
+		st.close();
+	} finally {
+		delete process.env.DSH_ATLAS_DB;
+		releaseChainRefs();
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+}
 
 console.log(`\nall ${passed} tests passed`);

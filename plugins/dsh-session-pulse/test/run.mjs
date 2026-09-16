@@ -11,7 +11,7 @@ let pass = 0;
 const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); } else { console.log(`FAIL ${label}`); process.exitCode = 1; } };
 
 // 1. 模式门控：安全模式名单 + 判定（含服务端兜底）。Saker 发行版只有两个安全模式。
-ok("安全模式名单齐（pentest + code-audit）", PULSE_MODES.length === 2 && PULSE_MODES.includes("pentest") && PULSE_MODES.includes("code-audit") && Object.keys(MODE_LABELS).length === 2);
+ok("安全模式名单齐（pentest + code-audit + ctf-solver）", PULSE_MODES.length === 3 && PULSE_MODES.includes("pentest") && PULSE_MODES.includes("code-audit") && PULSE_MODES.includes("ctf-solver") && Object.keys(MODE_LABELS).length === 3);
 ok("modeOk：直判/服务端兜底/组合名拒绝", modeOk("pentest", "") === true && modeOk("cordis", "code-audit") === true && modeOk("cordis", "") === false && modeOk("", "") === false);
 
 // 2. 任务进度：todos 投影 → 汇总
@@ -97,6 +97,9 @@ ok("progressOf：null/空清单返回 null", progressOf(null) === null && progre
 	fs.writeFileSync(path.join(ws, "session.jsonl.zstd"), blob);
 	const tr = subagentTranscript(sid, dir);
 	ok("多帧 zstd 定位+全量解压+转写", tr.sessionId === sid && JSON.stringify(tr.entries.map((e) => e.kind)) === JSON.stringify(["user", "assistant", "tool"]) && tr.entries[0].text === "任务：复核");
+	fs.renameSync(path.join(ws, "session.jsonl.zstd"), path.join(ws, "session.v3.jsonl.zstd"));
+	const trV3 = subagentTranscript(sid, dir);
+	ok("v3 文件名 session.v3.jsonl.zstd 可定位", trV3.sessionId === sid && trV3.entries.length === 3);
 	await assert.rejects(async () => subagentTranscript("not-exist-0123456789", dir), /不存在/);
 	await assert.rejects(async () => subagentTranscript("../evil", dir), /非法/);
 	fs.rmSync(dir, { recursive: true, force: true });
@@ -130,6 +133,11 @@ ok("栅栏四态",
 	isTrustedRequest({ headers: { host: "127.0.0.1:3080", origin: "http://127.0.0.1:3080" } }, []) === true &&
 	isTrustedRequest({}, []) === false);
 ok("路由前缀", ROUTE_PATH === "/dsh-session-pulse");
+
+// 7. 客户端数据源契约：聊天快照必须走 slot 的 useChat，不能读 Session 上已移除的 chat 字段。
+const clientSrc = fs.readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
+ok("提示词栏使用 conversation session 槽位的 useChat", clientSrc.includes("props.useChat") && clientSrc.includes("useChat(function (s) { return s; })"));
+ok("不再从 useSession 快照读取已移除的 chat 字段", !clientSrc.includes("useSession(function (s) { return s.chat; })"));
 
 ok("CSRF 头校验：匹配放行/缺失或错值拒",
 	checkCsrf({ headers: { "x-dsh-csrf": "T" } }, "T") === true &&

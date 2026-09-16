@@ -14,8 +14,8 @@ export const SERVER_PRESETS: readonly ServerPreset[] = [
   {
     id: 'chrome-devtools',
     label: 'Chrome DevTools',
-    description: 'Chrome DevTools MCP：页面快照、点击、填表、网络与控制台（默认关闭；开启即经 npx 拉起）',
-    json: '{\n  "mcpServers": {\n    "chrome-devtools": {\n      "command": "npx",\n      "args": ["-y", "chrome-devtools-mcp@latest"],\n      "disabled": true\n    }\n  }\n}',
+    description: 'Chrome DevTools MCP：页面快照、点击、填表、网络与控制台（默认关闭；固定 1.9.0，auto/proxy 避免 29 个工具进入提示词）',
+    json: '{\n  "mcpServers": {\n    "chrome-devtools": {\n      "command": "npx",\n      "args": ["-y", "chrome-devtools-mcp@1.9.0"],\n      "disabled": true\n    }\n  }\n}',
   },
   {
     id: 'kali',

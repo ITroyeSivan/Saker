@@ -1,3 +1,8 @@
+
+// ── 平台数据根（$DSH_HOME）────────────────────────────────────────────
+// 宿主按 $DSH_HOME 装配 profiles/会话/存储；插件一律跟随，避免「一半落 A 一半落 B」。
+// 未设置时等价于 ~/.dsh，故对既有用户是零行为变更。
+const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
 // dsh-webshell-mgr「webshell 管理」宿主插件：
 //   1) Web 通道：/dsh-webshell-mgr 前缀路由（同源信任栅栏）——连接/执行/文件/数据库/
 //      生成器/插件/台账 RPC；
@@ -21,7 +26,7 @@ import { protocolMeta, detectProtocol, probeConnection } from "./protocol/regist
 import * as cap from "./protocol/capabilities.js";
 import { GEN_KINDS, makeAndSave, importFromFile, GEN_DIR } from "./generators.js";
 import { listPlugins, getPlugin, runPlugin, checkRunnable } from "./plugins-registry.js";
-import { readFileSync, mkdirSync, writeFileSync, existsSync, unlinkSync as fsUnlink, readdirSync } from "node:fs";
+import { readFileSync, mkdirSync, writeFileSync, existsSync, unlinkSync as fsUnlink, readdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 
 const name = "dsh-webshell-mgr";
@@ -33,7 +38,7 @@ const CSRF_TOKEN = crypto.randomBytes(24).toString("hex");
 export function checkCsrf(req, token) {
 	return String(req?.headers?.["x-dsh-csrf"] ?? "") === String(token ?? "");
 }
-const BASE_DIR = path.join(os.homedir(), ".dsh", "webshell-mgr");
+const BASE_DIR = path.join(DSH_HOME, "webshell-mgr");
 const DB_PATH = path.join(BASE_DIR, "webshell.db");
 const WS_SETTINGS_FILE = path.join(BASE_DIR, "settings.json");
 
@@ -99,6 +104,9 @@ function wsGenCandidates(settings) {
 	return out;
 }
 let WS_CFG = { genDir: "", templates: {}, selfShells: [] };
+const WS_SCHEMA = z.object({
+	genDir: z.string().default(""),
+});
 function loadWsCfg() {
 	try {
 		const j = JSON.parse(readFileSync(WS_SETTINGS_FILE, "utf8"));
@@ -111,7 +119,16 @@ function loadWsCfg() {
 	return WS_CFG;
 }
 function saveWsCfg() {
-	try { mkdirSync(BASE_DIR, { recursive: true }); writeFileSync(WS_SETTINGS_FILE, JSON.stringify({ genDir: WS_CFG.genDir || "", templates: WS_CFG.templates || {}, selfShells: WS_CFG.selfShells || [] }, null, 2), "utf8"); } catch { /* 磁盘异常仅降级 */ }
+	// 原子写：这份配置里装着**用户自己的马库清单**（selfShells）与生成目录。
+	// 直写时的半截 JSON 会让 loadWsCfg 走 catch → WS_CFG 复位成空默认值，
+	// 用户的马库清单**静默清空**（磁盘异常只降级、不报错，所以完全没有提示）。
+	try {
+		mkdirSync(BASE_DIR, { recursive: true });
+		const payload = JSON.stringify({ genDir: WS_CFG.genDir || "", templates: WS_CFG.templates || {}, selfShells: WS_CFG.selfShells || [] }, null, 2);
+		const tmp = `${WS_SETTINGS_FILE}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+		writeFileSync(tmp, payload, "utf8");
+		renameSync(tmp, WS_SETTINGS_FILE);
+	} catch { /* 磁盘异常仅降级 */ }
 }
 /** 形态模板默认：显式 raw 字段优先；模板非空次之；其余交给 generate 随机/默认。 */
 function genWithTpl(kind, raw) {
@@ -145,10 +162,10 @@ function obfOf(kind) { return OBF_OF_KIND[kind] || "passgate"; }
 /** 该形态可自定义的模板字段。 */
 function fieldsOf(kind) {
 	const f = [];
-	if (kind.includes("-oneliner")) f.push({ key: "passParam", label: "口令 POST 参数名", hint: "默认 pass" });
-	if (kind.includes("-basic")) f.push({ key: "password", label: "连接口令", hint: "留空=生成时随机" }, { key: "cmdParam", label: "命令参数名", hint: "默认 cmd" }, { key: "passParam", label: "口令 POST 参数名", hint: "默认 pass" });
+	if (kind.includes("-oneliner")) f.push({ key: "passParam", label: "口令 POST 参数名", hint: "默认 pass（留空=默认）" });
+	if (kind.includes("-basic")) f.push({ key: "password", label: "连接口令", hint: "留空=生成时随机" }, { key: "cmdParam", label: "命令参数名", hint: "默认 cmd（留空=默认）" }, { key: "passParam", label: "口令 POST 参数名", hint: "默认 pass（留空=默认）" });
 	if (kind.includes("-behinder") || kind.includes("-mem-filter")) f.push({ key: "password", label: "连接口令（key=md5(口令)[0:16]）", hint: "留空=生成时随机" });
-	if (kind.includes("-godzilla")) f.push({ key: "password", label: "口令/密钥源", hint: "哥斯拉型：密钥缺省取口令" }, { key: "passParam", label: "口令 POST 参数名", hint: "默认 pass" });
+	if (kind.includes("-godzilla")) f.push({ key: "password", label: "口令/密钥源", hint: "哥斯拉型：密钥缺省取口令" }, { key: "passParam", label: "口令 POST 参数名", hint: "默认 pass（留空=默认）" });
 	return f;
 }
 /** 模板目录树：语言 → 绕过形式组 → 形态。 */
@@ -491,7 +508,8 @@ async function dbCore(connId, action, a = {}) {
 	}
 }
 
-function genCore(action, a = {}) {
+export function genCore(action, a = {}, storeOverride) {
+	const getStore = () => storeOverride ?? theStore();
 	switch (action) {
 		case "kinds": return { kinds: GEN_KINDS, protocols: protocolMeta() };
 		case "catalog": return { langs: catalogTree() };
@@ -508,31 +526,31 @@ function genCore(action, a = {}) {
 			if (Object.keys(cur).length === 0) delete WS_CFG.templates[kind];
 			else WS_CFG.templates[kind] = cur;
 			saveWsCfg();
-			logOp(theStore(), "", "tpl.set", `${kind} ${JSON.stringify(cur)}`);
+			logOp(getStore(), "", "tpl.set", `${kind} ${JSON.stringify(cur)}`);
 			return { ok: true, kind, values: cur };
 		}
-		case "list": return { generations: listGenerations(theStore()) };
+		case "list": return { generations: listGenerations(getStore()) };
 		case "make": {
 			const item = makeAndSave(genBase(), String(a.kind ?? ""), genWithTpl(String(a.kind ?? ""), a));
-			const rec = recordGeneration(theStore(), { name: item.name, lang: item.lang, kind: item.kind, filePath: item.filePath, meta: { password: item.password, passParam: item.passParam, cmdParam: item.cmdParam, connHint: item.connHint } });
-			logOp(theStore(), "", "gen.make", `${item.kind} → ${item.filePath}`);
+			const rec = recordGeneration(getStore(), { name: item.name, lang: item.lang, kind: item.kind, filePath: item.filePath, meta: { password: item.password, passParam: item.passParam, cmdParam: item.cmdParam, connHint: item.connHint } });
+			logOp(getStore(), "", "gen.make", `${item.kind} → ${item.filePath}`);
 			return { generation: rec, password: item.password, connHint: item.connHint, content: item.content };
 		}
 		case "import": {
 			const item = importFromFile(genBase(), String(a.path ?? ""), a);
-			const rec = recordGeneration(theStore(), { name: item.name, lang: item.lang, kind: "import", filePath: item.filePath, meta: {} });
+			const rec = recordGeneration(getStore(), { name: item.name, lang: item.lang, kind: "import", filePath: item.filePath, meta: {} });
 			return { generation: rec, content: item.content };
 		}
 		case "read": {
-			const rec = listGenerations(theStore()).find((g) => g.id === String(a.id ?? ""));
+			const rec = listGenerations(getStore()).find((g) => g.id === String(a.id ?? ""));
 			if (!rec) throw new Error("产物不存在");
 			return { generation: rec, content: readFileSync(rec.file_path, "utf8") };
 		}
 		case "delete": {
 			const id = String(a.id ?? "");
-			const rec = listGenerations(theStore()).find((g) => g.id === id);
+			const rec = listGenerations(getStore()).find((g) => g.id === id);
 			if (!rec) throw new Error("产物不存在");
-			st.db.prepare("DELETE FROM generations WHERE id = ?").run(id);
+			getStore().deleteGeneration.run(id);
 			return { ok: true };
 		}
 		default: throw new Error(`未知生成操作 ${action}`);
@@ -757,7 +775,7 @@ export async function dispatch(ctx, st, endpoint, payload) {
 function registerTools(ctx) {
 	ctx.tools.register(defineTool({
 		name: "webshell_generate",
-		description: "生成基础/自研加密/冰蝎型 webshell 源码（仅授权测试）。php-oneliner（eval 通道一句话）/ php-basic（口令门+命令通道）/ php-aes1|php-aes2（自研加密马 v1=c/u/d、v2=+eval 结构化能力）/ php-behinder|php-godzilla（生态兼容型）/ jsp-basic / jsp-aes1 / jsp-behinder（冰蝎型 JSP·behinder-java 通道）/ jsp-mem-filter（Tomcat Filter 内存马引导器：上传访问一次即注入，删文件连接仍在）/ aspx-basic / aspx-aes1。返回源码+落盘路径+连接提示；免杀变体请走免杀对抗模式。",
+		description: "生成 webshell 源码并返回落盘路径与连接提示（仅授权测试）。kind 覆盖 PHP/JSP/ASPX 基础、自研加密、冰蝎/哥斯拉与 JSP 内存马形态；免杀变体走免杀对抗模式。",
 		parameters: {
 			kind: { type: "string", required: true, enum: Object.keys(GEN_KINDS), description: "生成类型" },
 			name: { type: "string", description: "产物名（默认 kind+时间戳）" },
@@ -776,7 +794,7 @@ function registerTools(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "webshell_connect",
-		description: "登记并连接一个 webshell（仅授权测试）：给定 URL+口令(+盐)自动识别协议（自研加密/一句话 eval/命令通道/冰蝎 PHP·JSP/哥斯拉/魔改变体/内存马 X-C），探测 OS 与基本信息，登记进「webshell 管理」页。内存马：URL 填任意存活路径（Filter/Module 全站劫持；Spring Controller 型填注入器返回的伪装路径），自动识别命中后按内存马形态登记。返回连接 id 供 exec/file/db/plugin 工具使用。",
+		description: "登记并连接 webshell（仅授权测试）：按 URL+口令+盐自动识别协议、探测 OS 与基本信息。返回连接 id 供后续文件/命令/数据库工具使用。",
 		parameters: {
 			url: { type: "string", required: true, description: "webshell 地址（含协议 http(s)://）" },
 			password: { type: "string", description: "口令 / X-T / X-G 值（按协议）" },
@@ -807,7 +825,7 @@ function registerTools(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "webshell_exec",
-		description: "在指定 webshell 连接上执行 OS 命令（仅授权测试）。行缓冲语义：交互式命令换非交互等价（ad 纪律：长任务拆短命令、输出落文件分段读）。",
+		description: "在已连接 webshell 上执行 OS 命令（仅授权测试）；长任务拆短命令，输出可落文件分段读。",
 		parameters: {
 			conn_id: { type: "string", required: true, description: "连接 id（webshell_connect 返回）" },
 			command: { type: "string", required: true, description: "OS 命令" }
@@ -822,7 +840,7 @@ function registerTools(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "webshell_file",
-		description: "webshell 文件操作（仅授权测试）。action=ls/read/write/delete/delete-dir/mkdir/mv/chmod/touch/stat/wget/roots/zip/unzip（behinder-java）/shot（截屏，产物落 generated/。read 返回 base64；write 传 base64（自动分块）；touch 伪造时间戳（epoch 秒）；wget 从 URL 拉文件到目标机。工具上传属环境改动——进操作痕迹台账（本工具每次操作已记 op_log）。",
+		description: "webshell 文件操作（仅授权测试）。支持列举、读写、删除、移动、权限、时间戳、下载、压缩解压和截屏；每次操作记 op_log。",
 		parameters: {
 			conn_id: { type: "string", required: true, description: "连接 id" },
 			action: { type: "string", required: true, enum: ["ls", "read", "write", "delete", "delete-dir", "mkdir", "mv", "copy", "chmod", "touch", "stat", "wget", "roots"], description: "操作" },
@@ -844,7 +862,7 @@ function registerTools(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "webshell_db",
-		description: "webshell 数据库操作（仅授权测试）。通道要求：PHP 系走 eval 能力（eval 马/自研 v2，目标机 PDO）；behinder-java 通道走 JDBC（目标应用自带驱动 jar 即可，含 mysql/mssql/pgsql/oracle）。action=profile.save/dbs/tables/tableinfo/exec。先 profile.save 存连接档案（type=mysql/pgsql/sqlite/mssql/oracle + host/port/username/password/database），再 dbs→tables→exec。",
+		description: "webshell 数据库操作（仅授权测试）：先 profile.save 保存连接档案，再按 dbs→tables→tableinfo/exec 操作。PHP 走 PDO，behinder-java 走 JDBC。",
 		parameters: {
 			conn_id: { type: "string", required: true, description: "连接 id" },
 			action: { type: "string", required: true, enum: ["profile.save", "dbs", "tables", "tableinfo", "exec", "enum"], description: "操作（enum=目标应用数据源凭据枚举，behinder-java）" },
@@ -868,7 +886,7 @@ function registerTools(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "webshell_net",
-		description: "webshell 网络动作（仅授权测试；behinder-java 通道=目标侧载荷，godzilla-java 通道=HTTP 隧道）。kind: socks（目标侧 SOCKS5 无鉴权，port=监听端口，any=绑 0.0.0.0）/ fwd（端口转发：listen 监听端口 → host:port）/ reverse（反弹 shell：回连 host:port）/ tunnel.start（HTTP 隧道：localPort 本地 SOCKS5，全部流量封装 web 请求，需 godzilla-java）/ tunnel.stop（localPort）/ tunnel.status。",
+		description: "webshell 网络动作（仅授权测试）：socks 代理、端口转发、反弹 shell、HTTP 隧道启停与状态。具体参数见 kind。",
 		parameters: {
 			conn_id: { type: "string", description: "连接 id" },
 			kind: { type: "string", required: true, enum: ["socks", "fwd", "reverse", "tunnel.start", "tunnel.stop", "tunnel.status"], description: "动作" },
@@ -889,7 +907,7 @@ function registerTools(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "webshell_batch_exec",
-		description: "多连接批量执行命令（仅授权测试）：对多个已登记 webshell 并发面逐个执行同一命令，返回各连接结果（输出截 2000 字）。",
+		description: "对多个已登记连接逐个执行同一命令，并返回各连接结果（仅授权测试）。",
 		parameters: {
 			conn_ids: { type: "array", items: { type: "string" }, required: true, description: "连接 id 列表" },
 			command: { type: "string", required: true, description: "OS 命令" }
@@ -905,7 +923,7 @@ function registerTools(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "webshell_mem_unload",
-		description: "卸载内存马（仅授权测试；behinder-java 通道）。从 Tomcat StandardContext 移除动态 Filter 的三注册面（filterConfigs/filterDefs/filterMaps）。name 留空 = 读引导器登记的 x-n 属性（本插件 jsp-mem-filter 引导器注入的马可自动定位）；卸载后该连接即断（预期行为），动作入 op_log 台账。",
+		description: "卸载 Tomcat Filter 内存马（仅授权测试，behinder-java）：移除三注册面并记 op_log；卸载后连接即断。",
 		parameters: {
 			conn_id: { type: "string", required: true, description: "内存马连接 id（behinder-java 通道）" },
 			name: { type: "string", description: "Filter 名（留空 = 自动读 x-n 登记）" }
@@ -921,7 +939,7 @@ function registerTools(ctx) {
 	}));
 	ctx.tools.register(defineTool({
 		name: "webshell_plugin_list",
-		description: "列出已安装的 webshell 载荷插件（声明式清单：名称/语言/通道/参数表单）。用户可用自然语言要求运行某个插件——先看本清单确认参数。",
+		description: "列出已安装 webshell 载荷插件及其参数表。",
 		parameters: {},
 		output: { schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } }, render: (_a, v) => [{ type: "text", text: v.ok ? v.plugins.map((p) => `${p.name} v${p.version} [${p.type}] ${p.langs.join("/")} 参数：${p.params.map((x) => x.key).join(",") || "无"}`).join("\n") || "（无插件）" : `查询失败：${v.error}` }] },
 		execute(_args, exec) {
@@ -933,7 +951,7 @@ function registerTools(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "webshell_plugin_run",
-		description: "在指定 webshell 连接上运行一个载荷插件（仅授权测试；需 eval 能力通道）。参数表见 webshell_plugin_list。",
+		description: "在连接上运行载荷插件（仅授权测试，需 eval 通道）；参数表见 webshell_plugin_list。",
 		parameters: {
 			conn_id: { type: "string", required: true, description: "连接 id" },
 			plugin: { type: "string", required: true, description: "插件名" },
@@ -950,7 +968,7 @@ function registerTools(ctx) {
 	}));
 	ctx.tools.register(defineTool({
 		name: "webshell_library_list",
-		description: "列出本机 webshell 库：可生成的内置形态（kind，用 webshell_generate 生成）与库目录里的自有马（name/file/lang/绕过形式，含只有文件、未在设置页登记过的条目）。口令不在此返回（用设置页查看）。",
+		description: "列出内置生成形态与本机自有 webshell；口令不由本工具返回。",
 		parameters: {},
 		output: { schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } }, render: (_a, v) => [{ type: "text", text: v.ok
 			? `库目录：${v.dir}\n内置形态 ${v.kinds.length} 种（${v.kinds.join("/")}）\n自有马 ${v.shells.length} 个：` + (v.shells.map((s) => `${s.name} (${s.lang} / ${s.obf}) file=${s.file}${s.registered ? "" : " [未登记]"}${s.password ? " 口令已设" : ""}`).join("\n") || "（无）")
@@ -965,7 +983,7 @@ function registerTools(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "webshell_library_read",
-		description: "读取本机 webshell 库中某个自有马的完整源码（仅授权测试）。先用 webshell_library_list 拿到 name，或直接用生成返回的 file。内容可作审计/免杀研究。",
+		description: "读取本机自有 webshell 源码（仅授权测试）；先由 webshell_library_list 取 name。",
 		parameters: {
 			name: { type: "string", description: "库中马的 name（list 返回）或 file 文件名" }
 		},
@@ -995,10 +1013,11 @@ function registerSettingsLayer(ctx, web) {
 	// 启动时读自有 settings.json；settings 服务仅尽力同步（非持久化主路径，避免 mutate 挂起）
 	loadWsCfg();
 	try {
-		const scope = ctx.settings.register("webshell-mgr", WS_SCHEMA, { base: { genDir: WS_CFG.genDir || "" } });
+		const scope = settings.register("webshell-mgr", WS_SCHEMA, { base: { genDir: WS_CFG.genDir || "" } });
 		const sync = () => { try { WS_CFG.genDir = scope.get?.().genDir ?? WS_CFG.genDir; } catch { /* ignore */ } };
 		sync();
-		try { ctx.settings.on?.("set", sync); } catch { /* ignore */ }
+		try { scope.watch?.(sync); } catch { /* optional host watcher */ }
+		try { settings.on?.("set", sync); } catch { /* ignore */ }
 	} catch (e) {
 		ctx.logger?.warn?.("dsh-webshell-mgr: settings register failed: %s", e && e.message ? e.message : String(e));
 	}

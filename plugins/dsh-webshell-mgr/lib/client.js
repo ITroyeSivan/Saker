@@ -132,6 +132,17 @@ function FormModal(props) {
 			h(Btn, { primary: true, onClick: function () { props.onSubmit(draft); } }, props.submitLabel || "确定")));
 }
 
+/** 应用内确认框：替代 window.confirm（原生对话框会阻塞渲染进程，Agent 驱动整页卡死）。 */
+function ConfirmModal(props) {
+	if (!props.open) return null;
+	return h(Modal, { open: true, onClose: props.onCancel },
+		h("h3", null, props.title || "确认操作"),
+		h("div", { style: { fontSize: 13, lineHeight: 1.7, whiteSpace: "pre-wrap" } }, props.message || ""),
+		h("div", { className: "dsh-wsm-row", style: { justifyContent: "flex-end" } },
+			h(Btn, { onClick: props.onCancel }, "取消"),
+			h(Btn, { primary: true, danger: true, onClick: props.onConfirm }, props.confirmLabel || "确定")));
+}
+
 //#endregion
 
 //#region 样式
@@ -351,6 +362,8 @@ function OverviewPane(props) {
 	var netHost = useState("");
 	var netTarget = useState("");
 	var netBusy = useState(false);
+	// 网络/卸载动作的结果就地显示（原生 alert 会阻塞渲染进程，Agent 驱动整页卡死）
+	var notice = useState(null);
 	useEffect(function () {
 		ops[1](null);
 		if (conn) api("ops.recent", { connId: conn.id, limit: 30 }).then(ops[1]).catch(function () { ops[1]({ ops: [] }); });
@@ -358,6 +371,7 @@ function OverviewPane(props) {
 	if (!conn) return h("div", { className: "dsh-wsm-skel" }, "左侧选择或新建一个连接");
 	var info = conn.basicInfo || {};
 	return h(React.Fragment, null,
+		h(Notice, { msg: notice[0] && notice[0].text, kind: notice[0] && notice[0].kind }),
 		h("div", { className: "dsh-wsm-row" },
 			h(Pill, { tone: "accent" }, conn.protocol),
 			h(Pill, null, conn.shell_lang),
@@ -414,9 +428,9 @@ function OverviewPane(props) {
 						netBusy[1](false);
 						var text = r.output || JSON.stringify(r);
 						if (r.tunnels) text = r.tunnels.length ? r.tunnels.map(function (t) { return "本地 :" + t.port + "（" + t.sessions + " 会话）"; }).join("；") : "（无活跃隧道）";
-						alert("结果：" + text);
+						notice[1]({ text: "结果：" + text, kind: "info" });
 						netMenu[1](null);
-					}).catch(function (e) { netBusy[1](false); alert("失败：" + String(e)); });
+					}).catch(function (e) { netBusy[1](false); notice[1]({ text: "失败：" + String(e), kind: "error" }); });
 				} }, netBusy[0] ? "执行中…" : "执行"))) : null,
 		unloadMenu[0] ? h(Popover, { open: true, anchor: unloadMenu[0].anchor, onClose: function () { unloadMenu[1](null); unloadName[1](""); }, title: "卸载内存马（Tomcat Filter 三注册面移除）", width: 360 },
 			h("div", { className: "dsh-wsm-notice" }, "Filter 名留空 = 自动读引导器登记（本插件引导器注入的马）。卸载后该连接即断（预期行为）。"),
@@ -428,8 +442,8 @@ function OverviewPane(props) {
 					api("mem.unload", { connId: conn.id, name: unloadName[0] }).then(function (r) {
 						unloadBusy[1](false); unloadMenu[1](null); unloadName[1]("");
 						props.onRefresh && props.onRefresh();
-						alert("卸载结果：" + (r.output || "ok") + "——连接已断属预期");
-					}).catch(function (e) { unloadBusy[1](false); alert("卸载失败：" + String(e)); });
+						notice[1]({ text: "卸载结果：" + (r.output || "ok") + "——连接已断属预期", kind: "info" });
+					}).catch(function (e) { unloadBusy[1](false); notice[1]({ text: "卸载失败：" + String(e), kind: "error" }); });
 				} }, unloadBusy[0] ? "卸载中…" : "确认卸载"))) : null,
 		h("div", { className: "dsh-wsm-kv" },
 			h("dt", null, "地址"), h("dd", { className: "dsh-wsm-mono" }, conn.url),
@@ -597,6 +611,8 @@ function FilesPane(props) {
 	var entries = useState(null);
 	var msg = useState("");
 	var msgKind = useState("info");
+	// 删除的二次确认（原生 confirm 会阻塞渲染进程，Agent 驱动整页卡死）
+	var confirmDel = useState(null);
 	var busy = useState(false);
 	var upPct = useState(0);
 	var rowMenu = useState(null);
@@ -704,7 +720,8 @@ function FilesPane(props) {
 			return;
 		}
 		if (action === "delete" || action === "delete-dir") {
-			if (!window.confirm("删除 " + target + "？" + (action === "delete-dir" ? "（递归）" : ""))) return;
+			confirmDel[1]({ action: action, target: target, message: "删除 " + target + "？" + (action === "delete-dir" ? "（递归）" : "") });
+			return;
 		}
 		act(action, { path: target });
 	}
@@ -780,6 +797,14 @@ function FilesPane(props) {
 	var crumbs = path[0].split(/[\\/]/).filter(Boolean);
 	var v = viewer[0];
 	return h(React.Fragment, null,
+		h(ConfirmModal, {
+			open: !!confirmDel[0],
+			title: "确认删除",
+			message: confirmDel[0] ? confirmDel[0].message : "",
+			confirmLabel: "删除",
+			onCancel: function () { confirmDel[1](null); },
+			onConfirm: function () { var d = confirmDel[0]; confirmDel[1](null); if (d) act(d.action, { path: d.target }); }
+		}),
 		h("div", { className: "dsh-wsm-row" },
 			h(Btn, { small: true, onClick: up, title: "上级目录", disabled: busy[0] }, ".."),
 			h("div", { className: "dsh-wsm-crumbs" },
@@ -880,6 +905,8 @@ var DB_TYPES = ["mysql", "pgsql", "sqlite", "mssql", "oracle"];
 function DbPane(props) {
 	var conn = props.conn;
 	var profiles = useState([]);
+	// 删除档案的二次确认（原生 confirm 会阻塞渲染进程，Agent 驱动整页卡死）
+	var confirmDel = useState(null);
 	var selProfile = useState("");
 	var dbs = useState(null);
 	var expanded = useState({});
@@ -937,6 +964,22 @@ function DbPane(props) {
 	var cur = profiles[0].find(function (p) { return p.id === selProfile[0]; });
 	var sqlHistory = (st.db && st.db.sqlHistory) || [];
 	return h(React.Fragment, null,
+		h(ConfirmModal, {
+			open: !!confirmDel[0],
+			title: "删除数据库档案",
+			message: confirmDel[0] ? confirmDel[0].message : "",
+			confirmLabel: "删除",
+			onCancel: function () { confirmDel[1](null); },
+			onConfirm: function () {
+				var c2 = confirmDel[0] && confirmDel[0].cur;
+				confirmDel[1](null);
+				if (!c2) return;
+				api("db.action", { connId: conn.id, action: "profile.delete", id: c2.id }).then(function () {
+					profiles[1](function (p) { return p.filter(function (x) { return x.id !== c2.id; }); });
+					if (selProfile[0] === c2.id) { selProfile[1](""); dbs[1](null); }
+				});
+			}
+		}),
 		h("div", { className: "dsh-wsm-row" },
 			h(Btn, { small: true, onClick: function (e) {
 				var rect = e.currentTarget.getBoundingClientRect();
@@ -955,11 +998,7 @@ function DbPane(props) {
 				cur ? h("button", { className: "dsh-wsm-menu-item", onClick: function () { profMenu[1](null); editing[1](Object.assign({}, cur, { password: "" })); } }, "编辑当前档案…") : null,
 				cur ? h("button", { className: "dsh-wsm-menu-item is-danger", onClick: function () {
 					profMenu[1](null);
-					if (!window.confirm("删除档案 " + (cur.remark || cur.type) + "？")) return;
-					api("db.action", { connId: conn.id, action: "profile.delete", id: cur.id }).then(function () {
-						profiles[1](function (p) { return p.filter(function (x) { return x.id !== cur.id; }); });
-						if (selProfile[0] === cur.id) { selProfile[1](""); dbs[1](null); }
-					});
+					confirmDel[1]({ cur: cur, message: "删除档案 " + (cur.remark || cur.type) + "？" });
 				} }, "删除当前档案") : null)),
 		h(Modal, { open: !!editing[0], onClose: function () { editing[1](null); } },
 			editing[0] ? h(React.Fragment, null,
@@ -1055,6 +1094,8 @@ function GenPane(props) {
 	var preview = useState(null);
 	var msg = useState("");
 	var importForm = useState(false);
+	// 删除登记的二次确认（原生 confirm 会阻塞渲染进程，Agent 驱动整页卡死）
+	var confirmDel = useState(null);
 	useEffect(function () {
 		api("gen.action", { action: "kinds" }).then(kinds[1]).catch(function (e) { msg[1](String(e)); });
 		api("gen.action", { action: "list" }).then(list[1]).catch(function () { list[1]({ generations: [] }); });
@@ -1069,6 +1110,19 @@ function GenPane(props) {
 	}
 	var kindRows = kinds[0] && kinds[0].kinds ? Object.entries(kinds[0].kinds) : [];
 	return h(React.Fragment, null,
+		h(ConfirmModal, {
+			open: !!confirmDel[0],
+			title: "删除产物登记",
+			message: confirmDel[0] ? "删除登记 " + confirmDel[0].name + "？" : "",
+			confirmLabel: "删除",
+			onCancel: function () { confirmDel[1](null); },
+			onConfirm: function () {
+				var d = confirmDel[0];
+				confirmDel[1](null);
+				if (!d) return;
+				api("gen.action", { action: "delete", id: d.id }).then(function () { api("gen.action", { action: "list" }).then(list[1]); });
+			}
+		}),
 		h("div", { className: "dsh-wsm-row" },
 			h(Field, { label: "类型" }, h("select", { className: "dsh-wsm-select", value: draft[0].kind, onChange: function (e) { set("kind", e.target.value); } },
 				kindRows.map(function (e) { return h("option", { key: e[0], value: e[0] }, e[1].label); }))),
@@ -1111,8 +1165,7 @@ function GenPane(props) {
 							h("td", null, fmtTime(g.created_at)),
 							h("td", { style: { textAlign: "right" } },
 								h(Btn, { small: true, danger: true, onClick: function () {
-									if (!window.confirm("删除登记 " + g.name + "？")) return;
-									api("gen.action", { action: "delete", id: g.id }).then(function () { api("gen.action", { action: "list" }).then(list[1]); });
+									confirmDel[1]({ id: g.id, name: g.name });
 								} }, "删除")));
 					}))))) : null);
 }
@@ -1200,6 +1253,8 @@ function WebshellView(props) {
 	var batchCmd = useState("whoami");
 	var batchBusy = useState(false);
 	var batchResult = useState(null);
+	// 删除连接的二次确认（原生 confirm 会阻塞渲染进程，Agent 驱动整页卡死）
+	var confirmDel = useState(null);
 	var states = useState({});
 	var statesRef = useRef({});
 	var persistTimers = useRef({});
@@ -1238,6 +1293,19 @@ function WebshellView(props) {
 	else if (tab[0] === "gen") pane = h(GenPane, {});
 	else pane = h(PluginsPane, { conn: conn });
 	return h("div", { className: "dsh-wsm-root" },
+		h(ConfirmModal, {
+			open: !!confirmDel[0],
+			title: "删除连接",
+			message: confirmDel[0] ? confirmDel[0].message : "",
+			confirmLabel: "删除",
+			onCancel: function () { confirmDel[1](null); },
+			onConfirm: function () {
+				var d = confirmDel[0];
+				confirmDel[1](null);
+				if (!d) return;
+				api("conn.delete", { id: d.id }).then(function () { if (selected[0] === d.id) selected[1](""); refresh(); });
+			}
+		}),
 		h("div", { className: "dsh-wsm-head" },
 			h("button", { className: "dsh-wsm-btn is-small", onClick: function () { railOpen[1](!railOpen[0]); }, title: "连接栏开/关" }, railOpen[0] ? "‹" : "›"),
 			h("span", { className: "dsh-wsm-title" }, "webshell 管理"),
@@ -1270,7 +1338,7 @@ function WebshellView(props) {
 					api("conn.batch", { ids: ids, command: batchCmd[0] }).then(function (r) {
 						batchBusy[1](false);
 						batchResult[1](r.results || []);
-					}).catch(function (e) { batchBusy[1](false); alert("批量失败：" + String(e)); });
+					}).catch(function (e) { batchBusy[1](false); batchResult[1]([{ name: "（批量调用未发出）", ok: false, error: String(e) }]); });
 				} }, batchBusy[0] ? "执行中…" : "执行（" + Object.keys(batchSel[0]).filter(function (k) { return batchSel[0][k]; }).length + "）")),
 			batchResult[0] ? h("div", { className: "dsh-wsm-scrollbox", style: { maxHeight: "24vh", marginTop: 6 } },
 				h("table", { className: "dsh-wsm-table" },
@@ -1314,9 +1382,7 @@ function WebshellView(props) {
 				h("button", { key: "del", className: "dsh-wsm-menu-item is-danger", onClick: function () {
 					var c = connMenu[0].conn;
 					connMenu[1](null);
-					if (window.confirm("删除连接 " + (c.name || c.url) + "？（含其数据库档案；不删目标上的马）")) {
-						api("conn.delete", { id: c.id }).then(function () { if (selected[0] === c.id) selected[1](""); refresh(); });
-					}
+					confirmDel[1]({ id: c.id, message: "删除连接 " + (c.name || c.url) + "？（含其数据库档案；不删目标上的马）" });
 				} }, "删除")
 			] : null),
 		h(ConnForm, { open: formOpen[0], editing: editing[0], onClose: function () { formOpen[1](false); }, onSaved: function (c) { formOpen[1](false); refresh(); selected[1](c.id); } }));
@@ -1373,17 +1439,17 @@ function ShellEditor(props) {
 	useEffect(function () {
 		if (!props.open || !props.shell) return;
 		setContent(null); setMsg("");
-		wsRpc(props.connection, "self-content-get", { id: props.shell.id }).then(function (r) {
+		wsRpc(props.connection, "self-content-get", { id: props.shell.id, file: props.shell.file }).then(function (r) {
 			if (r && r.ok) setContent(r.value.content);
 			else setMsg((r && r.error) || "读取失败");
-		});
+		}).catch(function (e) { setMsg("读取失败：" + String((e && e.message) || e)); });
 	}, [props.open, props.shell && props.shell.id]);
 	if (!props.open || !props.shell) return null;
 	function save() {
-		wsRpc(props.connection, "self-content-set", { id: props.shell.id, content: content }).then(function (r) {
+		wsRpc(props.connection, "self-content-set", { id: props.shell.id, file: props.shell.file, content: content }).then(function (r) {
 			if (r && r.ok) { setMsg("已保存到文件"); setTimeout(function () { props.onClose(); }, 600); }
 			else setMsg((r && r.error) || "保存失败");
-		});
+		}).catch(function (e) { setMsg("保存失败：" + String((e && e.message) || e)); });
 	}
 	var card = h("div", { style: { width: 780, maxWidth: "94vw", background: "#fff", borderRadius: 12, padding: 14, border: "1px solid #e4e4e7", boxShadow: "0 12px 34px rgba(0,0,0,0.18)" } },
 		h("div", { style: { fontSize: 14, fontWeight: 700 } }, "编辑 webshell 内容：", props.shell.name, "（", props.shell.file, "）"),
@@ -1438,6 +1504,8 @@ function buildLibItems(shells, langs, conns) {
 /** 单一库行：行首统一来源标签；按来源分发可用动作。 */
 function LibraryRow(props) {
 	var it = props.item, sh = it.raw;
+	// 分类改名的行内表单（原生 prompt 会阻塞渲染进程，Agent 驱动整页卡死）
+	var catModal = useState(null);
 	function commit(kind, val) {
 		var payload = { file: sh.file };
 		if (kind === "lang") payload.lang = val; else payload.obf = val;
@@ -1445,8 +1513,7 @@ function LibraryRow(props) {
 	}
 	function catEdit(kind) {
 		var cur = kind === "lang" ? (sh.lang || "其他") : (sh.obf || "自定义");
-		var next = window.prompt(kind === "lang" ? "语言（输入新值即创建新语言分类）" : "绕过形式（输入新值即创建新绕过分类）", cur);
-		if (next !== null && next.trim()) commit(kind, next.trim());
+		catModal[1]({ kind: kind, value: cur });
 	}
 	var mid = [], act = [];
 	if (it.source === "self") {
@@ -1471,7 +1538,17 @@ function LibraryRow(props) {
 		h("code", { style: Object.assign({}, wsMono, { fontWeight: 600, fontSize: 12, flex: "0 0 156px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }) }, it.name),
 		mid,
 		h("div", { style: { flex: 1, minWidth: 8 } }),
-		act);
+		act,
+		catModal[0] ? h(FormModal, {
+			key: "cat|" + catModal[0].kind + "|" + catModal[0].value,
+			open: true,
+			title: catModal[0].kind === "lang" ? "修改语言分类" : "修改绕过形式分类",
+			notice: "输入新值即创建新分类（未登记条目首次修改会自动登记）",
+			fields: [{ key: "v", label: "新值", value: catModal[0].value }],
+			submitLabel: "保存",
+			onClose: function () { catModal[1](null); },
+			onSubmit: function (d) { var kind = catModal[0].kind; var v = String(d.v || "").trim(); catModal[1](null); if (v) commit(kind, v); }
+		}) : null);
 }
 
 function TplEditor(props) {
@@ -1495,7 +1572,7 @@ function TplEditor(props) {
 		: props.item.fields.map(function (f) {
 			return h("div", { key: f.key, style: { marginBottom: 8 } },
 				h("div", { style: { fontSize: 12, fontWeight: 600 } }, f.label),
-				h("input", { value: form[f.key] || "", onChange: function (e) { set(f.key, e.target.value); }, placeholder: f.hint + "（留空=默认）", style: { width: "100%", boxSizing: "border-box", marginTop: 2, padding: "5px 8px", borderRadius: 6, border: "1px solid #d9d9de", fontSize: 12 } }));
+				h("input", { value: form[f.key] || "", onChange: function (e) { set(f.key, e.target.value); }, placeholder: f.hint, style: { width: "100%", boxSizing: "border-box", marginTop: 2, padding: "5px 8px", borderRadius: 6, border: "1px solid #d9d9de", fontSize: 12 } }));
 		});
 	var btnRow = h("div", { style: { display: "flex", gap: 8, marginTop: 8 } },
 		h("button", { type: "button", onClick: save, style: wsBtnPrimary }, "保存模板"),
@@ -1529,6 +1606,10 @@ function WebShellSettings(props) {
 	var [upFile, setUpFile] = useState(null);
 	var [upBusy, setUpBusy] = useState(false);
 	var [upMsg, setUpMsg] = useState("");
+	// 删除/组改名的应用内确认与表单（原生 confirm/prompt 会阻塞渲染进程，Agent 驱动整页卡死）
+	// 注意：本文件统一用元组风格 x = useState(init) + x[0]/x[1](..)；写成解构却在别处读 x[0] 会 null[0] 崩掉整块面板。
+	var confirmShell = useState(null);
+	var obfRename = useState(null);
 	var fileRef = React.useRef(null);
 	function load() {
 		wsRpc(props.connection, "manifest-preview", {}).then(function (r) { if (r && r.ok && r.value.langs) { setLangs(r.value.langs); setEffective(r.value.genDir || ""); } });
@@ -1549,10 +1630,14 @@ function WebShellSettings(props) {
 		wsRpc(props.connection, "self-update", { file: file, password: password }).then(function () { load(); });
 	}
 	function removeShell(sh) {
-		var q = sh.registered
-			? window.confirm("确认从库中移除「" + sh.file + "」？文件将一并删除（选择「取消」可保留文件）。")
-			: window.confirm("确认删除文件「" + sh.file + "」？");
-		if (!q) return;
+		confirmShell[1]({
+			file: sh.file,
+			message: sh.registered
+				? "确认从库中移除「" + sh.file + "」？文件将一并删除（选择「取消」可保留文件）。"
+				: "确认删除文件「" + sh.file + "」？"
+		});
+	}
+	function doRemoveShell(sh) {
 		wsRpc(props.connection, "self-remove", { file: sh.file, deleteFile: true }).then(function () { load(); });
 	}
 	function upload() {
@@ -1596,6 +1681,31 @@ function WebShellSettings(props) {
 	function setAllCollapsed(v) { var n = {}; byLang.forEach(function (g) { n[g.lang] = v; }); setCollapsed(n); }
 	var FILTERS = [["all", "全部"], ["self", "自有上传"], ["tpl", "内置模板"], ["conn", "已登记连接"]];
 	return h("div", { style: { maxWidth: 900 } },
+		h(ConfirmModal, {
+			open: !!confirmShell[0],
+			title: "删除 WebShell 库条目",
+			message: confirmShell[0] ? confirmShell[0].message : "",
+			confirmLabel: "删除",
+			onCancel: function () { confirmShell[1](null); },
+			onConfirm: function () { var f = confirmShell[0]; confirmShell[1](null); if (f) doRemoveShell(f); }
+		}),
+		h(FormModal, {
+			key: "obfrename|" + (obfRename[0] ? obfRename[0].obf : ""),
+			open: !!obfRename[0],
+			title: "整组改为绕过形式",
+			notice: "将把本组自有上传条目统一改成该绕过形式分类",
+			fields: [{ key: "obf", label: "绕过形式", value: obfRename[0] ? obfRename[0].obf : "" }],
+			submitLabel: "改名",
+			onClose: function () { obfRename[1](null); },
+			onSubmit: function (d) {
+				var f = obfRename[0];
+				obfRename[1](null);
+				var v = String(d.obf || "").trim();
+				if (!f || !v) return;
+				f.items.forEach(function (it2) { wsRpc(props.connection, "self-update", { id: it2.id, file: it2.file, obf: v }); });
+				setTimeout(load, 300);
+			}
+		}),
 		h("div", { style: { fontSize: 15, fontWeight: 700, margin: "0 0 2px" } }, "WebShell"),
 		h("div", { style: { fontSize: 12, color: "#6e6e73", lineHeight: 1.7, marginBottom: 10 } },
 			"单一库视图：自有上传、内置模板、已登记连接同库管理，按 语言 → 绕过形式 两级分类，行首「来源标签」区分归属。可上传改码、改密、改分类；连接密钥仅本机明文可见，模型侧脱敏。"),
@@ -1637,7 +1747,7 @@ function WebShellSettings(props) {
 									h("span", null, og.obf),
 									h("span", { style: { flex: 1 } }),
 									h("span", { style: { fontWeight: 400, color: "#6e7a88" } }, og.items.length + " 项"),
-									selfItems.length > 0 ? h("button", { type: "button", title: "把本组自有上传条目的绕过形式整组改名", onClick: function () { var v = window.prompt("整组改为绕过形式：", og.obf); if (v !== null && v.trim()) { selfItems.forEach(function (s) { wsRpc(props.connection, "self-update", { id: s.raw.id, obf: v.trim() }); }); setTimeout(load, 300); } }, style: { padding: "0 6px", fontSize: 11, cursor: "pointer", border: "none", background: "transparent", color: "#2f81f7" } }, "组改名") : null),
+									selfItems.length > 0 ? h("button", { type: "button", title: "把本组自有上传条目的绕过形式整组改名", onClick: function () { obfRename[1]({ obf: og.obf, items: selfItems.map(function (s) { return { id: s.raw.id, file: s.file }; }) }); }, style: { padding: "0 6px", fontSize: 11, cursor: "pointer", border: "none", background: "transparent", color: "#2f81f7" } }, "组改名") : null),
 								og.items.map(function (it) {
 									return h(LibraryRow, { key: it.key, item: it, connection: props.connection, onChanged: load, onEdit: function (s) { setEditShell(s); }, onChangePassword: changePassword, onRemove: removeShell, onEditTpl: function (t) { setEditing(t); } });
 								}));

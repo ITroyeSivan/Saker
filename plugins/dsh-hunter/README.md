@@ -4,7 +4,7 @@ FOFA / 奇安信 Hunter / 360 Quake **三方资产测绘聚合**：统一 DSL �
 
 ## 能力
 
-- **聚合检索**：`hunter_search` / `hunter_query` 统一 DSL（`host="x" && port="80"` 类），内部按平台规则转写并合并去重。
+- **聚合检索**：Web 设置页的搜索接口提供统一 DSL（`host="x" && port="80"` 类），内部按平台规则转写并合并去重。
 - **设置与配额**：Web 设置面板填三家 API key（独立 SQLite `~/.dsh/hunter/hunter.db` 存储），配额感知的分页/导出与每日预算护栏。
 - **实测流水线**（Live-Verify）：读 redteam-results 成果库取 finding → 指纹搜索 → 存活探测 → L0/L1 分级验证 → 回写 `retestNote / evidence / status` + 历史 + 会话 followup 通知。
 - **授权边界**：互联网资产仅 L0（GET 首页+指纹）；L1 最小影响验证**仅对用户显式标记授权的资产**执行；不提供 L2 完整利用。

@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-stage-gate",
-  "version": "1.5.0",
+  "version": "1.5.6",
   "description": "DSH stage-gate host plugin: the stage_gate / gates_list model tools validate task-workspace artifacts against the pentest / code-audit presets' gate schemas (structural checks), append verdicts to gate-log.md, and list each mode's canonical gate files. Intent ledger: operation_intent registers a direction with a mandatory evidence anchor (boot exemption / criterion / scope / current-session finding / chain node — cross-store validators with format-check degrade), operation_progress closes intents (done/blocked/dropped, reason required for terminal states). Constraints layer (operation_constraints: deny/allow with optional match keywords — keyword-bearing deny entries feed deterministic bash/fetch interception) and conservative scope auto-derivation (operation_goal returns a host-precise scope draft extracted from goal/criteria text, model confirms before registering). Mode-aware decomposition: DECOMPOSITION per-mode theory injected into operation_goal/scope/constraints renders (session mode resolved at execute time).",
   "files": [
     "lib",

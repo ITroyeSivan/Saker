@@ -1,5 +1,5 @@
 // dsh-mode-group 客户端：新建会话屏模式选择 chip。
-// pentest / code-audit 两个专业模式平铺于菜单最前；其余 roster 中可见的模式
+// pentest / code-audit / ctf-solver 三个专业模式平铺于菜单最前；其余 roster 中可见的模式
 // （如宿主 standard，供日常办公会话使用）紧随其后列出——只认 PRO_IDS 会把
 // standard 挡在 UI 之外，preset 层放行了也依然选不到。
 // 数据与动作走 connection.api.agentPresets，语义与原生 seat 一致：选择=暂存+
@@ -10,11 +10,11 @@ var module = { exports: {} }; var exports = module.exports;
 var React = require("react");
 var useState = React.useState, useEffect = React.useEffect, useRef = React.useRef, useCallback = React.useCallback;
 
-var PRO_IDS = ["pentest", "code-audit"];
+var PRO_IDS = ["pentest", "code-audit", "ctf-solver"];
 var RESEARCHER = "";
 var L10N = {
-	zh: { group: "专业安全模式", groupDesc: "渗透测试 / 代码审计", researcher: "通用模式" },
-	en: { group: "Professional security", groupDesc: "Pentest / Code audit", researcher: "General" }
+	zh: { group: "专业安全模式", groupDesc: "渗透测试 / 代码审计 / CTF 解题", researcher: "通用模式" },
+	en: { group: "Professional security", groupDesc: "Pentest / Code audit / CTF", researcher: "General" }
 };
 function t() {
 	return /^zh/.test(navigator.language || "") ? L10N.zh : L10N.en;

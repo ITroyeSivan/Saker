@@ -1,3 +1,8 @@
+
+// ── 平台数据根（$DSH_HOME）────────────────────────────────────────────
+// 宿主按 $DSH_HOME 装配 profiles/会话/存储；插件一律跟随，避免「一半落 A 一半落 B」。
+// 未设置时等价于 ~/.dsh，故对既有用户是零行为变更。
+const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
 // dsh-semgrep-audit — code-audit 扫描对账闭环的运行时化（D5 收口）：本机 semgrep
 // 封装为模型工具，纪律内置（同 scanner-tools 范式）：
 //   1) 检测制：本机未装 semgrep 拒绝执行——三级兜底提示（MCP/安装请求批准制），绝不自动装；
@@ -12,23 +17,52 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 
 const BIN_HINT = "本机未装 semgrep——三级兜底：①已连接 MCP（如 kali MCP 的 semgrep_scan，只替引擎不替规则集，命中面收窄如实标注）；②征得用户批准后安装（pip install semgrep——安装请求制，本工具绝不自动装）；③规则降级章通用模式+脚本。";
+const IS_WIN = process.platform === "win32";
+const WIN_PATHEXT = ".COM;.EXE;.BAT;.CMD";
 
-/** which-style binary check without shell. */
+/** PATH 直扫 + Windows App Paths 兜底；不依赖宿主是否继承 PATHEXT。 */
 export function hasBin(bin) {
-	const probe = process.platform === "win32" ? spawnSync("where", [bin]) : spawnSync("/usr/bin/which", [bin]);
-	return probe.status === 0;
+	const name = String(bin ?? "");
+	if (!name) return false;
+	if (name.includes("/") || name.includes("\\")) {
+		try { return fs.existsSync(name); } catch { return false; }
+	}
+	try {
+		const dirs = String(process.env.PATH || process.env.Path || "").split(path.delimiter).filter(Boolean);
+		const exts = IS_WIN
+			? String(process.env.PATHEXT || WIN_PATHEXT).split(";").filter(Boolean).map((e) => e.toLowerCase())
+			: [""];
+		for (const dir of dirs) {
+			for (const ext of exts) {
+				try { if (fs.existsSync(path.join(dir, name + ext))) return true; } catch { /* skip unreadable dir */ }
+			}
+		}
+	} catch { /* fall through */ }
+	try {
+		return IS_WIN
+			? spawnSync("where", [name], { stdio: "ignore", env: { ...process.env, PATHEXT: process.env.PATHEXT || WIN_PATHEXT } }).status === 0
+			: spawnSync("/bin/sh", ["-c", `command -v -- ${name} >/dev/null 2>&1`]).status === 0;
+	} catch { return false; }
 }
 
 /** 定位 code-audit refs/（三层规则集随预设分发）。候选按序探测，供测试注入。 */
 export function findRefsDir(candidates) {
-	const list = candidates ?? [
-		path.resolve(import.meta.dirname, "../../../modes/code-audit/refs"), // 开发树/整包部署（plugins 同级有 modes/）
-		path.join(os.homedir(), ".dsh", "profiles", "web", "modes", "code-audit", "refs") // profile 部署布局
-	];
+	const list = candidates ?? (() => {
+		const out = [];
+		try {
+			const req = createRequire(import.meta.url);
+			out.push(path.join(path.dirname(req.resolve("dsh-saker/package.json")), "preset", "code-audit", "refs"));
+		} catch { /* source tree without installed root package */ }
+		out.push(path.resolve(import.meta.dirname, "../../../preset/code-audit/refs"));
+		const profile = process.env.DSH_PROFILE || "web";
+		out.push(path.join(DSH_HOME, "profiles", profile, "node_modules", "dsh-saker", "preset", "code-audit", "refs"));
+		return out;
+	})();
 	for (const dir of list) {
 		try {
 			if (fs.existsSync(path.join(dir, "lang", "java-audit", "semgrep-rules")) || fs.existsSync(path.join(dir, "semgrep-oss"))) return dir;
@@ -92,39 +126,90 @@ function ensureDirs(workspace) {
 	fs.mkdirSync(path.join(workspace, "artifacts", "scans"), { recursive: true });
 }
 
-function appendEvidence(fsMod, workspace, evidenceId, cmd, file) {
-	const p = path.join(workspace, "evidence-index.md");
-	let head = "";
-	try { head = fsMod.readFileSync(p, "utf8"); } catch {
-		head = "# 证据索引\n\n| 编号 | 时间 | 证据 | 产生方式 | 交接/消费 |\n|---|---|---|---|---|\n";
+/**
+ * 跨进程排他锁（"wx" 创建即独占；带超时回收，防进程崩溃留死锁）。
+ *
+ * 为什么必须有：`appendEvidence` 与 `appendReconcile` 都是**整文件读-改-写** ——
+ * 两个 Solver 同时收尾（code-audit 的多路并行是常态）时，
+ * 后来者读到的是**对方写入前**的版本，于是**先写的那条证据/命中行被整段覆盖丢失**，
+ * 且不报任何错（文件看起来完好，只是少了几行）。
+ * 本项目其它插件（stage-gate / campaign-memory）已用同一套锁解决同类问题，这里对齐。
+ *
+ * @param {object} fsys - fs 实现（可注入，测试用真实 fs）
+ * @param {string} lockPath - 锁文件路径
+ * @param {() => any} fn - 持锁执行体
+ */
+function withLock(fsys, lockPath, fn, { waitMs = 5000, staleMs = 15000 } = {}) {
+	const deadline = Date.now() + waitMs;
+	for (;;) {
+		try {
+			fsys.writeFileSync(lockPath, String(process.pid), { flag: "wx" });
+			break;
+		} catch {
+			// 持锁者可能已崩溃：超过 staleMs 的锁直接回收
+			try {
+				const mtime = fsys.statSync(lockPath).mtimeMs;
+				if (Date.now() - mtime > staleMs) {
+					try { fsys.unlinkSync(lockPath); } catch { /* 已被别人回收 */ }
+					continue;
+				}
+			} catch { /* 锁刚被释放，立刻重试 */ }
+			if (Date.now() > deadline) throw new Error(`证据文件锁等待超时（${path.basename(lockPath)}，另一写入者未释放）`);
+		}
 	}
-	fsMod.writeFileSync(p, head + `| ${evidenceId} | ${new Date().toISOString()} | ${file} | ${cmd} | 扫描产物 |\n`);
-}
-
-function nextEvidenceId(fsMod, workspace) {
-	let n = 0;
 	try {
-		const text = fsMod.readFileSync(path.join(workspace, "evidence-index.md"), "utf8");
-		for (const m of text.matchAll(/\| E(\d+) \|/g)) n = Math.max(n, Number(m[1]));
-	} catch { /* 尚无索引 */ }
-	return `E${n + 1}`;
+		return fn();
+	} finally {
+		try { fsys.unlinkSync(lockPath); } catch { /* 已被回收 */ }
+	}
 }
 
-/** 对账双写：md（人读，同 scanner-tools 格式）+ csv（机读，表头对齐 audit-playbook A3 契约）。 */
+/**
+ * 「分配 id + 追加证据行」的**原子**版本。
+ *
+ * 拆开调用会漏：`nextEvidenceId()` 读文件算下一个号，`appendEvidence()` 再写 ——
+ * 两个并发调用会**读到同一份旧索引、拿到同一个 E 号**，后写的那条还顺手抹掉先写的。
+ * 所以把两步放进同一把锁（锁文件就挂在证据索引上）。
+ */
+function appendEvidenceLocked(fsMod, workspace, cmd, file) {
+	const p = path.join(workspace, "evidence-index.md");
+	return withLock(fsMod, p + ".lock", () => {
+		let head = "";
+		try { head = fsMod.readFileSync(p, "utf8"); } catch {
+			head = "# 证据索引\n\n| 编号 | 时间 | 证据 | 产生方式 | 交接/消费 |\n|---|---|---|---|---|\n";
+		}
+		let n = 0;
+		for (const m of head.matchAll(/\| E(\d+) \|/g)) n = Math.max(n, Number(m[1]));
+		const evidenceId = `E${n + 1}`;
+		fsMod.writeFileSync(p, head + `| ${evidenceId} | ${new Date().toISOString()} | ${file} | ${cmd} | 扫描产物 |\n`);
+		return evidenceId;
+	});
+}
+
+/**
+ * 对账双写：md（人读，同 scanner-tools 格式）+ csv（机读，表头对齐 audit-playbook A3 契约）。
+ *
+ * **加锁的原因**：两个文件都是「读全文 → 拼新内容 → 写回全文」。
+ * 多路 Solver 并发收尾时，后写者会用**自己读到的旧内容**覆盖先写者的追加，
+ * 表现为「命中行莫名少了几条」——不报错、文件完好，最难查的那类数据丢失。
+ * 锁挂在 md 上，csv 与它同锁（两者总是成对写）。
+ */
 export function appendReconcile(fsMod, workspace, rows) {
 	if (!rows || rows.length === 0) return 0;
 	const mdPath = path.join(workspace, "scan-reconcile.md");
-	let head = "";
-	try { head = fsMod.readFileSync(mdPath, "utf8"); } catch {
-		head = "# 扫描命中对账（scan-reconcile）\n\n| 来源 | 命中 | 终态 |\n|---|---|---|\n";
-	}
-	fsMod.writeFileSync(mdPath, head + rows.map((r) => `| semgrep | ${r.rule} @ ${r.file}:${r.line} [${r.severity}] | 待处置（命中≠漏洞，须复核+补真实调用链） |`).join("\n") + "\n");
-	const csvPath = path.join(workspace, "scan-reconcile.csv");
-	let csv = "";
-	try { csv = fsMod.readFileSync(csvPath, "utf8"); } catch { csv = "scanner,rule,file,line,verdict,reason\n"; }
-	const esc = (s) => /[",\n]/.test(s) ? `"${String(s).replace(/"/g, '""')}"` : String(s);
-	fsMod.writeFileSync(csvPath, csv + rows.map((r) => ["semgrep", r.rule, r.file, r.line, "待处置", "命中≠漏洞，复核后经 register 升格"].map(esc).join(",")).join("\n") + "\n");
-	return rows.length;
+	return withLock(fsMod, mdPath + ".lock", () => {
+		let head = "";
+		try { head = fsMod.readFileSync(mdPath, "utf8"); } catch {
+			head = "# 扫描命中对账（scan-reconcile）\n\n| 来源 | 命中 | 终态 |\n|---|---|---|\n";
+		}
+		fsMod.writeFileSync(mdPath, head + rows.map((r) => `| semgrep | ${r.rule} @ ${r.file}:${r.line} [${r.severity}] | 待处置（命中≠漏洞，须复核+补真实调用链） |`).join("\n") + "\n");
+		const csvPath = path.join(workspace, "scan-reconcile.csv");
+		let csv = "";
+		try { csv = fsMod.readFileSync(csvPath, "utf8"); } catch { csv = "scanner,rule,file,line,verdict,reason\n"; }
+		const esc = (s) => /[",\n]/.test(s) ? `"${String(s).replace(/"/g, '""')}"` : String(s);
+		fsMod.writeFileSync(csvPath, csv + rows.map((r) => ["semgrep", r.rule, r.file, r.line, "待处置", "命中≠漏洞，复核后经 register 升格"].map(esc).join(",")).join("\n") + "\n");
+		return rows.length;
+	});
 }
 
 /** 运行核心（spawn/fs/二进制检测均可注入供测试）。 */
@@ -147,8 +232,8 @@ export function runSemgrep({ workspace, target, layer = "builtin-java", rulesPat
 	const parsed = parseSemgrepJson(proc.stdout ? proc.stdout.toString() : "", cap);
 	if (!parsed.ok) return { ok: false, error: parsed.error };
 	fsx.writeFileSync(outFile, proc.stdout.toString());
-	const evidenceId = nextEvidenceId(fsx, workspace);
-	appendEvidence(fsx, workspace, evidenceId, `${cmdStr}（规则层 ${layer}：${configs.join("、")}）`, path.relative(workspace, outFile));
+	// 分配 id 与写行必须原子（见 appendEvidenceLocked 的说明）
+	const evidenceId = appendEvidenceLocked(fsx, workspace, `${cmdStr}（规则层 ${layer}：${configs.join("、")}）`, path.relative(workspace, outFile));
 	const reconciled = appendReconcile(fsx, workspace, parsed.hits);
 	return { ok: true, evidenceId, file: path.relative(workspace, outFile), layer, total: parsed.total, unique: parsed.unique, bySeverity: parsed.bySeverity, reconciled, summaryText: parsed.summaryText };
 }

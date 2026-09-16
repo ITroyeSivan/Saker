@@ -1,4 +1,4 @@
-# dsh-session-pulse：会话状态面板（两模式：渗透测试/代码审计）。
+# dsh-session-pulse：会话状态面板（渗透测试 / 代码审计 / CTF 解题）。
 # 宿主平面：会话头部右上角任务进度 chip（todos 投影）+ 子代理 chip；
 # 右侧「子智能体目录」抽屉（正在运行/已结束，点名进入子代理会话）；
 # 对话页左侧「提示词」栏（悬停预览、点击定位消息锚点）。
@@ -6,3 +6,8 @@
 - insert:
     - id: dsh-session-pulse
       name: '@dsh-external/dsh-session-pulse'
+      # dsh 0.1.6-alpha.1 already ships the authoritative turn outline, trajectory,
+      # todo panel, and subagent lineage UI. Keep this row disabled by default to avoid
+      # duplicate headers, drawers, and prompt rails; remove this flag only for a
+      # deliberate legacy UI test.
+      disabled: true

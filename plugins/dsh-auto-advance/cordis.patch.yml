@@ -1,5 +1,5 @@
 # One installable bundle row: the auto-advancer for the security presets
-# (pentest / code-audit). Host plane — subagent-class executor returns with open
+# (pentest / code-audit / ctf-solver). Host plane — subagent-class executor returns with open
 # intents in the workspace ledger trigger a stateful followup nudge (close →
 # anchor-dispatch next → or finish). Three guardrails: consecutive-turn cap
 # (human input resets), opt-in via the intent ledger, self-describing nudges;

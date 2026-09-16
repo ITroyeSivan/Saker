@@ -1,6 +1,6 @@
 # dsh-sec-enforce (确定性执行护栏)
 
-pentest / code-audit 两预设的**确定性工具调用护栏**：用 dsh-tools 的原生 guard 缝
+三种安全预设（pentest / code-audit / ctf-solver）的**确定性工具调用护栏**：用 dsh-tools 的原生 guard 缝
 （`ctx.tools.guard()`，pre-execute、同步、可拒绝、宿主平面全局注册）把四条纪律从"模型自查"
 变成**机器强制**。Guard 只对两安全预设触发；每次拒绝写入工作区 `enforce-log.md`。
 

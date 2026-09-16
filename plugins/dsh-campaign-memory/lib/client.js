@@ -35,10 +35,12 @@ function api(endpoint, payload) {
 
 var MODES = [
 	{ id: "pentest", label: "渗透测试" },
-	{ id: "code-audit", label: "代码审计" }
+	{ id: "code-audit", label: "代码审计" },
+	{ id: "ctf-solver", label: "CTF 解题" }
 ];
-var KIND_LABEL = { tactic: "战术打法", fingerprint: "目标指纹", tooling: "工具可用性", lesson: "教训", detect: "检测指纹" };
-var KINDS = ["", "tactic", "fingerprint", "tooling", "lesson", "detect"];
+var KIND_LABEL = { tactic: "战术打法", fingerprint: "目标指纹", tooling: "工具可用性", lesson: "教训", detect: "检测指纹", idea: "待验证方向" };
+var KINDS = ["", "tactic", "fingerprint", "tooling", "lesson", "detect", "idea"];
+var IDEA_STATUS_LABEL = { open: "待验证", confirmed: "已验证", "ruled-out": "已排除" };
 
 var CSS = [
 	"body{--cm-line:#4176e6;--cm-ink:#14263e;--cm-ink-2:#2c3f58;--cm-ink-3:#3d5273;--cm-ink-4:#5b6f8a;--cm-ink-5:#6e8098;--cm-ink-6:#7d8ea3;--cm-ink-7:#8a97a8;--cm-cyan-note:#2f6fe4;--cm-grad-a:#2f6fe4;--cm-grad-b:#38a4f7;--cm-on-grad:#ffffff;--cm-gold:#b07800;--cm-gold-ink:#7a5800;--cm-danger:#e03131;--cm-danger-ink:#c92a2a;--cm-root-bg:radial-gradient(1200px 500px at 70% -10%,color-mix(in srgb,var(--cm-line) 7%,transparent),transparent 60%),radial-gradient(900px 420px at 0% 110%,color-mix(in srgb,var(--cm-line) 5%,transparent),transparent 55%),linear-gradient(180deg,#f8fbff 0%,#eef4fc 100%);--cm-panel:rgba(255,255,255,.78);--cm-card:rgba(255,255,255,.66);--cm-input:#ffffff;--cm-float:rgba(255,255,255,.97);--cm-title-grad:linear-gradient(90deg,#2f6fe4,#14263e,#2f6fe4);--cm-glow:0 4px 14px rgba(20,40,80,.07);--cm-shadow:0 6px 24px rgba(20,40,80,.18);--cm-chip-hover:color-mix(in srgb,var(--cm-line) 18%,transparent);--cm-btn-hover:color-mix(in srgb,var(--cm-line) 18%,transparent)}",
@@ -72,6 +74,11 @@ var CSS = [
 	".dsh-cm-kbadge{display:inline-block;margin-left:6px;font-size:9px;border-radius:4px;padding:0 5px;border:1px solid color-mix(in srgb,var(--cm-cyan-note) 40%,transparent);color:var(--cm-cyan-note);vertical-align:1px}",
 	".dsh-cm-kbadge.k-detect{border-color:color-mix(in srgb,var(--cm-gold) 55%,transparent);color:var(--cm-gold-ink)}",
 	".dsh-cm-kbadge.k-expired{border-color:color-mix(in srgb,var(--cm-danger) 55%,transparent);color:var(--cm-danger-ink)}",
+	".dsh-cm-kbadge.k-idea{border-color:color-mix(in srgb,var(--cm-cyan-note) 62%,transparent);color:var(--cm-cyan-note)}",
+	".dsh-cm-kbadge.k-idea-open{border-color:color-mix(in srgb,var(--cm-gold) 55%,transparent);color:var(--cm-gold-ink)}",
+	".dsh-cm-kbadge.k-idea-confirmed{border-color:color-mix(in srgb,#2f9e44 55%,transparent);color:#2f9e44}",
+	".dsh-cm-kbadge.k-idea-ruled-out{border-color:color-mix(in srgb,var(--cm-danger) 45%,transparent);color:var(--cm-danger-ink);opacity:.72}",
+	".dsh-cm-idea-asset{margin-left:6px;font-size:10px;color:var(--cm-dim)}",
 	".dsh-cm-acts{display:flex;gap:5px;margin-top:6px;flex-wrap:wrap}",
 	".dsh-cm-acts button{border:1px solid color-mix(in srgb,var(--cm-line) 45%,transparent);border-radius:5px;background:color-mix(in srgb,var(--cm-line) 10%,transparent);color:var(--cm-ink-3);font-size:11px;cursor:pointer;padding:2px 8px}",
 	".dsh-cm-acts button.is-danger{border-color:color-mix(in srgb,var(--cm-danger) 50%,transparent);color:var(--cm-danger-ink)}",
@@ -185,7 +192,9 @@ function MemoryView(props) {
 						: rows[0].map(function (m) {
 							return React.createElement("div", { key: m.id, className: "dsh-cm-card" },
 								React.createElement("b", { onClick: function () { setExpanded(expanded[0] === m.id ? "" : m.id); }, style: { cursor: "pointer" } }, m.title,
-									React.createElement("span", { className: "dsh-cm-kbadge" + (m.kind === "detect" ? " k-detect" : "") }, KIND_LABEL[m.kind] || m.kind),
+									React.createElement("span", { className: "dsh-cm-kbadge" + (m.kind === "detect" ? " k-detect" : "") + (m.kind === "idea" ? " k-idea" : "") }, KIND_LABEL[m.kind] || m.kind),
+									m.kind === "idea" && m.ideaStatus ? React.createElement("span", { className: "dsh-cm-kbadge k-idea-" + m.ideaStatus }, IDEA_STATUS_LABEL[m.ideaStatus] || m.ideaStatus) : null,
+									m.kind === "idea" && m.ideaAsset ? React.createElement("span", { className: "dsh-cm-idea-asset" }, "资产 " + m.ideaAsset) : null,
 								m.expired ? React.createElement("span", { className: "dsh-cm-kbadge k-expired" }, "已过期") : null),
 								React.createElement("div", { className: "meta" },
 									(m.workspace ? "@" + m.workspace + " · " : "") + (m.tags ? m.tags + " · " : "") + (m.targetKind ? "目标：" + m.targetKind + " · " : "") + "热度 " + m.usageCount + " · " + (m.lastUsedAt ? "近用 " + fmtTime(m.lastUsedAt) : "未用过") + (m.expiresAt ? " · " + fmtTime(m.expiresAt) + " 过期" : "") ),

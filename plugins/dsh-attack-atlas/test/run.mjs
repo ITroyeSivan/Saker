@@ -1,7 +1,7 @@
 // dsh-attack-atlas 离线单测：类目体系完整性（key 唯一/形态合法）+ SQLite 覆盖态
 // （终态白名单/N-A 必附原因/会话×模式隔离/清除）+ 通道纯逻辑（端点分发/派单文案/信任栅栏）。
 import assert from "node:assert/strict";
-import { openStore, markCell, markStage, getCoverage, clearCoverage, addTarget, listTargets, removeTarget, addChainNode, addChainEdge, listChain, clearChain, chainRefIndex, CHAIN_NODE_KINDS, saveMethod, listMethods, getMethod, removeMethod, copyMethod, exportMethods, importMethods, saveCap, listCaps, recordMiss, missSummary } from "../lib/store.js";
+import { openStore, markCell, markStage, getCoverage, clearCoverage, addTarget, listTargets, removeTarget, addChainNode, addChainEdge, setChainEdgeStatus, listChain, clearChain, chainRefIndex, CHAIN_NODE_KINDS, CHAIN_EDGE_STATUSES, saveMethod, listMethods, getMethod, removeMethod, copyMethod, exportMethods, importMethods, saveCap, listCaps, recordMiss, missSummary } from "../lib/store.js";
 import { TAXONOMIES, ATLAS_MODES, locate, itemsInForm, validateTaxonomy, refPaths } from "../lib/taxonomy.js";
 import fs2 from "node:fs";
 import path2 from "node:path";
@@ -94,7 +94,7 @@ await ok("攻防体系：19 主类×3 战场×5 阶段×4 形态，zone 全合�
 });
 
 await ok("八专业模式全覆盖：全部已就绪，研究员=总控不建图谱（不在名单）", () => {
-	assert.equal(ATLAS_MODES.length, 2);
+	assert.equal(ATLAS_MODES.length, 3);
 	assert.ok(!ATLAS_MODES.includes("redteam"), "研究员不进图谱名单");
 	assert.ok(!TAXONOMIES.redteam, "taxonomy 无研究员条目");
 	for (const m of ATLAS_MODES) assert.equal(TAXONOMIES[m].pending, undefined, `模式 ${m} 应已就绪`);
@@ -203,7 +203,7 @@ await ok("markStage + clearCoverage：阶段推进与按格/全量清除", () =>
 await ok("dispatch：taxonomy.get 拿到安全模式与渗透全量；coverage.get 必须带 sessionId", async () => {
 	const st = openStore(":memory:");
 	const r = await dispatch(null, st, "taxonomy.get", {});
-	assert.equal(r.modes.length, 2);
+	assert.equal(r.modes.length, 3);
 	assert.ok(r.taxonomies.pentest.categories);
 	await assert.rejects(() => dispatch(null, st, "coverage.get", { mode: "pentest" }), /sessionId required/);
 	st.close();
@@ -1676,6 +1676,54 @@ await ok("triggerMessage 格子档：动词与姿势语态同步（audit 审计�
 	assert.ok(irCell.includes("对以下格子排查") && irCell.includes("取证姿势"), "IR 格子语态");
 	const pentestCat = triggerMessage(TAXONOMIES.pentest, { level: "category", categoryId: "hardcoded" });
 	assert.ok(pentestCat.includes("已验·有发现") && !pentestCat.includes("已测·有发现"), "pentest 词表从默认已测定制为已验");
+});
+
+// ── 攻击图边可信度：区分「看着像通路」与「真的打通了」──────────────────────
+// 不区分的话，图会退化成猜测堆叠；refuted 保留在图里置灰，避免重复试同一条死路。
+await ok("边可信度：状态落库 + listChain 带回 + 流转", () => {
+	const st = openStore(":memory:");
+	const S = "s-edge-1", M = "attack-defense";
+	addChainNode(st, S, M, { id: "h1", label: "跳板机", kind: "host", target: "" });
+	addChainNode(st, S, M, { id: "h2", label: "内网 DC", kind: "host", target: "" });
+	const e = addChainEdge(st, S, M, { src: "h1", dst: "h2", label: "凭据复用", edgeType: "exploits", status: "suspected", target: "" });
+	assert.equal(e.status, "suspected", "登记边时可信度应落库");
+	const row = listChain(st, S, M, "").edges.find((x) => x.src === "h1" && x.dst === "h2");
+	assert.equal(row.status, "suspected", "listChain 应带回 status");
+	assert.ok(typeof row.createdAt === "string" && row.createdAt.length > 0, "listChain 应带回 createdAt（时间线回放需要）");
+	const m = setChainEdgeStatus(st, S, M, { src: "h1", dst: "h2", label: "凭据复用", status: "confirmed", target: "" });
+	assert.equal(m.status, "confirmed", "状态应能流转到已确认");
+	st.close();
+});
+
+await ok("边可信度：重登记同一条边不覆盖已标注状态", () => {
+	const st = openStore(":memory:");
+	const S = "s-edge-2", M = "attack-defense";
+	addChainNode(st, S, M, { id: "a", label: "A", kind: "host", target: "" });
+	addChainNode(st, S, M, { id: "b", label: "B", kind: "host", target: "" });
+	addChainEdge(st, S, M, { src: "a", dst: "b", label: "横移", edgeType: "exploits", status: "confirmed", target: "" });
+	addChainEdge(st, S, M, { src: "a", dst: "b", label: "横移", edgeType: "exploits", target: "" });
+	const row = listChain(st, S, M, "").edges.find((x) => x.src === "a" && x.dst === "b");
+	assert.equal(row.status, "confirmed", "重登记不等于重新判断可信度，不应把已确认清空");
+	st.close();
+});
+
+await ok("边可信度：标注不存在的边应报错", () => {
+	const st = openStore(":memory:");
+	assert.throws(() => setChainEdgeStatus(st, "s-edge-3", "attack-defense", { src: "x", dst: "y", label: "", status: "confirmed", target: "" }), /边不存在/);
+	st.close();
+});
+
+// ── client 侧模式清单：漏改会导致空态提示与地图视图少一项 ──────────────────
+// 实测漏改：taxonomy.js 的 ATLAS_MODES（字符串数组）加了 ctf-solver，但 client.js 里
+// **同名的** ATLAS_MODES（对象数组，双引号）没加 —— 空态提示里就只列两个模式。
+// 两个同名不同形的数组，只 grep 单引号会漏掉后者。
+await ok("client ATLAS_MODES 含全部已实装模式", () => {
+	const src = fs2.readFileSync(path2.join(path2.dirname(fileURLToPath(import.meta.url)), "../lib/client.js"), "utf8");
+	const m = /var ATLAS_MODES = \[([\s\S]*?)\n\];/.exec(src);
+	assert.ok(m, "client ATLAS_MODES 应存在");
+	for (const id of ["pentest", "code-audit", "ctf-solver"]) {
+		assert.ok(m[1].includes(id), `client ATLAS_MODES 应含 ${id}`);
+	}
 });
 
 console.log(`\n${passed} passed`);

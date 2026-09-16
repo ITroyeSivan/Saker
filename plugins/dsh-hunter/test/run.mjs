@@ -4,7 +4,7 @@ import assert from "node:assert";
 import { parseDsl, buildQueries, mergeAssets, fofaGuard, LIMITS } from "../lib/adapters.js";
 import { parseFingerprint, fingerprintQuery, fingerprintLadder, searchWithRelax, fingerprintMatches, verifyPipeline } from "../lib/verify.js";
 import { openHunterStore, configView, getKey } from "../lib/store.js";
-import { isTrustedRequest, checkCsrf } from "../lib/index.js";
+import { isTrustedRequest, checkCsrf, buildFindingPatch } from "../lib/index.js";
 
 let pass = 0, fail = 0;
 // 异步用例必须等待完成后再计数，否则断言未执行就被进程退出（假绿）。
@@ -160,6 +160,17 @@ await ok("流水线：授权资产 L1 通过 → l1-passed 且立即停", async 
 	assert.ok(r.detail.stoppedEarly);
 	await new Promise((r2) => server.close(r2));
 });
+
+await ok("实测回写：L1 通过必须带二次评级与足量依据", () => {
+	const patch = buildFindingPatch(
+		{ severity: "high", evidence: "scan-reconcile.md#1" },
+		{ verdict: "l1-passed", summary: "授权资产 L1 marker 回显成功", detail: { l0Hits: 1, l1Passed: 1 } },
+	);
+	assert.equal(patch.status, "verified");
+	assert.equal(patch.secondRating, "high");
+	assert.ok(String(patch.secondRatingNote).length >= 40, "二次复核依据必须至少 40 字");
+	assert.equal(patch.auditMode, "dynamic");
+});
 await ok("流水线：未授权资产不做 L1（L0 成立但 L1=0）", async () => {
 	const http = await import("node:http");
 	const server = http.createServer((req, res) => {
@@ -255,6 +266,55 @@ await ok("CSRF 头校验：匹配放行/缺失或错值拒", () => {
 	assert.equal(checkCsrf({ headers: { "x-dsh-csrf": "X" } }, "T"), false);
 	assert.equal(checkCsrf({}, "T"), false);
 });
+
+// ── 库损坏自愈（2026-09-13 夜：与另外 5 个插件同类的孪生 bug）────────────────
+// 背景：`new DatabaseSync` 遇到坏文件直接抛 `file is not a database`，
+// 而 hunter 的**全部功能**（key / 历史 / 授权白名单）都挂在这个库上 —— 一抛全废。
+// 磁盘满、强杀、网盘回写、误改名都会造成这种文件。
+{
+	const { mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+
+	const dir = mkdtempSync(join(tmpdir(), "hunter-heal-"));
+	const dbPath = join(dir, "hunter.db");
+
+	await ok("坏库（垃圾字节）不抛异常，且功能可用", () => {
+		writeFileSync(dbPath, Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe, 0x7f, 0x00, 0x42]));
+		const st = openHunterStore(dbPath);            // 修复前：这里抛 file is not a database
+		st.setKey.run("fofa", "cipher-x", new Date().toISOString());
+		assert.equal(configView(st).fofa.configured, true, "自愈后应能正常读写");
+		st.close();
+	});
+
+	await ok("坏库被改名备份（原文件不丢，可人工找回）", () => {
+		const backups = readdirSync(dir).filter((f) => f.includes(".corrupt-"));
+		assert.equal(backups.length, 1, `应恰好有 1 个备份，实际 ${backups.length}`);
+	});
+
+	await ok("备份内容就是原始垃圾字节（没被覆盖或清空）", () => {
+		const bak = readdirSync(dir).find((f) => f.includes(".corrupt-"));
+		const bytes = readFileSync(join(dir, bak));
+		assert.equal(bytes.length, 8, "备份应与原文件等长");
+		assert.equal(bytes[3], 0xff, "字节内容应原样保留");
+	});
+
+	await ok("正常库不会被误判为坏库（幂等）", () => {
+		const st = openHunterStore(dbPath);            // 第二次打开：库头已是 SQLite
+		assert.equal(configView(st).fofa.configured, true, "数据应还在");
+		st.close();
+		const backups = readdirSync(dir).filter((f) => f.includes(".corrupt-"));
+		assert.equal(backups.length, 1, "不应新增备份");
+	});
+
+	await ok(":memory: 不走自愈路径（不报错）", () => {
+		const st = openHunterStore(":memory:");
+		assert.equal(configView(st).hunter.configured, false);
+		st.close();
+	});
+
+	rmSync(dir, { recursive: true, force: true });
+}
 
 console.log(fail === 0 ? `\nall ${pass} tests passed` : `\n${fail} FAILED, ${pass} passed`);
 process.exit(fail ? 1 : 0);

@@ -1,0 +1,33 @@
+{
+  "name": "@dsh-external/dsh-tool-scope",
+  "version": "0.1.2",
+  "description": "Per-mode tool visibility scope: hides global tool declarations that the current session mode can never call. Each plugin already declares its own mode gate (webshell-mgr ALLOWED_MODES=[pentest], ctf-observer MODE_ID=ctf-solver, redteam-results/campaign-memory/trace-vault/knowledge-hub MODE_IDS=[pentest,code-audit,ctf-solver]) — outside those modes the call is hard-rejected, yet the schemas still ride every request. Measured: tool definitions are 67.8% of a 164KB request (101 tools, 111.5K bytes). This plugin applies the host's native per-agent tools.restrict() at session creation so those declarations never enter the prompt. Deny-only, self-limiting, fail-visible, and switchable off per rule.",
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "deepseek",
+    "deepseek-harness",
+    "dsh-plugin",
+    "dsh-bundle",
+    "tool-scope",
+    "context-budget",
+    "prompt-cost"
+  ],
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "license": "MIT",
+  "author": "Saker contributors",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

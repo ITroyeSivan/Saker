@@ -1,3 +1,8 @@
+
+// ── 平台数据根（$DSH_HOME）────────────────────────────────────────────
+// 宿主按 $DSH_HOME 装配 profiles/会话/存储；插件一律跟随，避免「一半落 A 一半落 B」。
+// 未设置时等价于 ~/.dsh，故对既有用户是零行为变更。
+const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
 // dsh-attack-atlas — 攻击面图谱宿主插件。
 //
 // 三件事：
@@ -15,7 +20,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import { defineTool } from "@deepseek-ai/dsh-tools";
-import { openStore, markCell, markStage, getCoverage, clearCoverage, addTarget, listTargets, removeTarget, switchTarget, addChainNode, addChainEdge, listChain, clearChain, CHAIN_NODE_KINDS, CHAIN_EDGE_TYPES, chainKindLabel, CELL_STATES, STAGE_STATES, TARGET_KINDS, targetKindLabel, saveMethod, listMethods, getMethod, removeMethod, copyMethod, exportMethods, importMethods, saveCap, listCaps, removeCap, exportCaps, importCaps, recordMiss, missSummary } from "./store.js";
+import { openStore, markCell, markStage, getCoverage, clearCoverage, addTarget, listTargets, removeTarget, switchTarget, addChainNode, addChainEdge, setChainEdgeStatus, listChain, clearChain, CHAIN_NODE_KINDS, CHAIN_EDGE_TYPES, CHAIN_EDGE_STATUSES, chainKindLabel, CELL_STATES, STAGE_STATES, TARGET_KINDS, targetKindLabel, saveMethod, listMethods, getMethod, removeMethod, copyMethod, exportMethods, importMethods, saveCap, listCaps, removeCap, exportCaps, importCaps, recordMiss, missSummary } from "./store.js";
 import { TAXONOMIES, ATLAS_MODES, locate } from "./taxonomy.js";
 import { validateMethod, methodRunMessage, inferTargetKind, METHOD_LIMITS } from "./method.js";
 
@@ -39,7 +44,7 @@ const MODE_LABELS = {
 	"ctf-solver": "CTF 解题模式"
 };
 for (const [_m, _tax] of Object.entries(TAXONOMIES)) _tax.id = _m; // 锚定生成器按模式取词
-const DB_PATH = path.join(os.homedir(), ".dsh", "attack-atlas", "atlas.db");
+const DB_PATH = path.join(DSH_HOME, "attack-atlas", "atlas.db");
 const MAX_BODY = 1024 * 1024;
 
 let store;
@@ -646,7 +651,12 @@ export async function dispatch(ctx, st, endpoint, payload) {
 	if (endpoint === "chain.edge") {
 		const sessionId = String(p.sessionId ?? "");
 		if (!sessionId) throw new Error("sessionId required");
-		return { ok: true, edge: addChainEdge(st, sessionId, String(p.mode ?? "pentest"), { src: p.src, dst: p.dst, label: p.label, edgeType: p.edgeType, target: p.target !== undefined ? String(p.target) : "" }) };
+		return { ok: true, edge: addChainEdge(st, sessionId, String(p.mode ?? "pentest"), { src: p.src, dst: p.dst, label: p.label, edgeType: p.edgeType, status: p.status, target: p.target !== undefined ? String(p.target) : "" }) };
+	}
+	if (endpoint === "chain.edge-status") {
+		const sessionId = String(p.sessionId ?? "");
+		if (!sessionId) throw new Error("sessionId required");
+		return { ok: true, edge: setChainEdgeStatus(st, sessionId, String(p.mode ?? "pentest"), { src: p.src, dst: p.dst, label: p.label, status: p.status, target: p.target !== undefined ? String(p.target) : "" }) };
 	}
 	if (endpoint === "chain.list") {
 		const sessionId = String(p.sessionId ?? "");
@@ -803,6 +813,7 @@ export async function dispatch(ctx, st, endpoint, payload) {
 			targets = listTargets(st, sessionId, mode);
 		}
 		const notes = String(p.notes ?? m.notes ?? "").trim().slice(0, METHOD_LIMITS.notes);
+		// 注入安全：本调用在 RPC 端点处理器内（UI 点击触发），不在 Session.append 的发布临界区里。
 		agent.followup({
 			id: `atlas-method-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
 			role: "user",
@@ -820,6 +831,7 @@ export async function dispatch(ctx, st, endpoint, payload) {
 		const agents = resolveAgents(ctx);
 		const agent = agents?.get?.(sessionId);
 		if (!agent || typeof agent.followup !== "function") return { ok: false, unreachable: true, error: "会话不可达（会话可能已删除或代理未运行）" };
+		// 注入安全：同上，RPC 端点处理器内。
 		agent.followup({
 			id: `atlas-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
 			role: "user",
@@ -910,7 +922,7 @@ let resultsStoreCache;
 async function findFindingIdInResults(sessionId, mode, title) {
 	if (!title) return "";
 	const mod = await import("@dsh-external/dsh-redteam-results/store");
-	if (!resultsStoreCache) resultsStoreCache = mod.openStore(path.join(os.homedir(), ".dsh", "redteam-results", "results.db"));
+	if (!resultsStoreCache) resultsStoreCache = mod.openStore(path.join(DSH_HOME, "redteam-results", "results.db"));
 	const hit = (mod.allFindings(resultsStoreCache, sessionId, mode) || []).find((f) => f.title === title);
 	return hit?.id ?? "";
 }
@@ -940,6 +952,7 @@ function nudgeUndetermined(ctx, sessionId, mode, taxonomy, doneKeys, markedCats,
 			content: [{ type: "text", text: `[AttackAtlas·覆盖提醒] finding 已自动点亮「${cat.label}」内关联格子。该主类仍有 ${undetermined.length} 格未终态：${names}——收口时逐格终态三选一（${trioWords(taxonomy)}）${MODE_CLOSE_HINT[mode] ?? ""}，或用 redteam_coverage_sync 整表批量回写（key/终态均可写中文标签）。` }],
 			source: { kind: "user" }
 		};
+		// 注入安全：由 finding 登记工具路径调用（工具执行期），不在 Session.append 临界区里。
 		if (deps.followup) deps.followup(message); else agent.followup(message);
 		out.push(catId);
 	}
@@ -997,16 +1010,21 @@ export async function autoLightFromFinding(ctx, st, sessionId, findingArgs, deps
 //#endregion
 
 function apply(ctx) {
+	// 插件卸载时释放库句柄。句柄悬着会锁住 -wal/-shm —— Windows 上表现为这个库文件
+	// 既删不掉也改不了名（备份/迁移/损坏自愈都要 rename 它）。
+	// 对照 campaign-memory：它一直有这条 ctx.effect，其余插件此前都缺，
+	// 插件重载/HMR 会因此留下永不回收的句柄（实测同进程二次 openStore 会 EBUSY）。
+	ctx.effect(() => () => { try { store?.close?.(); } catch { /* 已关或句柄失效 */ } store = undefined; }, "dsh-attack-atlas: store handle");
 	//#region 模型工具（宿主平面注册；八专业模式会话内可用——light 通用模式等非图谱会话执行被拒）
 	ctx.tools.register(defineTool({
 		name: "redteam_coverage_mark",
-		description: "把攻击面图谱（「攻击面图谱」标签页）里的一个格子或主类标为终态。每个格子终态：tested-found / tested-clear / na / budget-stop（图例按模式显示对应语义——渗透=已验·有发现/未命中、免杀=已测·过检/被检出、CTF=已解·flag 验证/已试·卡点、应急=查实·有证据/已查·未命中等）。key 形如 injection/sqli（格子）或 injection（主类整组 N-A），也接受主类/格子的中文标签（自动归一）；写错时报错会列出该模式全部合法主类。tested-clear 时 reason 建议写未排除面；tested-found 时 findingRefs 填关联 finding id。逐格回写，图谱实时点亮。",
+		description: "把一个图谱格子或主类标为终态（tested-found / tested-clear / na / budget-stop）。key 支持 cat/item 或中文标签；逐格回写，图谱实时点亮。",
 		parameters: {
-			key: { type: "string", required: true, description: "cat/item 格子 key、cat 主类 key，或主类/格子中文标签" },
+			key: { type: "string", required: true, description: "格子/主类 key 或中文标签" },
 			state: { type: "string", required: true, enum: CELL_STATES, description: "终态" },
-			reason: { type: "string", description: "原因（na/budget-stop 必填；tested-clear 建议写未排除面）" },
+			reason: { type: "string", description: "原因（na/budget-stop 必填）" },
 			findingRefs: { type: "string", description: "关联 finding id（逗号分隔）" },
-			target: { type: "string", description: "该终态所属目标（按目标分账：同格每目标各一行；须为已登记 label，写错报已登记清单；缺省=当前锚定目标，未登记任何目标时落会话公共 scope）" }
+			target: { type: "string", description: "所属目标；缺省=当前锚定目标" }
 		},
 		output: {
 			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
@@ -1037,11 +1055,11 @@ function apply(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "redteam_coverage_stage",
-		description: "推进攻击面图谱顶部的作战流程带：进入某阶段标 active、完成标 done。stage 取当前模式体系的阶段 id（渗透模式为 s0-s6：防护画像/被动收集/入口面盘点/登陆口专线/逐面挖掘/验证与影响证明/收口），也接受阶段中文标签（自动归一）；写错时报错会列出该模式全部合法阶段。阶段带按目标分账：target 缺省推进当前锚定目标的阶段。stage_gate 判定 PASS 后对应阶段（及其此前阶段）自动回写 done（归当时锚定目标），本工具用于无门阶段的推进与补记。",
+		description: "推进图谱顶部的作战流程带：active=进行中，done=完成。stage 支持阶段 id 或中文标签；stage_gate PASS 后会自动回写。",
 		parameters: {
 			stage: { type: "string", required: true, description: "阶段 id 或阶段中文标签" },
 			state: { type: "string", required: true, enum: STAGE_STATES, description: "active=进行中 done=完成" },
-			target: { type: "string", description: "推进哪个目标的阶段带（须为已登记 label；缺省=当前锚定目标）" }
+			target: { type: "string", description: "目标 label；缺省=当前锚定目标" }
 		},
 		output: {
 			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
@@ -1072,7 +1090,7 @@ function apply(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "redteam_coverage_sync",
-		description: "批量回写覆盖终态（覆盖对账/收口用）：一次调用替代逐格 redteam_coverage_mark。入口二选一——rows=[{key,state,reason,findingRefs,target}] 数组，或 path=覆盖矩阵 markdown 文件（表头须含「格子」「终态」列名，兼容 原因/finding/目标 列，分隔行自动跳过）。key 与终态均接受中文标签（自动归一到体系 key 与四态）；坏行跳过并在结果逐行说明原因，好行照常落库。",
+		description: "批量回写覆盖终态。rows 与 path 二选一：rows 为终态行数组；path 为含「格子」「终态」列的 Markdown 表。坏行跳过并逐行报告。",
 		parameters: {
 			rows: { type: "array", items: { type: "object", additionalProperties: true }, description: "终态行数组（与 path 二选一）：{key, state, reason, findingRefs, target}" },
 			path: { type: "string", description: "覆盖矩阵文件路径（与 rows 二选一；工作区相对或绝对路径）" }
@@ -1119,12 +1137,12 @@ function apply(ctx) {
 	}));
 	ctx.tools.register(defineTool({
 		name: "redteam_atlas_target",
-		description: "登记/切换/查看本会话 AttackAtlas 的作战目标（与资产清单基线 assets.md 同步维护；入口面盘点发现的每个资产均登记）。覆盖态按目标分账：每个目标有独立的矩阵点亮、阶段推进与链路拓扑。add=登记（首个目标自动成为当前锚定，并把此前公共 scope 的回写扫入它）；switch=切换当前锚定（回写不带 target 默认归当前锚定、派单信封锚定行随切更新——换对象作业的第一动作）；remove=删除目标并级联清理其覆盖终态/阶段/链路（错登清理用；做完的目标 switch 切走即可，勿删）。kind 取 domain/web/ip/org 组织单位/api/miniprogram/android/ios/desktop/component/cloud/ai/repo/sample/payload/webshell/loader/memshell/c2/host/case 案件/challenge 题目/account/tenant/cluster/other。",
+		description: "登记/切换/查看本会话作战目标；覆盖、阶段、链路都按目标分账。换对象作业第一动作是 switch；remove 会级联清理该目标数据，慎用。",
 		parameters: {
 			action: { type: "string", required: true, enum: ["add", "switch", "list", "remove"], description: "add=登记 switch=切换当前锚定 list=列出 remove=删除（级联清数据）" },
-			label: { type: "string", description: "目标标识（域名/ip:port/公司名/样本 sha256 前缀等），action=add 必填；action=switch 可按 label 切锚" },
+			label: { type: "string", description: "目标标识；add 必填，switch 可按 label 切锚" },
 			kind: { type: "string", enum: TARGET_KINDS, description: "目标形态" },
-			note: { type: "string", description: "备注（入口/授权范围片段）" },
+			note: { type: "string", description: "备注" },
 			seq: { type: "number", description: "action=remove/switch 时的序号（与 label 二选一）" }
 		},
 		output: {
@@ -1152,21 +1170,22 @@ function apply(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "redteam_atlas_chain",
-		description: "登记/查看本会话 AttackAtlas 的攻击链拓扑（仅攻防评估/应急溯源/云安全三模式有链路体系，其余模式不可用；链路拓扑图弹窗实时成图）。链路按目标分账：登记与查看都带 target 维度，缺省归当前锚定目标。节点：攻防/应急用 entry 入口/host 主机/segment 网段关口/bastion 堡垒机/dc 域控/cred 凭据；云安全用 identity 身份/角色、secret 密钥面、resource 云资源、orgroot 组织根/KMS（major）、pivot 信任链/横移。重大成果节点 major=true，seg 填网段（如 10.1.1.x）；边 label 写动作（获取权限/凭据复用/隔离突破/域控获取/角色链入…）。多入口/暂无链路按实际登记，不虚构。突破成立、拿下一台主机、跨段、拿到关键凭据时即登记——链路拓扑随战役推进实时生长。",
+		description: "登记/查看攻击链拓扑（仅攻防评估、应急溯源、云安全三模式）。先加节点再加边；突破、拿主机、跨段、获关键凭据时登记，不虚构。",
 		parameters: {
-			action: { type: "string", required: true, enum: ["add-node", "add-edge", "list", "clear"], description: "add-node=登记节点 add-edge=登记边 list=查看（list 可带 target 过滤，缺省全目标并集） clear=清空" },
-			id: { type: "string", description: "节点 id（字母数字与 ._-，如 h-192-168-1-2；action=add-node 必填）" },
+			action: { type: "string", required: true, enum: ["add-node", "add-edge", "mark-edge", "list", "clear"], description: "add-node=登记节点 add-edge=登记边 mark-edge=标注边的可信度 list=查看（list 可带 target 过滤，缺省全目标并集） clear=清空" },
+			id: { type: "string", description: "节点 id（add-node 必填）" },
 			label: { type: "string", description: "节点显示名（域名/ip/凭据名）" },
 			kind: { type: "string", enum: CHAIN_NODE_KINDS, description: "节点类型" },
-			seg: { type: "string", description: "所属网段（如 10.1.1.x）" },
-			note: { type: "string", description: "备注（拿到什么权限/凭据名）" },
+			seg: { type: "string", description: "所属网段" },
+			note: { type: "string", description: "备注" },
 			major: { type: "boolean", description: "重大成果节点（堡垒机/域控/全域权限等）" },
-			findingRef: { type: "string", description: "关联战果 finding id（redteam_finding_register 返回的 id，如 attack-defense-3）——链路节点与「redteam 成果」页互链；无关联省略" },
-			target: { type: "string", description: "登记到哪个目标的链路面（须为已登记 label；缺省=当前锚定目标）" },
+			findingRef: { type: "string", description: "关联 finding id；无关联省略" },
+			target: { type: "string", description: "目标 label；缺省=当前锚定目标" },
 			src: { type: "string", description: "边起点节点 id（action=add-edge 必填）" },
 			dst: { type: "string", description: "边终点节点 id" },
 			edgeLabel: { type: "string", description: "边动作标签（获取权限/凭据复用/隔离突破…）" },
-			edgeType: { type: "string", enum: ["discovered_on", "exploits", "enables", "depends_on", "leads_to"], description: "边类型（推荐填）：discovered_on 在…发现 / exploits 利用 / enables 使可行 / depends_on 前置依赖 / leads_to 导致——类型化边让拓扑图与攻击链复盘可按边语义聚合" }
+			edgeType: { type: "string", enum: ["discovered_on", "exploits", "enables", "depends_on", "leads_to"], description: "边类型：发现/利用/使可行/前置依赖/导致" },
+			edgeStatus: { type: "string", enum: ["suspected", "confirmed", "refuted"], description: "边可信度：疑似/已确认/已证伪" }
 		},
 		output: {
 			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
@@ -1181,8 +1200,12 @@ function apply(ctx) {
 				if (args.action === "list") return Promise.resolve({ ok: true, chain: listChain(theStore(), session.id, session.mode, args.target !== undefined ? String(args.target) : undefined) });
 				if (args.action === "clear") { clearChain(theStore(), session.id, session.mode, args.target !== undefined ? String(args.target) : undefined); return Promise.resolve({ ok: true, what: "链路已清空" }); }
 				if (args.action === "add-node") { const n = addChainNode(theStore(), session.id, session.mode, { id: args.id, label: args.label, kind: args.kind, seg: args.seg, note: args.note, major: args.major, findingRef: args.findingRef, target: tgt }); return Promise.resolve({ ok: true, what: `节点 ${n.label}（${chainKindLabel(n.kind)}${n.major ? "·重大" : ""}${n.findingRef ? `·关联成果 ${n.findingRef}` : ""}）` }); }
-				const e = addChainEdge(theStore(), session.id, session.mode, { src: args.src, dst: args.dst, label: args.edgeLabel, edgeType: args.edgeType, target: tgt });
-				return Promise.resolve({ ok: true, what: `边 ${e.src} → ${e.dst}${e.edgeType ? "（" + CHAIN_EDGE_TYPES[e.edgeType] + "）" : ""}${e.label ? "·" + e.label : ""}` });
+				if (args.action === "mark-edge") {
+					const m = setChainEdgeStatus(theStore(), session.id, session.mode, { src: args.src, dst: args.dst, label: args.edgeLabel, status: args.edgeStatus, target: tgt });
+					return Promise.resolve({ ok: true, what: `边 ${m.src} → ${m.dst} 可信度 → ${m.status ? CHAIN_EDGE_STATUSES[m.status] : "未标注"}` });
+				}
+				const e = addChainEdge(theStore(), session.id, session.mode, { src: args.src, dst: args.dst, label: args.edgeLabel, edgeType: args.edgeType, status: args.edgeStatus, target: tgt });
+				return Promise.resolve({ ok: true, what: `边 ${e.src} → ${e.dst}${e.edgeType ? "（" + CHAIN_EDGE_TYPES[e.edgeType] + "）" : ""}${e.status ? "·" + CHAIN_EDGE_STATUSES[e.status] : ""}${e.label ? "·" + e.label : ""}` });
 			} catch (e) {
 				return Promise.resolve({ ok: false, error: e?.message ?? String(e) });
 			}

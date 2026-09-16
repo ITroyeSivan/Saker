@@ -1,3 +1,8 @@
+
+// ── 平台数据根（$DSH_HOME）────────────────────────────────────────────
+// 宿主按 $DSH_HOME 装配 profiles/会话/存储；插件一律跟随，避免「一半落 A 一半落 B」。
+// 未设置时等价于 ~/.dsh，故对既有用户是零行为变更。
+const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
 // dsh-hunter「hunter狩猎」宿主插件：
 //   1) Web 通道：/dsh-hunter 前缀路由（同源信任栅栏）——设置/查询/导出/实测/历史 RPC；
 //   2) 存储：独立 SQLite ~/.dsh/hunter/hunter.db（API key + 实测历史 + 授权白名单）；
@@ -24,8 +29,8 @@ const CSRF_TOKEN = crypto.randomBytes(24).toString("hex");
 export function checkCsrf(req, token) {
 	return String(req?.headers?.["x-dsh-csrf"] ?? "") === String(token ?? "");
 }
-const DB_PATH = path.join(os.homedir(), ".dsh", "hunter", "hunter.db");
-const RESULTS_DB_PATH = path.join(os.homedir(), ".dsh", "redteam-results", "results.db");
+const DB_PATH = path.join(DSH_HOME, "hunter", "hunter.db");
+const RESULTS_DB_PATH = path.join(DSH_HOME, "redteam-results", "results.db");
 
 let store;
 function theStore() {
@@ -125,6 +130,24 @@ function normalizeRows(platform, rows) {
 const LIVE_VERIFY_SENT = new Map();
 const LIVE_VERIFY_WINDOW_MS = 10 * 60 * 1000;
 
+/** Build the finding patch from one live-verification result. Kept pure for regression tests. */
+export function buildFindingPatch(finding, result) {
+	const note = `[实测] ${nowIso().slice(0, 19)} ${result.summary}`;
+	const patch = {
+		retestNote: note,
+		evidence: [finding.evidence, `实测:${result.verdict} (L0=${result.detail?.l0Hits ?? 0}/L1=${result.detail?.l1Passed ?? 0})`].filter(Boolean).join("；"),
+	};
+	if (result.verdict === "l1-passed") {
+		patch.status = "verified";
+		patch.auditMode = "dynamic";
+		// Hunter 的 L1 是独立动态通道复核，仍须满足成果库的成对校验：
+		// 评级沿用首次等级（未观察到降/升级），依据写清动态复现方式。
+		patch.secondRating = finding.severity;
+		patch.secondRatingNote = `独立 L1 实测复核：${result.summary || "授权资产最小影响验证通过"}；动态通道重新触发成功，现象与首次结论一致。`;
+	}
+	return patch;
+}
+
 async function runVerify(ctx, p) {
 	const sessionId = String(p.sessionId ?? "");
 	const findingId = String(p.findingId ?? "");
@@ -194,12 +217,7 @@ async function runVerify(ctx, p) {
 	if (result.detail && typeof result.detail === "object") result.detail.relax = relaxHit ? { level: relaxHit.level, label: relaxHit.label, query: relaxHit.query } : null;
 
 	// 回写 finding（数据变更）
-	const note = `[实测] ${nowIso().slice(0, 19)} ${result.summary}`;
-	const patch = { retestNote: note, evidence: [finding.evidence, `实测:${result.verdict} (L0=${result.detail?.l0Hits ?? 0}/L1=${result.detail?.l1Passed ?? 0})`].filter(Boolean).join("；") };
-	if (result.verdict === "l1-passed") {
-		patch.status = "verified";
-		patch.auditMode = "dynamic"; // L1 实测过=形态升格动态——消除「已验证+静态审计」词面矛盾（过程形态随实测事实更新）
-	}
+	const patch = buildFindingPatch(finding, result);
 	updateFinding(rst, sessionId, finding.mode, findingId, patch);
 
 	// 历史
@@ -211,6 +229,7 @@ async function runVerify(ctx, p) {
 		const agents = ctx.get("agents");
 		const agent = agents?.get?.(sessionId);
 		if (agent && typeof agent.followup === "function") {
+			// 注入安全：本调用在 RPC 端点处理器内（页面触发实测流水线），不在 Session.append 临界区里。
 			agent.followup({
 				id: `hunter-${Date.now()}-${finding.seq}`,
 				role: "user",

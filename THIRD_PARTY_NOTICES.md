@@ -35,4 +35,11 @@ Saker 本体（模式/提示词/插件源码/文档）以 MIT 授权（见根目
 - 收录范围：仅 `md/txt/yaml/yml` 文本（各章节 README、Intruder payload 清单、方法论），不含图片/二进制/脚本
 - 约束要点：MIT 允许自由使用与再分发，需保留版权声明与本声明；用途限定授权测试与学习（详见该目录 `_PATT_SOURCE_NOTICE.md`）
 
+## 6. 外部知识包 — `dsh-knowledge-hub`
+
+- 知识包目录 `plugins/dsh-knowledge-hub/packs/knowledge-packs.json` 只记录上游 URL、许可证、分支和稀疏路径。
+- 第三方知识内容不随 Saker 根包或插件包分发；安装后由用户机器从上游 Git 仓库同步到 `DSH_HOME/refs/imports/`。
+- 每个包独立声明 `bundle-safe`、`separate-pack` 或 `local-only`。CC BY-NC、GPL、无明确许可证的内容只允许本地导入，不进入 MIT 发布包。
+- 上游内容更新、撤回或删除由其原始仓库控制，用户可以在设置页或命令行重新同步。
+
 如你是上述任一内容的权利人并认为本仓库的收录方式不妥，欢迎提 Issue 联系移除。

@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { parseSemgrepJson, buildArgs, findRefsDir, appendReconcile, runSemgrep, RULE_LAYERS } from "../lib/index.js";
+import { parseSemgrepJson, buildArgs, findRefsDir, appendReconcile, runSemgrep, RULE_LAYERS, hasBin } from "../lib/index.js";
 
 let pass = 0, fail = 0;
 const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); } else { fail++; console.log(`FAIL ${label}`); } };
@@ -43,6 +43,8 @@ const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); 
 	ok("findRefsDir：命中含规则集的候选", findRefsDir([path.join(dir, "nonexist"), dir]) === dir);
 	ok("findRefsDir：全不存在返回空串", findRefsDir([path.join(dir, "none1"), path.join(dir, "none2")]) === "");
 	fs.rmSync(dir, { recursive: true, force: true });
+	const actual = findRefsDir();
+	ok("findRefsDir：当前仓库布局能定位 preset/code-audit/refs", actual.endsWith("preset/code-audit/refs") || actual.endsWith("preset\\code-audit\\refs"), actual);
 }
 
 // 4. 对账双写：md 行格式 + csv 表头/转义
@@ -80,6 +82,26 @@ const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); 
 	const r4 = runSemgrep({ workspace: ws, target, layer: "builtin-java", spawnFn: () => ({ status: 0, stdout: "{}" }), fsMod: fs, refsCandidates: [refs], hasBinFn: () => false });
 	ok("运行：缺装拒绝走三级兜底提示（检测制）", r4.ok === false && r4.error.includes("绝不自动装"));
 	fs.rmSync(ws, { recursive: true, force: true });
+}
+
+// 6. 并发收尾不丢行（真多进程）
+// 背景：evidence-index.md 与 scan-reconcile.* 都是「读全文 → 拼新内容 → 写回全文」，
+// 多路 Solver 同时收尾时后写者会用旧内容覆盖先写者（不报错、文件完好、只是少行）。
+// 这条必须真并发才测得出来 —— 同进程顺序调用永远看不出。
+{
+	const { runConcurrencyChecks } = await import("./concurrent.mjs");
+	await runConcurrencyChecks((label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); } else { fail++; console.log(`FAIL ${label}`); } });
+}
+
+// 7. 二进制探测：Windows 缺 PATHEXT 仍可识别 PATH 中的工具
+{
+	const savedPathext = process.env.PATHEXT;
+	delete process.env.PATHEXT;
+	ok("hasBin：PATH 中的 node 可命中（Windows 无 PATHEXT 也成立）", hasBin("node") === true);
+	ok("hasBin：绝对路径可命中", hasBin(process.execPath) === true);
+	ok("hasBin：不存在的工具返回 false", hasBin("definitely-missing-semgrep-xyz") === false);
+	if (savedPathext === undefined) delete process.env.PATHEXT;
+	else process.env.PATHEXT = savedPathext;
 }
 
 console.log(fail === 0 ? `\nall ${pass} tests passed` : `\n${fail} FAILED, ${pass} passed`);

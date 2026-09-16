@@ -16,7 +16,8 @@ import * as cap from "../lib/protocol/capabilities.js";
 import { GEN_KINDS, makeAndSave } from "../lib/generators.js";
 import { listPlugins, getPlugin, runPlugin } from "../lib/plugins-registry.js";
 
-const BASE_DIR = path.join(os.homedir(), ".dsh", "webshell-mgr");
+const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
+const BASE_DIR = path.join(DSH_HOME, "webshell-mgr");
 const DB_PATH = path.join(BASE_DIR, "webshell.db");
 const store = openStore(DB_PATH);
 

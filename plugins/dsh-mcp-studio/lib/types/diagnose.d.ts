@@ -8,5 +8,5 @@ export interface DiagnoseReport {
     readonly toolCount?: number;
     readonly error?: string;
 }
-/** Run one full handshake: a throwaway stdio child, or initialize + tools/list over HTTP. */
+/** Run one full handshake: a throwaway channel, opened and closed around initialize + tools/list. */
 export declare function diagnoseServer(server: ServerEntry): Promise<DiagnoseReport>;

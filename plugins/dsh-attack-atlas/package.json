@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-attack-atlas",
-  "version": "1.2.1",
+  "version": "1.2.9",
   "description": "AttackAtlas tab for the pentest / code-audit presets: per-mode architecture matrix (battle zones x tactics x items with per-mode terminal-state semantics), four-state coverage light-up, dispatch-on-double-click, attack-chain topology, custom work-methodology composer (layered run envelope, closure inquiry), tool/MCP/custom-tool modules with install-approval protocol, and a capability library of user-defined categories and items shared into the composer. The target is a first-class dimension of the coverage ledger: coverage cells, stage bands and chain topology are accounted per target, with an active-target pointer (first registered target auto-activates; redteam_atlas_target switch re-anchors), a per-target/aggregate matrix view, and org (organization) as a target kind. A working-target dropdown (selecting re-anchors and routes dispatches/default writes to it) and an LLM output-downstream-parsing cell are included. Legacy stores migrate automatically (*_legacy tables retained).",
   "files": [
     "lib",

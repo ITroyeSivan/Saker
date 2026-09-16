@@ -65,11 +65,22 @@ function SkillRow(props) {
       React.createElement('span', { style: { fontWeight: 600, fontSize: 13, fontFamily: 'ui-monospace, Consolas, monospace' } }, '/' + skill.name),
       React.createElement('span', { style: { fontSize: 10, padding: '1px 6px', borderRadius: 999, background: badge.bg, color: badge.fg, fontWeight: 600 } }, badge.label),
       React.createElement('div', { style: { flex: 1 } }),
-      skill.origin === 'user' ? React.createElement('button', {
-        type: 'button', title: '卸载该用户层技能',
-        onClick: props.onRemove,
-        style: { padding: '4px 10px', fontSize: 12, borderRadius: 6, border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: 'transparent', color: '#d1242f', cursor: 'pointer', flex: '0 0 auto' },
-      }, '卸载') : null,
+      skill.origin === 'user' ? (props.confirming
+        ? React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, flex: '0 0 auto' } },
+          '卸载 /' + skill.name + ' ？',
+          React.createElement('button', {
+            type: 'button', onClick: props.onRemove,
+            style: { padding: '4px 10px', fontSize: 12, borderRadius: 6, border: '1px solid #d1242f', background: '#fff5f5', color: '#d1242f', cursor: 'pointer', fontWeight: 700 },
+          }, '卸载'),
+          React.createElement('button', {
+            type: 'button', onClick: props.onCancel,
+            style: { padding: '4px 10px', fontSize: 12, borderRadius: 6, border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: 'transparent', color: 'var(--dsw-alias-label-primary,#1a1a1a)', cursor: 'pointer' },
+          }, '取消'))
+        : React.createElement('button', {
+          type: 'button', title: '卸载该用户层技能',
+          onClick: props.onRequest,
+          style: { padding: '4px 10px', fontSize: 12, borderRadius: 6, border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: 'transparent', color: '#d1242f', cursor: 'pointer', flex: '0 0 auto' },
+        }, '卸载')) : null,
       React.createElement(CopyButton, { name: skill.name })),
     skill.description ? React.createElement('div', { style: { fontSize: 12, color: 'var(--dsw-alias-label-secondary,#4a4a4f)', lineHeight: 1.55 } }, skill.description) : null);
 }
@@ -108,7 +119,7 @@ function UploadBox(props) {
   return React.createElement('div', { style: { border: '1px dashed var(--dsw-alias-border-l2,#c9c9d0)', borderRadius: 8, padding: '12px', marginBottom: 12, background: 'var(--dsw-alias-bg-layer-2,#fafafb)' } },
     React.createElement('div', { style: { fontSize: 13, fontWeight: 600, marginBottom: 4 } }, '上传技能压缩包'),
     React.createElement('div', { style: hintStyle() },
-      '选择本机的 .zip / .tgz / .tar.gz（内应含一个技能目录，如 my-skill/SKILL.md，或一个顶层 my-skill.md；SKILL.md 需带 name 与 description frontmatter）。安装到 ~/.dsh/skills/<name>/，宿主热载，无需重启。'),
+      '选择本机的 .zip / .tgz / .tar.gz（内应含一个技能目录，如 my-skill/SKILL.md，或一个顶层 my-skill.md；SKILL.md 需带 name 与 description frontmatter）。安装到平台技能目录 skills/<name>/（即 $DSH_HOME 或 ~/.dsh 之下），宿主热载，无需重启——上传后当前会话的输入框打 / 即可看到。'),
     React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
       React.createElement('input', {
         ref: fileRef, type: 'file', accept: '.zip,.tgz,.tar.gz',
@@ -124,6 +135,8 @@ function Page(props) {
   var [presetId, setPresetId] = useState('');
   var [reloadTick, setReloadTick] = useState(0);
   var [msg, setMsg] = useState(null);
+  // 卸载的行内两段式确认（原生 confirm 会阻塞渲染进程，Agent 驱动的整页卡死）
+  var [confirmName, setConfirmName] = useState('');
 
   function load() {
     setState({ status: 'loading', skills: [] });
@@ -137,8 +150,9 @@ function Page(props) {
   }
   useEffect(load, [presetId, reloadTick]);
 
+  function requestRemove(name) { setConfirmName(name); }
+  function cancelRemove() { setConfirmName(''); }
   function remove(name) {
-    if (!window.confirm('卸载用户层技能 /' + name + '？（shared/preset 随包技能不受影响）')) return;
     rpc(props.connection, 'remove-skill', { name: name }).then(function (res) {
       if (res && res.ok) { setReloadTick(function (t) { return t + 1; }); }
       else setMsg({ ok: false, text: ((res && res.error && res.error.message) || '卸载失败') });
@@ -150,18 +164,19 @@ function Page(props) {
     React.createElement('div', { style: hintStyle() },
       '模型在会话开始时自动收到技能目录，任务匹配描述时会用 `skill` 工具按名加载正文；你也可以手动引用——在输入框打 / 弹出候选，或直接粘贴 ',
       React.createElement('code', { style: { background: 'var(--dsw-alias-bg-layer-2,#f6f6f7)', padding: '1px 5px', borderRadius: 4, fontSize: 11 } }, '/技能名'),
-      ' 后回车，该技能正文注入当轮。shared=所有模式可见；模式专属=仅 pentest/code-audit 预设挂载；已安装=你自己上传的。'),
+      ' 后回车，该技能正文注入当轮。shared=所有模式可见；模式专属=由对应预设挂载；已安装=你自己上传的。'),
     React.createElement(UploadBox, { connection: props.connection, onInstalled: function () { setReloadTick(function (t) { return t + 1; }); } }),
     React.createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'center', marginBottom: 12 } },
       React.createElement('span', { style: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#6e6e73)' } }, '范围筛选：'),
       React.createElement('button', { type: 'button', onClick: function () { setPresetId(''); }, style: { padding: '4px 10px', fontSize: 12, borderRadius: 6, border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: presetId === '' ? '#dbeafe' : 'transparent', cursor: 'pointer' } }, '全部'),
       React.createElement('button', { type: 'button', onClick: function () { setPresetId('pentest'); }, style: { padding: '4px 10px', fontSize: 12, borderRadius: 6, border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: presetId === 'pentest' ? '#dbeafe' : 'transparent', cursor: 'pointer' } }, 'pentest'),
-      React.createElement('button', { type: 'button', onClick: function () { setPresetId('code-audit'); }, style: { padding: '4px 10px', fontSize: 12, borderRadius: 6, border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: presetId === 'code-audit' ? '#dbeafe' : 'transparent', cursor: 'pointer' } }, 'code-audit')),
+      React.createElement('button', { type: 'button', onClick: function () { setPresetId('code-audit'); }, style: { padding: '4px 10px', fontSize: 12, borderRadius: 6, border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: presetId === 'code-audit' ? '#dbeafe' : 'transparent', cursor: 'pointer' } }, 'code-audit'),
+      React.createElement('button', { type: 'button', onClick: function () { setPresetId('ctf-solver'); }, style: { padding: '4px 10px', fontSize: 12, borderRadius: 6, border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: presetId === 'ctf-solver' ? '#dbeafe' : 'transparent', cursor: 'pointer' } }, 'ctf-solver')),
     msg ? React.createElement('div', { style: { marginBottom: 8 } }, React.createElement('span', { style: msgStyle(msg.ok) }, msg.text)) : null,
     state.status === 'loading' ? React.createElement('div', { style: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#6e6e73)' } }, '加载中…') : null,
     state.status === 'error' ? React.createElement('div', { style: msgStyle(false) }, '无法读取技能清单。') : null,
     state.status === 'ready' && state.skills.length === 0 ? React.createElement('div', { style: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#6e6e73)' } }, '当前筛选下没有技能。') : null,
-    state.skills.map(function (s) { return React.createElement(SkillRow, { key: s.name, skill: s, onRemove: function () { remove(s.name); } }); }));
+    state.skills.map(function (s) { return React.createElement(SkillRow, { key: s.name, skill: s, confirming: confirmName === s.name, onRequest: function () { requestRemove(s.name); }, onCancel: cancelRemove, onRemove: function () { setConfirmName(''); remove(s.name); } }); }));
 }
 
 function apply(ctx) {

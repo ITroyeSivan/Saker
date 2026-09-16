@@ -4,8 +4,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { openStore, writeMemory, searchMemories, topForInjection, listMemories, getMemory, removeMemory, statsMemories, purgeExpired, kindLabel, MAX_ROWS_PER_WORKSPACE } from "../lib/store.js";
-import { buildMemoryBlock, dispatch, isTrustedRequest, MODE_IDS, checkCsrf } from "../lib/index.js";
+import { openStore, writeMemory, searchMemories, topForInjection, listMemories, getMemory, removeMemory, statsMemories, purgeExpired, kindLabel, MAX_ROWS_PER_WORKSPACE, setIdeaStatus, listIdeas } from "../lib/store.js";
+import { buildMemoryBlock, dispatch, isTrustedRequest, MODE_IDS, checkCsrf, isRootSession, distillWorkspace, closeStore, apply } from "../lib/index.js";
+import { readLedger, distillCandidates, renderCandidates, MAX_CANDIDATES, STATE_FILE, OUT_FILE } from "../lib/distill.js";
 
 let pass = 0, fail = 0;
 const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); } else { fail++; console.log(`FAIL ${label}`); } };
@@ -88,7 +89,7 @@ const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); 
 	const nMatch = / n="(\d+)">/.exec(fb2);
 	ok("预算截断硬上限 ≤700（修复 723 超限）", fb2.length <= 700 && fb2.endsWith("</dsh-campaign-memory>"));
 	ok("截断先减记忆行：指引行保留、首行保留、n 同步实留行数", fb2.includes("campaign_memory_search") && fb2.includes("超预算行0") && !fb2.includes("超预算行9") && nMatch !== null && Number(nMatch[1]) < 10);
-	ok("安全模式名单齐（pentest + code-audit）", MODE_IDS.length === 2 && MODE_IDS.includes("pentest") && MODE_IDS.includes("code-audit"));
+	ok("安全模式名单齐（pentest + code-audit + ctf-solver）", MODE_IDS.length === 3 && MODE_IDS.includes("pentest") && MODE_IDS.includes("code-audit") && MODE_IDS.includes("ctf-solver"));
 	st.close();
 }
 
@@ -247,5 +248,173 @@ const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); 
 		checkCsrf({ headers: { "x-dsh-csrf": "X" } }, "T") === false &&
 		checkCsrf({ headers: {} }, "T") === false && checkCsrf({}, "T") === false);
 
+// 13. P1-3 收尾蒸馏：台账容错读取 / 四类候选抽取 / 判重基准 / 清单渲染 / 落盘不落库 / 顶层会话判定
+{
+	const ledgerRaw = {
+		goal: { text: "拿下 portal 后台" },
+		criteria: [{ text: "能读到敏感配置", status: "met" }, { text: "能写文件", status: "open" }],
+		intents: [
+			{ summary: "SQL 注入打点（门户站）", status: "done", anchor: { kind: "finding", ref: "F-1" }, note: "预期拿到库名" },
+			{ summary: "反序列化入口", status: "blocked", anchor: { kind: "endpoint", ref: "/api/x" } },
+			{ summary: "绕 WAF 直连", status: "dropped", anchor: {} },
+			{ summary: "", status: "done" }
+		],
+		note: "出口网关只放 443",
+		pending: ["补一张出网图", ""]
+	};
+
+	// 13.1 台账读取（跑真文件系统，不打桩）
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cm-ledger-"));
+	ok("台账缺失/路径非法一律 null（收尾不抛错）", readLedger(dir) === null && readLedger("") === null && readLedger(undefined) === null);
+	fs.writeFileSync(path.join(dir, STATE_FILE), "{ 这不是 JSON", "utf8");
+	ok("台账 JSON 损坏→null（不让收尾钩子炸掉销毁流程）", readLedger(dir) === null);
+	fs.writeFileSync(path.join(dir, STATE_FILE), JSON.stringify(ledgerRaw), "utf8");
+	const ledger = readLedger(dir);
+	ok("台账读取：goal 对象取 text", ledger.goal === "拿下 portal 后台");
+	ok("台账读取：criteria/intents 原样、pending 去空", ledger.criteria.length === 2 && ledger.intents.length === 4 && ledger.pending.length === 1);
+	ok("台账读取：note 保留（受阻/放弃理由来源）", ledger.note === "出口网关只放 443");
+
+	// 13.2 四类抽取（纯函数）
+	const cands = distillCandidates({ ledger });
+	ok("已完成方向→tactic（带锚与登记预期）", cands.some((c) => c.kind === "tactic" && c.title === "打法：SQL 注入打点（门户站）" && c.content.includes("finding:F-1") && c.content.includes("预期拿到库名")));
+	ok("受阻方向→lesson（带受阻原因）", cands.some((c) => c.kind === "lesson" && c.title === "受阻：反序列化入口" && c.content.includes("出口网关只放 443")));
+	ok("放弃方向→lesson（边界）", cands.some((c) => c.kind === "lesson" && c.title === "放弃：绕 WAF 直连"));
+	ok("仅 met 判据→detect", cands.filter((c) => c.kind === "detect").length === 1 && cands.some((c) => c.kind === "detect" && c.title === "判据：能读到敏感配置"));
+	ok("空 summary 不抽（噪声过滤）", cands.length === 4);
+	ok("无台账/空入参→零候选", distillCandidates({ ledger: null }).length === 0 && distillCandidates({}).length === 0);
+
+	// 13.3 判重：比较基准是裸语义，不含「打法：」这类展示前缀
+	const withDup = distillCandidates({ ledger, existing: [{ id: "cm-9", title: "SQL 注入打点（门户站）旧战役", content: "沿用 F-1 路径" }] });
+	ok("判重：已有相似记忆→标 dup（给 id，提示同题重写=刷新）", withDup.find((c) => c.kind === "tactic").dup === "cm-9");
+	ok("判重：无相似记忆→不标", cands.find((c) => c.kind === "tactic").dup === "");
+	ok("判重：过短标题不参与比较（防误判）", distillCandidates({ ledger: { goal: "", note: "", criteria: [], intents: [{ summary: "绕 WAF", status: "done", anchor: {} }] }, existing: [{ id: "cm-1", title: "绕 WAF 直连", content: "" }] })[0].dup === "");
+
+	// 13.4 候选上限
+	const many = { goal: "", note: "", criteria: [], intents: Array.from({ length: 60 }, (_, i) => ({ summary: "方向 " + i, status: "done", anchor: { kind: "k", ref: String(i) } })) };
+	ok("候选上限 " + MAX_CANDIDATES + " 条（多了变噪声）", distillCandidates({ ledger: many }).length === MAX_CANDIDATES);
+
+	// 13.5 清单渲染
+	ok("空候选渲染为空串（不产出空文件）", renderCandidates({ cwd: "x", mode: "pentest", candidates: [] }) === "" && renderCandidates({ cwd: "x", mode: "pentest" }) === "");
+	const md = renderCandidates({ cwd: "E:/ws", mode: "pentest", candidates: cands, now: new Date("2026-09-12T01:02:03Z") });
+	ok("清单首屏就写清「未写入记忆库」", md.includes("# 会话收尾·记忆候选") && md.includes("**未写入记忆库**") && md.includes("campaign_memory_write"));
+	ok("清单含工作区/模式/时间/条数", md.includes("`E:/ws`") && md.includes("模式：pentest") && md.includes("2026-09-12T01:02:03.000Z") && md.includes("候选：" + cands.length + " 条"));
+	ok("清单逐条成节（kind｜标题 + 正文 + tags）", cands.every((c) => md.includes("## " + c.kind + "｜" + c.title)) && md.includes("- tags：`打法,可复用`"));
+
+	// 13.6 落盘（真写文件、真读回）
+	const wr = fs.mkdtempSync(path.join(os.tmpdir(), "cm-out-"));
+	ok("无台账→不落盘", distillWorkspace({ cwd: wr, mode: "pentest", existing: [] }).written === false && !fs.existsSync(path.join(wr, OUT_FILE)));
+	fs.writeFileSync(path.join(wr, STATE_FILE), JSON.stringify(ledgerRaw), "utf8");
+	const r1 = distillWorkspace({ cwd: wr, mode: "pentest", existing: [] });
+	const outFile = path.join(wr, OUT_FILE);
+	ok("有台账→落盘候选清单（条数/路径/内容）", r1.written === true && r1.count === 4 && r1.file === outFile && fs.readFileSync(outFile, "utf8").includes("打法：SQL 注入打点（门户站）"));
+	const stA = openStore(":memory:");
+	writeMemory(stA, { mode: "pentest", kind: "tactic", title: "既有记入", content: "x" });
+	const r2 = distillWorkspace({ cwd: wr, mode: "pentest", existing: listMemories(stA, { mode: "pentest", limit: 200 }) });
+	ok("落盘不落库：库内条数不变（入库必须过人）", r2.written === true && listMemories(stA, { mode: "pentest" }).length === 1);
+	stA.close();
+	// 落盘失败必须吞掉（返回 error，不抛）——同名目录占位让 writeFileSync 报 EISDIR
+	const we = fs.mkdtempSync(path.join(os.tmpdir(), "cm-err-"));
+	fs.writeFileSync(path.join(we, STATE_FILE), JSON.stringify(ledgerRaw), "utf8");
+	fs.mkdirSync(path.join(we, OUT_FILE));
+	const re = distillWorkspace({ cwd: we, mode: "pentest", existing: [] });
+	ok("落盘失败→返回 error 而不抛（不许打断销毁流程）", re.written === false && re.count === 0 && typeof re.error === "string" && re.error.length > 0);
+
+	// 13.7 顶层会话判定
+	ok("顶层会话（无深度 / 深度 0）→可蒸馏", isRootSession({ session: { header: { cwd: "x" } } }) === true && isRootSession({ session: { header: { cwd: "x", delegationDepth: 0 } } }) === true);
+	ok("子代理会话（origin=subagent 或 深度>0）→不蒸馏", isRootSession({ session: { header: { cwd: "x", origin: "subagent" } } }) === false && isRootSession({ session: { header: { cwd: "x", delegationDepth: 2 } } }) === false);
+
+	// 13.8 接线：真挂 apply()，真派发 agent/disposed
+	const hdir = fs.mkdtempSync(path.join(os.tmpdir(), "cm-hook-"));
+	process.env.DSH_CAMPAIGN_MEMORY_DB = path.join(hdir, "memory.db");
+	fs.writeFileSync(path.join(hdir, STATE_FILE), JSON.stringify(ledgerRaw), "utf8");
+	const handlers = {};
+	const logs = [];
+	let presetNow = "pentest";
+	await apply({
+		on: (ev, fn) => { handlers[ev] = fn; },
+		effect: (fn) => { fn(); },
+		tools: { register: () => {} },
+		systemPrompt: { context: () => {} },
+		webServer: { register: () => () => {} },
+		webRuntime: { trustedHosts: [] },
+		agentPresets: { composedPreset: () => presetNow },
+		logger: { info: (m) => logs.push(m) }
+	});
+	ok("apply 挂了 agent/disposed 钩子", typeof handlers["agent/disposed"] === "function");
+	const agentOf = (header) => ({ ctx: {}, session: { id: "h1", header } });
+	const hookOut = path.join(hdir, OUT_FILE);
+	handlers["agent/disposed"]({ agent: agentOf({ cwd: hdir, agentPreset: "pentest" }) });
+	ok("顶层会话销毁→工作区落盘候选清单", fs.existsSync(hookOut) && fs.readFileSync(hookOut, "utf8").includes("未写入记忆库"));
+	// 先往库里放一条相似记忆，再销毁一次：证明落盘前真的读库判重
+	const hst = openStore(process.env.DSH_CAMPAIGN_MEMORY_DB);
+	writeMemory(hst, { mode: "pentest", kind: "tactic", title: "SQL 注入打点（门户站）旧战役", content: "沿用" });
+	hst.close();
+	fs.rmSync(hookOut, { force: true });
+	handlers["agent/disposed"]({ agent: agentOf({ cwd: hdir, agentPreset: "pentest" }) });
+	ok("落盘前先读库判重（existing 生效→清单标「已有相似记忆」）", fs.existsSync(hookOut) && fs.readFileSync(hookOut, "utf8").includes("已有相似记忆"));
+	ok("收尾日志留痕（未入库可追溯）", logs.some((m) => m.includes("收尾蒸馏") && m.includes("未入库")));
+	// 不该触发的情形
+	fs.rmSync(hookOut, { force: true });
+	handlers["agent/disposed"]({ agent: agentOf({ cwd: hdir, agentPreset: "pentest", origin: "subagent" }) });
+	ok("子代理销毁不落盘（避免战役中途反复覆写）", !fs.existsSync(hookOut));
+	handlers["agent/disposed"]({ agent: agentOf({ cwd: hdir, agentPreset: "pentest", delegationDepth: 1 }) });
+	ok("深度>0 的会话销毁不落盘", !fs.existsSync(hookOut));
+	presetNow = "chat";
+	handlers["agent/disposed"]({ agent: agentOf({ cwd: hdir, agentPreset: "chat" }) });
+	ok("非安全模式会话不蒸馏", !fs.existsSync(hookOut));
+	presetNow = "pentest";
+	handlers["agent/disposed"]({ agent: agentOf({}) });
+	ok("无 cwd 不蒸馏且不抛错", !fs.existsSync(hookOut));
+	ok("收尾蒸馏不写库（库内仅 1 条既有记忆）", (() => { const st2 = openStore(process.env.DSH_CAMPAIGN_MEMORY_DB); const n = listMemories(st2, { mode: "pentest" }).length; st2.close(); return n === 1; })());
+	// 释放模块级库句柄再清目录：不释放会在 Windows 上锁住 -wal/-shm（表现是 EBUSY，不是权限）
+	closeStore();
+	fs.rmSync(hdir, { recursive: true, force: true });
+	fs.rmSync(wr, { recursive: true, force: true });
+	fs.rmSync(we, { recursive: true, force: true });
+	fs.rmSync(dir, { recursive: true, force: true });
+}
+
 console.log(fail === 0 ? `\nall ${pass} tests passed` : `\n${fail} FAILED, ${pass} passed`);
+// ── 方向层（Idea）：与「已发生的事实」分开维护的「下一步该往哪打」────────────
+// 照 BreachWeave 的 Idea/Memory 分层：事实只增不减，方向必须能收口。
+// 这里锁住的关键不变量：idea 不被回落成 tactic、默认只列未收口、收口依据可追溯。
+{
+	const st = openStore(":memory:");
+	const ws = { workspace: "client-idea" };
+
+	const a = writeMemory(st, { mode: "pentest", kind: "idea", title: "未验证：/admin 未授权", content: "假设可直接访问管理台", idea_basis: "响应 200 但没跟进去", idea_asset: "api.example.com", ...ws });
+	const rowA = listIdeas(st, { mode: "pentest" }).find((r) => r.id === a.id);
+	ok("idea 不会被回落成 tactic（白名单漏加就会静默变 tactic）", rowA !== undefined);
+	ok("方向默认状态为 open", rowA && rowA.ideaStatus === "open");
+	ok("方向依据与关联资产落库", rowA && String(rowA.ideaBasis).includes("响应 200") && rowA.ideaAsset === "api.example.com");
+	ok("方向不设 TTL（不会因过期消失，只靠收口淘汰）", rowA && rowA.expires_at === null);
+
+	writeMemory(st, { mode: "pentest", kind: "idea", title: "另一个方向", content: "x", ...ws });
+	writeMemory(st, { mode: "pentest", kind: "tactic", title: "一条普通打法", content: "y", ...ws });
+	ok("方向清单不混入普通记忆", listIdeas(st, { mode: "pentest" }).length === 2);
+
+	const settled = setIdeaStatus(st, a.id, "ruled-out", "跟进去发现需认证，排除");
+	ok("收口返回新状态", settled.ideaStatus === "ruled-out");
+	ok("收口后默认清单不再含它", !listIdeas(st, { mode: "pentest" }).some((r) => r.id === a.id));
+	ok("includeSettled 仍可查到已收口", listIdeas(st, { mode: "pentest", includeSettled: true }).some((r) => r.id === a.id));
+	ok("收口依据追加进正文可追溯", String(getMemory(st, a.id).content).includes("跟进去发现需认证"));
+
+	let threw = false;
+	try { setIdeaStatus(st, a.id, "whatever"); } catch { threw = true; }
+	ok("非法状态被拒", threw === true);
+
+	const t = writeMemory(st, { mode: "pentest", kind: "tactic", title: "带脏字段的打法", content: "z", idea_status: "confirmed", ...ws });
+	const rowT = listMemories(st, { mode: "pentest" }).find((r) => r.id === t.id);
+	ok("非 idea 行不写方向状态（避免脏数据混进记忆）", rowT.ideaStatus === "");
+
+	// 同题刷新：内容更新但状态保留（刷新内容 ≠ 改变结论）
+	setIdeaStatus(st, a.id, "confirmed", "改用带 Cookie 的请求验证通过");
+	writeMemory(st, { mode: "pentest", kind: "idea", title: "未验证：/admin 未授权", content: "补充：需要先拿低权账号", ...ws });
+	const after = listIdeas(st, { mode: "pentest", includeSettled: true }).find((r) => r.id === a.id);
+	ok("同题刷新保留已有状态", after.ideaStatus === "confirmed");
+	ok("同题刷新更新正文", String(after.content).includes("补充：需要先拿低权账号"));
+
+	st.close();
+}
+
 process.exit(fail ? 1 : 0);

@@ -2,12 +2,12 @@
 
 # Saker
 
-**给 DeepSeek Harness 用的安全测试工作台：渗透测试与代码审计的流程、工具、留痕都可替换。**
+**给 DeepSeek Harness 用的安全测试工作台：渗透测试、代码审计与 CTF 解题的流程、工具、留痕都可替换。**
 
-模块化提示词 · 21 个独立插件 · 自定义工具链 · MCP 接入 · 安全知识库 · WebShell 管理
+模块化提示词 · 23 个独立插件 · 自定义工具链 · MCP 接入 · 安全知识库 · WebShell 管理
 
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek-Harness-111827?style=flat-square)](https://github.com/deepseek-ai/deepseek-harness)
-[![Saker](https://img.shields.io/badge/Saker-v0.2.6-4f46e5?style=flat-square)](https://github.com/ITroyeSivan/Saker)
+[![Saker](https://img.shields.io/badge/Saker-v0.3.0-4f46e5?style=flat-square)](https://github.com/ITroyeSivan/Saker)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.5-339933?style=flat-square&logo=node.js&logoColor=white)](./package.json)
 [![License](https://img.shields.io/badge/code-MIT-2563eb?style=flat-square)](./LICENSE)
 
@@ -17,7 +17,7 @@
 
 ## 这是什么
 
-Saker 是 DeepSeek Harness 上的一套安全测试模式包，外加 21 个独立插件。
+Saker 是 DeepSeek Harness 上的一套安全测试模式包，外加 23 个独立插件。
 它不提供扫描器、模型或额度，负责的是「怎么测」这件事：测试流程、攻击面口径、工具接入、过程留痕、成果复核。
 
 跟常见的「AI 渗透测试插件」不同，那些本质是一段写死的提示词——流程、话术、输出格式、工具选择全固化在文本里，装上去是什么样，用起来就永远是什么样。
@@ -25,14 +25,14 @@ Saker 把这些都做成能自己改的：26 个内置提示词能自由组合�
 
 ## 特性
 
-- **三种模式** — 渗透测试、代码审计两个专业模式，外加宿主自带的标准模式，在新会话页直接切
+- **三种专业模式** — 渗透测试、代码审计、CTF 解题，外加宿主自带的标准模式，在新会话页直接切
 - **提示词可编排** — 26 个内置提示词能勾选、改内容、存成组合，输入框「方法 ▾」一键切
 - **技能可自定义** — 技能包能上传安装、能卸载，会话里按需引用
 - **工具可自定义** — 本机扫描器的路径和分类自己配，库里没有的工具也能加进来
 - **MCP 可接入** — stdio 和 streamable HTTP 两种接法，连上就能给模型用
 - **攻击面覆盖** — 每个资产测到哪一步都落库，没测的地方一眼看得见
 - **WebShell 管理** — 16 种载荷生成、连接与文件/数据库操作，库按语言和绕过方式分类
-- **知识库随包** — PayloadsAllTheThings 全量文本、方法论手册、Exploit-DB 索引，离线可用
+- **知识库自动扩展** — 20 个高质量知识包、SQLite FTS5 混合检索、PayloadsAllTheThings 与 Exploit-DB，离线可用
 - **成果与证据** — 每个发现都挂证据和复核状态，报告从台账生成，不是模型现场编
 - **跨会话记忆** — 打过的目标、指纹、工具经验都留着，下个会话能查
 
@@ -50,7 +50,7 @@ Saker 把这些都做成能自己改的：26 个内置提示词能自由组合�
 git clone https://github.com/ITroyeSivan/Saker.git
 cd Saker
 
-node scripts/pack-all.mjs        # 生成根模式包和 21 个插件包
+node scripts/pack-all.mjs        # 生成根模式包和 23 个插件包
 node scripts/install-all.mjs     # 装进 dsh 的 web profile
 dsh web                          # 重启宿主
 ```
@@ -66,7 +66,7 @@ dsh web                          # 重启宿主
 
 ## 后续计划
 
-- [ ] 持续适配 DeepSeek Harness 最新版本（当前支持：`0.1.5-rc.1`）
+- [ ] 持续适配 DeepSeek Harness 最新版本（当前支持：`0.1.6-alpha.1`；`0.1.5-rc.1` 保留兼容）
 
 - [ ] 新增功能
 
@@ -82,9 +82,10 @@ dsh web                          # 重启宿主
 | 搞清楚每个功能在哪、怎么改成自己的 | [功能说明](./docs/features.md) |
 | 了解整体设计与插件分工 | [架构：它是怎么搭起来的](./docs/architecture.md) |
 | 查某个插件是干什么的 | [插件清单](./docs/plugin-list.md) |
+| 判断能力该用 dsh 宿主还是 Saker | [宿主能力对照](./docs/host-capabilities.md) |
 | 改代码、打包、发版 | [开发与发布](./docs/development.md) |
 | 确认能用在哪、哪些结论要人复核 | [边界与执行约束](./docs/boundaries.md) |
-| 看这一版改了什么 | [发布说明](./docs/release-v0.2.6.md) |
+| 看这一版改了什么 | [发布说明](./docs/release-v0.3.2.md) |
 
 ## 边界与授权
 

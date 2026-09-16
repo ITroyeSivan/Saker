@@ -1,9 +1,46 @@
 /** MCP config JSON parser and exporter: accepts {"mcpServers":…} / {"servers":…} / bare maps / single-server objects / one wrapper level; non-server metadata keys are ignored. */
 import type { ServerDraft } from './contracts.js'
+import { DEFAULT_PROXY_THRESHOLD } from './contracts.js'
+
+/** Machine-readable paste/import diagnostic; the UI owns the wording (see locales.ts). */
+export type McpJsonErrorCode = 'empty' | 'badJson' | 'notObject' | 'noServers' | 'skipped'
+
+export interface McpJsonError {
+  readonly code: McpJsonErrorCode
+  /** badJson: 1-based line of the syntax error, when the engine reports one. */
+  readonly line?: number
+  /** badJson: 1-based column of the syntax error, when the engine reports one. */
+  readonly column?: number
+  /** badJson: 0-based character offset, when the engine reports one. */
+  readonly position?: number
+  /** skipped: the entry name that could not be read as a server. */
+  readonly name?: string
+  /** badJson: the character the engine choked on, when it names one. */
+  readonly token?: string
+}
+
+/**
+ * Pull line/column/position/token out of a JSON.parse SyntaxError message. The engine's
+ * own wording stays inside this function — no parser prose may reach the UI (see locales.ts).
+ * Node 22/24 emit two shapes, and the second one carries no location at all:
+ *   Expected ':' after property name in JSON at position 28 (line 3 column 9)
+ *   Unexpected token '}', "{"a": }" is not valid JSON
+ */
+export function jsonErrorDetail(error: unknown): Pick<McpJsonError, 'line' | 'column' | 'position' | 'token'> {
+  const message = error instanceof Error ? error.message : String(error)
+  const position = /at position (\d+)/.exec(message)
+  const lineColumn = /line (\d+) column (\d+)/.exec(message)
+  const token = /unexpected token '([^']*)'/i.exec(message)
+  return {
+    ...(position === null ? {} : { position: Number(position[1]) }),
+    ...(lineColumn === null ? {} : { line: Number(lineColumn[1]), column: Number(lineColumn[2]) }),
+    ...(token === null ? {} : { token: token[1] }),
+  }
+}
 
 export interface McpJsonParseResult {
   readonly servers: ServerDraft[]
-  readonly warnings: string[]
+  readonly warnings: McpJsonError[]
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000
@@ -54,6 +91,9 @@ function parseServerEntry(name: string, raw: unknown): ServerDraft | undefined {
     headers: isHttp ? toPairs(entry.headers) : [],
     toolCallTimeoutMs: DEFAULT_TIMEOUT_MS,
     failOnStartupError: false,
+    exposure: 'auto',
+    proxyThreshold: DEFAULT_PROXY_THRESHOLD,
+    directTools: [],
   }
 }
 
@@ -75,14 +115,14 @@ export const MCP_JSON_TEMPLATE = `{
 /**
  * Pretty-print any pasted config (two-space indent); returns an error for invalid JSON.
  */
-export function formatMcpJson(text: string): { text: string } | { error: string } {
+export function formatMcpJson(text: string): { text: string } | { error: McpJsonError } {
   const trimmed = text.trim()
-  if (trimmed === '') return { error: 'empty input' }
+  if (trimmed === '') return { error: { code: 'empty' } }
   try {
     const document: unknown = JSON.parse(trimmed)
     return { text: `${JSON.stringify(document, null, 2)}\n` }
   } catch (error) {
-    return { error: `invalid JSON: ${error instanceof Error ? error.message : String(error)}` }
+    return { error: { code: 'badJson', ...jsonErrorDetail(error) } }
   }
 }
 
@@ -157,17 +197,17 @@ export function serversToMcpJson(servers: ReadonlyArray<{
 }
 
 /** Parse a pasted JSON document into server drafts; names deduplicate with suffixes. */
-export function parseMcpJson(text: string, existing: Readonly<Iterable<string>> = []): McpJsonParseResult | { error: string } {
+export function parseMcpJson(text: string, existing: Readonly<Iterable<string>> = []): McpJsonParseResult | { error: McpJsonError } {
   const trimmed = text.trim()
-  if (trimmed === '') return { error: 'empty input' }
+  if (trimmed === '') return { error: { code: 'empty' } }
   let document: unknown
   try {
     document = JSON.parse(trimmed)
   } catch (error) {
-    return { error: `invalid JSON: ${error instanceof Error ? error.message : String(error)}` }
+    return { error: { code: 'badJson', ...jsonErrorDetail(error) } }
   }
-  if (!isObject(document)) return { error: 'expected a JSON object' }
-  const warnings: string[] = []
+  if (!isObject(document)) return { error: { code: 'notObject' } }
+  const warnings: McpJsonError[] = []
   const collect = (map: Record<string, unknown>): ServerDraft[] => {
     const servers: ServerDraft[] = []
     for (const [rawName, rawEntry] of Object.entries(map)) {
@@ -177,7 +217,7 @@ export function parseMcpJson(text: string, existing: Readonly<Iterable<string>> 
       if (rawName === '_meta' || rawName === 'inputs' || rawName.startsWith('$')) continue
       const draft = parseServerEntry(rawName, rawEntry)
       if (draft === undefined) {
-        warnings.push(`skipped "${rawName}": no command (stdio) or url (http)`)
+        warnings.push({ code: 'skipped', name: rawName })
         continue
       }
       servers.push(draft)
@@ -206,8 +246,7 @@ export function parseMcpJson(text: string, existing: Readonly<Iterable<string>> 
   }
   if (servers === undefined || servers.length === 0) {
     return {
-      error: warnings[0]
-        ?? 'no server entries found: expected {"mcpServers": {...}}, {"servers": {...}}, a bare {name: config} map, or one server object',
+      error: warnings[0] ?? { code: 'noServers' },
     }
   }
   const used = new Set<string>(existing)

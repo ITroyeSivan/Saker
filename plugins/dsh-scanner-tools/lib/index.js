@@ -15,17 +15,53 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { TOOL_DEFS, buildArgs, tiersLine } from "./registry.js";
 
+/**
+ * 落盘文件名的时间戳（含毫秒 + 4 位随机后缀）。
+ *
+ * **为什么不能用秒级**：原先用 `toISOString().slice(0,14)`（YYYYMMDDHHmmss）拼
+ * `tool-output/<tool>-<ts>.txt` 与 `scans/<tool>-<ts>.json` —— 同一秒内有两次调用
+ * （多路 Solver 并行、或同一轮里连发两个扫描）就会**撞同一个文件名，后者静默覆盖前者**：
+ * 证据原件没了、对账指向的却是后写的那份，而日志里一点异常都没有。
+ * 加毫秒把窗口从 1s 缩到 1ms，再加 4 位随机后缀兜住「同毫秒并发」。
+ * 格式仍可读可排序：`nmap-20260914T001234567-a1b2.txt`。
+ */
+function stamp() {
+	return new Date().toISOString().replace(/[-:.]/g, "").slice(0, 17) + "-" + randomBytes(2).toString("hex");
+}
+
 const RATE_DEFAULTS = { nuclei: 15, httpx: 25, ffuf: 50 }; // 保守默认；显式覆盖会留痕
 const BIN_HINT = "三级兜底：本机未装该工具——先查已连接 MCP（如 kali MCP），仍无则按 pentest-playbook 安装请求流程征得用户批准后安装；本工具绝不自动安装。";
+const IS_WIN = process.platform === "win32";
+const WIN_PATHEXT = ".COM;.EXE;.BAT;.CMD";
 
-/** which-style binary check without shell. */
+/** PATH 直扫 + Windows App Paths 兜底；不依赖宿主是否继承 PATHEXT。 */
 export function hasBin(bin) {
-	const probe = process.platform === "win32" ? spawnSync("where", [bin]) : spawnSync("/usr/bin/which", [bin]);
-	return probe.status === 0;
+	const name = String(bin ?? "");
+	if (!name) return false;
+	if (name.includes("/") || name.includes("\\")) {
+		try { return fs.existsSync(name); } catch { return false; }
+	}
+	try {
+		const dirs = String(process.env.PATH || process.env.Path || "").split(path.delimiter).filter(Boolean);
+		const exts = IS_WIN
+			? String(process.env.PATHEXT || WIN_PATHEXT).split(";").filter(Boolean).map((e) => e.toLowerCase())
+			: [""];
+		for (const dir of dirs) {
+			for (const ext of exts) {
+				try { if (fs.existsSync(path.join(dir, name + ext))) return true; } catch { /* skip unreadable dir */ }
+			}
+		}
+	} catch { /* fall through */ }
+	try {
+		return IS_WIN
+			? spawnSync("where", [name], { stdio: "ignore", env: { ...process.env, PATHEXT: process.env.PATHEXT || WIN_PATHEXT } }).status === 0
+			: spawnSync("/bin/sh", ["-c", `command -v -- ${name} >/dev/null 2>&1`]).status === 0;
+	} catch { return false; }
 }
 
 /** target host must appear in the baseline file (active scans only). Returns {ok, hint, baseline}.
@@ -65,7 +101,7 @@ export function governPreview(raw) {
 export function spillOutput(fsMod, workspace, tool, raw) {
 	const dir = path.join(workspace, "artifacts", "tool-output");
 	fsMod.mkdirSync(dir, { recursive: true });
-	const ts = new Date().toISOString().replace(/[-:T.]/g, "").slice(0, 14);
+	const ts = stamp();
 	const file = path.join(dir, `${tool}-${ts}.txt`);
 	fsMod.writeFileSync(file, String(raw ?? ""));
 	// 回读指针统一正斜杠：该值会写进证据并交给模型跨平台读取，Windows 反斜杠会污染记录。
@@ -121,6 +157,47 @@ function nextEvidenceId(workspace) {
 	return `E${n + 1}`;
 }
 
+function sleepSync(ms) {
+	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** Cross-process lock for the two human-readable scan ledgers. */
+function withLedgerLock(workspace, fn) {
+	const lockDir = path.join(workspace, "artifacts", ".scan-ledger-locks");
+	fs.mkdirSync(lockDir, { recursive: true });
+	const lockFile = path.join(lockDir, "persist.lock");
+	const started = Date.now();
+	for (;;) {
+		let fd;
+		try {
+			fd = fs.openSync(lockFile, "wx");
+			try { return fn(); }
+			finally {
+				try { fs.closeSync(fd); } catch { /* already closed */ }
+				try { fs.unlinkSync(lockFile); } catch { /* already released */ }
+			}
+		} catch (error) {
+			if (error?.code !== "EEXIST") throw error;
+			// Break a stale lock left by a crashed process, but never steal a fresh one.
+			try {
+				if (Date.now() - fs.statSync(lockFile).mtimeMs > 60_000) fs.unlinkSync(lockFile);
+			} catch { /* raced with release */ }
+			if (Date.now() - started > 10_000) throw new Error("扫描台账锁等待超时");
+			sleepSync(20);
+		}
+	}
+}
+
+/** Serialize evidence-id allocation and both ledger appends under one cross-process lock. */
+export function persistScanRecords(workspace, { command, file, rows = [] }) {
+	return withLedgerLock(workspace, () => {
+		const evidenceId = nextEvidenceId(workspace);
+		appendEvidence(workspace, evidenceId, command, file);
+		appendReconcile(workspace, rows);
+		return evidenceId;
+	});
+}
+
 /** Run one scanner with rate discipline + evidence + reconcile. Pure-ish core (fs injectable in tests). */
 export function runScan({ bin, args, workspace, tool, rate, defaultRate, active, target, parse, outFile: outFileOverride }) {
 	const cooldown = breakerCheck(tool);
@@ -131,15 +208,16 @@ export function runScan({ bin, args, workspace, tool, rate, defaultRate, active,
 		if (!reg.ok) return { ok: false, error: reg.hint, bin };
 	}
 	ensureDirs(workspace);
+	const home = process.env.HOME || process.env.USERPROFILE || "";
 	const nucleiTemplateDirs = [
-		path.join(process.env.HOME ?? "", "nuclei-templates"),
-		path.join(process.env.HOME ?? "", "Library", "Application Support", "nuclei", "templates"),
-		path.join(process.env.HOME ?? "", ".config", "nuclei", "templates")
+		path.join(home, "nuclei-templates"),
+		path.join(home, "Library", "Application Support", "nuclei", "templates"),
+		path.join(home, ".config", "nuclei", "templates")
 	];
 	if (bin === "nuclei" && !nucleiTemplateDirs.some((d) => fs.existsSync(d))) {
 		return { ok: false, error: "nuclei 模板库不存在——首次使用需一次性下载（nuclei -update-templates，数据非工具安装）。按用户基准需批准：请在 DSH 会话外自行执行，或明确批准后由模型执行。", bin };
 	}
-	const ts = new Date().toISOString().replace(/[-:T.]/g, "").slice(0, 14);
+	const ts = stamp();
 	const outFile = outFileOverride ?? path.join(workspace, "artifacts", "scans", `${tool}-${ts}.json`);
 	const full = [...args];
 	if (rate && rate !== defaultRate) full.push(...(tool === "nuclei" ? ["-rl", String(rate)] : tool === "httpx" ? ["-rl", String(rate)] : ["-rate", String(rate)]));
@@ -161,9 +239,13 @@ export function runScan({ bin, args, workspace, tool, rate, defaultRate, active,
 	} else {
 		fs.writeFileSync(outFile, JSON.stringify({ raw: raw }, null, 2)); // 全文落盘不截断（模型侧预览另由注册表工具治理）
 	}
-	const evidenceId = nextEvidenceId(workspace);
-	appendEvidence(workspace, evidenceId, cmdStr + (rate && rate !== defaultRate ? `（速率显式覆盖：默认 ${defaultRate} → ${rate}，留痕）` : `（保守默认速率 ${defaultRate}）`), path.relative(workspace, outFile).replace(/\\/g, "/"));
-	const reconciled = appendReconcile(workspace, parsed.__hits || []);
+	const rows = parsed.__hits || [];
+	const evidenceId = persistScanRecords(workspace, {
+		command: cmdStr + (rate && rate !== defaultRate ? `（速率显式覆盖：默认 ${defaultRate} → ${rate}，留痕）` : `（保守默认速率 ${defaultRate}）`),
+		file: path.relative(workspace, outFile).replace(/\\/g, "/"),
+		rows,
+	});
+	const reconciled = rows.length;
 	return { ok: proc.status === 0, evidenceId, file: path.relative(workspace, outFile).replace(/\\/g, "/"), summary: parsed.__summary ?? {}, hits: (parsed.__hits || []).length, reconciled, stdout: parsed.__summaryText ?? "" };
 }
 
@@ -290,7 +372,7 @@ function apply(ctx) {
 			if (!fs.existsSync(path.resolve(wl))) return Promise.resolve({ ok: false, error: `字典不存在：${wl}——请给 wordlist 参数（绝对路径或 SecLists）；本工具不代装字典。` });
 			const u = args.mode === "param" ? (args.url.includes("FUZZ=") ? args.url : args.url + (args.url.includes("?") ? "&" : "?") + "FUZZ=1") : args.url;
 			ensureDirs(path.resolve(args.workspace));
-			const ts = new Date().toISOString().replace(/[-:T.]/g, "").slice(0, 14);
+			const ts = stamp();
 			const outFile = path.join(path.resolve(args.workspace), "artifacts", "scans", `ffuf-${ts}.json`);
 			const args2 = ["-u", u, "-w", wl, "-mc", "200,204,301,302,307,401,403", "-o", outFile, "-of", "json", "-s"];
 			return Promise.resolve(runScan({ bin: "ffuf", args: args2, workspace: path.resolve(args.workspace), tool: "ffuf", rate: args.rate, defaultRate: RATE_DEFAULTS.ffuf, active: true, target: args.url, parse: ffufParse, outFile }));
@@ -300,7 +382,9 @@ function apply(ctx) {
 	for (const def of Object.values(TOOL_DEFS)) {
 		ctx.tools.register(defineTool({
 			name: def.name,
-			description: `${def.summary} Full output always persisted to artifacts/tool-output/ with a capped preview returned. ${def.hint}。${tiersLine(def)}`,
+			// 六段降级阶梯只在“本机缺工具”时才有决策价值；runGoverned 的缺装错误已原样返回 tiersLine，
+			// 常驻 schema 会为每个工具重复 ~500B（13 个合计 7.2K），纯属重复上下文。
+			description: `${def.summary} 全文自动落盘到 artifacts/tool-output/，模型侧只收封顶预览。本机缺工具或目标未登记时，错误结果会返回降级阶梯与修复提示。`,
 			parameters: Object.assign({
 				workspace: { type: "string", required: true, description: "Task workspace root" },
 				extra: { type: "string", description: "Explicit extra args (audit-logged escape hatch; shell metacharacters rejected)" }

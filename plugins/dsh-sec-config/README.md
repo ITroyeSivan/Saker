@@ -84,6 +84,46 @@ provider 名不存在时会明确拒绝，不会凭空建一个。
 写完需**重启 dsh** 生效。密钥由 dsh 自己的凭据库提供（`apiKeyEnv` → `~/.dsh/.credentials.yaml`
 的 `refs`），本面板不碰密钥；代理对 `Authorization` 头**原样透传**。
 
+## 端点档案（一键换供应商）
+
+「安全配置 → 模型端点档案」把常用上游地址存成清单，换供应商点一下就切过去 —— 不用去
+「设置 → 模型」手改 baseURL。首层不用建档也能用：没有档案时面板给出三档现成项
+（本机代理 / 直连上游 / 清除覆盖），并可把任一档「存为档案」。
+
+| 档位类型 | 行为 |
+|---|---|
+| 本机代理 | 写 `http://<listenHost>:<listenPort>/v1` |
+| 直连上游 | 写 `<upstream>`（不走代理；上游若要求自定义头会 400）|
+| 初始地址 | 写回首次接入时记下的那个地址（见下）|
+| 清除覆盖 | **unset** `providers.<id>.baseURL`，回内建默认 —— 仅对内建 provider 成立，见下 |
+| 自定义 | 手填 |
+
+### 「回得去」靠初始地址快照，不是靠清除覆盖
+
+清除覆盖**只对 dsh 内建目录里的 provider 成立**。自定义 provider 配了不在内建目录里的模型 id 时，
+`baseURL` 是**必填项**，宿主会直接拒绝：
+
+```
+provider "custom" model "glm-5.3-flash" needs a baseURL;
+the installed catalog does not describe this route
+```
+
+所以插件在**第一次读到某 provider 的 baseURL 时把它记为初始地址**（`model.baseline`），
+「恢复初始地址」档就是写回它。快照**只在没有快照 / 换了 provider 时记**——
+若写成「当前值 ≠ 快照就重记」，快照会跟着当前值一路跑，等于没有快照，
+切过去就再也回不到最初那个（这个坑是端到端实跑才发现的，纯函数单测看不见）。
+「把当前生效地址记为初始地址」按钮可以手动重定基准。
+
+点「清除覆盖」时若 provider 不允许，面板会给出可照做的中文指引（含宿主原文），
+**不会把配置改坏**，面板也不会空白。
+
+### 边界
+
+- 只改 `baseURL` 一个字段；`displayName` / `api` / `models` / `apiKeyEnv` 一律不碰。
+- 切换后需**重启 dsh** 生效。
+- 任何 RPC 失败都经统一收口成字符串再渲染：`res.error` 是 `{code,message,details}` **对象**，
+  直接当 React 子节点渲染会抛 React #31，宿主 error boundary 会把整块「安全配置」区吞成空白。
+
 ## 依赖
 
 - peer：`@deepseek-ai/cordis`、`@deepseek-ai/dsh-settings`、`@deepseek-ai/dsh-system-prompt`、`@deepseek-ai/dsh-shell-env`。

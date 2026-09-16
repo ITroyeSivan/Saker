@@ -42,12 +42,32 @@ export type StudioLocaleKey =
   | 'toolCallTimeoutMs'
   | 'failOnStartupError'
   | 'failOnStartupErrorHint'
+  | 'exposure'
+  | 'exposureHint'
+  | 'exposureAuto'
+  | 'exposureDirect'
+  | 'exposureProxy'
+  | 'exposureHybrid'
+  | 'exposureProxyBadgeHint'
+  | 'proxyThreshold'
+  | 'proxyThresholdHint'
+  | 'directTools'
+  | 'directToolsHint'
   | 'empty'
+  | 'noMatch'
   | 'pasteJson'
   | 'pasteJsonHint'
   | 'pasteJsonPlaceholder'
   | 'importJson'
   | 'importDone'
+  | 'errEmpty'
+  | 'errBadJson'
+  | 'errBadJsonAt'
+  | 'errBadJsonPos'
+  | 'errBadJsonToken'
+  | 'errNotObject'
+  | 'errNoServers'
+  | 'errSkipped'
   | 'toolsTitle'
   | 'toolsSearchPlaceholder'
   | 'toolsEmpty'
@@ -132,12 +152,32 @@ export const en: Record<StudioLocaleKey, string> = {
   toolCallTimeoutMs: 'Tool-call timeout (ms)',
   failOnStartupError: 'Fail mount on startup error',
   failOnStartupErrorHint: 'Otherwise an unreachable server simply contributes no tools.',
+  exposure: 'Tool exposure',
+  exposureHint: 'Direct puts one tool per server tool into every turn. Proxy publishes only mcp_search / mcp_call and fetches metadata on demand — cheaper for servers with many tools.',
+  exposureAuto: 'Auto (proxy at or above the threshold)',
+  exposureDirect: 'Direct (one tool per server tool)',
+  exposureProxy: 'Proxy (mcp_search / mcp_call only)',
+  exposureHybrid: 'Hybrid (proxy + promoted tools)',
+  exposureProxyBadgeHint: 'Proxied: its tools are reachable through mcp_search / mcp_call rather than as individual entries.',
+  proxyThreshold: 'Proxy threshold (tools)',
+  proxyThresholdHint: 'Auto proxies the server once it advertises at least this many tools.',
+  directTools: 'Promoted tools',
+  directToolsHint: 'Comma-separated raw tool names to keep as individual entries while the rest stay behind the proxy. Names not advertised by the server are skipped.',
   empty: 'No MCP servers configured yet. Add one, or paste an existing config.',
+  noMatch: 'No server matches the current filter or search. Clear them to see all servers.',
   pasteJson: 'Paste JSON',
   pasteJsonHint: 'Accepts Claude Desktop / VS Code / Cline / bare-map MCP config JSON; every entry becomes one row below.',
   pasteJsonPlaceholder: '{"mcpServers": {"github": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": {"GITHUB_TOKEN": "..."}}}}',
   importJson: 'Import',
   importDone: 'imported',
+  errEmpty: 'Nothing to parse — paste or type a config first.',
+  errBadJson: 'That is not valid JSON.',
+  errBadJsonAt: 'Invalid JSON at line {line}, column {column}.',
+  errBadJsonPos: 'Invalid JSON at character {position}.',
+  errBadJsonToken: 'Invalid JSON: unexpected {token}.',
+  errNotObject: 'The top level must be a JSON object.',
+  errNoServers: 'No server entries found. Expected {"mcpServers": {...}}, {"servers": {...}}, a bare {name: config} map, or a single server object.',
+  errSkipped: 'Skipped "{name}": stdio needs a command, http needs a url.',
   toolsTitle: 'Tools',
   toolsSearchPlaceholder: 'Filter tools…',
   toolsEmpty: 'No tool matches this filter.',
@@ -223,12 +263,32 @@ export const zh: Record<StudioLocaleKey, string> = {
   toolCallTimeoutMs: '单次工具调用超时（毫秒）',
   failOnStartupError: '启动失败即报错',
   failOnStartupErrorHint: '关闭时，连不上的服务器只是不贡献任何工具。',
+  exposure: '工具暴露方式',
+  exposureHint: '直连=每个服务端工具都单独进模型上下文；代理=只暴露 mcp_search / mcp_call 两个入口，工具元数据按需拉取——工具多的服务器能用这个省上下文。',
+  exposureAuto: '自动（达到阈值走代理）',
+  exposureDirect: '直连（每个工具单独暴露）',
+  exposureProxy: '代理（只留 mcp_search / mcp_call）',
+  exposureHybrid: '混合（代理 + 指定工具直连）',
+  exposureProxyBadgeHint: '已代理：它的工具通过 mcp_search / mcp_call 调用，不再逐个出现在工具列表里。',
+  proxyThreshold: '代理阈值（工具数）',
+  proxyThresholdHint: '自动模式下，服务端工具数达到该值即改走代理。',
+  directTools: '直连的工具',
+  directToolsHint: '逗号分隔的原始工具名：这些仍单独暴露，其余走代理。服务端没有的工具名会被跳过。',
   empty: '还没有配置 MCP 服务器。添加一个，或直接粘贴现成配置。',
+  noMatch: '没有服务器匹配当前的筛选或搜索条件，清空后即可看到全部服务器。',
   pasteJson: '粘贴 JSON',
   pasteJsonHint: '支持 Claude Desktop / VS Code / Cline / 裸映射等常见 MCP 配置格式，每一条解析为下方一行。',
   pasteJsonPlaceholder: '{"mcpServers": {"github": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": {"GITHUB_TOKEN": "..."}}}}',
   importJson: '导入',
   importDone: '已导入',
+  errEmpty: '没有可解析的内容，请先粘贴或填写配置。',
+  errBadJson: '这不是合法的 JSON。',
+  errBadJsonAt: 'JSON 格式有误：第 {line} 行第 {column} 列。',
+  errBadJsonPos: 'JSON 格式有误：第 {position} 个字符处。',
+  errBadJsonToken: 'JSON 格式有误：出现意外字符 {token}。',
+  errNotObject: '顶层必须是一个 JSON 对象。',
+  errNoServers: '没有找到服务器条目：支持 {"mcpServers": {...}}、{"servers": {...}}、裸的 {名称: 配置} 映射，或单个服务器对象。',
+  errSkipped: '已跳过「{name}」：stdio 需要 command，http 需要 url。',
   toolsTitle: '工具',
   toolsSearchPlaceholder: '筛选工具…',
   toolsEmpty: '没有匹配该筛选的工具。',

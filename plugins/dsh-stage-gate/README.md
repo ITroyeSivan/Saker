@@ -1,6 +1,6 @@
 # dsh-stage-gate
 
-DSH 宿主平面插件：把各安全预设（Saker 的 pentest / code-audit）的阶段门禁纪律中的**结构检查**变成模型工具
+DSH 宿主平面插件：把各安全预设（Saker 的 pentest / code-audit / ctf-solver）的阶段门禁纪律中的**结构检查**变成模型工具
 `stage_gate` / `gates_list`——模型不能自评门禁，必须调用工具校验，判定追加进 `<workspace>/gate-log.md` 审计 trail。
 
 ## 目标契约与中断恢复（operation-state.json）

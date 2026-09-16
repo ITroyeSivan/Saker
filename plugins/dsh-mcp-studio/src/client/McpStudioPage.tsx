@@ -4,7 +4,7 @@ import type { DiagnoseReport, ServerLive, StudioLive, Translate } from './contra
 import type { StudioCardFace } from './controller.js'
 import { useStoreState } from './components.js'
 import { ServerCard } from './ServerCard.js'
-import { MCP_JSON_TEMPLATE, formatMcpJson, serversToMcpJson } from './mcp-json.js'
+import { MCP_JSON_TEMPLATE, formatMcpJson, serversToMcpJson, type McpJsonError } from './mcp-json.js'
 import { SERVER_PRESETS } from './presets.js'
 
 const STATUS_POLL_MS = 3_000
@@ -81,26 +81,49 @@ export function createStudioPage(face: StudioCardFace, t: Translate, pollStatus:
       setPasteOpen(true)
     }, [pasteText, templateFilled])
 
+    // Parser diagnostics arrive as structured codes (see mcp-json.ts) so every message
+    // the user sees comes from the locale dictionary — no English parser text leaks into
+    // the Chinese UI.
+    const mcpErrText = useCallback((error: McpJsonError): string => {
+      switch (error.code) {
+        case 'empty':
+          return t('errEmpty')
+        case 'badJson':
+          if (error.line !== undefined && error.column !== undefined) {
+            return t('errBadJsonAt', { line: error.line, column: error.column })
+          }
+          if (error.token !== undefined) return t('errBadJsonToken', { token: error.token })
+          if (error.position !== undefined) return t('errBadJsonPos', { position: error.position })
+          return t('errBadJson')
+        case 'notObject':
+          return t('errNotObject')
+        case 'noServers':
+          return t('errNoServers')
+        case 'skipped':
+          return t('errSkipped', { name: error.name ?? '' })
+      }
+    }, [t])
+
     const runFormat = useCallback(() => {
       const result = formatMcpJson(pasteText)
       if ('error' in result) {
-        setPasteNote({ kind: 'err', text: result.error })
+        setPasteNote({ kind: 'err', text: mcpErrText(result.error) })
         return
       }
       setPasteText(result.text)
       setPasteNote(undefined)
-    }, [pasteText])
+    }, [pasteText, mcpErrText])
 
     const runJsonImport = useCallback(() => {
       const result = face.importMcpJson(pasteText)
       if ('error' in result) {
-        setPasteNote({ kind: 'err', text: result.error })
+        setPasteNote({ kind: 'err', text: mcpErrText(result.error) })
         return
       }
       setPasteOpen(false)
       setPasteText('')
-      setPasteNote({ kind: 'ok', text: `${t('importDone')} ${result.servers}${result.warnings.length > 0 ? ` · ${result.warnings.join('；')}` : ''}` })
-    }, [face, pasteText, t])
+      setPasteNote({ kind: 'ok', text: `${t('importDone')} ${result.servers}${result.warnings.length > 0 ? ` · ${result.warnings.map(mcpErrText).join('；')}` : ''}` })
+    }, [face, pasteText, t, mcpErrText])
 
     const copyAll = useCallback(() => {
       const json = serversToMcpJson(state.view.servers)
@@ -266,6 +289,12 @@ export function createStudioPage(face: StudioCardFace, t: Translate, pollStatus:
             )}
           </div>
         )}
+
+        {state.view.servers.length > 0 && visibleServers.length === 0 ? (
+          <div className="dsh-mcs-empty">
+            <p>{t('noMatch')}</p>
+          </div>
+        ) : null}
 
         {state.view.servers.length === 0 ? (
           <div className="dsh-mcs-empty">

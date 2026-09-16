@@ -1,4 +1,9 @@
-// dsh-redteam-results — 会话隔离的 redteam 成果登记（渗透/代审两模式）宿主插件。
+
+// ── 平台数据根（$DSH_HOME）────────────────────────────────────────────
+// 宿主按 $DSH_HOME 装配 profiles/会话/存储；插件一律跟随，避免「一半落 A 一半落 B」。
+// 未设置时等价于 ~/.dsh，故对既有用户是零行为变更。
+const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
+// dsh-redteam-results — 会话隔离的 redteam 成果登记（渗透 / 代码审计 / CTF）宿主插件。
 //
 // 三件事：
 //   1) 模型侧工具：redteam_finding_register / update / delete——执行时从 exec.agent
@@ -15,8 +20,9 @@
 import path from "node:path";
 import crypto from "node:crypto";
 import os from "node:os";
+import fs from "node:fs";
 import { defineTool } from "@deepseek-ai/dsh-tools";
-import { openStore, registerFinding, updateFinding, removeFinding, getFinding, listFindings, listFindingsAll, groupByTarget, groupByTargetAll, computeStats, computeStatsAll, modeCounts, modeCountsAll, ledgerOverview, ledgerOverviewAll, getMeta, setMeta, SEVERITIES, STATUSES, MODE_STATUSES, ALL_STATUSES, EVIDENCE_LEVELS, SOURCE_ORIGINS, statusesOf } from "./store.js";
+import { openStore, registerFinding, updateFinding, removeFinding, getFinding, allFindings, listFindings, listFindingsAll, groupByTarget, groupByTargetAll, computeStats, computeStatsAll, modeCounts, modeCountsAll, ledgerOverview, ledgerOverviewAll, getMeta, setMeta, SEVERITIES, STATUSES, MODE_STATUSES, ALL_STATUSES, EVIDENCE_LEVELS, SOURCE_ORIGINS, SECOND_RATINGS, secondReviewError, secondReviewVerdict, statusesOf } from "./store.js";
 
 const name = "dsh-redteam-results";
 const inject = ["tools", "webServer", "webRuntime", "agentPresets"];
@@ -32,27 +38,148 @@ const VERIFY_SENT = new Map();
 const VERIFY_WINDOW_MS = 10 * 60 * 1000;
 
 /** 链路互链（chain 三模式）：反查 AttackAtlas 链路节点对各 finding 的引用——行带 chainNodes
- *  供 Detail 互链显示。atlas 包/库不可用时静默缺省（不阻塞成果读取）。 */
-let atlasStoreCache;
-async function joinChainRefs(rows, mode) {
-	if (!Array.isArray(rows) || rows.length === 0) return;
+ *  供 Detail 互链显示。atlas 包/库不可用时静默缺省（不阻塞成果读取）。
+ *
+ *  句柄缓存存 { dbPath, store }：atlas 的 openStore 返回对象**不带 dbPath 字段**，
+ *  原先写 `cache.dbPath !== dbPath` 判定恒真 → 每次列表/分组请求都新开一个 SQLite 连接、
+ *  旧句柄永不关闭（连接泄漏；Windows 上还表现为库文件被长期占用、临时目录删不掉）。 */
+let atlasStoreCache; // { dbPath: string, store: { close(): void } }
+/** 释放互链句柄（换库/测试/宿主卸载时用——Windows 上不关句柄则库文件不可删）。 */
+export function releaseChainRefs() {
+	if (atlasStoreCache === undefined) return;
+	try { atlasStoreCache.store.close(); } catch { /* 已关或句柄失效 */ }
+	atlasStoreCache = undefined;
+}
+/** 取 atlas 句柄（进程级缓存）；库不存在或包不可用返回 undefined（调用方静默降级）。 */
+async function atlasHandle() {
 	try {
 		const mod = await import("@dsh-external/dsh-attack-atlas/store");
-		const dbPath = process.env.DSH_ATLAS_DB || path.join(os.homedir(), ".dsh", "attack-atlas", "atlas.db");
-		if (!atlasStoreCache || atlasStoreCache.dbPath !== dbPath) atlasStoreCache = mod.openStore(dbPath);
-		const refIdx = mod.chainRefIndex(atlasStoreCache, mode);
+		const dbPath = process.env.DSH_ATLAS_DB || path.join(DSH_HOME, "attack-atlas", "atlas.db");
+		if (dbPath !== ":memory:" && !fs.existsSync(dbPath)) return undefined;
+		if (!atlasStoreCache || atlasStoreCache.dbPath !== dbPath) {
+			releaseChainRefs();
+			atlasStoreCache = { dbPath, store: mod.openStore(dbPath) };
+		}
+		return { mod, store: atlasStoreCache.store };
+	} catch { return undefined; }
+}
+
+async function joinChainRefs(rows, mode) {
+	if (!Array.isArray(rows) || rows.length === 0) return;
+	const atlas = await atlasHandle();
+	if (atlas === undefined) return;
+	try {
+		const refIdx = atlas.mod.chainRefIndex(atlas.store, mode);
 		for (const f of rows) {
 			const refs = refIdx[`${f.sessionId ?? ""}:${f.id}`];
 			if (refs) f.chainNodes = refs.map((r) => ({ id: r.nodeId, label: r.label, kind: r.kind, major: !!r.major }));
 		}
 	} catch { /* atlas 不可用或无链路数据——互链缺省 */ }
 }
-const MODES = ["pentest", "code-audit"];
+
+/** 读本会话链路的全部节点（省略 target = 全目标并集）；atlas 不可用返回 undefined。 */
+async function atlasChainNodes(sessionId, mode) {
+	const atlas = await atlasHandle();
+	if (atlas === undefined) return undefined;
+	try { return atlas.mod.listChain(atlas.store, sessionId, mode); } catch { return undefined; }
+}
+
+/** 攻击图 ↔ 成果 只读对账（P1-2 步 2）。返回两清单，不改任何数据。
+ *
+ *  - **unlinked**：有成果、但没有任何链路节点引用它 —— 图漏了。stage-gate 读的就是这张图，
+ *    图不全，门禁就是拿着一张不全的图在做判断。
+ *  - **dangling**：链路节点引用了存在不了的成果（写错了 id / 来自别会话）—— 图脏了，
+ *    在跨会话聚合视图里会误连到别人的成果上。
+ *
+ *  为什么只报告不自动修：自动补节点会制造噪声，自动删节点会吃掉人工编排的拓扑。
+ *  修不修、怎么修由人判；这里只把不一致摊开。 */
+export function reconcileChain({ findings, nodes, sessionId }) {
+	const keyOf = (sid, id) => `${sid ?? ""}:${id ?? ""}`;
+	const known = new Set(findings.map((f) => keyOf(f.sessionId, f.id)));
+	const linked = new Set();
+	const dangling = [];
+	for (const n of nodes) {
+		const ref = String(n.findingRef ?? "").trim();
+		if (ref === "") continue;   // 无关联节点是合法拓扑（纯资产节点），不算脏
+		// listChain 的节点投影不带 sessionId（查询本身就是按会话过滤的）——缺省按被查会话归属，
+		// 否则每个节点都会被误判成「他会话」。显式带 sessionId 的调用方（跨会话对账）仍然生效。
+		const nodeSid = n.sessionId ?? sessionId;
+		const k = keyOf(nodeSid, ref);
+		if (known.has(k)) { linked.add(k); continue; }
+		dangling.push({
+			nodeId: n.id, nodeLabel: n.label, sessionId: nodeSid, target: n.target, findingRef: ref,
+			reason: String(nodeSid) === String(sessionId) ? "指向本会话不存在的成果" : "指向他会话的成果（聚合视图会误连）"
+		});
+	}
+	const unlinked = findings
+		.filter((f) => !linked.has(keyOf(f.sessionId, f.id)))
+		.map((f) => ({ id: f.id, title: f.title, status: f.status, severity: f.severity, target: f.target }));
+	return { unlinked, dangling, checked: { findings: findings.length, nodes: nodes.length } };
+}
+
+/** 渲染链路对账结果。纯函数，便于对“超过 12 条”的省略分支做回归测试。 */
+export function renderChainReconcile(v) {
+	if (!v.ok) return `对账失败：${v.error}`;
+	if (v.available === false) return "未安装攻击图插件或本机尚无攻击图库——本次只核对成果侧，无图可对。";
+	if (v.unlinked.length === 0 && v.dangling.length === 0) {
+		return `对账通过：${v.checked.findings} 条成果、${v.checked.nodes} 个链路节点，两边一致。`;
+	}
+	const lines = [`链路对账：${v.checked.findings} 条成果 / ${v.checked.nodes} 个节点`];
+	if (v.unlinked.length > 0) {
+		lines.push(`未上图 ${v.unlinked.length} 条（图会失真，门禁据此判断）：`);
+		for (const f of v.unlinked.slice(0, 12)) lines.push(`  - ${f.id} ${f.title}（${f.status}）`);
+		if (v.unlinked.length > 12) lines.push(`  …另有 ${v.unlinked.length - 12} 条`);
+	}
+	if (v.dangling.length > 0) {
+		lines.push(`悬挂引用 ${v.dangling.length} 处（节点指向不存在的成果）：`);
+		for (const d of v.dangling.slice(0, 12)) lines.push(`  - 节点 ${d.nodeId} → ${d.findingRef}：${d.reason}`);
+		if (v.dangling.length > 12) lines.push(`  …另有 ${v.dangling.length - 12} 处`);
+	}
+	lines.push("本条只报告不修改：补节点请在攻击图里手动加（自动补会造噪声），删错引用请人工确认后处理。");
+	return lines.join("\n");
+}
+/** 发现自动上图（P1-2 步 1）：登记成功后，在本会话链路上补一个引用该 finding 的节点，
+ *  让「攻击图」与「redteam 成果」页天然同步（stage-gate 读的就是这张图）。
+ *
+ *  三条自我约束：
+ *  - **幂等**：节点 id 取 finding id，addChainNode 按 (session,mode,target,id) upsert，重复登记不产重复节点。
+ *  - **不为不用图的用户凭空建库**：只在 atlas 库已存在时执行（":memory:" 除外）。
+ *  - **失败绝不阻塞登记**：atlas 未装/库损坏一律静默返回 undefined。
+ *
+ *  kind 固定 other（「资产」）——按 finding.type 猜图例类型会制造错色节点，宁可交给人在图里改。
+ */
+export async function autoLinkFinding(sessionId, mode, finding) {
+	try {
+		const mod = await import("@dsh-external/dsh-attack-atlas/store");
+		const dbPath = process.env.DSH_ATLAS_DB || path.join(DSH_HOME, "attack-atlas", "atlas.db");
+		if (dbPath !== ":memory:" && !fs.existsSync(dbPath)) return undefined;
+		if (!atlasStoreCache || atlasStoreCache.dbPath !== dbPath) {
+			releaseChainRefs();
+			atlasStoreCache = { dbPath, store: mod.openStore(dbPath) };
+		}
+		return mod.addChainNode(atlasStoreCache.store, sessionId, mode, {
+			id: finding.id,
+			label: finding.title || finding.target || finding.id,
+			kind: "other",
+			note: `自动补登自成果 ${finding.id}${finding.type ? `（类型：${finding.type}）` : ""}`,
+			findingRef: finding.id
+		});
+	} catch { return undefined; }
+}
+
+/** 登记 + 自动上图（模型工具与测试共用同一路径）。 */
+export async function registerFindingWithLink(store, sessionId, mode, args) {
+	const finding = registerFinding(store, sessionId, mode, args);
+	const node = await autoLinkFinding(sessionId, mode, finding);
+	return { finding, node };
+}
+
+const MODES = ["pentest", "code-audit", "ctf-solver"];
 const MODE_LABELS = {
 	pentest: "渗透测试模式",
 	"code-audit": "代码审计模式"
 };
-const DB_PATH = path.join(os.homedir(), ".dsh", "redteam-results", "results.db");
+const DB_PATH = path.join(DSH_HOME, "redteam-results", "results.db");
 const MAX_BODY = 5 * 1024 * 1024;
 
 let store; // 进程级单句柄（DatabaseSync 同步 API，SQLite 自带串行化）
@@ -84,43 +211,43 @@ export function verifyMessage(finding) {
 	if (finding.timelineAt) lines.push(`攻击时间：${finding.timelineAt}`);
 	if (finding.entry || finding.identity || finding.permission || finding.resource) lines.push(`攻击路径四要素：入口=${finding.entry || "缺"} ｜ 身份=${finding.identity || "缺"} ｜ 权限=${finding.permission || "缺"} ｜ 资源=${finding.resource || "缺"}`);
 	const statusGuide = finding.mode === "code-audit"
-		? ["请按代审验证纪律复核（双链一致/扫描对账），复核后调 redteam_finding_update 回写 status 与 verifyNote：",
+		? ["请按代审验证纪律复核（双链一致/扫描对账），复核后调 redteam_finding_update 回写 status / verifyNote / secondRating+secondRatingNote（首次转 verified 须成对给齐，缺一被拒）：",
 			"- 静态审计：复核通过只能回写 code-reviewed（代码侧已复核）——代码级推理不得标 verified；",
 			"- verified 仅限动态验证成功：EXP 本地复现真实生效，或在线授权环境实测 L1 通过；",
 			"- 动态审计复现不成立 → false-positive；验证未完成/环境性失败保持 pending。"].join("\n")
 		: finding.mode === "attack-defense"
-		? ["请按攻防评估验证纪律复核（确定性信号按战果类型择一：对照文件字节一致 / victim 侧标记数据被读到 / OOB 回调命中；入口/注入类战果仍用对照三件套：基线/差分/marker 逐字回显），复核后调 redteam_finding_update 回写 status 与 verifyNote：",
+		? ["请按攻防评估验证纪律复核（确定性信号按战果类型择一：对照文件字节一致 / victim 侧标记数据被读到 / OOB 回调命中；入口/注入类战果仍用对照三件套：基线/差分/marker 逐字回显），复核后调 redteam_finding_update 回写 status / verifyNote / secondRating+secondRatingNote（首次转 verified 须成对给齐，缺一被拒）：",
 			"- verified=战果真实有效（上述信号至少其一成立，L 链级如实）；",
 			"- 验证未完成或环境性失败（目标不可达/WAF 拦截/超时）→ 保持 pending，不得因此判 false-positive；",
 			"- false-positive=复核后确认战果不成立或误记；",
 			"- fixed=已交付（仅当此前已 verified）。"].join("\n")
 		: finding.mode === "binary-analysis"
-		? ["请按二进制分析验证纪律复核（静态优先：独立重读关键反汇编段/重跑分析脚本比对一致性；多视角结论一致=更高可信、分歧=对比结论如实写；动态验证仅在必要时建议用户指定干净隔离 VM——本次复核默认静态），复核后调 redteam_finding_update 回写 status 与 verifyNote：",
+		? ["请按二进制分析验证纪律复核（静态优先：独立重读关键反汇编段/重跑分析脚本比对一致性；多视角结论一致=更高可信、分歧=对比结论如实写；动态验证仅在必要时建议用户指定干净隔离 VM——本次复核默认静态），复核后调 redteam_finding_update 回写 status / verifyNote / secondRating+secondRatingNote（首次转 verified 须成对给齐，缺一被拒）：",
 			"- verified=已定论（字节/指令级证据支撑，结论可独立复核复现）；",
 			"- suspect=疑似（静态线索成立但未到定论强度，或还原三验未全过）——合法中间态，不强行升格；",
 			"- pending=分析中（复核未完成或需补充证据）；",
 			"- 复核推翻原结论 → 更新 description/chain 如实记录矛盾证据，不删行。"].join("\n")
 		: finding.mode === "cloud-security"
-		? ["请按云安全攻防验证纪律复核（三重证据：云 API 响应+策略文档+权限清单至少其二；只读 Describe/Get/List 验证优先、限速、账单意识；四要素闭环核对：入口/身份/权限/资源逐项对证据），复核后调 redteam_finding_update 回写 status 与 verifyNote：",
+		? ["请按云安全攻防验证纪律复核（三重证据：云 API 响应+策略文档+权限清单至少其二；只读 Describe/Get/List 验证优先、限速、账单意识；四要素闭环核对：入口/身份/权限/资源逐项对证据），复核后调 redteam_finding_update 回写 status / verifyNote / secondRating+secondRatingNote（首次转 verified 须成对给齐，缺一被拒）：",
 			"- verified=已证实（路径可到达性有真实云证据支撑，四要素无悬空）；",
 			"- 验证未完成或环境性失败（API 不可达/权限不足/限速）→ 保持 pending，不得因此判 false-positive；",
 			"- false-positive=复核后确认路径不成立或误判；",
 			"- fixed=已修复（仅当此前已 verified、修复后复测不成功才可标记）。"].join("\n")
 		: finding.mode === "ctf-solver"
-		? ["请按 CTF 解题验证纪律复核（flag 真实性主线：flag 原文+平台回执/得分变动+解题脚本可重放，至少其二可追溯；web 题可附请求-响应对），复核后调 redteam_finding_update 回写 status 与 verifyNote：",
+		? ["请按 CTF 解题验证纪律复核（flag 真实性主线：flag 原文+平台回执/得分变动+解题脚本可重放，至少其二可追溯；web 题可附请求-响应对），复核后调 redteam_finding_update 回写 status / verifyNote / secondRating+secondRatingNote（首次转 verified 须成对给齐，缺一被拒）：",
 			"- verified=已解（flag 已提交且平台确认得分，证据可追溯）；",
 			"- stuck=卡点（思路断/技术堵点/环境问题）——写明卡在哪一步、已试过什么；",
 			"- pending=未解（尚未出 flag 或验证未完成）；",
 			"- 复核推翻原结论（flag 无效/非本题 flag）→ 如实更新 description 与验证记录，不删行。"].join("\n")
 		: finding.mode === "incident-response"
-		? ["请按应急溯源验证纪律复核（证据链交叉：日志/样本/时间戳/网络记录多源一致，时间线逐节点闭合；单条日志不构成结论），复核后调 redteam_finding_update 回写 status 与 verifyNote：",
+		? ["请按应急溯源验证纪律复核（证据链交叉：日志/样本/时间戳/网络记录多源一致，时间线逐节点闭合；单条日志不构成结论），复核后调 redteam_finding_update 回写 status / verifyNote / secondRating+secondRatingNote（首次转 verified 须成对给齐，缺一被拒）：",
 			"- verified=已证实（多源证据交叉确凿，证据编号可追溯）；",
 			"- code-reviewed=复核通过（证据链形式复核完成，未到已证实强度不升格）；",
 			"- 复核未完成或证据不足（日志缺失/时间窗未定）→ 保持 pending；",
 			"- false-positive=排除（误报或与失陷无关的正常业务现象）；",
 			"- fixed=已处置（处置清单执行完成并复测无再生即标——与渗透「修复后复测不成功」语义不同）；",
 			"- 复核推翻原结论 → 如实更新 description 与验证记录，不删行。"].join("\n")
-		: ["请按本模式验证纪律复核（渗透模式=对照三件套：基线/差分/marker 逐字回显），复核后调 redteam_finding_update 回写 status 与 verifyNote：",
+		: ["请按本模式验证纪律复核（渗透模式=对照三件套：基线/差分/marker 逐字回显），复核后调 redteam_finding_update 回写 status / verifyNote / secondRating+secondRatingNote（首次转 verified 须成对给齐，缺一被拒）：",
 			"- verified=验证完成且真实可再复现；",
 			"- 验证未完成或环境性失败（WAF 拦截/目标不可达/超时）→ 保持 pending，不得因此判 false-positive；",
 			"- false-positive=验证后确认漏洞不存在或误判；",
@@ -258,6 +385,7 @@ export async function dispatch(ctx, st, endpoint, payload) {
 		const agents = resolveAgents(ctx);
 		const agent = agents?.get?.(sessionId);
 		if (!agent || typeof agent.followup !== "function") return { ok: false, unreachable: true, error: "原会话不可达（会话可能已删除或代理未运行）——可人工复核后使用「标记验证结果」兜底" };
+		// 注入安全：本调用在 RPC 端点处理器内（UI 点「复核」触发），不在 Session.append 临界区里。
 		agent.followup({ id: `rtr-${Date.now()}-${finding.seq}`, role: "user", content: [{ type: "text", text: verifyMessage(finding) }], source: { kind: "user" } });
 		VERIFY_SENT.set(vkey, Date.now());
 		if (VERIFY_SENT.size > 500) for (const [k, t] of VERIFY_SENT) if (Date.now() - t >= VERIFY_WINDOW_MS) VERIFY_SENT.delete(k);
@@ -272,8 +400,17 @@ export async function dispatch(ctx, st, endpoint, payload) {
 		// 状态词表按 finding 的模式取（产物型=各自本体词、redteam=台账词表）——与 register/update 同源。
 		const allowed = statusesOf(finding.mode);
 		if (!allowed.includes(p.status)) return { ok: false, error: `status 必须是 ${allowed.join("/")}` };
-		const updated = updateFinding(st, sessionId, finding.mode, id, { status: p.status, verifyNote: String(p.verifyNote ?? "") || undefined });
-		return { ok: true, id: updated.id, status: updated.status, verifyNote: updated.verifyNote };
+		// 人工复核兜底同样受「二次复核成对校验」约束：转 verified 必须同一次调用给齐独立评级 + 依据。
+		// 依据同时写入 secondRatingNote（评级依据）与 verifyNote（既有视图读的复核记录字段）；
+		// 调用方只给 verifyNote 时自动镜像——避免 UI 多一个输入框就与模型工具路径行为不一致。
+		const reviewNote = String(p.secondRatingNote ?? "").trim() || String(p.verifyNote ?? "").trim();
+		const updated = updateFinding(st, sessionId, finding.mode, id, {
+			status: p.status,
+			verifyNote: String(p.verifyNote ?? "") || undefined,
+			secondRating: p.secondRating !== undefined && String(p.secondRating) !== "" ? String(p.secondRating) : undefined,
+			secondRatingNote: reviewNote || undefined,
+		});
+		return { ok: true, id: updated.id, status: updated.status, verifyNote: updated.verifyNote, secondRating: updated.secondRating, verdict: secondReviewVerdict(updated) };
 	}
 	throw new Error(`unknown endpoint ${endpoint}`);
 }
@@ -283,48 +420,53 @@ export async function dispatch(ctx, st, endpoint, payload) {
 //#region host wiring
 
 function apply(ctx) {
-	//#region 模型工具（宿主平面，两模式可见）
+	// 插件卸载时释放库句柄。句柄悬着会锁住 -wal/-shm —— Windows 上表现为这个库文件
+	// 既删不掉也改不了名（备份/迁移/损坏自愈都要 rename 它）。
+	// 对照 campaign-memory：它一直有这条 ctx.effect，其余插件此前都缺，
+	// 插件重载/HMR 会因此留下永不回收的句柄（实测同进程二次 openStore 会 EBUSY）。
+	ctx.effect(() => () => { try { store?.close?.(); } catch { /* 已关或句柄失效 */ } store = undefined; }, "dsh-redteam-results: store handle");
+	//#region 模型工具（宿主平面，三种安全模式可见）
 	ctx.tools.register(defineTool({
 		name: "redteam_finding_register",
-		description: "登记一条 finding 到本会话「redteam 成果」页（会话×模式自动隔离，不可指定他模式）。每条进报告的 finding 必登；status 复核前一律 pending；字段语义全集见 shared/refs/finding-fields.md。子代理登记落入其自身会话库。",
+		description: "登记一条 finding 到本会话「redteam 成果」页。每条进报告的 finding 必登；完整字段语义、模式词表与填写纪律见 shared/refs/finding-fields.md。子代理登记落入其自身会话库。",
 		parameters: {
 			title: { type: "string", required: true, description: "名称（简短）" },
-			severity: { type: "string", enum: SEVERITIES, description: "等级（漏洞型模式必填；免杀/CTF/二进制等产物型模式不展示等级，可省略默认 medium，分类标签走 type）" },
+			severity: { type: "string", enum: SEVERITIES, description: "等级；漏洞型必填，其他模式可省略（默认 medium）" },
 			target: { type: "string", required: true, description: "地址/目标/位置" },
 			summary: { type: "string", required: true, description: "一句话简介" },
-			type: { type: "string", description: "分类标签（按模式本体词表：渗透=漏洞类可含 CWE；代审=RCE 主线（任意上传RCE/未授权RCE/组合RCE/硬编码前端绕过/zip自解压RCE/深度反序列化/溢出RCE/其他）或漏洞类可含 CWE；攻防=战果类型：入口点/数据读取成果/凭据·密码本/哈希集(hash map)/横向立足点/域控成果/Webshell 部署/持久化项/内网资产/检测gap；免杀=交付物语言/形态如 jsp/aspx/powershell/nim/加载器/内存马；CTF=题目模块（web/pwn/reverse/crypto/misc/forensics/ai-ml/osint/malware/mobile/ad-domain/cloud/supply——与图谱自动点亮对齐；难度写入标题或 summary）；应急=链节点类型（入口点/执行/持久化/横向/数据外传/影响/处置清理/其他——与图谱自动点亮对齐；自然事件词如 webshell/勒索病毒/横向移动亦可点亮）；二进制=产物类型（脱壳还原二进制/反编译源码/提取配置/提取密钥(Key)/C2 配置/提取载荷/修复样本/脚本工具/IOC 集/YARA 规则——type 与图谱自动点亮对齐）；云安全=路径类型（凭证泄露利用/元数据服务/对象存储/云数据库/权限提升/容器逃逸/K8s 集群/Serverless/CI-CD/横向/持久化/其他——与图谱自动点亮对齐）；其余=各模式类型词表）" },
+			type: { type: "string", description: "类型标签；按当前模式词表填写，详见 finding-fields.md" },
 			description: { type: "string", description: "描述（影响与成因）" },
-			poc: { type: "string", description: "测试过程+完整EXP：复杂=exp/<id>.py 脚本；简单=可直接复现的请求/命令" },
+			poc: { type: "string", description: "测试过程+完整 EXP；复杂场景写 exp/<id>.py，简单场景写可直接复现的请求/命令" },
 			chain: { type: "string", description: "调用链 entry→sink（审计双链之一，每行一链）" },
-			chainTracer: { type: "string", description: "追踪员独立重追链（审计双链另一侧）" },
-			chainVerdict: { type: "string", description: "双链结论：一致 / 不一致+差异（不一致=疑似）" },
+			chainTracer: { type: "string", description: "追踪员独立重追链（双链另一侧）" },
+			chainVerdict: { type: "string", description: "双链结论：一致 / 不一致+差异" },
 			snippetEntry: { type: "string", description: "entry 关键代码片段" },
 			snippetSink: { type: "string", description: "sink 关键代码片段" },
 			cwe: { type: "string", description: "CWE 编号" },
 			patch: { type: "string", description: "修复 diff 建议（可选）" },
-			sourceOrigin: { type: "string", enum: SOURCE_ORIGINS, description: "来源：manual=纯人工；scan-confirmed=扫描器命中经人工确证后登记（代审/渗透挂扫描器时）；scan-false-positive=扫描命中人工复核判伪" },
+			sourceOrigin: { type: "string", enum: SOURCE_ORIGINS, description: "来源：manual / scan-confirmed / scan-false-positive" },
 			sampleHash: { type: "string", description: "样本 SHA256（二进制）" },
 			family: { type: "string", description: "家族/变种（二进制）" },
 			packer: { type: "string", description: "壳/保护（二进制）" },
 			iocs: { type: "string", description: "IOC 清单（二进制）" },
 			detectionRule: { type: "string", description: "检测规则（二进制）" },
-			baseline: { type: "string", description: "三件套①基线（渗透）" },
-			diffEvidence: { type: "string", description: "三件套②差分（渗透）" },
-			markerEcho: { type: "string", description: "三件套③marker 回显" },
-			impact: { type: "string", description: "影响证明（渗透）" },
+			baseline: { type: "string", description: "对照三件套①基线" },
+			diffEvidence: { type: "string", description: "对照三件套②差分" },
+			markerEcho: { type: "string", description: "对照三件套③marker 回显" },
+			impact: { type: "string", description: "影响证明" },
 			cvss: { type: "string", description: "CVSS 向量+评分" },
 			requestPkt: { type: "string", description: "完整请求包（渗透）" },
 			responsePkt: { type: "string", description: "关键响应（渗透）" },
-			evidence: { type: "string", description: "证据引用（evidence-index 编号/产物路径）" },
+			evidence: { type: "string", description: "证据引用（编号/产物路径）" },
 			fix: { type: "string", description: "修复建议（每条 finding 必填）" },
 			timelineAt: { type: "string", description: "时间节点（应急）" },
 			entry: { type: "string", description: "入口身份（云）" },
 			identity: { type: "string", description: "利用身份（云）" },
 			permission: { type: "string", description: "权限（云）" },
 			resource: { type: "string", description: "目标资源（云）" },
-			status: { type: "string", enum: STATUSES, description: "默认 pending" },
-			evidenceLevel: { type: "string", enum: EVIDENCE_LEVELS, description: "证据等级四档（自高到低）：impact 影响已证（数据实际获取/业务动作达成）＞ confirmed 可复现（渗透/攻防=对照三件套齐；应急=多源证据交叉一致）＞ partial 部分证据（工具输出/间接推断）＞ unknown 未知" },
-			auditMode: { type: "string", enum: ["static", "dynamic"], description: "审计形态（代审必填）：static=静态（无本地复现环境/未复现生效）；dynamic=动态（本地环境真实复现生效）" }
+			status: { type: "string", enum: STATUSES, description: "默认 pending；终态规则见 finding-fields.md" },
+			evidenceLevel: { type: "string", enum: EVIDENCE_LEVELS, description: "impact / confirmed / partial / unknown；语义见 finding-fields.md" },
+			auditMode: { type: "string", enum: ["static", "dynamic"], description: "代码审计必填：static=静态，dynamic=动态复现成功" }
 		},
 		output: {
 			schema: {
@@ -335,23 +477,25 @@ function apply(ctx) {
 					id: { type: "string", required: true }
 				}
 			},
-			render: (_a, v) => [{ type: "text", text: v.ok ? `已登记成果 #${v.seq} ${v.title}（${v.mode}，${v.severity}）——本会话「redteam 成果」页可见` : `登记失败：${v.error}` }]
+			render: (_a, v) => [{ type: "text", text: v.ok ? `已登记成果 #${v.seq} ${v.title}（${v.mode}，${v.severity}）——本会话「redteam 成果」页可见${v.chainNode ? `，并已在攻击图补节点 ${v.chainNode}` : ""}` : `登记失败：${v.error}` }]
 		},
-		execute(args, exec) {
+		async execute(args, exec) {
 			const session = sessionOf(ctx, exec);
-			if (!session) return Promise.resolve({ ok: false, id: "", error: "无法解析当前会话（工具需在会话内调用）" });
-			const finding = registerFinding(theStore(), session.id, session.mode, args);
-			return Promise.resolve({ ok: true, id: finding.id, seq: finding.seq, title: finding.title, mode: finding.mode, severity: finding.severity });
+			if (!session) return { ok: false, id: "", error: "无法解析当前会话（工具需在会话内调用）" };
+			const { finding, node } = await registerFindingWithLink(theStore(), session.id, session.mode, args);
+			return { ok: true, id: finding.id, seq: finding.seq, title: finding.title, mode: finding.mode, severity: finding.severity, chainNode: node ? node.id : "" };
 		}
 	}));
 
 	ctx.tools.register(defineTool({
 		name: "redteam_finding_update",
-		description: "按 id 更新一条 finding：状态流转（verified/false-positive/fixed）、字段修订、verifyNote 记复核结论、retestNote 记复测结论。语义全集见 shared/refs/finding-fields.md。",
+		description: "按 id 更新 finding：状态流转、字段修订、复核/复测注记。首次流转 verified 时必须同时给 secondRating 与至少 40 字的 secondRatingNote；完整语义见 shared/refs/finding-fields.md。",
 		parameters: {
 			id: { type: "string", required: true, description: "finding id（如 pentest-3）" },
-			status: { type: "string", enum: ALL_STATUSES, description: "新状态（按模式子集：漏洞型=pending/code-reviewed/verified/false-positive/fixed，verified=验证成功且可再复现，fixed=仅限此前已验证后修复复测不成功；免杀=pending 在验/verified 过检/detected 被检出；CTF=pending 未解/stuck 卡点/verified 已解；二进制=pending 分析中/suspect 疑似/verified 已定论）" },
+			status: { type: "string", enum: ALL_STATUSES, description: "新状态；按当前模式终态规则，详见 finding-fields.md" },
 			verifyNote: { type: "string", description: "复核注记（结论+依据，简短）" },
+			secondRating: { type: "string", enum: SECOND_RATINGS, description: "复核独立给出的二次评级；首次流转 verified 时必填" },
+			secondRatingNote: { type: "string", description: "二次评级依据（≥40 字）：复核方式与观察现象" },
 			severity: { type: "string", enum: SEVERITIES },
 			title: { type: "string" },
 			type: { type: "string" },
@@ -379,10 +523,10 @@ function apply(ctx) {
 			cvss: { type: "string" },
 			requestPkt: { type: "string" },
 			responsePkt: { type: "string" },
-			retestNote: { type: "string", description: "复测注记（修复后复测结论：已修复/部分/未修复+依据）" },
+			retestNote: { type: "string", description: "复测注记（修复后复测结论+依据）" },
 			evidence: { type: "string" },
 			fix: { type: "string" },
-			timelineAt: { type: "string", description: "攻击时间节点（时间线排序：ISO 或 YYYY-MM-DD HH:MM；未知填 unknown）" },
+			timelineAt: { type: "string", description: "攻击时间节点（ISO 或 YYYY-MM-DD HH:MM）" },
 			entry: { type: "string" },
 			identity: { type: "string" },
 			permission: { type: "string" },
@@ -392,20 +536,48 @@ function apply(ctx) {
 		},
 		output: {
 			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
-			render: (_a, v) => [{ type: "text", text: v.ok ? `成果已更新：${v.id} → ${v.status ?? "字段修订"}${v.verifyNote ? `（${v.verifyNote}）` : ""}` : `更新失败：${v.error}` }]
+			render: (_a, v) => {
+				if (!v.ok) return [{ type: "text", text: `更新失败：${v.error}` }];
+				const review = v.secondRating
+					? ` ｜ 二次评级 ${v.secondRating}${v.verdict === "downgrade" ? `（低于首次 ${v.severity}，报告会标注不一致）` : v.verdict === "upgrade" ? `（高于首次 ${v.severity}）` : "（与首次一致）"}`
+					: "";
+				return [{ type: "text", text: `成果已更新：${v.id} → ${v.status ?? "字段修订"}${v.verifyNote ? `（${v.verifyNote}）` : ""}${review}` }];
+			}
 		},
 		execute(args, exec) {
 			const session = sessionOf(ctx, exec);
 			if (!session) return Promise.resolve({ ok: false, error: "无法解析当前会话" });
 			const finding = updateFinding(theStore(), session.id, session.mode, args.id, args);
 			if (finding === undefined) return Promise.resolve({ ok: false, error: `finding ${args.id} 不存在（本会话 ${session.mode} 页）` });
-			return Promise.resolve({ ok: true, id: finding.id, status: finding.status, verifyNote: finding.verifyNote });
+			return Promise.resolve({ ok: true, id: finding.id, status: finding.status, verifyNote: finding.verifyNote, secondRating: finding.secondRating, severity: finding.severity, verdict: secondReviewVerdict(finding) });
+		}
+	}));
+
+	ctx.tools.register(defineTool({
+		name: "redteam_chain_reconcile",
+		description: "只读对账本会话「redteam 成果」与攻击图链路：列出未入图成果和引用不存在成果的节点。出报告前建议运行。",
+		parameters: {},
+		output: {
+			schema: {
+				type: "object", additionalProperties: true,
+				properties: { ok: { type: "boolean", required: true }, available: { type: "boolean" } }
+			},
+			render: (_a, v) => [{ type: "text", text: renderChainReconcile(v) }]
+		},
+		async execute(_args, exec) {
+			const session = sessionOf(ctx, exec);
+			if (!session) return { ok: false, error: "无法解析当前会话" };
+			const findings = allFindings(theStore(), session.id, session.mode).map((f) => ({ ...f, sessionId: session.id }));
+			const chain = await atlasChainNodes(session.id, session.mode);
+			if (chain === undefined) return { ok: true, available: false, unlinked: [], dangling: [], checked: { findings: findings.length, nodes: 0 } };
+			const report = reconcileChain({ findings, nodes: chain.nodes, sessionId: session.id });
+			return { ok: true, available: true, ...report };
 		}
 	}));
 
 	ctx.tools.register(defineTool({
 		name: "redteam_finding_delete",
-		description: "Remove one finding from this session's「redteam 成果」tab by id（页面删除按钮同源；删除即删数据库行，统计同步更新）。",
+		description: "按 id 删除本会话「redteam 成果」页的一条 finding（直接删除数据库行，统计同步更新）。",
 		parameters: { id: { type: "string", required: true, description: "finding id" } },
 		output: {
 			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
@@ -452,6 +624,8 @@ function apply(ctx) {
 			}
 		}
 	}), "dsh-redteam-results: web route");
+	// 卸载时释放 atlas 互链句柄——否则 Windows 上库文件被占，插件重装/库迁移会失败。
+	ctx.effect(() => () => { try { releaseChainRefs(); } catch { /* 卸载期静默 */ } }, "dsh-redteam-results: chain refs");
 	//#endregion
 }
 

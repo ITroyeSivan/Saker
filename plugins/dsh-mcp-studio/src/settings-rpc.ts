@@ -40,8 +40,21 @@ export interface HostSettingsService {
   ): Promise<void>
 }
 
+/**
+ * dsh 0.1.5-rc.1: `connection.register(ctx, ...)` is the supported entry — it binds the
+ * route to the *calling* plugin's ctx so that `owner.webServer.register(...)` runs against
+ * the consuming plugin, not against the connection service's own ctx. `rpc.handle` (the
+ * 0.1.4 shape) silently fails to register under 0.1.5: the route 404s and the settings page
+ * hangs on "loading". Keep the legacy member on the type only so older hosts still typecheck.
+ */
 export interface HostConnectionHandle {
-  rpc: {
+  register(
+    ctx: unknown,
+    channel: string,
+    handler: (endpoint: string, payload: unknown) => Promise<RpcResult>,
+    options: { authority: 'trusted-host' | 'loopback' },
+  ): unknown
+  rpc?: {
     handle(channel: string, handler: (endpoint: string, payload: unknown) => Promise<RpcResult>, options: { authority: 'trusted-host' | 'loopback' }): unknown
   }
 }
@@ -135,6 +148,17 @@ export interface ServerStatus {
   readonly error?: string
   readonly toolCount: number
   readonly tools: readonly ToolView[]
+  /** Effective tool exposure for this row: `direct` or `proxy`. */
+  readonly exposure?: 'direct' | 'proxy'
+}
+
+/**
+ * Proxied servers contribute no `mcp__<name>__*` tools, so tool visibility can no longer
+ * be the health signal. The catalog is: if we can list it, the server is reachable.
+ */
+export interface ProxyView {
+  readonly catalog: (serverName: string) => ReadonlyArray<ToolView>
+  readonly state: (serverName: string) => { state: 'connecting' | 'ready' | 'error'; error?: string } | undefined
 }
 
 export interface StudioStatus {
@@ -156,12 +180,13 @@ function asToolsViewHandle(view: unknown): { visible: ReadonlyMap<string, { name
   return view as { visible: ReadonlyMap<string, { name: string; description?: unknown }> }
 }
 
-/** Build the status getter: per enabled server, aggregate its `mcp__<name>__*` tools out of the registry view. */
+/** Build the status getter: per enabled server, aggregate its tools out of the registry view (direct) or its catalog (proxy). */
 export function createStatusHandler(
   section: () => StudioSection,
   viewOf: () => unknown,
   tracker: MountTracker,
   executions?: ExecutionRing,
+  proxy?: { view: ProxyView; exposureOf: (server: ServerEntry) => 'direct' | 'proxy' },
 ): () => Promise<RpcResult> {
   return async (): Promise<RpcResult> => {
     const current = section()
@@ -172,7 +197,15 @@ export function createStatusHandler(
     for (const server of current.servers) {
       const prefix = `mcp__${server.name}__`
       const tools: ToolView[] = []
-      if (view !== undefined && server.enabled) {
+      const effective = server.enabled && proxy !== undefined ? proxy.exposureOf(server) : 'direct'
+      let proxiedState: { state: 'connecting' | 'ready' | 'error'; error?: string } | undefined
+      let proxiedError: string | undefined
+      if (server.enabled && effective === 'proxy' && proxy !== undefined) {
+        for (const tool of proxy.view.catalog(server.name)) tools.push({ name: tool.name, description: tool.description })
+        tools.sort((left, right) => left.name.localeCompare(right.name))
+        proxiedState = proxy.view.state(server.name)
+        proxiedError = proxiedState?.error
+      } else if (view !== undefined && server.enabled) {
         for (const [name, definition] of view.visible) {
           if (!name.startsWith(prefix)) continue
           tools.push({ name: name.slice(prefix.length), description: typeof definition.description === 'string' ? definition.description : '' })
@@ -183,7 +216,13 @@ export function createStatusHandler(
       let state: ServerState
       let error: string | undefined
       if (!server.enabled) state = 'disabled'
-      else if (tools.length > 0) state = 'connected'
+      else if (effective === 'proxy') {
+        if (proxiedState === undefined) state = 'unreachable'
+        else if (proxiedState.state === 'ready') state = 'connected'
+        else if (proxiedState.state === 'connecting') state = 'mounting'
+        else state = 'error'
+        error = proxiedError
+      } else if (tools.length > 0) state = 'connected'
       else if (note?.state === 'error') {
         state = 'error'
         error = note.error
@@ -199,6 +238,7 @@ export function createStatusHandler(
         ...(error === undefined ? {} : { error }),
         toolCount: tools.length,
         tools,
+        exposure: effective,
       })
     }
     const enabled = servers.filter(server => server.state !== 'disabled').length
@@ -211,15 +251,25 @@ export function createStatusHandler(
 }
 
 export function registerStudioRpc(
+  ctx: unknown,
   connection: HostConnectionHandle,
   settings: HostSettingsService,
   ns: string,
   status: () => Promise<RpcResult>,
   diagnose?: (id: string) => Promise<RpcResult>,
   clearExecutions?: () => void,
+  debug?: () => unknown,
 ): void {
-  connection.rpc.handle(STUDIO_CHANNEL, async (endpoint, rawPayload): Promise<RpcResult> => {
+  connection.register(ctx, STUDIO_CHANNEL, async (endpoint, rawPayload): Promise<RpcResult> => {
     if (endpoint === 'status') return status()
+    // Read-only diagnostics: expose *why* the badge reads the way it does — whether the tool
+    // view resolved, which `mcp__` tools the global view actually holds, and each server's
+    // mount note. The badge only reflects tool visibility, so without the intermediate values
+    // a "diagnose says reachable / badge says unreachable" split is undebuggable.
+    if (endpoint === 'debug') {
+      if (debug === undefined) return badRequest('debug unavailable')
+      return ok(debug())
+    }
     if (endpoint === 'executions/clear') {
       if (clearExecutions === undefined) return badRequest('execution log unavailable')
       clearExecutions()

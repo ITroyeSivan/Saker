@@ -1,6 +1,6 @@
 window.__ModuleLoader__.load({ id: "@dsh-external/dsh-session-pulse", factory: (require) => {
 var module = { exports: {} }; var exports = module.exports;
-// dsh-session-pulse client — 会话状态面板（两模式：渗透测试 / 代码审计）：
+// dsh-session-pulse client — 会话状态面板（渗透测试 / 代码审计 / CTF 解题）：
 //   1) 对话栏右上角：任务进度 chip（todos 投影）→ 点击展开任务面板（逐条勾选）；
 //      子代理 chip → 右侧「子智能体目录」抽屉（锚定对话列右侧）；
 //   2) 抽屉内点名子代理 → 就地展开其运行内容（服务端转写：任务/文本/工具行），返回不离开主会话；
@@ -12,8 +12,8 @@ var useState = React.useState, useEffect = React.useEffect, useRef = React.useRe
 
 //#region 纯逻辑镜像（与 lib/pulse.js 保持逐行为等价）
 
-var PULSE_MODES = ["pentest", "code-audit"];
-var MODE_LABELS = { pentest: "渗透测试", "code-audit": "代码审计" };
+var PULSE_MODES = ["pentest", "code-audit", "ctf-solver"];
+var MODE_LABELS = { pentest: "渗透测试", "code-audit": "代码审计", "ctf-solver": "CTF 解题" };
 
 function modeOk(agentPreset, serverMode) {
 	if (PULSE_MODES.includes(agentPreset)) return true;
@@ -208,6 +208,7 @@ function PulseRoot(props) {
 	var sessionsStore = props.pulseSessions;
 	var sessionId = props.sessionId != null ? String(props.sessionId) : "";
 	var useSession = props.useSession;
+	var useChat = props.useChat;
 	var useProjection = props.useProjection;
 
 	var tasksOpen = useState(false); var setTasksOpen = tasksOpen[1];
@@ -282,7 +283,7 @@ function PulseRoot(props) {
 		try {
 			var banner = document.querySelector("header,[role=banner]");
 			if (banner) { var b = banner.getBoundingClientRect(); if (b.bottom > safeTop) safeTop = b.bottom; }
-		} catch { }
+		} catch { /* 顶栏查询失败（宿主布局变更/未挂载）：不钳位，仅可能被顶栏遮住 */ }
 		setColRect({ left: r.left, top: r.top, safeTop: safeTop, width: r.width, height: r.height });
 	};
 		measure();
@@ -308,10 +309,12 @@ function PulseRoot(props) {
 	}, []);
 
 	var progress = useProjection ? useProjection("todos") : null;
-	var chat = useSession ? useSession(function (s) { return s.chat; }) : null;
+	// 会话槽位已把聊天快照拆成独立 useChat；不能再从 useSession 上取 s.chat
+	//（当前宿主该字段恒为 undefined，提示词栏会因此静默消失）。
+	var chat = useChat ? useChat(function (s) { return s; }) : null;
 	var running = useSession ? useSession(function (s) { return s.running; }) : false;
 
-	// 门控在全部 hooks 之后（两模式之外不渲染）
+	// 门控在全部 hooks 之后（三种安全模式之外不渲染）
 	if (!modeOk(agentPreset, serverMode[0])) return null;
 
 	function say(text, err) {

@@ -67,7 +67,7 @@ export function scanSkillDeps(presetId, now = Date.now()) {
  * 从 sec-config 命名空间解析「已配置工具名」集合（小写键）。
  *
  * 为什么需要它：技能依赖检查原本只做 `command -v`，但本平台的工具大多**不在 PATH**
- * （用户把工具放在 E:\工作\Web Security\Tools\...，由 sec-config 的 entries/roots
+ * （用户把工具放在任意本地工具目录，由 sec-config 的 entries/roots
  * 管理，运行时经 DSH_TOOL_* 注入 shell）。只查 PATH 会把已配好的工具一律判为缺失，
  * 于是信封里出现「0/13 就绪」与同一份 runtime context 里的 sec-config manifest
  * 「tools: ... dirsearch ... sqlmap」自相矛盾，直接误导模型放弃既有工具。

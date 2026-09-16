@@ -10,7 +10,7 @@
 
 export const CELL_STATES = ["tested-found", "tested-clear", "na", "budget-stop"];
 export const STAGE_STATES = ["active", "done"];
-export const ATLAS_MODES = ["pentest", "code-audit"];
+export const ATLAS_MODES = ["pentest", "code-audit", "ctf-solver"];
 
 const CORE9 = ["hardcoded", "access", "auth", "config", "injection", "deser", "file", "logic", "component"];
 

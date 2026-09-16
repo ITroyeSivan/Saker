@@ -4,6 +4,13 @@ import type { StudioLocaleKey } from './locales.js';
 import type { StudioCardState } from './controller.js';
 export type Translate = (key: StudioLocaleKey, params?: Record<string, unknown>) => string;
 export type Transport = 'stdio' | 'streamable-http';
+/** Mirrors the Host `Exposure` union (src/types.ts). */
+export type Exposure = 'auto' | 'direct' | 'proxy' | 'hybrid';
+/**
+ * Mirror of the Host default (src/types.ts, `DEFAULT_PROXY_THRESHOLD`). Restated rather
+ * than imported: `types.ts` carries the Host schema and must not enter the browser bundle.
+ */
+export declare const DEFAULT_PROXY_THRESHOLD = 10;
 export interface Pair {
     key: string;
     value: string;
@@ -21,6 +28,12 @@ export interface ServerDraft {
     headers: Pair[];
     toolCallTimeoutMs: number;
     failOnStartupError: boolean;
+    /** How this server's tools reach the model. */
+    exposure: Exposure;
+    /** `auto` threshold: at or above this many tools the server is proxied. */
+    proxyThreshold: number;
+    /** `hybrid` only: raw tool names kept as real `mcp__<name>__<tool>` entries. */
+    directTools: string[];
 }
 export interface StudioDraft {
     servers: ServerDraft[];
@@ -47,6 +60,8 @@ export interface ServerLive {
         name: string;
         description: string;
     }>;
+    /** Effective exposure the Host resolved for this row (`direct` or `proxy`). */
+    readonly exposure?: 'direct' | 'proxy';
 }
 export interface ExecutionRecord {
     readonly at: number;

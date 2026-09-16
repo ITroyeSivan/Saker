@@ -1,3 +1,8 @@
+
+// ── 平台数据根（$DSH_HOME）────────────────────────────────────────────
+// 宿主按 $DSH_HOME 装配 profiles/会话/存储；插件一律跟随，避免「一半落 A 一半落 B」。
+// 未设置时等价于 ~/.dsh，故对既有用户是零行为变更。
+const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
 // dsh-sec-enforce — deterministic tool-call enforcement for the security presets.
 //
 // 确定性拦截的落地：所有 Gate 此前是模型自查（stage_gate
@@ -45,7 +50,7 @@ const Config = z.object({
 
 /** 全局熔断（跨模式事实层）：标记文件存在即拦全部工具执行，移除即恢复（无需重启）。
  *  一键停止 = `touch ~/.dsh/sec-enforce/KILL`；恢复 = 删除该标记文件。 */
-const KILL_MARKER = () => process.env.DSH_KILL_SWITCH_FILE ?? path.join(os.homedir(), ".dsh", "sec-enforce", "KILL");
+const KILL_MARKER = () => process.env.DSH_KILL_SWITCH_FILE ?? path.join(DSH_HOME, "sec-enforce", "KILL");
 const KILL_REASON = () => `全局熔断已触发：所有工具执行暂停（一键停止）。恢复方法：移除标记文件 ${KILL_MARKER()}。熔断期间仅回答问题，不执行任何操作。`;
 const killTripped = () => { try { return fs.existsSync(KILL_MARKER()); } catch { return false; } };
 
@@ -174,7 +179,7 @@ export function buildAskListener({ config, appendLog, resolveMode }) {
 		if (workspace) {
 			try {
 				appendLog(workspace, `| ${new Date().toISOString()} | ${mode} | ask | ${exec.name} | ${ask.reason.split("：")[0]} |\n`);
-			} catch {}
+			} catch { /* 审计日志写失败不阻断判定：拦截仍生效，但该条未被记账 */ }
 		}
 		return { kind: "ask", reason: ask.reason };
 	};
@@ -251,7 +256,7 @@ export function buildGuard({ config, readGateLog, readOperationState, appendLog,
 		if (reason !== undefined && workspace) {
 			try {
 				appendLog(workspace, `| ${new Date().toISOString()} | ${mode} | ${exec.name} | ${reason.split("：")[0]} |\n`);
-			} catch {}
+			} catch { /* 同上：日志失败不阻断，代价是审计链缺这一条 */ }
 		}
 		return reason;
 	};
@@ -260,7 +265,7 @@ export function buildGuard({ config, readGateLog, readOperationState, appendLog,
 /** operation-state 的未收口准则 id；无契约/无准则返回 null（不拦截）。 */
 function openCriteriaIds(state) {
 	if (state === null || state === undefined || !Array.isArray(state.criteria) || state.criteria.length === 0) return null;
-	const open = state.criteria.filter((c) => c && c.status !== "met").map((c) => c.id);
+	const open = state.criteria.filter((c) => c && c.status !== "met" && c.status !== "failed").map((c) => c.id);
 	return open;
 }
 

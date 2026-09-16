@@ -183,6 +183,33 @@ const Config = z.object({
     /** 剥掉客户端注入的私有字段（不剥上游会 400 Extra inputs are not permitted） */
     sanitize: z.boolean().default(true),
     userAgent: z.string().default('saker-sec-config/1.0'),
+    /**
+     * 端点档案：可一键切换的多个上游地址。存在的意义是「换供应商不用手改配置」——
+     * 上游（如 OpenCode Go）改了鉴权方式、或将来 dsh 原生就能接，点一下切过去即可，
+     * 不用去「设置 → 模型」手改 baseURL。
+     * kind=default 的档位是**清除覆盖**（unset providers.<id>.baseURL）。
+     *
+     * ⚠️ 但清除覆盖**只对 dsh 内建目录里的 provider 成立**。实测报错原文：
+     *   `provider "custom" model "glm-5.3-flash" needs a baseURL;
+     *    the installed catalog does not describe this route`
+     * 即：自定义 provider + 不在内建目录里的模型 id 时，baseURL 是**必填**，
+     * 所谓「dsh 默认端点」根本不存在。所以真正的「回得去」要靠下面的 baseline
+     * （第一次见到该 provider 的地址时存下来），而不是靠 unset。
+     */
+    endpoints: z.array(z.object({
+      id: z.string().default(''),
+      name: z.string().default(''),
+      baseURL: z.string().default(''),
+      kind: z.string().default('custom'),
+      note: z.string().default(''),
+    })).default([]),
+    /** 初始地址快照：首次读到某 provider 的 baseURL 时记下。用于「恢复初始地址」——
+     *  这是自定义 provider 唯一可靠的「回得去」手段（unset 会被宿主判为非法配置）。 */
+    baseline: z.object({
+      provider: z.string().default(''),
+      baseURL: z.string().default(''),
+      capturedAt: z.string().default(''),
+    }).default({}),
   }),
   /** 工具库 v2：一个或多个「工具根目录」。选择后一键探测并按分类导入；也支持单目录。 */
   roots: z.array(z.string()).default([]),
@@ -199,7 +226,13 @@ const Config = z.object({
   /** 供「工具自动探测」扫描的候选根（用户可选填；留空则用已配工具父目录）。 */
   scanRoots: z.array(z.string()).default([]),
   /** 被用户从工具行「隐藏」的 preset/自定义工具 key：行不展示、不进 manifest、
-   * 不进 shell 环境；路径配置值保留，随时可恢复（移除 ≠ 删除配置）。 */
+   * 不进 shell 环境；路径配置值保留，随时可恢复（移除 ≠ 删除配置）。
+   *
+   *  ⚠ **它不是「从模型工具列表移除」**（2026-09-14 澄清）：只过滤提示词里那一行
+   *  `tools: …` 清单文字与 `DSH_TOOL_*` 环境变量，**工具 schema 该带还是带** ——
+   *  勾了不省请求字节。真正要把声明从每轮请求里去掉，用 `dsh-tool-scope`
+   *  （走宿主 `agent.ctx.tools.restrict({deny})`）。
+   *  另注：当前版本 UI 未提供该字段的勾选入口，默认空数组 —— 属预留能力。 */
   hiddenTools: z.array(z.string()).default([]),
 })
 
@@ -260,7 +293,7 @@ function normSep(value) {
 }
 
 /**
- * 规范化写入的路径类字段，避免 `E:/工作/Web Security\Tools` 这类混用分隔符
+ * 规范化写入的路径类字段，避免 `<盘符>/dir/subdir\leaf` 这类混用分隔符
  * 落盘后让下游插件（webshell-mgr / scanner-tools 等）解析失败：
  *   - roots / scanRoots：数组，逐项归一化并去掉尾部斜杠
  *   - tools / entries[].path：字符串绝对路径，归一化为反斜杠
@@ -798,7 +831,7 @@ function buildServerEntry(name, rawUrl, section) {
     if (scriptPath) {
       // Use forward slashes — mcp-studio's splitArgs treats backslashes as
       // shell escapes and would mangle Windows paths containing spaces and
-      // CJK characters ("E:\工作\..." → "E:工作...").
+      // CJK characters (for example, a Windows path containing CJK segments).
       const scriptPosix = scriptPath.replace(/\\/g, '/')
       return {
         id: SEC_MANAGED_IDS.burp,
@@ -911,6 +944,114 @@ function readProviderBaseUrl(settings, provider) {
     return null
   }
 }
+
+//#region 端点档案（换供应商不用手改配置）
+
+/** 允许的档位类型。`default` 是特殊档：清除 baseURL 覆盖、回到 dsh 内建默认。 */
+const ENDPOINT_KINDS = ['proxy', 'upstream', 'direct', 'default', 'custom']
+
+/** 档案归一化（纯函数，供测试）：补齐 id/name，收敛 kind，去重 id。 */
+export function normalizeEndpoints(list) {
+  const out = []
+  const seen = new Set()
+  const arr = Array.isArray(list) ? list : []
+  arr.forEach((e, i) => {
+    if (!e || typeof e !== 'object') return
+    let id = String(e.id || '').trim() || `ep${i + 1}`
+    while (seen.has(id)) id = `${id}_`
+    seen.add(id)
+    const kind = ENDPOINT_KINDS.includes(String(e.kind)) ? String(e.kind) : 'custom'
+    out.push({
+      id,
+      name: String(e.name || '').trim() || `端点 ${i + 1}`,
+      baseURL: String(e.baseURL || '').trim().replace(/\/+$/, ''),
+      kind,
+      note: String(e.note || '').trim(),
+    })
+  })
+  return out
+}
+
+/**
+ * 决定「切到某档」要往 llm-pi-ai 写什么（纯函数，供测试）。
+ *
+ * 这里是整个功能唯一的易错点：`kind=default` **必须** unset 而不是 set 空串。
+ * 写成空串会让 provider 拿到一个空 baseURL（请求 URL 直接畸形），
+ * 表现为「切回默认之后模型全挂」——比不切还糟。
+ */
+export function planEndpointUse(profile) {
+  if (!profile || typeof profile !== 'object') throw new Error('端点不存在')
+  if (String(profile.kind) === 'default') return { op: 'unset', baseURL: '' }
+  const url = String(profile.baseURL || '').trim().replace(/\/+$/, '')
+  if (!/^https?:\/\/[^\s]+$/i.test(url)) throw new Error('端点地址必须是 http(s):// 开头的 URL：' + (url || '（空）'))
+  return { op: 'set', baseURL: url }
+}
+
+/**
+ * 命中判定用的档位池（纯函数，供测试）。
+ * 用户还没存档案时，界面上显示的就是**建议档**；此时如果只拿「已存档案」去比，
+ * 会出现「明明写着直连上游、命中档位却说不匹配任何档案」的自相矛盾。
+ * 所以池子必须 = 已存档案（非空时）否则建议档；且**两者不混**（存了档案就只看档案，
+ * 否则建议档会和用户自建的同地址档案打架，命中谁全看顺序）。
+ */
+export function endpointPool(profiles, model) {
+  const saved = normalizeEndpoints(profiles)
+  return saved.length ? saved : normalizeEndpoints(suggestEndpoints(model))
+}
+
+/**
+ * 是否该为新 provider 记录初始地址快照（纯函数，供测试）。
+ *
+ * **只在「还没有快照」或「换了 provider」时记**。
+ * 绝不能写成「当前生效值 ≠ 快照就重记」——那样快照会跟着当前值一路跑，
+ * 等价于没有快照（实测踩到过：切到直连上游后，下次读面板把快照也改成了上游地址，
+ * 于是「恢复初始地址」指向的就是刚切过去的地址，永远回不到最初那个）。
+ */
+export function shouldCaptureBaseline(baseline, provider, installed) {
+  if (!installed) return false
+  const b = baseline || {}
+  if (!String(b.baseURL || '')) return true
+  return String(b.provider || '') !== provider
+}
+
+/** 无档案时给 UI 的现成档位（本机代理 / 直连上游 / 初始地址 / 清除覆盖），让功能开箱可用。 */
+export function suggestEndpoints(model) {
+  const m = model || {}
+  const host = String(m.listenHost || '127.0.0.1').trim() || '127.0.0.1'
+  const port = Number(m.listenPort) || 8788
+  const out = []
+  const base = String((m.baseline && m.baseline.baseURL) || '').trim().replace(/\/+$/, '')
+  // 初始地址排在最前：这是自定义 provider 唯一可靠的「回得去」手段
+  if (base) out.push({ id: 'sug-baseline', name: '恢复初始地址', baseURL: base, kind: 'baseline', note: '首次接入时记下的地址' })
+  out.push({ id: 'sug-proxy', name: '本机代理（内置）', baseURL: `http://${host}:${port}/v1`, kind: 'proxy', note: '由本插件在宿主内起代理，补齐上游要求的会话头' })
+  const up = String(m.upstream || '').trim().replace(/\/+$/, '')
+  if (up) out.push({ id: 'sug-upstream', name: '直连上游', baseURL: up, kind: 'upstream', note: '不走代理；上游若要求自定义头会 400' })
+  out.push({ id: 'sug-default', name: '清除 baseURL 覆盖', baseURL: '', kind: 'default', note: '仅对 dsh 内建 provider 有效；自定义 provider 会被判为缺 baseURL' })
+  return out
+}
+
+/** 清除覆盖失败时的说明（纯函数，供测试）。宿主对自定义 provider 会以「needs a baseURL」拒绝，
+ *  原样抛给用户是看不懂的，这里翻译成能照做的指引。 */
+export function unsetFailureHint(provider) {
+  return `无法清除 provider「${provider}」的 baseURL 覆盖：它的模型不在 dsh 内建目录里，baseURL 是必填项`
+    + '（宿主原文：needs a baseURL; the installed catalog does not describe this route）。'
+    + '请改选「恢复初始地址」「本机代理」或「直连上游」；'
+    + '若确实想用 dsh 内建端点，应改用内建 provider（如 deepseek），而不是清空这个 provider 的地址。'
+}
+
+/**
+ * 判断某个已生效的 baseURL 命中哪一档。
+ * `installed === null` 表示 provider 没有 baseURL 覆盖 → 命中 kind=default 档
+ * （约定：`default` 档取「第一个」default 类档案）。
+ */
+export function matchEndpoint(profiles, installed) {
+  const list = normalizeEndpoints(profiles)
+  const isDefault = installed === null || installed === ''
+  if (isDefault) return list.find((p) => p.kind === 'default') || null
+  const norm = String(installed).trim().replace(/\/+$/, '')
+  return list.find((p) => p.kind !== 'default' && p.baseURL === norm) || null
+}
+//#endregion
 
 /** 带超时的 fetch（探测用，失败即返回错误文本而不是抛）。 */
 async function probeUrl(url, timeoutMs) {
@@ -1058,23 +1199,47 @@ async function syncMcpServers(settings, services) {
   }
 }
 
-/** Schedule a sync that survives mcp-studio not-yet-registered at first watch tick. */
-function scheduleSync(settings, services, logger) {
-  let attempts = 0
+/**
+ * Schedule a sync that survives mcp-studio not-yet-registered at the first watch tick.
+ *
+ * mcp-studio owns the `mcp-studio` settings namespace and registers it inside its own
+ * apply(). Activation order across plugins is not guaranteed, so at the first tick the
+ * namespace may legitimately not exist yet and the settings call throws. The previous
+ * version retried a fixed 8 times (fixed 800 ms) and then gave up for the rest of the
+ * process lifetime — a boot-order race became a permanently unsynced MCP bridge, reported
+ * by a single console.error. Wait for the namespace instead: exponential backoff up to a
+ * ceiling, and **no attempt ceiling**. A failed attempt throws before any I/O, so waiting
+ * indefinitely costs nothing. `timing` exists so tests do not have to wait for real delays.
+ */
+export function scheduleSync(settings, services, logger, timing = {}) {
+  const pick = (v, fallback) => (Number.isFinite(v) && v > 0 ? v : fallback)
+  const firstDelayMs = pick(timing.firstDelayMs, 400)
+  const maxDelayMs = pick(timing.maxDelayMs, 30_000)
+  const factor = Number.isFinite(timing.factor) && timing.factor > 1 ? timing.factor : 1.7
+  const summarizeAt = pick(timing.summarizeAt, 8)
+  let delay = firstDelayMs
+  let failures = 0
   const attempt = async () => {
     try {
       const result = await syncMcpServers(settings, services)
       logger?.debug?.('dsh-sec-config: MCP bridge synced servers=%s missingProxy=%s', JSON.stringify((result && result.synced) || []), JSON.stringify((result && result.missingProxy) || []))
       return result
     } catch (err) {
-      attempts += 1
+      failures += 1
       const msg = err && err.message ? err.message : String(err)
-      if (attempts >= 8) console.error('[dsh-sec-config] MCP bridge sync failed after 8 attempts: %s', msg)
-      else setTimeout(attempt, 800)
+      const next = Math.min(Math.round(delay * factor), maxDelayMs)
+      if (failures === summarizeAt) {
+        const every = maxDelayMs >= 1000 ? `${Math.round(maxDelayMs / 1000)}s` : `${maxDelayMs}ms`
+        console.error('[dsh-sec-config] MCP bridge still waiting for the "%s" settings namespace after %d tries (%s); will keep retrying every %s until it appears', MCP_STUDIO_NAMESPACE, failures, msg, every)
+      } else if (failures < summarizeAt) {
+        logger?.debug?.('dsh-sec-config: MCP bridge sync retry %d in %dms: %s', failures, next, msg)
+      }
+      delay = next
+      setTimeout(attempt, next)
     }
     return null
   }
-  setTimeout(attempt, 400)
+  setTimeout(attempt, firstDelayMs)
 }
 
 /**
@@ -1259,6 +1424,134 @@ export function apply(ctx, config = {}) {
             { op: 'set', path: ['providers', provider, 'baseURL'], value: target },
           ])
           return ok({ applied: true, provider, baseURL: target, restartRequired: true })
+        }
+        if (endpoint === 'model/endpoints') {
+          // 端点档案列表 + 当前生效值 + 命中的档位。档案为空时给三档现成建议，
+          // 让用户「装上就能用」，不必先手工建档案。
+          // 命中判定必须把**建议档**也算进池子：用户还没存档案时看到的就是建议档，
+          // 若只拿已存档案去比，会出现「明明写着直连上游、却说不匹配任何档案」的自相矛盾。
+          const model = (current() || {}).model || {}
+          const provider = String(model.provider || 'custom')
+          const installed = readProviderBaseUrl(settings, provider)
+          const profiles = normalizeEndpoints(model.endpoints)
+          // 初始地址快照：只在「还没有快照 / provider 变了 / 地址变了」时写一次，
+          // 幂等且收敛（写完下一轮就读到，不再写）。自定义 provider 的 baseURL 必填，
+          // 没有这个快照，「回得去」就无从谈起。
+          const b0 = model.baseline || {}
+          // 回给 UI 的必须是**写后**的值：用写前的 b0 回，界面会一直显示「尚未记录」，
+          // 用户以为按钮没生效（实测踩到过）。写了就更新返回值。
+          let effBaseline = {
+            provider: String(b0.provider || ''),
+            baseURL: String(b0.baseURL || ''),
+            capturedAt: String(b0.capturedAt || ''),
+          }
+          if (shouldCaptureBaseline(b0, provider, installed)) {
+            effBaseline = { provider, baseURL: installed, capturedAt: new Date().toISOString() }
+            try {
+              await settings.mutate(NAMESPACE, [{ op: 'set', path: ['model', 'baseline'], value: effBaseline }])
+            } catch { /* 快照失败不影响读取（effBaseline 仍回报，便于界面提示）*/ }
+          }
+          const pool = endpointPool(model.endpoints, model)
+          const match = matchEndpoint(pool, installed)
+          return ok({
+            provider,
+            namespaceReady: installed !== null,
+            installedBaseUrl: installed,
+            isDefault: installed === null || installed === '',
+            profiles,
+            suggestions: profiles.length ? [] : pool,
+            activeProfileId: match ? match.id : null,
+            activeProfileName: match ? match.name : '',
+            baseline: effBaseline,
+          })
+        }
+        if (endpoint === 'model/endpoint-baseline') {
+          // 手动把当前生效地址记为初始地址（例如换过供应商后想重定基准）。
+          const model = (current() || {}).model || {}
+          const provider = String(model.provider || 'custom')
+          const installed = readProviderBaseUrl(settings, provider)
+          if (!installed) return failure('当前 provider 没有生效的 baseURL，无从记录')
+          const value = { provider, baseURL: installed, capturedAt: new Date().toISOString() }
+          await settings.mutate(NAMESPACE, [{ op: 'set', path: ['model', 'baseline'], value }])
+          return ok({ baseline: value })
+        }
+        if (endpoint === 'model/endpoint-save') {
+          // 档案增改（有 id 且已存在=更新，否则新增）。只动自己的命名空间。
+          const model = (current() || {}).model || {}
+          const list = normalizeEndpoints(model.endpoints)
+          const raw = (payload || {}).profile || payload || {}
+          const name = String(raw.name || '').trim()
+          if (!name) return failure('档案名必填')
+          const kind = ENDPOINT_KINDS.includes(String(raw.kind)) ? String(raw.kind) : 'custom'
+          const baseURL = String(raw.baseURL || '').trim().replace(/\/+$/, '')
+          if (kind !== 'default' && !/^https?:\/\/[^\s]+$/i.test(baseURL)) {
+            return failure('端点地址必须是 http(s):// 开头的 URL')
+          }
+          const note = String(raw.note || '').trim()
+          const id = String(raw.id || '').trim()
+          const idx = id ? list.findIndex((p) => p.id === id) : -1
+          let saved
+          if (idx >= 0) {
+            list[idx] = Object.assign({}, list[idx], { name, baseURL, kind, note })
+            saved = list[idx]
+          } else {
+            const nid = id || `ep${Date.now().toString(36)}`
+            saved = { id: nid, name, baseURL, kind, note }
+            list.push(saved)
+          }
+          await settings.mutate(NAMESPACE, [{ op: 'set', path: ['model', 'endpoints'], value: list }])
+          return ok({ saved, profiles: list })
+        }
+        if (endpoint === 'model/endpoint-delete') {
+          const model = (current() || {}).model || {}
+          const id = String((payload || {}).id || '').trim()
+          if (!id) return failure('缺少 id')
+          const list = normalizeEndpoints(model.endpoints).filter((p) => p.id !== id)
+          await settings.mutate(NAMESPACE, [{ op: 'set', path: ['model', 'endpoints'], value: list }])
+          return ok({ profiles: list })
+        }
+        if (endpoint === 'model/endpoint-use') {
+          // 真正的一键切换：把该档地址写进 llm-pi-ai 的 providers.<id>.baseURL。
+          // kind=default 走 unset（清除覆盖回 dsh 内建默认），绝不写空串。
+          if (settings.writable === false) return failure('DSH settings are read-only')
+          const model = (current() || {}).model || {}
+          const provider = String(model.provider || 'custom')
+          if (!PROVIDER_ID_RE.test(provider)) return failure('provider 名不合法：' + provider)
+          if (readProviderBaseUrl(settings, provider) === null) {
+            return failure(`llm-pi-ai 里没有 provider「${provider}」—— 先在「设置 → 模型」建好它，这里只负责改它的地址`)
+          }
+          const p = payload || {}
+          const id = String(p.id || '').trim()
+          // 池子与列表一致（档案非空时只看档案，否则看建议档）——避免同地址两条记录
+          // 命中谁全看顺序。UI 上出现过的 id 一定在这里能找到。
+          const all = endpointPool(model.endpoints, model)
+          const profile = id
+            ? all.find((x) => x.id === id)
+            : { kind: p.kind, baseURL: p.baseURL, name: p.name }
+          if (!profile) return failure('端点不存在：' + id)
+          let plan
+          try { plan = planEndpointUse(profile) } catch (err) { return failure(err && err.message ? err.message : String(err)) }
+          const ops = plan.op === 'unset'
+            ? [{ op: 'unset', path: ['providers', provider, 'baseURL'] }]
+            : [{ op: 'set', path: ['providers', provider, 'baseURL'], value: plan.baseURL }]
+          try {
+            await settings.mutate(LLM_PI_AI_NAMESPACE, ops)
+          } catch (err) {
+            // 自定义 provider（模型不在 dsh 内建目录里）清掉 baseURL 会被判为非法配置。
+            // 把宿主的原文翻译成能照做的指引，别让用户对着 "needs a baseURL" 发愣。
+            if (plan.op === 'unset') return failure(unsetFailureHint(provider))
+            return failure((err && err.message) ? err.message : String(err))
+          }
+          const nowInstalled = readProviderBaseUrl(settings, provider)
+          return ok({
+            used: profile.name || profile.baseURL || 'dsh 默认',
+            op: plan.op,
+            provider,
+            baseURL: plan.baseURL,
+            installedBaseUrl: nowInstalled,
+            isDefault: nowInstalled === null || nowInstalled === '',
+            restartRequired: true,
+          })
         }
         if (endpoint === 'model/probe') {
           // 真发一个请求看通不通：GET <baseURL>/models，不消耗 token

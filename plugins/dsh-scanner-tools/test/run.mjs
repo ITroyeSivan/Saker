@@ -3,7 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import url from "node:url";
-import { checkRegistered, hasBin, RATE_DEFAULTS, runScan, governPreview, spillOutput, breakerCheck, breakerRecord, runGoverned } from "../lib/index.js";
+import { spawnSync } from "node:child_process";
+import { checkRegistered, hasBin, RATE_DEFAULTS, runScan, governPreview, spillOutput, breakerCheck, breakerRecord, runGoverned, persistScanRecords } from "../lib/index.js";
 import { TOOL_DEFS, buildArgs, tiersLine } from "../lib/registry.js";
 
 const F = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), "fixture");
@@ -124,5 +125,57 @@ const g5 = runGoverned({ def: TOOL_DEFS.netexec, params: { protocol: "smb", targ
 expect("netexec 防盲打：未登记网段拒绝（spawn 前）", !g5.ok && g5.error.includes("防盲打"));
 const g6 = runGoverned({ def: TOOL_DEFS.impacket, params: { module: "secretsdump", target: "x@10.99.99.99", workspace: F }, workspace: F });
 expect("impacket 防盲打：未登记目标拒绝", !g6.ok && g6.error.includes("防盲打"));
+
+// ── 二进制探测：PATH 直扫、绝对路径、Windows 缺 PATHEXT ──
+{
+	const savedPathext = process.env.PATHEXT;
+	delete process.env.PATHEXT;
+	expect("hasBin：PATH 中的 node 可命中（Windows 无 PATHEXT 也成立）", hasBin("node") === true);
+	expect("hasBin：绝对路径可命中", hasBin(process.execPath) === true);
+	expect("hasBin：不存在的工具返回 false", hasBin("definitely-missing-bin-xyz") === false);
+	if (savedPathext === undefined) delete process.env.PATHEXT;
+	else process.env.PATHEXT = savedPathext;
+}
+
+// ── 证据台账并发：多进程同时收尾不得丢行或复用编号 ──
+{
+	const ws = fs.mkdtempSync(path.join(os.tmpdir(), "scan-ledger-"));
+	fs.mkdirSync(path.join(ws, "artifacts", "scans"), { recursive: true });
+	const child = path.join(F, "..", "_child-ledger.mjs");
+	const runs = Array.from({ length: 8 }, () => spawnSync(process.execPath, ["--import", "../../scripts/test-stub-register.mjs", child, ws], {
+		cwd: path.join(F, "..", ".."), encoding: "utf8",
+	}));
+	expect("并发子进程全部成功", runs.every((r) => r.status === 0), runs.map((r) => r.stderr).join("\n"));
+	const ids = runs.map((r) => r.stdout.trim()).filter(Boolean);
+	expect("并发收尾生成 8 个唯一证据编号", new Set(ids).size === 8 && ids.every((id) => /^E\d+$/.test(id)), ids.join(","));
+	const evidence = fs.readFileSync(path.join(ws, "evidence-index.md"), "utf8");
+	const reconcile = fs.readFileSync(path.join(ws, "scan-reconcile.md"), "utf8");
+	expect("并发收尾证据行一条不丢", (evidence.match(/\| E\d+ \|/g) || []).length === 8);
+	expect("并发收尾对账行一条不丢", (reconcile.match(/\| concurrency \|/g) || []).length === 8);
+	fs.rmSync(ws, { recursive: true, force: true });
+}
+
+// ── 同秒并发不覆盖产物（2026-09-13 夜：秒级时间戳曾在同一秒内互相覆盖）──
+// 背景：落盘名原为 `<tool>-YYYYMMDDHHmmss.txt`（精确到秒）。多路 Solver 并行、
+// 或同一轮里连发两个扫描时，**同一秒的两次调用会撞同名 → 后者静默覆盖前者**，
+// 证据原件丢失且日志无异常。改为「毫秒 + 4 位随机后缀」后不应再撞。
+{
+	const t = fs.mkdtempSync(path.join(os.tmpdir(), "scan-stamp-"));
+	const seen = new Set();
+	for (let i = 0; i < 200; i++) {
+		const rel = spillOutput(fs, t, "nmap", "payload-" + i);
+		if (seen.has(rel)) { expect(`第 ${i} 次落盘撞名`, false, rel); break; }
+		seen.add(rel);
+	}
+	expect("同秒内 200 次落盘全部唯一（不互相覆盖）", seen.size === 200);
+
+	// 内容仍可逐一读回（证明没有被覆盖成最后一份）
+	const dir = path.join(t, "artifacts", "tool-output");
+	const files = fs.readdirSync(dir);
+	expect("200 个产物文件都真实存在", files.length === 200);
+	const contents = new Set(files.map((f) => fs.readFileSync(path.join(dir, f), "utf8")));
+	expect("每个文件内容各不相同（无覆盖残留）", contents.size === 200);
+	fs.rmSync(t, { recursive: true, force: true });
+}
 
 process.exit(failed ? 1 : 0);

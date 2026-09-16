@@ -1,6 +1,6 @@
 window.__ModuleLoader__.load({ id: "@dsh-external/dsh-redteam-results", factory: (require) => {
 var module = { exports: {} }; var exports = module.exports;
-// dsh-redteam-results client — 会话标签页「redteam 成果」：两模式侧栏 + 各模式成果页（板式按模式分型）。
+// dsh-redteam-results client — 会话标签页「redteam 成果」：三安全模式侧栏 + 各模式成果页（板式按模式分型）。
 // 会话隔离：数据按 sessionId 读写；模式隔离由服务端 (session_id, mode) 双键强制；模式页为跨会话聚合视图。
 "use strict";
 var React = require("react");
@@ -38,6 +38,22 @@ var MODES = [
 ];
 var SEVERITY_LABEL = { critical: "严重", high: "高危", medium: "中危", low: "低危" };
 var SEVERITY_ORDER = ["critical", "high", "medium", "low"];
+var SECOND_RATING_LIST = ["critical", "high", "medium", "low", "info"];
+/** 严重度刻度（与服务端 RATING_SCALE 同源）：info 低于 low。 */
+var RATING_SCALE_C = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
+/** 两次评级的比对结论：unrated / match / downgrade / upgrade。 */
+function ratingVerdict(f) {
+	if (!f.secondRating || !(f.secondRating in RATING_SCALE_C) || !(f.severity in RATING_SCALE_C)) return "unrated";
+	var a = RATING_SCALE_C[f.severity], b = RATING_SCALE_C[f.secondRating];
+	return b === a ? "match" : (b < a ? "downgrade" : "upgrade");
+}
+function verdictSuffix(f) {
+	var v = ratingVerdict(f);
+	if (v === "downgrade") return "（低于首次 " + f.severity + "，报告标注不一致）";
+	if (v === "upgrade") return "（高于首次 " + f.severity + "）";
+	if (v === "match") return "（与首次 " + f.severity + " 一致）";
+	return "";
+}
 var STATUS_LABEL = { pending: "待验证", "code-reviewed": "代码侧已复核", verified: "已验证", "false-positive": "误报", fixed: "已修复" };
 var EVIDENCE_LABEL = { impact: "影响已证", confirmed: "已证实", partial: "部分证据", unknown: "未知" };
 var SOURCE_LABEL = { manual: "人工深审", "scan-confirmed": "扫描确认", "scan-false-positive": "扫描误报" };
@@ -1215,7 +1231,8 @@ function Detail(props) {
 			f.poc ? Block({ title: meta.pocTitle }, f.poc) : null,
 			f.evidence ? Block({ title: "任务书 / 材料路径" }, f.evidence) : null,
 			f.fix ? Block({ title: "备注 / 风险提示" }, f.fix) : null,
-			f.verifyNote ? Block({ title: "复核记录" }, f.verifyNote) : null,
+			f.secondRating ? Block({ title: "二次评级（独立复核）" }, f.secondRating + verdictSuffix(f) + (f.secondRatingNote ? "\n依据：" + f.secondRatingNote : "")) : null,
+		f.verifyNote ? Block({ title: "复核记录" }, f.verifyNote) : null,
 			React.createElement("div", { className: "dsh-rtr-rowactions" },
 				React.createElement(Btn, { onClick: function () { props.onVerify(f); } }, "发送到会话复核"),
 				React.createElement(Btn, { onClick: function () { props.onExportOne(f); } }, "导出任务卡（MD）")));
@@ -1384,6 +1401,12 @@ function ModePage(props) {
 	var customTo = useState(""); var setCustomTo = customTo[1];
 	var rt = rangeIso(range[0], customFrom[0], customTo[0]);
 	var metaDraft = useState({ targetLabel: "", version: "", scope: "" }); var setMetaDraft = metaDraft[1];
+	// 人工复核标记向导：原生 confirm/prompt 会阻塞渲染进程（Agent 驱动整页卡死），改为组件内三步状态机
+	var rv = useState(null); var setRv = rv[1];
+	var rvStep = useState(1); var setRvStep = rvStep[1];
+	var rvStatus = useState(""); var setRvStatus = rvStatus[1];
+	var rvNote = useState(""); var setRvNote = rvNote[1];
+	var rvSecond = useState("high"); var setRvSecond = rvSecond[1];
 
 	var fetchList = useCallback(function (opts) {
 		var o = opts || {};
@@ -1453,29 +1476,49 @@ function ModePage(props) {
 	// 行唯一键：跨会话视图里 id 只在会话内唯一（每个会话都有一条 pentest-1）——sessionId+id 复合，防 React 重复 key 与勾选/展开串行。
 	function uidOf(f) { return (f.sessionId || sessionId) + ":" + f.id; }
 	function toggle(f) { var u = uidOf(f); setConfirmDel(""); setExpanded(expanded[0] === u ? "" : u); }
-	function onVerify(f) {
+	// 复核依据的默认正文（与原来的 prompt 初值一致）
+	function reviewNoteFor(status) {
+		if (status === "verified") return "原会话不可达，人工复核通过。复核方式与观察到的现象：";
+		var neg = rv[0] ? rv[0].neg : "";
+		var tail = neg === "false-positive" ? "判伪" : neg === "suspect" ? "定疑似" : neg === "stuck" ? "记卡点" : "重置";
+		return "原会话不可达，人工复核" + tail + "。复核方式与观察到的现象：";
+	}
+	// 提交人工标记：校验仍在客户端拦一道（转 verified 须 ≥40 字依据 + 词表内二次评级），服务端另有一道。
+	function reviewSubmit(status) {
+		var note = String(rvNote[0] || "");
+		if (status === "verified" && note.trim().length < 40) { setNotice("转为「已验证」需至少 40 字复核依据（当前 " + note.trim().length + " 字）"); return; }
+		var second = "";
+		if (status === "verified") {
+			second = String(rvSecond[0] || "").trim();
+			if (SECOND_RATING_LIST.indexOf(second) === -1) { setNotice("二次评级必须是 " + SECOND_RATING_LIST.join("/")); return; }
+		}
+		if (!rv[0]) return;
+		var f = rv[0].f; var statusText = status === "verified" ? rv[0].posText : rv[0].negText;
+		setRv(null); setRvStep(1);
+		api("finding.mark", { sessionId: f.sessionId || sessionId, id: f.id, status: status, verifyNote: note, secondRating: second, secondRatingNote: note })
+			.then(function (m) { setNotice(m && m.ok ? "已人工标记 #" + f.seq + " → " + statusText : "标记失败：" + ((m && m.error) || "未知")); if (props.onRefreshCounts) props.onRefreshCounts(); if (grouped[0]) fetchGroups(); else fetchList({}); })
+			.catch(function (e) { setNotice("标记失败：" + (e && e.message ? e.message : e)); });
+	}
+		function onVerify(f) {
 		api("finding.verify", { sessionId: f.sessionId || sessionId, mode: mode, id: f.id })
 			.then(function (r) {
 				if (r && r.ok) { setNotice("验证请求已发送到原会话（# " + f.seq + " " + f.title + "），复核后状态由会话回写"); return; }
 				if (r && r.unreachable) {
-					// 原会话已删/不可达：人工复核兜底——两段确认三出口（确定=verified / 第二段确定=模式词表内的判伪或重置项 / 取消=不标记）；
-					// 确定项与判伪词均按模式词表取（binary=已定论/疑似、av=过检/被检出、其余=已验证/误报或已失效）。
+					// 原会话已删/不可达：人工复核兜底。原先是 confirm→confirm→prompt→prompt 的串联原生弹窗，
+					// 会阻塞渲染进程（对话框一弹，页面 JS 全部停摆，Agent 驱动整页卡死），故整条向导改为
+					// 组件内三步弹层：步1 选标记项（verified / 模式词表内判伪或重置项 / 取消）——
+					// 单一出口与原来的两段确认等价；步2 填复核依据（转 verified 需 ≥40 字，服务端强制）；
+					// 步3 独立二次评级。确定项与判伪词均按模式词表取（binary=已定论/疑似、av=过检/被检出、其余=已验证/误报或已失效）。
 					var okSet = statusLabelSetFor(meta.archetype, mode) || STATUS_LABEL;
 					var opts = (STATUS_OPTIONS_OF[mode] || Object.keys(STATUS_LABEL)).filter(function (s) { return s !== "pending"; });
 					var neg = opts.indexOf("false-positive") !== -1 ? "false-positive" : (opts.indexOf("suspect") !== -1 ? "suspect" : (opts.indexOf("stuck") !== -1 ? "stuck" : "pending"));
 					var negText = (okSet[neg] || neg) + "（" + neg + "）";
 					var posText = (okSet.verified || "已验证") + "（verified）";
-					var ok = window.confirm(r.error + "\n\n人工复核后直接标记？\n确定=标记「" + posText + "」，取消=选择其他标记");
-					if (!ok && !window.confirm("标记为「" + negText + "」？\n确定=标记，取消=不做标记")) { setNotice("已取消标记——成果保持原状态"); return; }
-					var status = ok ? "verified" : neg;
-					var statusText = ok ? posText : negText;
-					var note = window.prompt("人工复核结论（写入验证记录）：", "原会话不可达，人工复核" + (ok ? "通过" : (neg === "false-positive" ? "判伪" : neg === "suspect" ? "定疑似" : neg === "stuck" ? "记卡点" : "重置"))) || "";
-					api("finding.mark", { sessionId: f.sessionId || sessionId, id: f.id, status: status, verifyNote: note })
-						.then(function (m) { setNotice(m && m.ok ? "已人工标记 #" + f.seq + " → " + statusText : "标记失败：" + ((m && m.error) || "未知")); if (props.onRefreshCounts) props.onRefreshCounts(); if (grouped[0]) fetchGroups(); else fetchList({}); })
-						.catch(function (e) { setNotice("标记失败：" + (e && e.message ? e.message : e)); });
+					setRv({ f: f, error: r.error || "", neg: neg, negText: negText, posText: posText });
+					setRvStep(1); setRvStatus(""); setRvNote(""); setRvSecond("high");
 					return;
 				}
-				setNotice("验证请求失败：" + ((r && r.error) || "未知错误"));
+								setNotice("验证请求失败：" + ((r && r.error) || "未知错误"));
 			})
 			.catch(function (e) { setNotice("验证请求失败：" + (e && e.message ? e.message : e)); });
 	}
@@ -1717,6 +1760,28 @@ function ModePage(props) {
 
 	return React.createElement(React.Fragment, null,
 		(notice[0] && String(notice[0]).trim()) ? React.createElement("div", { className: "dsh-rtr-notice" }, notice[0]) : null,
+		// 人工复核向导弹层（原生对话框会阻塞渲染进程，故全部就地渲染）
+		(rv[0] ? React.createElement("div", { style: { position: "fixed", left: "50%", top: "72px", transform: "translateX(-50%)", zIndex: 3000, width: "min(580px, 92vw)", maxHeight: "70vh", overflowY: "auto", background: "var(--dsw-alias-bg-base,#fff)", border: "1px solid var(--dsw-alias-border-l1,#d9d9de)", borderRadius: 10, boxShadow: "0 12px 40px rgba(0,0,0,.2)", padding: "14px 16px", whiteSpace: "normal" } },
+			React.createElement("div", { style: { fontWeight: 700, marginBottom: 6 } }, "人工复核标记 #" + rv[0].f.seq + " " + rv[0].f.title),
+			React.createElement("div", { style: { fontSize: 12, color: "#b45309", marginBottom: 10, whiteSpace: "pre-wrap", maxHeight: 140, overflowY: "auto" } }, rv[0].error),
+			rvStep[0] === 1 ? React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+				React.createElement(Btn, { primary: true, onClick: function () { setRvStatus("verified"); setRvNote(reviewNoteFor("verified")); setRvStep(2); } }, "标记「" + rv[0].posText + "」"),
+				React.createElement(Btn, { onClick: function () { setRvStatus(rv[0].neg); setRvNote(reviewNoteFor(rv[0].neg)); setRvStep(2); } }, "标记「" + rv[0].negText + "」"),
+				React.createElement(Btn, { onClick: function () { setRv(null); setNotice("已取消标记——成果保持原状态"); } }, "取消")) : null,
+			rvStep[0] === 2 ? React.createElement("div", null,
+				React.createElement("div", { style: { fontSize: 12, marginBottom: 4 } }, rvStatus[0] === "verified" ? "复核结论（写入验证记录，至少 40 字）：" : "复核结论（写入验证记录）："),
+				React.createElement("textarea", { value: rvNote[0], onChange: function (e) { setRvNote(e.target.value); }, rows: 4, style: { width: "100%", fontSize: 12, padding: 8, borderRadius: 6, border: "1px solid var(--dsw-alias-border-l1,#d9d9de)", boxSizing: "border-box", fontFamily: "inherit" } }),
+				React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" } },
+					React.createElement(Btn, { primary: true, onClick: function () { if (rvStatus[0] === "verified") { if (String(rvNote[0]).trim().length < 40) { setNotice("转为「已验证」需至少 40 字复核依据（当前 " + String(rvNote[0]).trim().length + " 字）"); return; } setRvStep(3); } else reviewSubmit(rvStatus[0]); } }, rvStatus[0] === "verified" ? "下一步：独立二次评级" : "提交标记"),
+					React.createElement(Btn, { onClick: function () { setRvStep(1); } }, "上一步"),
+					React.createElement("span", { style: { fontSize: 12, color: "#6e6e73" } }, "当前 " + String(rvNote[0]).trim().length + " 字"))) : null,
+			rvStep[0] === 3 ? React.createElement("div", null,
+				React.createElement("div", { style: { fontSize: 12, marginBottom: 4 } }, "独立二次评级（未能复现所声称的影响就选 info）："),
+				React.createElement("select", { className: "dsh-rtr-select", value: rvSecond[0], onChange: function (e) { setRvSecond(e.target.value); } },
+					SECOND_RATING_LIST.map(function (s) { return React.createElement("option", { key: s, value: s }, s); })),
+				React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 8 } },
+					React.createElement(Btn, { primary: true, onClick: function () { reviewSubmit("verified"); } }, "提交标记"),
+					React.createElement(Btn, { onClick: function () { setRvStep(2); } }, "上一步"))) : null) : null),
 		React.createElement(MetaBar, {
 			meta: sesMeta, labels: meta.metaLabels, editing: editingMeta[0], draft: metaDraft[0],
 			onEdit: function () { setMetaDraft({ targetLabel: sesMeta.targetLabel, version: sesMeta.version, scope: sesMeta.scope }); setEditingMeta(true); },
@@ -1763,7 +1828,7 @@ function ModePage(props) {
 //#region 任务台账大屏（跨会话作战视图：聚合各模式数据）
 
 var SCR_MODE_LABEL = { pentest: "渗透测试", "code-audit": "代码审计" };
-var SCR_MODE_VOCAB = ["pentest", "code-audit"];
+var SCR_MODE_VOCAB = ["pentest", "code-audit", "ctf-solver"];
 
 function BigScreen(props) {
 	var data = useState(null); var setData = data[1];

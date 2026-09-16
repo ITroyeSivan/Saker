@@ -28,7 +28,7 @@ const BLOCKED_RE = /\b(403|forbidden|waf|blocked|rate.?limit|429|too many reques
 export function classifyOutcome(isError, text) {
 	if (isError === true) return "error";
 	return BLOCKED_RE.test(String(text ?? "")) ? "blocked" : "ok";
-}
+	}
 
 /** 从 tool/result 的 message.content 块提取文本并截断。真实管线为嵌套结构
  *  （[{type:"tool-result", content:[{type:"text",...}], isError}]），合成/回放事件
@@ -36,34 +36,34 @@ export function classifyOutcome(isError, text) {
 export function resultTextOf(content, cap = RESULT_CAP) {
 	const texts = [];
 	const walk = (blocks) => {
-		if (typeof blocks === "string") { texts.push(blocks); return; }
-		if (!Array.isArray(blocks)) return;
-		for (const b of blocks) {
-			if (!b || typeof b !== "object") continue;
-			if (b.type === "text" && typeof b.text === "string") texts.push(b.text);
-			else if (Array.isArray(b.content) || typeof b.content === "string") walk(b.content); // tool-result 嵌套
-		}
+	if (typeof blocks === "string") { texts.push(blocks); return; }
+	if (!Array.isArray(blocks)) return;
+	for (const b of blocks) {
+	if (!b || typeof b !== "object") continue;
+	if (b.type === "text" && typeof b.text === "string") texts.push(b.text);
+	else if (Array.isArray(b.content) || typeof b.content === "string") walk(b.content); // tool-result 嵌套
+	}
 	};
 	walk(content);
 	return capText(texts.join("\n"), cap);
-}
+	}
 
 /** 调用参数归一：JSON 字符串美化后截断；非 JSON 原样截断。 */
 export function argsTextOf(raw, cap = ARGS_CAP) {
 	const s = String(raw ?? "");
 	let pretty = s;
 	try {
-		const parsed = JSON.parse(s);
-		if (parsed && typeof parsed === "object") pretty = JSON.stringify(parsed, null, 1);
+	const parsed = JSON.parse(s);
+	if (parsed && typeof parsed === "object") pretty = JSON.stringify(parsed, null, 1);
 	} catch { /* 非 JSON 原样 */ }
 	return capText(pretty, cap);
-}
+	}
 
 function capText(s, cap) {
 	const text = String(s ?? "");
 	if (text.length <= cap) return text;
 	return `${text.slice(0, cap)}\n…[trace-vault 截断：原 ${text.length} 字符，仅存前 ${cap}]`;
-}
+	}
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS traces (
@@ -85,10 +85,41 @@ CREATE INDEX IF NOT EXISTS traces_created ON traces(created_at DESC);
 
 function now() {
 	return new Date().toISOString().replace("T", " ").slice(0, 19);
-}
+	}
 
 export function openStore(dbPath, { retentionDays = 14, maxRows = 50000 } = {}) {
 	if (dbPath !== ":memory:") fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+	// 库文件坏了（不是 SQLite 格式）时的自愈：备份原文件再重建空库。
+	// 为什么不能直接抛："file is not a database" 会让插件的**全部功能**不可用，
+	// 而磁盘满/强杀/网盘回写/误改名都会造成这个问题。数据已经读不出来，
+	// 能做的是**保住原文件**（改名备份，不删）并让插件继续可用；
+	// 备份路径打到 stderr（只此一次），用户能据此找回或求助。
+	function healCorruptDb(dbPath) {
+		if (dbPath === ':memory:') return;
+		let head = '';
+		try { head = fs.readFileSync(dbPath).subarray(0, 16).toString("latin1"); } catch { return; }
+		if (head.startsWith("SQLite format 3")) return;   // 正常的库头
+		let bak = dbPath + ".corrupt-" + Date.now();
+		let n = 1;
+		while (fs.existsSync(bak)) bak = dbPath + ".corrupt-" + Date.now() + "-" + n++;   // 绝不覆盖已有备份
+		try {
+			fs.renameSync(dbPath, bak);
+			// WAL/SHM 属于**已损坏的那个库**：留着会被回放到新库上，导致新库也打不开。
+			// 它们只是未落盘的增量，主库已备份，这里一并清掉（清不掉不影响主流程）。
+			for (const ext of ["-wal", "-shm"]) {
+				try { fs.rmSync(dbPath + ext, { force: true }); } catch { /* 被占用：留给下次启动 */ }
+			}
+			console.error("[存储] 数据库文件不是 SQLite 格式，已备份为 " + bak + " 并重建空库（原数据可从此文件找回）");
+		} catch (e) {
+			// EBUSY 最常见：同进程内旧句柄还没释放（本插件缓存了 store）。
+			// 这时**不硬来**：原样让调用方抛，用户看到的是真实原因（文件被占用），
+			// 比"备份失败但装作没事"更诚实。
+			console.error("[存储] 数据库文件损坏且无法备份：" + (e && e.message ? e.message : e) + "（文件被占用时请关闭其它 dsh 实例后重启）");
+			throw e;
+		}
+	}
+
+healCorruptDb(dbPath);   // **必须在开库前**：坏文件会让 new DatabaseSync 直接抛
 	const db = new DatabaseSync(dbPath);
 	db.exec("PRAGMA journal_mode = WAL");
 	db.exec("PRAGMA busy_timeout = 5000"); // 多进程（两个 dsh 实例）并发写不直接抛 SQLITE_BUSY
@@ -97,26 +128,26 @@ export function openStore(dbPath, { retentionDays = 14, maxRows = 50000 } = {}) 
 	purgeOld(st);
 	capRows(st);
 	return st;
-}
+	}
 
 /** 落一条完整调用（callId 已配对）。id 冲突时覆盖（同 callId 重放以最新为准）。 */
 export function insertTrace(st, { id, sessionId, mode, tool, args = "", result = "", isError = false, outcome, durMs }) {
 	const cls = outcome ?? classifyOutcome(isError, result);
 	st.db
-		.prepare(
-			`INSERT OR REPLACE INTO traces (id, session_id, mode, tool, args, result, is_error, outcome, dur_ms, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-		)
-		.run(String(id), String(sessionId ?? ""), String(mode ?? ""), String(tool ?? ""), String(args ?? ""), String(result ?? ""), isError ? 1 : 0, cls, Number.isFinite(durMs) ? Math.max(0, Math.round(durMs)) : null, now());
+	.prepare(
+	`INSERT OR REPLACE INTO traces (id, session_id, mode, tool, args, result, is_error, outcome, dur_ms, created_at)
+	 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	)
+	.run(String(id), String(sessionId ?? ""), String(mode ?? ""), String(tool ?? ""), String(args ?? ""), String(result ?? ""), isError ? 1 : 0, cls, Number.isFinite(durMs) ? Math.max(0, Math.round(durMs)) : null, now());
 	st.insertCount += 1;
 	if (st.insertCount % 200 === 0) { purgeOld(st); capRows(st); }
 	return { id: String(id), outcome: cls };
-}
+	}
 
 /** LIKE 转义：q 中的 % _ \ 按字面匹配。 */
 export function escapeLike(q) {
 	return String(q ?? "").replace(/[\\%_]/g, (c) => `\\${c}`);
-}
+	}
 
 /** 关键词检索（子串命中 args/result），新行在前。返回轻量行（不含全文）。 */
 export function searchTraces(st, { q = "", tool = "", sessionId = "", mode = "", limit = 10, offset = 0 } = {}) {
@@ -129,16 +160,16 @@ export function searchTraces(st, { q = "", tool = "", sessionId = "", mode = "",
 	if (sessionId) { where.push("session_id = ?"); params.push(String(sessionId)); }
 	if (mode) { where.push("mode = ?"); params.push(String(mode)); }
 	const sql = `SELECT id, session_id, mode, tool, is_error, outcome, dur_ms, created_at, length(args) AS args_len, length(result) AS result_len
-		FROM traces ${where.length ? "WHERE " + where.join(" AND ") : ""}
-		ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`;
+	FROM traces ${where.length ? "WHERE " + where.join(" AND ") : ""}
+	ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`;
 	return st.db.prepare(sql).all(...params, lim, off).map(rowOf);
-}
+	}
 
 /** 按 id 取完整行（含 args/result 全文——落库上限内）。 */
 export function getTrace(st, id) {
 	const row = st.db.prepare("SELECT * FROM traces WHERE id = ?").get(String(id ?? ""));
 	return row ? rowOf(row) : undefined;
-}
+	}
 
 /** 最近调用（新行在前），可按会话/工具过滤。 */
 export function listRecent(st, { sessionId = "", tool = "", limit = 20 } = {}) {
@@ -148,10 +179,10 @@ export function listRecent(st, { sessionId = "", tool = "", limit = 20 } = {}) {
 	if (sessionId) { where.push("session_id = ?"); params.push(String(sessionId)); }
 	if (tool) { where.push("tool = ?"); params.push(String(tool)); }
 	const sql = `SELECT id, session_id, mode, tool, is_error, outcome, dur_ms, created_at, length(args) AS args_len, length(result) AS result_len
-		FROM traces ${where.length ? "WHERE " + where.join(" AND ") : ""}
-		ORDER BY created_at DESC, id DESC LIMIT ?`;
+	FROM traces ${where.length ? "WHERE " + where.join(" AND ") : ""}
+	ORDER BY created_at DESC, id DESC LIMIT ?`;
 	return st.db.prepare(sql).all(...params, lim).map(rowOf);
-}
+	}
 
 /** 出局统计（失败归因的聚合面：blocked 计数是「换路径」信号）。since 传 ISO 时刻
  *  （如 30 分钟前）只统计其后；省略=全部。 */
@@ -165,32 +196,32 @@ export function statsTraces(st, { sessionId = "", since = "" } = {}) {
 	const out = { total: 0, ok: 0, blocked: 0, error: 0 };
 	for (const r of rows) { out.total += r.n; if (OUTCOMES.includes(r.outcome)) out[r.outcome] = r.n; }
 	return out;
-}
+	}
 
 /** 会话画像（评估指标最小集）：调用成败分布/成功率/自救信号/人工介入数。
  *  自救信号（SRR 雏形）= 出现过 blocked 之后再出现 ok（时间序按 created_at+rowid）；
  *  人工介入 = tool='(intervention)' 行（真人用户消息，插件注入已排除）。 */
 export function sessionStats(st, { sessionId = "" } = {}) {
 	const rows = sessionId
-		? st.db.prepare("SELECT tool, outcome FROM traces WHERE session_id = ? ORDER BY created_at, rowid").all(String(sessionId))
-		: st.db.prepare("SELECT tool, outcome FROM traces ORDER BY created_at, rowid").all();
+	? st.db.prepare("SELECT tool, outcome FROM traces WHERE session_id = ? ORDER BY created_at, rowid").all(String(sessionId))
+	: st.db.prepare("SELECT tool, outcome FROM traces ORDER BY created_at, rowid").all();
 	let ok = 0, blocked = 0, error = 0, interventions = 0, sawBlocked = false, selfRecovered = false;
 	const blockedTools = new Map();
 	for (const r of rows) {
-		if (r.tool === "(intervention)") { interventions++; continue; }
-		if (r.outcome === "ok") { ok++; if (sawBlocked) selfRecovered = true; }
-		else if (r.outcome === "blocked") { blocked++; sawBlocked = true; blockedTools.set(r.tool, (blockedTools.get(r.tool) ?? 0) + 1); }
-		else if (r.outcome === "error") { error++; }
+	if (r.tool === "(intervention)") { interventions++; continue; }
+	if (r.outcome === "ok") { ok++; if (sawBlocked) selfRecovered = true; }
+	else if (r.outcome === "blocked") { blocked++; sawBlocked = true; blockedTools.set(r.tool, (blockedTools.get(r.tool) ?? 0) + 1); }
+	else if (r.outcome === "error") { error++; }
 	}
 	const calls = ok + blocked + error;
 	return {
-		sessionId: String(sessionId || ""),
-		calls, ok, blocked, error, interventions,
-		successRate: calls > 0 ? Math.round((ok / calls) * 1000) / 10 : null,
-		selfRecovered,
-		blockedTools: [...blockedTools.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([t, n]) => `${t}×${n}`)
+	sessionId: String(sessionId || ""),
+	calls, ok, blocked, error, interventions,
+	successRate: calls > 0 ? Math.round((ok / calls) * 1000) / 10 : null,
+	selfRecovered,
+	blockedTools: [...blockedTools.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([t, n]) => `${t}×${n}`)
 	};
-}
+	}
 
 /** 按保留天数清理（开库与每 200 次写入触发）。返回删除行数。 */
 export function purgeOld(st) {
@@ -198,7 +229,7 @@ export function purgeOld(st) {
 	if (!Number.isFinite(days) || days <= 0) return 0;
 	const info = st.db.prepare("DELETE FROM traces WHERE created_at < datetime('now', ?)").run(`-${Math.round(days)} days`);
 	return Number(info.changes) || 0;
-}
+	}
 
 /** 总量上限：超限按 created_at 最旧淘汰。返回删除行数。 */
 export function capRows(st) {
@@ -207,24 +238,24 @@ export function capRows(st) {
 	const n = st.db.prepare("SELECT COUNT(*) AS n FROM traces").get().n;
 	if (n <= max) return 0;
 	const info = st.db.prepare(
-		`DELETE FROM traces WHERE id IN (SELECT id FROM traces ORDER BY created_at ASC, id ASC LIMIT ?)`
+	`DELETE FROM traces WHERE id IN (SELECT id FROM traces ORDER BY created_at ASC, id ASC LIMIT ?)`
 	).run(n - max);
 	return Number(info.changes) || 0;
-}
+	}
 
 function rowOf(row) {
 	return {
-		id: row.id,
-		sessionId: row.session_id,
-		mode: row.mode,
-		tool: row.tool,
-		args: row.args ?? "",
-		result: row.result ?? "",
-		isError: row.is_error === 1,
-		outcome: row.outcome,
-		durMs: row.dur_ms,
-		createdAt: row.created_at,
-		argsLen: row.args_len ?? undefined,
-		resultLen: row.result_len ?? undefined
+	id: row.id,
+	sessionId: row.session_id,
+	mode: row.mode,
+	tool: row.tool,
+	args: row.args ?? "",
+	result: row.result ?? "",
+	isError: row.is_error === 1,
+	outcome: row.outcome,
+	durMs: row.dur_ms,
+	createdAt: row.created_at,
+	argsLen: row.args_len ?? undefined,
+	resultLen: row.result_len ?? undefined
 	};
-}
+	}

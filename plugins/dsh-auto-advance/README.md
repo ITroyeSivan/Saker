@@ -1,6 +1,6 @@
 # dsh-auto-advance 自动推进器
 
-安全模式（pentest / code-audit）的事件驱动闭环最后一环：执行体返回 → 台账有未收口方向 → followup 推进提醒。
+安全模式（pentest / code-audit / ctf-solver）的事件驱动闭环最后一环：执行体返回 → 台账有未收口方向 → followup 推进提醒。
 
 ## 做什么
 

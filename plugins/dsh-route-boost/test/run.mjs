@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 // Offline unit tests for dsh-route-boost. No host, no session — pure data and
 // rendering, plus contract checks against dsh-stage-gate's real GATES and the
 // presets' top-level refs README indexes.
-import { MODES, inferPhase, inferRefs, inferEvidence, buildEnvelope, buildEnvelopeDetailed, purposeLine, wrapEnvelope, isEnvelopeText, envelopeRev, appendAccounting, isHumanUser, matchKeyword, escapePromptBraces, hasNegation, buildAuditRow, Config } from "../lib/index.js";
+import { MODES, inferPhase, inferRefs, inferEvidence, buildEnvelope, buildEnvelopeDetailed, purposeLine, wrapEnvelope, isEnvelopeText, envelopeRev, appendAccounting, accountingPath, isHumanUser, matchKeyword, escapePromptBraces, hasNegation, buildAuditRow, appendAuditLine, Config } from "../lib/index.js";
+import { spawn } from "node:child_process";
 import { buildSurfaceGuard, isWrapPhase } from "../lib/index.js";
 import { scanSkillDeps, checkTool } from "../lib/skilltools.mjs";
 import { detectScope } from "../lib/scope.mjs";
@@ -290,6 +291,7 @@ console.log(fail === 0 ? `\nall ${pass} tests passed` : `\n${fail} FAILED, ${pas
 	const op = { goal: "对 demo 靶站完成授权渗透", total: 3, met: 1, openIds: ["g2", "g3"], pending: ["复测注入点"], gates: { P1: { pass: true } } };
 	const withOp = buildEnvelope({ presetId: "pentest", mode, phase, refsHits: [], evidence: "unknown", gates: FALLBACK_GATES, operation: op });
 	ok("envelope includes operation recovery line", withOp.includes("operation 恢复") && withOp.includes("1/3 met") && withOp.includes("g2,g3") && withOp.includes("P1 pass"), withOp.slice(0, 120));
+	ok("envelope marks failed criteria as closed, not open", buildEnvelope({ presetId: "pentest", mode, phase, refsHits: [], evidence: "unknown", gates: FALLBACK_GATES, operation: { ...op, met: 1, failed: 2, openIds: [] } }).includes("failed 2") && !buildEnvelope({ presetId: "pentest", mode, phase, refsHits: [], evidence: "unknown", gates: FALLBACK_GATES, operation: { ...op, met: 1, failed: 2, openIds: [] } }).includes("未收口"));
 	const without = buildEnvelope({ presetId: "pentest", mode, phase, refsHits: [], evidence: "unknown", gates: FALLBACK_GATES });
 	ok("envelope omits recovery line without operation", !without.includes("operation 恢复"));
 	ok("recovery line truncates long goal", buildEnvelope({ presetId: "pentest", mode, phase, refsHits: [], gates: FALLBACK_GATES, operation: { ...op, goal: "x".repeat(200) } }).includes("x".repeat(80)));
@@ -344,6 +346,11 @@ console.log(fail === 0 ? `\nall ${pass} tests passed` : `\n${fail} FAILED, ${pas
 	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rb-acc-"));
 	const tmp = path.join(tmpDir, "injections.jsonl");
 	ok("appendAccounting writes JSONL line", appendAccounting(tmp, { ts: "t", mode: "pentest", rev: 1, dropped: ["refs"] }) === true && JSON.parse(fs.readFileSync(tmp, "utf8").trim()).rev === 1);
+	const savedHome = process.env.DSH_HOME;
+	process.env.DSH_HOME = "E:/isolated-home";
+	ok("accountingPath follows DSH_HOME", accountingPath() === path.join("E:/isolated-home", "route-boost", "injections.jsonl"));
+	if (savedHome === undefined) delete process.env.DSH_HOME;
+	else process.env.DSH_HOME = savedHome;
 }
 
 // 18. 任务口径：用户指定优先（定向只做指定项并点亮），未指定走全流程
@@ -422,6 +429,92 @@ console.log(fail === 0 ? `\nall ${pass} tests passed` : `\n${fail} FAILED, ${pas
 	ok("信封渲染收尾工具面行", env.includes("工具面: 收尾相位") && env.includes("已收起"));
 	const execPhase = m.phases.find((p) => p.id === "verify");
 	ok("执行相位无工具面行", !buildEnvelope({ presetId: "pentest", mode: m, phase: execPhase, refsHits: [], evidence: "unknown", gates: FALLBACK_GATES, surface: "" }).includes("工具面: 收尾相位"));
+}
+
+// 17b. 结束条件外置（P1-2）：信封必须告诉模型「收工前要 operation_conclude 申请」，
+// 且要带上「failed 是有效终态」这一句 —— 少了它模型会为了过闸把做不到的事写成 met。
+{
+	const m = MODES.pentest;
+	const env = buildEnvelope({ presetId: "pentest", mode: m, phase: m.phases[0], refsHits: [], evidence: "unknown", gates: FALLBACK_GATES });
+	ok("信封含收尾申请指引（operation_conclude）", env.includes("operation_conclude"), env.slice(0, 200));
+	ok("信封说明判定权在系统（申请/驳回语义）", env.includes("系统判定") && env.includes("驳回"));
+	ok("信封明确 failed 是有效终态（防为过闸造假）", env.includes("failed 是有效终态"));
+	// 每个模式的信封都该有（不只 pentest）
+	const missing = Object.entries(MODES).filter(([pid, mm]) =>
+		!buildEnvelope({ presetId: pid, mode: mm, phase: mm.phases[0], refsHits: [], evidence: "unknown", gates: FALLBACK_GATES }).includes("operation_conclude")).map(([pid]) => pid);
+	ok("所有模式的信封都带该指引", missing.length === 0, missing.join(","));
+}
+
+// 17. 审计首写的并发安全：`appendAuditLine` 用 `flag:"wx"` 原子建表头。
+// 旧实现是 existsSync 预检 + writeFileSync 整写 —— 预检与写之间有窗口，
+// 并发首写会互相覆盖，且此后都走 append → **审计行静默丢失**。
+//
+// 分两段，因为「真并发」抓不住这个窗口（进程启动天然错开，实测 8×12 子进程下
+// 新旧实现都是全绿 → 那种测试不可证伪）：
+//   17a **确定性竞争注入**：钩住 fs.writeFileSync，在本次写入之前**先让另一个写者完成首写**，
+//       精确复现「判定与写入之间被插入」的时序。新旧实现在此**结果不同** —— 这段才是判据。
+//   17b 真并发压力：N 个子进程同时写，保证没有更粗的错（如完全没写/写坏）。
+{
+	// ---- 17a 确定性竞争注入 ----
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "route-audit-race-"));
+	const file = path.join(dir, "route-audit.md");
+	const other = "| t | pentest | verify | OTHER |";
+	const realWriteFileSync = fs.writeFileSync;
+	let injected = false;
+	// 钩子：本次调用视为「写者 A」；在 A 落笔之前，先让「写者 B」把文件建好。
+	//   · 新实现：A 的写入带 flag:"wx" → 因文件已存在而失败 → 走 append → A/B 都在 ✓
+	//   · 旧实现：A 的写入是裸整写 → 直接覆盖 B → **B 的行消失** ✗
+	fs.writeFileSync = function (p, ...rest) {
+		if (!injected && p === file) {
+			injected = true;
+			realWriteFileSync(file, "# 路由决策审计（route-boost 自动留痕）\n\n| 时间 | 模式 | 相位 | 触发输入 |\n|---|---|---|---|\n" + other + "\n");
+		}
+		return realWriteFileSync.call(fs, p, ...rest);
+	};
+	try {
+		appendAuditLine(file, "| t | pentest | verify | MINE |");
+	} finally {
+		fs.writeFileSync = realWriteFileSync;
+	}
+	const raced = fs.readFileSync(file, "utf8");
+	ok("竞争注入：注入确实发生（否则本段无意义）", injected);
+	ok("竞争注入：先到的写者不被覆盖（B 的行还在）", raced.includes("OTHER"));
+	ok("竞争注入：后到的写者也写入（A 的行也在）", raced.includes("MINE"));
+	ok("竞争注入：表头仍只有 1 份", (raced.match(/^# 路由决策审计/gm) || []).length === 1);
+	fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// ---- 17b 真并发压力（粗检：有没有压根没写/写坏）----
+{
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "route-audit-"));
+	const file = path.join(dir, "route-audit.md");
+	const N = 8, PER = 12;
+	const kidSrc = path.join(dir, "child.mjs");
+	// lib/index.js 依赖 @deepseek-ai/schemastery（离线环境下不存在）→ 子进程也必须套桩，
+	// 否则子进程 import 直接 ERR_MODULE_NOT_FOUND，测试会误报成「丢行」。
+	const stubUrl = url.pathToFileURL(path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), "../../../scripts/test-stub-register.mjs")).href;
+	const libUrl = url.pathToFileURL(path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), "../lib/index.js")).href;
+	fs.writeFileSync(kidSrc, `
+import { appendAuditLine } from ${JSON.stringify(libUrl)};
+const [file, tag, n] = process.argv.slice(2);
+for (let i = 0; i < Number(n); i++) appendAuditLine(file, "| t | pentest | verify | " + tag + "-" + i + " |");
+`);
+	const kids = [];
+	for (let k = 0; k < N; k++) {
+		kids.push(new Promise((res) => {
+			const p = spawn(process.execPath, ["--import", stubUrl, kidSrc, file, "w" + k, String(PER)], { stdio: "ignore" });
+			p.on("exit", res);
+		}));
+	}
+	await Promise.all(kids);
+	const text = fs.readFileSync(file, "utf8");
+	const heads = (text.match(/^# 路由决策审计/gm) || []).length;
+	const rows = (text.match(/^\| t \| pentest \| verify \|/gm) || []).length;
+	ok("审计并发首写：表头恰好 1 份", heads === 1);
+	ok(`审计并发首写：${N * PER} 行一行不少`, rows === N * PER, `实得 ${rows}`);
+	// 表头必须在任何数据行之前（否则 markdown 表会被断成两段）
+	ok("审计并发首写：表头在所有数据行之前", text.indexOf("# 路由决策审计") < text.indexOf("| t | pentest | verify |"));
+	fs.rmSync(dir, { recursive: true, force: true });
 }
 
 process.exit(fail ? 1 : 0);

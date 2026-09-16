@@ -1,4 +1,9 @@
-// dsh-campaign-memory — 战役记忆宿主插件（渗透测试 / 代码审计 两模式）。
+
+// ── 平台数据根（$DSH_HOME）────────────────────────────────────────────
+// 宿主按 $DSH_HOME 装配 profiles/会话/存储；插件一律跟随，避免「一半落 A 一半落 B」。
+// 未设置时等价于 ~/.dsh，故对既有用户是零行为变更。
+const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
+// dsh-campaign-memory — 战役记忆宿主插件（渗透 / 代码审计 / CTF 三种安全模式）。
 //
 // 三件事：
 //   1) 沉淀：模型侧 campaign_memory_write 随战随记（存储原文不脱敏——内网地址/指纹细节是打法价值所在，凭据同样原样入库）；
@@ -8,23 +13,47 @@
 //   3) 治理：detect 默认 30 天过期并自动清理；fingerprint 默认 180 天——到期退出自动召回、
 //      检索仍可命中带过期标记、同题重写即刷新；同模式同工作区同题写入=刷新不重复；
 //      Web 标签页「战役记忆」浏览/检索/删除，loopback RPC 同源栅栏。
+//   4) 收尾：顶层会话销毁时读工作区意图台账（operation-state.json），把受阻/放弃/已完成/已判定
+//      四类可迁移项抽成候选清单落盘 memory-candidates.md——**只出候选、不自动写库**（记忆带 TTL
+//      与冷淘汰，入库必须过人）。
 //
 // 记忆是模式作用域的跨会话资产：渗透的目标指纹打法与入口战法、代审的框架 sink 与审计结论。
 
 import path from "node:path";
+import fs from "node:fs";
 import crypto from "node:crypto";
 import os from "node:os";
 import { defineTool } from "@deepseek-ai/dsh-tools";
-import { openStore, writeMemory, searchMemories, topForInjection, listMemories, getMemory, removeMemory, statsMemories, purgeExpired, kindLabel, MEMORY_KINDS } from "./store.js";
+import { openStore, writeMemory, searchMemories, topForInjection, listMemories, getMemory, removeMemory, statsMemories, purgeExpired, kindLabel, MEMORY_KINDS, setIdeaStatus, listIdeas, IDEA_STATUSES } from "./store.js";
+import { readLedger, distillCandidates, renderCandidates, OUT_FILE } from "./distill.js";
 
 const name = "dsh-campaign-memory";
 const inject = ["tools", "webServer", "webRuntime", "agentPresets", "systemPrompt"];
 
-export const MODE_IDS = ["pentest", "code-audit"];
+export const MODE_IDS = ["pentest", "code-audit", "ctf-solver"];
 const MODE_LABELS = {
-	pentest: "渗透测试", "code-audit": "代码审计"
+	pentest: "渗透测试", "code-audit": "代码审计", "ctf-solver": "CTF 解题"
 };
-const DB_PATH = path.join(os.homedir(), ".dsh", "campaign-memory", "memory.db");
+/** 记忆库路径：默认 `~/.dsh/campaign-memory/memory.db`；`DSH_CAMPAIGN_MEMORY_DB` 可覆盖
+ *  （与兄弟插件 `DSH_ATLAS_DB` 同约定——便于把库挪到别处，也让离线测试不必碰真实记忆库）。 */
+function dbPath() {
+	const override = process.env.DSH_CAMPAIGN_MEMORY_DB;
+	return typeof override === "string" && override !== "" ? override : path.join(DSH_HOME, "campaign-memory", "memory.db");
+}
+
+let store;
+function theStore() {
+	if (store === undefined) store = openStore(dbPath());
+	return store;
+}
+
+/** 释放模块级库句柄（插件卸载 / 测试收尾）。句柄不释放会在 Windows 上锁住 `-wal`/`-shm`，
+ *  之后删除工作目录报 EBUSY——排查时会误以为是权限或杀软。 */
+export function closeStore() {
+	if (store === undefined) return;
+	try { store.close(); } catch { /* 已关闭或已随进程回收 */ }
+	store = undefined;
+}
 const ROUTE_PATH = "/dsh-campaign-memory";
 /** 进程级 CSRF token：GET <route>/csrf 由同源页取走（跨源响应不可读），POST 须回带 x-dsh-csrf 头。 */
 const CSRF_TOKEN = crypto.randomBytes(24).toString("hex");
@@ -32,12 +61,6 @@ export function checkCsrf(req, token) {
 	return String(req?.headers?.["x-dsh-csrf"] ?? "") === String(token ?? "");
 }
 const MAX_BODY = 1024 * 1024;
-
-let store;
-function theStore() {
-	if (store === undefined) store = openStore(DB_PATH);
-	return store;
-}
 
 //#region 召回注入块（纯函数，供测试）
 
@@ -95,6 +118,36 @@ function sessionOf(ctx, exec) {
 	if (typeof preset !== "string") preset = agent?.session?.header?.agentPreset;
 	return { id: String(id), mode: MODE_IDS.includes(preset) ? preset : undefined };
 }
+
+//#region 会话收尾蒸馏（P1-3：只出候选、不自动写库）
+
+/** 顶层会话判定：子代理在战役中途反复创建与销毁，收尾蒸馏只认顶层——否则同一工作区会被反复覆写、
+ *  半成品台账也会被当成收尾结果。深度取自会话头（权威且单调），运行期缺省即深度 0。 */
+export function isRootSession(agent) {
+	const header = agent?.session?.header;
+	if (header?.origin === "subagent") return false;
+	const depth = header?.delegationDepth ?? 0;
+	return !(Number.isSafeInteger(depth) && depth > 0);
+}
+
+/** 抽候选并落盘到工作区（返回 {written,file,count,error?}）。**绝不抛错**——收尾钩子不许打断销毁流程。
+ *  只写文件、不碰记忆库：记忆带 TTL 与 400 条冷淘汰，一条错指纹会污染后续每一局，入库必须过人。 */
+export function distillWorkspace({ cwd, mode, existing = [], now = new Date() }) {
+	try {
+		const ledger = readLedger(cwd);
+		const candidates = distillCandidates({ ledger, existing });
+		if (candidates.length === 0) return { written: false, file: "", count: 0 };
+		const text = renderCandidates({ cwd, mode, candidates, now });
+		if (text === "") return { written: false, file: "", count: 0 };
+		const file = path.join(cwd, OUT_FILE);
+		fs.writeFileSync(file, text, "utf8");
+		return { written: true, file, count: candidates.length };
+	} catch (e) {
+		return { written: false, file: "", count: 0, error: e?.message ?? String(e) };
+	}
+}
+
+//#endregion
 
 //#region HTTP 通道（自注册路由 + 同源信任栅栏）
 
@@ -173,6 +226,14 @@ export async function dispatch(ctx, st, endpoint, payload) {
 	if (endpoint === "memory.purge") {
 		return { ok: true, ...purgeExpired(st) };
 	}
+	if (endpoint === "idea.list") {
+		const mode = String(p.mode ?? "");
+		if (!mode) throw new Error("mode required");
+		return { ideas: listIdeas(st, { mode, status: p.status ? String(p.status) : "", includeSettled: !!p.includeSettled, limit: p.limit }) };
+	}
+	if (endpoint === "idea.set") {
+		return { ok: true, idea: setIdeaStatus(st, String(p.id ?? ""), String(p.status ?? ""), String(p.note ?? "")) };
+	}
 	throw new Error(`unknown endpoint ${endpoint}`);
 }
 
@@ -197,10 +258,29 @@ function apply(ctx) {
 	});
 	//#endregion
 
-	//#region 模型工具（宿主平面；两模式会话内可用）
+	//#region 收尾蒸馏钩子（顶层会话销毁时把台账里可迁移的部分抽成候选清单，落盘不落库）
+	ctx.on("agent/disposed", (payload) => {
+		try {
+			const agent = payload?.agent ?? payload; // 宿主载荷是 {agent}；同时容错旧形（直接给 agent）
+			if (!isRootSession(agent)) return;
+			const cwd = agent?.session?.header?.cwd;
+			if (typeof cwd !== "string" || cwd === "") return;
+			const session = sessionOf(ctx, { agent });
+			if (!session?.mode) return;
+			let existing = [];
+			try { existing = listMemories(theStore(), { mode: session.mode, limit: 200 }); } catch { existing = []; }
+			const r = distillWorkspace({ cwd, mode: session.mode, existing });
+			if (r.written) ctx.logger?.info?.(`dsh-campaign-memory: 收尾蒸馏落盘 ${r.count} 条记忆候选 → ${r.file}（未入库，需 campaign_memory_write 确认后写入）`);
+		} catch { /* 收尾蒸馏失败不得影响销毁流程 */ }
+	});
+	// 插件卸载即释放库句柄：句柄悬着会锁住 -wal/-shm（Windows 上表现为删不掉目录）。
+	ctx.effect(() => () => { closeStore(); }, "dsh-campaign-memory: store handle");
+	//#endregion
+
+	//#region 模型工具（宿主平面；三种安全模式会话内可用）
 	ctx.tools.register(defineTool({
 		name: "campaign_memory_write",
-		description: "把本次战役中验证有效的打法/目标指纹/工具可用性/教训/检测指纹沉淀为战役记忆（跨会话长期复用）。存储原文不做脱敏——内网地址/指纹细节/凭据均原样入库（记忆库是本地库）；已有独立凭据库（hunter key 库/webshell 连接库等）时也可只写指位（存哪、叫什么）。同模式同工作区同题写入=刷新既有记忆（正文与时效更新、热度保留，不产生重复——复用标题即可更新）。kind：tactic 战术打法 / fingerprint 目标指纹（默认 180 天时效，到期退出自动召回、检索仍可命中带过期标记，同题重写即刷新；代审的框架 sink 特征归此档）/ tooling 工具可用性（代审的 semgrep 规则集调优结论归此档）/ lesson 教训 / detect 检测指纹（默认 30 天过期并清理，可 expires_days 覆盖）。本模式作战记忆以本工具为准沉淀；用户偏好/环境事实等通用记忆（如有其他记忆工具）不在此沉淀。有效即可记，不必等收口。同模式同工作区上限 400 条，超限自动冷淘汰（热度×半衰最旧让位）；同目录多目标（多云厂商/多样本/多题）时 target_kind 填目标标识（厂商名/样本哈希前 8 位/平台名）——召回注入按目标标注，适用性按目标自判。CTF：题解套路与非预期解→tactic、工具配方（完整命令行/参数）→tooling、卡点教训→lesson；开赛/换题型先检索；同名题跨平台/赛事以 target_kind=平台名区分（同题同平台才刷新，不互覆）。应急溯源：排查配方与处置手法→tactic、家族/威胁指纹→fingerprint、取证工具可用性→tooling、检测规则时效情报→detect、复盘教训→lesson；接案/换案件先检索；多案件同目录以 target_kind=案件号区分。",
+		description: "沉淀跨会话记忆。kind=tactic / fingerprint / tooling / lesson / detect；detect 默认 30 天、fingerprint 180 天，其余永久。同模式同工作区同题写入即刷新，每工作区上限 400 条。存储原文不做脱敏；有效即可记。",
 		parameters: {
 			title: { type: "string", required: true, description: "一句话标题（如：XX 框架后台默认凭据直连）；同题同 target_kind 即刷新而非新增（跨平台同名题不互覆）" },
 			content: { type: "string", required: true, description: "打法/事实正文（怎么做的、命中条件、关键参数；原样入库不做脱敏——凭据/密钥也原样存储）" },
@@ -228,7 +308,7 @@ function apply(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "campaign_memory_search",
-		description: "检索本模式战役记忆（开战或换目标类型时先查——历史打法可能直接给出可复用路径；本模式作战记忆以本工具为准，通用记忆检索不作前置）。跨工作区检索：全部工作区的同模式记忆都可命中，每行带 workspace 来源标注——跨客户/项目经验复用是显式动作。按热度排序（使用频次×30 天时间衰减，久未读取自然让位）；命中不记账，campaign_memory_get 读全文即记账并复活热度；已过期目标指纹仍可命中（带过期标记）。行内为正文预览，全文经 campaign_memory_get 按需读取。返回为空说明该方向没有历史沉淀。",
+		description: "检索本模式跨工作区记忆，按热度排序，返回正文预览；全文用 campaign_memory_get。开战或换目标类型时先查。",
 		parameters: {
 			query: { type: "string", required: true, description: "关键词（标题/正文/标签匹配，如：XX 云台 弱口令）" },
 			kind: { type: "string", enum: MEMORY_KINDS, description: "限定类别（可选）" },
@@ -252,7 +332,7 @@ function apply(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "campaign_memory_get",
-		description: "读取一条战役记忆全文（检索/list 返回的是正文预览，需要完整打法细节时按 id 取全文）。读取即计入热度（usage/last_used 刷新）——驱动自动召回排序，被采用的历史打法读完即复活。",
+		description: "按 id 读取记忆全文；读取计入热度并驱动召回排序。",
 		parameters: {
 			id: { type: "string", required: true, description: "记忆 id（cm- 开头）" }
 		},
@@ -274,7 +354,7 @@ function apply(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "campaign_memory_list",
-		description: "列出本模式当前有效战役记忆（收口复盘与记忆治理用；按热度排序取前列——默认 50 条、上限 200，需要更多用检索收窄）。",
+		description: "列出本模式有效记忆，按热度排序；收口复盘与治理用。",
 		parameters: { kind: { type: "string", enum: MEMORY_KINDS, description: "限定类别（可选）" }, limit: { type: "number", description: "返回条数（默认 50，上限 200）" } },
 		output: {
 			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
@@ -293,7 +373,7 @@ function apply(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "campaign_memory_remove",
-		description: "删除一条战役记忆（过时/失效/错误的记忆及时清除，保持记忆库可信）。",
+		description: "按 id 删除一条记忆。",
 		parameters: { id: { type: "string", required: true, description: "记忆 id（cm- 开头）" } },
 		output: {
 			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
@@ -304,6 +384,94 @@ function apply(ctx) {
 			if (!session?.mode) return Promise.resolve({ ok: false, error: "仅安全模式会话内可用" });
 			try {
 				return Promise.resolve({ ok: true, ...removeMemory(theStore(), args.id) });
+			} catch (e) {
+				return Promise.resolve({ ok: false, error: e?.message ?? String(e) });
+			}
+		}
+	}));
+	//#endregion
+
+	//#region 方向层工具（Idea：还没做但值得做的假设——与"已发生的事实"分开维护）
+	ctx.tools.register(defineTool({
+		name: "campaign_idea_open",
+		description: "登记待验证方向（事实用 campaign_memory_write；本工具记下一步该往哪打）。同模式同工作区同题写入即刷新，收口走 campaign_idea_settle。",
+		parameters: {
+			title: { type: "string", required: true, description: "方向一句话（如：api.example.com 的 /admin 未授权访问未验证）" },
+			content: { type: "string", required: true, description: "方向正文：假设是什么、打算怎么验、预期结果" },
+			basis: { type: "string", description: "判断依据（哪个事实/证据让你觉得值得试——这是方向的信噪比来源）" },
+			asset: { type: "string", description: "关联资产（域名/IP/URL，便于和 attack-atlas 的攻击面覆盖联动对账）" },
+			target_kind: { type: "string", description: "适用目标形态（web/api/域环境/平台名等）" },
+			status: { type: "string", enum: IDEA_STATUSES, description: "初始状态（默认 open 待验证）" }
+		},
+		output: {
+			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
+			render: (_a, v) => [{ type: "text", text: v.ok ? `方向已${v.refreshed ? "刷新" : "登记"}：${v.id}（${v.idea_status}）` : `登记失败：${v.error}` }]
+		},
+		execute(args, exec) {
+			const session = sessionOf(ctx, exec);
+			if (!session?.mode) return Promise.resolve({ ok: false, error: "仅安全模式会话内可用" });
+			try {
+				const ws = workspaceOf(exec?.agent);
+				const m = writeMemory(theStore(), {
+					mode: session.mode, kind: "idea", title: args.title,
+					content: [args.content, args.basis ? "依据：" + args.basis : ""].filter(Boolean).join("\n"),
+					target_kind: args.target_kind, source_session: session.id,
+					workspace: ws.name, workspace_key: ws.key,
+					idea_status: args.status, idea_basis: args.basis, idea_asset: args.asset,
+				});
+				return Promise.resolve({ ok: true, id: m.id, idea_status: m.refreshed ? "(保留原状态)" : (args.status || "open"), refreshed: m.refreshed, evicted: m.evicted });
+			} catch (e) {
+				return Promise.resolve({ ok: false, error: e?.message ?? String(e) });
+			}
+		}
+	}));
+
+	ctx.tools.register(defineTool({
+		name: "campaign_idea_settle",
+		description: "收口方向：confirmed=已验证成立，ruled-out=验证后排除。note 记录依据并追加到正文；没试过不要排除。",
+		parameters: {
+			id: { type: "string", required: true, description: "方向 id（cm- 开头，来自 campaign_idea_open/list）" },
+			status: { type: "string", required: true, enum: ["confirmed", "ruled-out"], description: "confirmed=已验证成立 / ruled-out=已排除" },
+			note: { type: "string", description: "结论依据（为什么成立/为什么排除——会写进正文留痕）" }
+		},
+		output: {
+			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
+			render: (_a, v) => [{ type: "text", text: v.ok ? `方向已收口：${v.id} → ${v.idea_status}` : `收口失败：${v.error}` }]
+		},
+		execute(args, exec) {
+			const session = sessionOf(ctx, exec);
+			if (!session?.mode) return Promise.resolve({ ok: false, error: "仅安全模式会话内可用" });
+			try {
+				const r = setIdeaStatus(theStore(), args.id, args.status, args.note);
+				return Promise.resolve({ ok: true, id: r.id, idea_status: r.ideaStatus });
+			} catch (e) {
+				return Promise.resolve({ ok: false, error: e?.message ?? String(e) });
+			}
+		}
+	}));
+
+	ctx.tools.register(defineTool({
+		name: "campaign_idea_list",
+		description: "列出未收口方向；开新局、换目标或卡住时先看。includeSettled=true 可复盘已收口项。",
+		parameters: {
+			status: { type: "string", enum: IDEA_STATUSES, description: "只看某个状态（省略=只看 open 未收口）" },
+			includeSettled: { type: "boolean", description: "包含已收口的方向（复盘用）" },
+			limit: { type: "number", description: "返回条数（默认 30，上限 200）" }
+		},
+		output: {
+			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
+			render: (_a, v) => {
+				if (!v.ok) return [{ type: "text", text: `查询失败：${v.error}` }];
+				if (!v.ideas.length) return [{ type: "text", text: "当前没有未收口的方向——侦察时若发现「没测但可疑」的点，用 campaign_idea_open 登记。" }];
+				return [{ type: "text", text: v.ideas.map((i) => `[${i.ideaStatus}${i.ideaAsset ? "｜" + i.ideaAsset : ""}] ${i.title}（${i.id}）——${String(i.content).split("\\n")[0].slice(0, 120)}`).join("\n") }];
+			}
+		},
+		execute(args, exec) {
+			const session = sessionOf(ctx, exec);
+			if (!session?.mode) return Promise.resolve({ ok: false, error: "仅安全模式会话内可用" });
+			try {
+				const ideas = listIdeas(theStore(), { mode: session.mode, status: args.status ?? "", includeSettled: !!args.includeSettled, limit: args.limit });
+				return Promise.resolve({ ok: true, ideas });
 			} catch (e) {
 				return Promise.resolve({ ok: false, error: e?.message ?? String(e) });
 			}

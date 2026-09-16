@@ -1,3 +1,8 @@
+
+// ── 平台数据根（$DSH_HOME）────────────────────────────────────────────
+// 宿主按 $DSH_HOME 装配 profiles/会话/存储；插件一律跟随，避免「一半落 A 一半落 B」。
+// 未设置时等价于 ~/.dsh，故对既有用户是零行为变更。
+const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
 // dsh-method-stack — host.
 // 提示词"方法"化：把可切换的测试逻辑组织成 模块组(group)→子方法(method) 两级。
 // 模型侧：注册固定 systemPrompt context（order 460，位于 route-boost 500 之前），
@@ -5,7 +10,7 @@
 // 每轮 —— 用户改动组合后下一轮即生效（agent-loop 每轮重渲染 contexts）。
 // 自定义：官方默认方法集随本插件 methods/（只读，可克隆到用户层）；用户层
 // ~/.dsh/methods/<group>/<id>/ 同名 shadow 官方（与宿主 scoped section 同构思想）。
-// 组合持久化：~/.dsh/method-stack/profiles/<presetId>.yml（默认组合+自定义组合）。
+// 组合持久化：~/.dsh/method-stack/profiles/<presetId>.json（默认组合+自定义组合）。
 // 追溯：组合内容变化递增 rev，追加 ~/.dsh/method-stack/audit.log（时间/模式/组合/rev）。
 import fs from 'node:fs'
 import path from 'node:path'
@@ -27,7 +32,7 @@ const Config = z.object({ enable: z.boolean().default(true) })
 
 // 随包默认方法集（只读；克隆后进用户层编辑）。目录每项含 manifest.yml + prompt.md。
 const BUILTIN_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'methods')
-const HOME_ROOT = path.join(os.homedir(), '.dsh', 'method-stack')
+const HOME_ROOT = path.join(DSH_HOME, 'method-stack')
 const USER_METHODS_ROOT = path.join(HOME_ROOT, 'methods')
 const PROFILES_DIR = path.join(HOME_ROOT, 'profiles')
 const AUDIT_LOG = path.join(HOME_ROOT, 'audit.log')
@@ -130,15 +135,26 @@ function readProfile(presetId) {
 }
 function writeProfile(presetId, data) {
   fs.mkdirSync(PROFILES_DIR, { recursive: true })
-  fs.writeFileSync(profileFile(presetId), JSON.stringify(data, null, 2), 'utf8')
+  // 原子写：半截 JSON 会让 readProfile 返回 null → currentProfile 回退到「全启用」，
+  // 用户刚勾好的方法选择**静默消失**（且没有任何报错）。临时文件 + rename 消除这个窗口。
+  const file = profileFile(presetId)
+  const tmp = `${file}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 8)}`
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8')
+  fs.renameSync(tmp, file)
 }
 function currentProfile(presetId) {
   const p = readProfile(presetId)
   if (p && Array.isArray(p.active)) return p
-  // 默认：全启用（官方方法集即"开箱全开"，用户可关）
+  // 默认**不启用任何方法**（2026-09-13 用户要求）。
+  //
+  // 为什么改（原来是「开箱全开」）：方法正文是**每轮请求常驻注入**的 systemPrompt context ——
+  // 26 个方法全文 ≈ 14KB（约 4–5K token），在 32K 窗口的模型上直接吃掉 15%，
+  // 实测出现过 `CONTEXT_WINDOW_EXCEEDED: request (38341 tokens) size (32768 tokens)`。
+  // 而多数轮次只用得上其中一两个方法，「默认全开」等于让所有会话替这个默认值付上下文成本。
+  // 改为按需勾选；仍保留「全部启用」组合，想全开的人一键即可（UI 里也有该快捷）。
   const all = []
   for (const g of fullCatalog()) for (const m of g.methods) all.push(`${g.group}/${m.id}`)
-  const def = { preset: presetId, active: all, combos: { '全部启用': all } }
+  const def = { preset: presetId, active: [], combos: { '全部启用': all } }
   writeProfile(presetId, def)
   return def
 }
@@ -268,6 +284,22 @@ export function apply(ctx, config = {}) {
         writeProfile(presetId, profile)
         audit(presetId, 'use-combo', name)
         return ok({ active: profile.active, rev: profile.rev })
+      }
+      // 删除组合：save-combo 的反操作。此前只能建不能删，误存一个组合就永久留在设置页，
+      // 只能手改 profile JSON 才能去掉（2026-09-12 浏览器验收发现）。
+      // 不改 rev：rev 是「启用集」的版本，组合定义变化不影响注入正文。
+      if (endpoint === 'delete-combo') {
+        const presetId = typeof p.presetId === 'string' && p.presetId ? p.presetId : 'pentest'
+        const name = typeof p.name === 'string' ? p.name.trim() : ''
+        if (!name) return failure('组合名不能为空')
+        const profile = currentProfile(presetId)
+        if (!profile.combos || !Object.prototype.hasOwnProperty.call(profile.combos, name)) {
+          return failure('组合不存在：' + name)
+        }
+        delete profile.combos[name]
+        writeProfile(presetId, profile)
+        audit(presetId, 'delete-combo', name)
+        return ok({ combos: profile.combos })
       }
       // 用户方法克隆/还原：clone({presetId? group,id}) / restore({group,id})
       if (endpoint === 'clone') {

@@ -1,0 +1,21 @@
+# One installable bundle row: per-mode tool visibility scope.
+#
+# 一轮模型请求里工具定义占 67.8%（实测 101 个 / 111.5K 字节），而其中一批工具在
+# 当前模式下**本来就调不动** —— 各插件早已声明自己的模式门禁：
+#   · webshell-mgr  ALLOWED_MODES = ["pentest"]      （非 pentest 硬拒绝）
+#   · ctf-observer  MODE_ID = "ctf-solver"            （只在 ctf-solver 模式生效）
+#   · redteam-results / campaign-memory / trace-vault / knowledge-hub
+#                   MODE_IDS = ["pentest","code-audit","ctf-solver"]
+#
+# 本插件在会话创建时用宿主原生的 per-agent 过滤（agent.ctx.tools.restrict）把
+# **当前模式永远用不到的那些工具声明**收掉：模型看不到 = 不进请求体。
+# 思路来自 BreachWeave 的 pi-mcp-adapter（「别把全部工具声明塞进上下文」），
+# 但落地更轻 —— 不造代理层、不加新工具、不改变任何调用语义。
+#
+# 只减不增；restrict 失败只告警并放行（保持工具面原样）；可用 enable/规则开关关闭。
+- insert:
+    - id: dsh-tool-scope
+      name: '@dsh-external/dsh-tool-scope'
+      config:
+        enable: true
+        log: true
