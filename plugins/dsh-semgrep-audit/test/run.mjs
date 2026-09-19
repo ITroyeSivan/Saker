@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { parseSemgrepJson, buildArgs, findRefsDir, appendReconcile, runSemgrep, RULE_LAYERS, hasBin } from "../lib/index.js";
+import { parseSemgrepJson, buildArgs, findRefsDir, appendReconcile, runSemgrep, runSemgrepProcess, RULE_LAYERS, hasBin, configuredSemgrepBin, resolveSemgrepBin } from "../lib/index.js";
 
 let pass = 0, fail = 0;
 const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); } else { fail++; console.log(`FAIL ${label}`); } };
@@ -68,19 +68,26 @@ const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); 
 	fs.mkdirSync(target, { recursive: true });
 	fs.mkdirSync(path.join(refs, "lang", "java-audit", "semgrep-rules"), { recursive: true });
 	const semgrepOut = JSON.stringify({ results: [{ check_id: "r.a", path: "A.java", start: { line: 1 }, extra: { severity: "ERROR", message: "m" } }], errors: [] });
-	const r = runSemgrep({
+	const r = await runSemgrep({
 		workspace: ws, target, layer: "builtin-java",
 		spawnFn: (bin, args) => ({ status: 0, stdout: semgrepOut, args }),
 		fsMod: fs, refsCandidates: [refs], hasBinFn: () => true
 	});
 	ok("运行：产物 JSON 落盘 + 证据行 + 对账双写", r.ok && r.total === 1 && r.reconciled === 1 && fs.existsSync(path.join(ws, "artifacts", "scans")) && fs.readFileSync(path.join(ws, "evidence-index.md"), "utf8").includes("semgrep scan --json"));
 	ok("运行：证据编号自增格式", /^E\d+$/.test(r.evidenceId));
-	const r2 = runSemgrep({ workspace: ws, target, layer: "custom", rulesPath: "/no/such.yml", spawnFn: () => ({ status: 0, stdout: "{}" }), fsMod: fs, refsCandidates: [refs], hasBinFn: () => true });
+	const r2 = await runSemgrep({ workspace: ws, target, layer: "custom", rulesPath: "/no/such.yml", spawnFn: () => ({ status: 0, stdout: "{}" }), fsMod: fs, refsCandidates: [refs], hasBinFn: () => true });
 	ok("运行：custom 规则路径不存在拒绝", r2.ok === false && r2.error.includes("规则路径不存在"));
-	const r3 = runSemgrep({ workspace: ws, target, layer: "builtin-java", spawnFn: () => ({ status: 0, stdout: "{}" }), fsMod: fs, refsCandidates: ["/none"], hasBinFn: () => true });
+	const r3 = await runSemgrep({ workspace: ws, target, layer: "builtin-java", spawnFn: () => ({ status: 0, stdout: "{}" }), fsMod: fs, refsCandidates: ["/none"], hasBinFn: () => true });
 	ok("运行：refs 未定位拒绝并提示 custom 兜底", r3.ok === false && r3.error.includes("layer=custom"));
-	const r4 = runSemgrep({ workspace: ws, target, layer: "builtin-java", spawnFn: () => ({ status: 0, stdout: "{}" }), fsMod: fs, refsCandidates: [refs], hasBinFn: () => false });
+	const r4 = await runSemgrep({ workspace: ws, target, layer: "builtin-java", spawnFn: () => ({ status: 0, stdout: "{}" }), fsMod: fs, refsCandidates: [refs], hasBinFn: () => false });
 	ok("运行：缺装拒绝走三级兜底提示（检测制）", r4.ok === false && r4.error.includes("绝不自动装"));
+	let timerTicked = false;
+	const timer = setTimeout(() => { timerTicked = true; }, 20);
+	const proc = await runSemgrepProcess(process.execPath, ["-e", "setTimeout(() => process.stdout.write('SEMGREP_ASYNC_OK'), 120)"]);
+	clearTimeout(timer);
+	ok("运行核心：长扫描不阻塞宿主事件循环（同步 spawn 会冻结 UI）", timerTicked && proc.stdout.toString().includes("SEMGREP_ASYNC_OK"), proc.error?.message ?? "");
+	const utf8 = await runSemgrepProcess(process.execPath, ["-e", "process.stdout.write(String(process.env.PYTHONUTF8||'')+'/'+String(process.env.PYTHONIOENCODING||''))"]);
+	ok("运行核心：Semgrep 子进程强制 UTF-8（zh-CN Windows 不按 GBK 读规则）", utf8.stdout.toString() === "1/utf-8", utf8.stdout.toString());
 	fs.rmSync(ws, { recursive: true, force: true });
 }
 
@@ -102,6 +109,18 @@ const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); 
 	ok("hasBin：不存在的工具返回 false", hasBin("definitely-missing-semgrep-xyz") === false);
 	if (savedPathext === undefined) delete process.env.PATHEXT;
 	else process.env.PATHEXT = savedPathext;
+}
+
+// 8. sec-config 工具路径：entries 优先、legacy tools 兜底、hidden 拒绝
+{
+	const entries = configuredSemgrepBin({ entries: [{ key: "semgrep", path: "C:/tools/semgrep.exe" }], tools: { semgrep: "C:/legacy/semgrep.exe" } });
+	ok("semgrep 路径：entries 条目优先", entries === "C:/tools/semgrep.exe", entries);
+	const legacy = configuredSemgrepBin({ tools: { semgrep: "C:/legacy/semgrep.exe" } });
+	ok("semgrep 路径：legacy tools 兼容", legacy === "C:/legacy/semgrep.exe", legacy);
+	const hidden = resolveSemgrepBin({ hiddenTools: ["semgrep"], entries: [{ key: "semgrep", path: "C:/tools/semgrep.exe" }] });
+	ok("semgrep 路径：hiddenTools 后回退 PATH 命令名", hidden === "semgrep", hidden);
+	const file = resolveSemgrepBin({ entries: [{ key: "semgrep", path: process.execPath }] });
+	ok("semgrep 路径：绝对文件配置原样解析", file === process.execPath, file);
 }
 
 console.log(fail === 0 ? `\nall ${pass} tests passed` : `\n${fail} FAILED, ${pass} passed`);

@@ -11,6 +11,7 @@ import { httpRequest, b64, unb64, md5hex } from "./http-client.js";
 import { patchClass } from "./javapatch.js";
 import { JAVA_PAYLOADS } from "./payloads-java.js";
 import { shapeHeaders, stripResponse } from "./profile.js";
+import { parseJsonResponse } from "./json-response.js";
 
 const NAME_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const randomInnerName = () => {
@@ -75,7 +76,7 @@ export async function fetchInfo(conn) {
 
 /** 目录列表 → JSON 数组（n/d/s/r/w/m 毫秒）。 */
 export function listDir(conn, path) {
-	return sendJavaPayload(conn, "WsmList", { p: path }).then((t) => JSON.parse(t));
+	return sendJavaPayload(conn, "WsmList", { p: path }).then((text) => parseJsonResponse(text, "冰蝎 Java 目录列表"));
 }
 
 /** 读文件（base64 回传，二进制安全）→ Buffer。offset/len 可选（断点续传范围读）。 */

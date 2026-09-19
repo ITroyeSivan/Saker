@@ -11,6 +11,35 @@
 // **不依赖任何外部程序** —— 随插件走，任何用户装上即用。
 import http from 'node:http'
 import { randomBytes } from 'node:crypto'
+import { createRequire } from 'node:module'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import path from 'node:path'
+
+// 统一出站策略（根包 `dsh-saker/egress`）：模型上游属于 infra 出站，
+// 冻结档必须在**发出请求之前**拦下。实现只解析，不在这里复制判定逻辑。
+const HERE = path.dirname(fileURLToPath(import.meta.url))
+const requireFromHere = createRequire(import.meta.url)
+let egressModule
+async function egressLib() {
+  if (egressModule !== undefined) return egressModule
+  try {
+    egressModule = await import(pathToFileURL(requireFromHere.resolve('dsh-saker/egress')).href)
+  } catch {
+    try {
+      egressModule = await import(pathToFileURL(path.resolve(HERE, '..', '..', '..', 'lib', 'egress.js')).href)
+    } catch {
+      egressModule = null
+    }
+  }
+  return egressModule
+}
+
+/** 默认闸门：读统一策略 + 判定 + 留痕；模块缺失时不拦（保持旧行为）并如实回报。 */
+export async function checkUpstreamEgress(home, host, note) {
+  const lib = await egressLib()
+  if (!lib) return { decision: 'allow', reason: 'egress-module-missing', mode: 'allow', policySource: 'module-missing' }
+  return lib.checkEgress(home, { plugin: 'dsh-sec-config', kind: 'infra', host, note })
+}
 
 /** 消息对象上的私有字段。用「有没有 role」判断是不是消息对象 ——
  *  `model` 只在消息里非法，顶层的 `model` 是必需的，剥错了会得到
@@ -39,6 +68,203 @@ const HOP_BY_HOP = new Set([
  * 报 `Decompression failed`。长度同理，解压后必变。
  */
 const DROP_RESPONSE_HEADERS = new Set(['content-encoding', 'content-length'])
+const AUDIT_LIMIT = 20
+
+/** Outbound redaction modes. `secrets` is deliberately protocol-aware and
+ * preserves targets; it is not a generic "replace every scary word" pass. */
+export const REDACTION_MODES = ['off', 'secrets', 'secrets+pii']
+
+// 字段级分类（对标 Presidio 的 recognizer → operator 分离，但保持零依赖）：
+// 先按字段名判断结构化数据类别，再执行对应 operator。这样 `{"password":"hunter2"}`
+// 这种“值本身不像 token”的结构化凭据不会漏；目标 IP、域名、URL 和普通载荷仍放行。
+const FIELD_KIND_RULES = [
+	[/^(?:proxy_)?authorization$/, 'authorization'],
+	[/^(?:set_)?cookie$/, 'cookie'],
+	[/^private_key$/, 'private-key'],
+	[/^(?:aws_)?(?:access_key_id|secret_access_key)$/, 'cloud-key'],
+	[/^github_(?:token|pat)$/, 'github-token'],
+	[/^jwt$/, 'jwt'],
+	[/^(?:api_key|apikey)$/, 'api-key'],
+	[/^(?:password|passwd|pass|secret|client_secret|access_token|refresh_token|id_token|token|credential|credentials|session_id|sessionid|csrf|xsrf)$/, 'secret'],
+	[/(?:^|_)(?:password|passwd|pass|secret|token|credential|credentials)(?:_|$)/, 'secret'],
+]
+const CARRIER_VALUE_KEYS = new Set(['value', 'data', 'text', 'content'])
+
+function normalizeFieldName(name) {
+	return String(name ?? '')
+		.replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, '_')
+		.replace(/^_+|_+$/g, '')
+}
+
+function sensitiveFieldKind(name) {
+	const normalized = normalizeFieldName(name)
+	if (!normalized) return ''
+	for (const [pattern, kind] of FIELD_KIND_RULES) if (pattern.test(normalized)) return kind
+	return ''
+}
+
+/** 识别 `{ name: "Authorization", value: "Basic ..." }` 这类键值对结构。 */
+function sensitiveCarrierKind(node) {
+	for (const key of ['name', 'key', 'header', 'field']) {
+		if (typeof node[key] !== 'string') continue
+		const kind = sensitiveFieldKind(node[key])
+		if (kind) return kind
+	}
+	return ''
+}
+
+function redactFieldValue(value, kind) {
+	if (value === undefined || value === null || value === '') return { value, redacted: 0, byKind: {} }
+	if (typeof value === 'string' && /^\[REDACTED:[^\]]+\]$/.test(value.trim())) {
+		return { value, redacted: 0, byKind: {} }
+	}
+	return { value: `[REDACTED:${kind}]`, redacted: 1, byKind: { [kind]: 1 } }
+}
+
+/**
+ * Redact credentials embedded in a text block. The default mode keeps target
+ * IPs, domains, paths and ordinary security payloads intact, because those are
+ * required for an authorized test to remain reproducible.
+ */
+export function redactText(value, mode = 'secrets') {
+	let out = String(value ?? '')
+	const byKind = {}
+	const secretsEnabled = mode === 'secrets' || mode === 'secrets+pii'
+	const piiEnabled = mode === 'secrets+pii'
+	if (!secretsEnabled || !out) return { text: out, redacted: 0, byKind }
+	let redacted = 0
+	const replace = (re, repl, kind) => {
+		out = out.replace(re, (...args) => {
+			redacted += 1
+			byKind[kind] = (byKind[kind] || 0) + 1
+			if (typeof repl === 'function') return repl(...args)
+			return String(repl).replace(/\$(\d+)/g, (_match, index) => args[Number(index)] ?? '')
+		})
+	}
+
+	replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/gi, '[REDACTED:private-key]', 'private-key')
+	// 保留字段名，替换整个 header 值（Bearer / Basic / Digest 都适用）。
+	// 结构化 JSON 里的值优先按“带引号的 value”截断，避免吃掉同一行后续字段。
+	replace(/(["']?(?:proxy-)?authorization["']?\s*:\s*)(["'])(.*?)\2/gi, '$1$2[REDACTED:authorization]$2', 'authorization')
+	replace(/(["']?(?:proxy-)?authorization["']?\s*:\s*)(?=[^\s"'\r\n,;])([^\r\n,;]+)/gi, '$1[REDACTED:authorization]', 'authorization')
+	replace(/(["']?cookie["']?\s*:\s*)(["'])(.*?)\2/gi, '$1$2[REDACTED:cookie]$2', 'cookie')
+	replace(/(["']?cookie["']?\s*:\s*)(?=[^\s"'\r\n])([^\r\n]+)/gi, '$1[REDACTED:cookie]', 'cookie')
+	replace(/(["']?set-cookie["']?\s*:\s*)(["'])(.*?)\2/gi, '$1$2[REDACTED:set-cookie]$2', 'cookie')
+	replace(/(["']?set-cookie["']?\s*:\s*)(?=[^\s"'\r\n])([^\r\n]+)/gi, '$1[REDACTED:set-cookie]', 'cookie')
+	replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/g, 'Bearer [REDACTED:bearer]', 'bearer')
+	replace(/\b(?:AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16})\b/g, '[REDACTED:cloud-key]', 'cloud-key')
+	replace(/\b(?:ghp|gho|ghu|ghs|github_pat)_[A-Za-z0-9_]{12,}\b/gi, '[REDACTED:github-token]', 'github-token')
+	// 高置信 SaaS/云凭据前缀（对标 gitleaks config/gitleaks.toml）：
+	// 不做泛化熵扫描，只替换有明确格式的 token，减少误伤安全测试载荷。
+	replace(/\bAIza[A-Za-z0-9_-]{35}\b/g, '[REDACTED:google-api-key]', 'google-api-key')
+	replace(/\bglpat-[A-Za-z0-9_.-]{20,320}\b/g, '[REDACTED:gitlab-token]', 'gitlab-token')
+	replace(/\bxox[baprs]-[A-Za-z0-9-]{10,100}\b/g, '[REDACTED:slack-token]', 'slack-token')
+	replace(/\b(?:sk|rk)_(?:test|live|prod)_[A-Za-z0-9]{10,99}\b/g, '[REDACTED:stripe-key]', 'stripe-key')
+	replace(/\b[A-Za-z0-9_~.]{3}\dQ~[A-Za-z0-9_~.-]{31,34}\b/g, '[REDACTED:azure-client-secret]', 'azure-client-secret')
+	replace(/\bsk-[A-Za-z0-9_-]{16,}\b/g, '[REDACTED:api-key]', 'api-key')
+	replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, '[REDACTED:jwt]', 'jwt')
+	replace(/(["']?(?:password|passwd|pass|secret|client_secret|api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|private[_-]?key)["']?\s*[:=]\s*)(["']?)([^"'\r\n,}\s]+)\2/gi, '$1$2[REDACTED:secret]$2', 'secret')
+	replace(/([?&](?:token|access_token|refresh_token|api_key|apikey|password|passwd)=)[^&#\s]+/gi, '$1[REDACTED:query-secret]', 'query-secret')
+	if (piiEnabled) {
+		replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[REDACTED:email]', 'email')
+		replace(/(?<!\d)1[3-9]\d{9}(?!\d)/g, '[REDACTED:phone-cn]', 'phone-cn')
+		replace(/(?<!\d)[1-9]\d{5}(?:18|19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx](?!\d)/g, '[REDACTED:id-cn]', 'id-cn')
+		out = out.replace(/(?<!\d)(?:\d[ -]?){15,18}\d(?!\d)/g, (match) => {
+			const digits = match.replace(/\D/g, '')
+			if (digits.length < 16 || digits.length > 19 || !luhnValid(digits)) return match
+			redacted += 1
+			byKind['bank-card'] = (byKind['bank-card'] || 0) + 1
+			return '[REDACTED:bank-card]'
+		})
+	}
+	return { text: out, redacted, byKind }
+}
+
+function luhnValid(digits) {
+	let sum = 0
+	let double = false
+	for (let i = digits.length - 1; i >= 0; i -= 1) {
+		let n = digits.charCodeAt(i) - 48
+		if (double) {
+			n *= 2
+			if (n > 9) n -= 9
+		}
+		sum += n
+		double = !double
+	}
+	return sum % 10 === 0
+}
+
+function redactNode(node, mode, inheritedKind = '') {
+	if (typeof node === 'string') {
+		if (inheritedKind) return redactFieldValue(node, inheritedKind)
+		const result = redactText(node, mode)
+		return { value: result.text, redacted: result.redacted, byKind: result.byKind }
+	}
+	if (Array.isArray(node)) {
+		let redacted = 0
+		const byKind = {}
+		const next = node.map((item) => {
+			const result = redactNode(item, mode, inheritedKind)
+			redacted += result.redacted
+			for (const [kind, count] of Object.entries(result.byKind || {})) byKind[kind] = (byKind[kind] || 0) + count
+			return result.value
+		})
+		return { value: next, redacted, byKind }
+	}
+	if (!node || typeof node !== 'object') {
+		return inheritedKind
+			? redactFieldValue(node, inheritedKind)
+			: { value: node, redacted: 0, byKind: {} }
+	}
+	let redacted = 0
+	const byKind = {}
+	const next = {}
+	const carrierKind = sensitiveCarrierKind(node)
+	for (const [key, value] of Object.entries(node)) {
+		const fieldKind = sensitiveFieldKind(key)
+			|| (carrierKind && CARRIER_VALUE_KEYS.has(normalizeFieldName(key)) ? carrierKind : '')
+		const result = redactNode(value, mode, fieldKind || inheritedKind)
+		next[key] = result.value
+		redacted += result.redacted
+		for (const [kind, count] of Object.entries(result.byKind || {})) byKind[kind] = (byKind[kind] || 0) + count
+	}
+	return { value: next, redacted, byKind }
+}
+
+/**
+ * Redact only model-bound message content. Top-level tool definitions stay
+ * byte-identical because their JSON schemas are executable contracts, not
+ * user data.
+ */
+export function redactBody(raw, mode = 'secrets') {
+	if ((mode !== 'secrets' && mode !== 'secrets+pii') || !raw || raw.length === 0) return { body: raw, redacted: 0, byKind: {} }
+	let obj
+	try { obj = JSON.parse(raw.toString('utf8')) } catch { return { body: raw, redacted: 0, byKind: {} } }
+	if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return { body: raw, redacted: 0, byKind: {} }
+
+	let redacted = 0
+	const byKind = {}
+	for (const key of ['messages', 'input']) {
+		if (!Array.isArray(obj[key])) continue
+		const result = redactNode(obj[key], mode)
+		obj[key] = result.value
+		redacted += result.redacted
+		for (const [kind, count] of Object.entries(result.byKind || {})) byKind[kind] = (byKind[kind] || 0) + count
+	}
+	if (typeof obj.prompt === 'string') {
+		const result = redactText(obj.prompt, mode)
+		obj.prompt = result.text
+		redacted += result.redacted
+		for (const [kind, count] of Object.entries(result.byKind || {})) byKind[kind] = (byKind[kind] || 0) + count
+	}
+	return redacted > 0
+		? { body: Buffer.from(JSON.stringify(obj), 'utf8'), redacted, byKind }
+		: { body: raw, redacted: 0, byKind: {} }
+}
 
 /**
  * 剥掉客户端注入的私有字段。
@@ -106,6 +332,23 @@ export function outboundHeaders(headers, opts) {
 }
 
 /**
+ * Join a client request path to the configured upstream without allowing the
+ * request to retarget the proxy. Absolute-form and protocol-relative request
+ * targets are rejected before URL construction.
+ */
+export function resolveUpstreamUrl(upstreamBase, requestUrl) {
+	const base = new URL(String(upstreamBase || ''))
+	const raw = String(requestUrl || '/')
+	if (/^[a-z][a-z0-9+.-]*:/i.test(raw) || raw.startsWith('//')) {
+		throw new Error(`upstream URL must be relative: ${raw}`)
+	}
+	const joined = base.toString().replace(/\/+$/, '') + '/' + raw.replace(/^\/+/, '')
+	const target = new URL(joined)
+	if (target.origin !== base.origin) throw new Error(`upstream origin mismatch: ${target.origin} != ${base.origin}`)
+	return target
+}
+
+/**
  * 独立运行模式：`node model-proxy.js --port 8788 --upstream https://opencode.ai/zen/go`
  *
  * 同一份实现既能在宿主进程内被插件调用（Saker），也能单独跑起来给**任何**客户端用 ——
@@ -162,22 +405,31 @@ export function readBody(req, limit = 32 * 1024 * 1024) {
  * @param {string} [opts.clientId] 写入 x-opencode-client
  * @param {string} [opts.projectId] 写入 x-opencode-project
  * @param {boolean} [opts.sanitize] 是否剥私有字段，默认 true
+ * @param {string} [opts.redaction] off / secrets，默认 secrets
  * @param {number} [opts.timeoutMs] 上游超时，默认 15 分钟（长任务）
  * @param {(line: string) => void} [opts.log]
  * @returns {Promise<{ server, port, close: () => Promise<void>, stats: () => object }>}
  */
 export function startModelProxy(opts) {
   const host = opts.host || '127.0.0.1'
-  const port = Number(opts.port) || 8788
+  const requestedPort = Number(opts.port)
+  const port = Number.isFinite(requestedPort) ? requestedPort : 8788
   const upstreamBase = String(opts.upstreamBase || '').replace(/\/+$/, '')
   const session = opts.session || 'ses_' + randomBytes(8).toString('hex')
   const userAgent = opts.userAgent || 'saker-sec-config/1.0'
   const clientId = opts.clientId || 'saker'
   const projectId = opts.projectId || 'saker'
   const sanitize = opts.sanitize !== false
+  const redaction = REDACTION_MODES.includes(String(opts.redaction)) ? String(opts.redaction) : 'secrets'
   const timeoutMs = Number(opts.timeoutMs) || 900000
   const log = opts.log || (() => {})
-  const counters = { requests: 0, stripped: 0, errors: 0, lastPath: '', lastStatus: 0, lastMs: 0 }
+  const egressHome = opts.dshHome || opts.home || undefined
+  const gate = opts.egressCheck || ((host, note) => checkUpstreamEgress(egressHome, host, note))
+  const counters = { requests: 0, stripped: 0, redacted: 0, redactedKinds: {}, errors: 0, lastPath: '', lastStatus: 0, lastMs: 0, events: [] }
+  const noteEvent = (event) => {
+    counters.events.push({ at: new Date().toISOString(), ...event })
+    if (counters.events.length > AUDIT_LIMIT) counters.events.splice(0, counters.events.length - AUDIT_LIMIT)
+  }
 
   const server = http.createServer(async (req, res) => {
     const started = Date.now()
@@ -193,8 +445,11 @@ export function startModelProxy(opts) {
           ok: true,
           kind: 'builtin',
           upstream: upstreamBase,
+          upstream_origin: new URL(upstreamBase).origin,
           session_mode: opts.session ? 'fixed' : 'per-process',
           sanitize,
+          redaction,
+          egress: counters.lastEgress || null,
           stats: counters,
         })
       }
@@ -202,8 +457,36 @@ export function startModelProxy(opts) {
       const body = await readBody(req)
       const { body: outBody, stripped } = sanitizeBody(body, sanitize)
       if (stripped > 0) counters.stripped += stripped
+      const { body: safeBody, redacted, byKind } = redactBody(outBody, redaction)
+      if (redacted > 0) {
+        counters.redacted += redacted
+        for (const [kind, count] of Object.entries(byKind || {})) counters.redactedKinds[kind] = (counters.redactedKinds[kind] || 0) + count
+      }
 
-      const upstreamUrl = upstreamBase + (req.url || '/')
+      let upstreamUrl
+      try {
+        upstreamUrl = resolveUpstreamUrl(upstreamBase, req.url || '/')
+      } catch (error) {
+        counters.errors += 1
+        noteEvent({ path: req.url || '/', status: 400, error: error.message })
+        return sendJson(400, { error: { type: 'UpstreamTargetRejected', message: error.message } })
+      }
+      // 统一出站策略：上游是 infra 目的地，冻结档在这里断掉（不发起 fetch）
+      let verdict = null
+      try {
+        verdict = await gate(new URL(upstreamUrl).hostname, `${req.method} ${req.url || '/'}`)
+      } catch { verdict = null }
+      if (verdict) counters.lastEgress = verdict
+      if (verdict && verdict.decision === 'deny') {
+        counters.errors += 1
+        noteEvent({ path: req.url || '/', status: 403, error: `egress:${verdict.reason}` })
+        return sendJson(403, {
+          error: {
+            type: 'EgressBlocked',
+            message: `统一出站策略拦截（${verdict.reason} / mode=${verdict.mode}）：上游 ${new URL(upstreamUrl).origin} 被冻结。改档位：设置 → 安全配置 → 出站策略。`,
+          },
+        })
+      }
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), timeoutMs)
 
@@ -212,7 +495,7 @@ export function startModelProxy(opts) {
         upstreamRes = await fetch(upstreamUrl, {
           method: req.method,
           headers: outboundHeaders(req.headers, { session, userAgent, clientId, projectId }),
-          body: req.method === 'GET' || req.method === 'HEAD' ? undefined : outBody,
+          body: req.method === 'GET' || req.method === 'HEAD' ? undefined : safeBody,
           signal: controller.signal,
           redirect: 'manual',
         })
@@ -224,7 +507,8 @@ export function startModelProxy(opts) {
       counters.lastPath = req.url
       counters.lastStatus = upstreamRes.status
       counters.lastMs = Date.now() - started
-      log(`--> ${req.method} ${req.url} strip=${stripped} -> ${upstreamRes.status} ${counters.lastMs}ms`)
+      noteEvent({ method: req.method, path: req.url, status: upstreamRes.status, stripped, redacted, redactedKinds: byKind || {}, ms: counters.lastMs })
+      log(`--> ${req.method} ${req.url} strip=${stripped} redact=${redacted} -> ${upstreamRes.status} ${counters.lastMs}ms`)
 
       const headers = {}
       upstreamRes.headers.forEach((v, k) => {
@@ -243,6 +527,7 @@ export function startModelProxy(opts) {
     } catch (err) {
       counters.errors += 1
       const message = err && err.message ? err.message : String(err)
+      noteEvent({ method: req.method, path: req.url || '/', status: 502, error: message, ms: Date.now() - started })
       log(`!! ${req.method} ${req.url} 失败：${message}`)
       if (!res.headersSent) sendJson(502, { error: { type: 'ProxyUpstreamError', message } })
       else res.end()
@@ -252,10 +537,11 @@ export function startModelProxy(opts) {
   return new Promise((resolve, reject) => {
     server.once('error', reject)
     server.listen(port, host, () => {
-      log(`内置模型代理已启动 http://${host}:${port} -> ${upstreamBase}（strip=${sanitize}）`)
+      const actualPort = server.address().port
+      log(`内置模型代理已启动 http://${host}:${actualPort} -> ${upstreamBase}（strip=${sanitize} redact=${redaction}）`)
       resolve({
         server,
-        port,
+        port: actualPort,
         session,
         close: () => new Promise((done) => server.close(() => done())),
         stats: () => ({ ...counters }),

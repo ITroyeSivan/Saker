@@ -54,7 +54,7 @@ function verdictSuffix(f) {
 	if (v === "match") return "（与首次 " + f.severity + " 一致）";
 	return "";
 }
-var STATUS_LABEL = { pending: "待验证", "code-reviewed": "代码侧已复核", verified: "已验证", "false-positive": "误报", fixed: "已修复" };
+var STATUS_LABEL = { pending: "待验证", "code-reviewed": "代码侧已复核", suspect: "疑似·未定论", verified: "已验证", "false-positive": "误报", fixed: "已修复" };
 var EVIDENCE_LABEL = { impact: "影响已证", confirmed: "已证实", partial: "部分证据", unknown: "未知" };
 var SOURCE_LABEL = { manual: "人工深审", "scan-confirmed": "扫描确认", "scan-false-positive": "扫描误报" };
 var AUDIT_MODE_LABEL = { static: "静态审计", dynamic: "动态·验证成功" };
@@ -135,7 +135,9 @@ var STATUS_OPTIONS_OF = {
 	"ctf-solver": ["pending", "stuck", "verified"],
 	"binary-analysis": ["pending", "suspect", "verified"],
 	"attack-defense": ["pending", "verified", "false-positive", "fixed"],
-	"cloud-security": ["pending", "verified", "false-positive", "fixed"]
+	"cloud-security": ["pending", "verified", "false-positive", "fixed"],
+	"pentest": ["pending", "suspect", "verified", "false-positive", "fixed"],
+	"code-audit": ["pending", "code-reviewed", "suspect", "verified", "false-positive", "fixed"]
 };
 var LEDGER_STATUS_LABEL = { pending: "进行中", verified: "已收口", "false-positive": "挂起", fixed: "已路由" };
 var CTF_STATUS_LABEL = { pending: "未解", stuck: "卡点", verified: "已解·flag 验证", "false-positive": "放弃/排除", fixed: "已复盘" };
@@ -453,6 +455,18 @@ function mdReport(f, mode) {
 		f.retestNote ? "\n## 复测记录\n\n" + f.retestNote + (f.retestAt ? "（" + fmtTime(f.retestAt) + "）" : "") + "\n" : "",
 		""
 	].join("\n");
+}
+
+function jsonReport(meta, stats, rows, mode) {
+	return JSON.stringify({
+		schema: "saker.redteam.report.v1",
+		schemaVersion: 1,
+		generatedAt: new Date().toISOString(),
+		mode: mode,
+		meta: meta || null,
+		stats: stats || null,
+		findings: rows || []
+	}, null, 2) + "\n";
 }
 
 function mdOverview(meta, stats, rows, mode) {
@@ -1479,8 +1493,12 @@ function ModePage(props) {
 	// 复核依据的默认正文（与原来的 prompt 初值一致）
 	function reviewNoteFor(status) {
 		if (status === "verified") return "原会话不可达，人工复核通过。复核方式与观察到的现象：";
-		var neg = rv[0] ? rv[0].neg : "";
-		var tail = neg === "false-positive" ? "判伪" : neg === "suspect" ? "定疑似" : neg === "stuck" ? "记卡点" : "重置";
+		var tail = status === "false-positive" ? "判伪"
+			: status === "suspect" ? "定疑似"
+			: status === "stuck" ? "记卡点"
+			: status === "code-reviewed" ? "代码侧复核通过"
+			: status === "detected" ? "记检出"
+			: "标记";
 		return "原会话不可达，人工复核" + tail + "。复核方式与观察到的现象：";
 	}
 	// 提交人工标记：校验仍在客户端拦一道（转 verified 须 ≥40 字依据 + 词表内二次评级），服务端另有一道。
@@ -1511,10 +1529,9 @@ function ModePage(props) {
 					// 步3 独立二次评级。确定项与判伪词均按模式词表取（binary=已定论/疑似、av=过检/被检出、其余=已验证/误报或已失效）。
 					var okSet = statusLabelSetFor(meta.archetype, mode) || STATUS_LABEL;
 					var opts = (STATUS_OPTIONS_OF[mode] || Object.keys(STATUS_LABEL)).filter(function (s) { return s !== "pending"; });
-					var neg = opts.indexOf("false-positive") !== -1 ? "false-positive" : (opts.indexOf("suspect") !== -1 ? "suspect" : (opts.indexOf("stuck") !== -1 ? "stuck" : "pending"));
-					var negText = (okSet[neg] || neg) + "（" + neg + "）";
+					var negativeOptions = opts.filter(function (s) { return s !== "verified"; }).map(function (s) { return { status: s, label: (okSet[s] || s) + "（" + s + "）" }; });
 					var posText = (okSet.verified || "已验证") + "（verified）";
-					setRv({ f: f, error: r.error || "", neg: neg, negText: negText, posText: posText });
+					setRv({ f: f, error: r.error || "", negativeOptions: negativeOptions, posText: posText });
 					setRvStep(1); setRvStatus(""); setRvNote(""); setRvSecond("high");
 					return;
 				}
@@ -1611,6 +1628,12 @@ function ModePage(props) {
 		fetchAllForExport().then(function (all) {
 			download(mode + "-report-" + localDate() + ".html", htmlReport(sesMeta, stats, all, mode), "text/html");
 			setNotice("报告包已导出（HTML，可浏览器打印成 PDF）");
+		});
+	}
+	function exportJson() {
+		fetchAllForExport().then(function (all) {
+			download(mode + "-report-" + localDate() + ".json", jsonReport(sesMeta, stats, all, mode), "application/json");
+			setNotice("结构化报告已导出（JSON）");
 		});
 	}
 	function saveMeta() {
@@ -1766,7 +1789,9 @@ function ModePage(props) {
 			React.createElement("div", { style: { fontSize: 12, color: "#b45309", marginBottom: 10, whiteSpace: "pre-wrap", maxHeight: 140, overflowY: "auto" } }, rv[0].error),
 			rvStep[0] === 1 ? React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
 				React.createElement(Btn, { primary: true, onClick: function () { setRvStatus("verified"); setRvNote(reviewNoteFor("verified")); setRvStep(2); } }, "标记「" + rv[0].posText + "」"),
-				React.createElement(Btn, { onClick: function () { setRvStatus(rv[0].neg); setRvNote(reviewNoteFor(rv[0].neg)); setRvStep(2); } }, "标记「" + rv[0].negText + "」"),
+				(rv[0].negativeOptions || []).map(function (opt) {
+					return React.createElement("span", { key: opt.status }, React.createElement(Btn, { onClick: function () { setRvStatus(opt.status); setRvNote(reviewNoteFor(opt.status)); setRvStep(2); } }, "标记「" + opt.label + "」"));
+				}),
 				React.createElement(Btn, { onClick: function () { setRv(null); setNotice("已取消标记——成果保持原状态"); } }, "取消")) : null,
 			rvStep[0] === 2 ? React.createElement("div", null,
 				React.createElement("div", { style: { fontSize: 12, marginBottom: 4 } }, rvStatus[0] === "verified" ? "复核结论（写入验证记录，至少 40 字）：" : "复核结论（写入验证记录）："),
@@ -1814,7 +1839,8 @@ function ModePage(props) {
 				exportMenu[0] ? React.createElement(PopMenu, { anchor: exportMenu[0], onClose: function () { setExportMenu(null); }, items: [
 					{ label: "总览（MD）", title: "当前筛选范围导出 MD 总览", onClick: exportOverview },
 					{ label: meta.archetype === "assets" ? "清单（表格）" : "全部（表格）", title: "翻页取全后导出表格", onClick: exportAll },
-					{ label: "报告包（HTML）", title: "HTML 报告包，可浏览器打印成 PDF", onClick: exportHtml }
+					{ label: "报告包（HTML）", title: "HTML 报告包，可浏览器打印成 PDF", onClick: exportHtml },
+					{ label: "结构化报告（JSON）", title: "机器可读的元数据、统计与全量成果", onClick: exportJson }
 				] }) : null),
 			React.createElement(Btn, { primary: true, disabled: selectedIds.length === 0, onClick: exportSelected }, selectedIds.length > 0 ? (meta.archetype === "assets" ? "导出选中卡片（" : "导出选中报告（") + selectedIds.length + "）" : (meta.archetype === "assets" ? "导出选中卡片" : "导出选中报告"))),
 		listBody,

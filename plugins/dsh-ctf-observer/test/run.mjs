@@ -11,7 +11,7 @@ import { join, dirname } from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { judge, topDuplicate, fingerprint, makeState, REVIEW_EVERY_ROUNDS, REMINDER_COOLDOWN_ROUNDS, REMINDER_REPEAT_WINDOW_ROUNDS, REPEAT_TOOL_THRESHOLD, ERROR_STREAK_THRESHOLD, IDLE_ROUNDS_THRESHOLD, MODE_ID, FLAG_RE, scheduleInject, steerText } from "../lib/index.js";
-import { readBoard, upsertChallenge, dispatch as boardDispatch, steer as boardSteer, addNote, peekSteers, markSteersConsumed, snapshotText, BOARD_FILE, mutateBoard } from "../lib/board.js";
+import { readBoard, upsertChallenge, dispatch as boardDispatch, updateDispatch as boardUpdateDispatch, DISPATCH_STALE_MS, steer as boardSteer, addNote, peekSteers, markSteersConsumed, snapshotText, BOARD_FILE, mutateBoard } from "../lib/board.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -189,7 +189,21 @@ ok("MODE_ID 就是 ctf-solver（其余模式零干扰的前提）", MODE_ID === 
 	// 派单必须挂在已登记的题上（否则并行时会派到空气里）
 	boardDispatch(tmp, { challengeId: "Web-Easy", path: "SSTI: {{7*7}}" });
 	ok("派单落到已有题上", readBoard(tmp).dispatches.length === 1);
+	const dispatchId = readBoard(tmp).dispatches[0].id;
+	boardUpdateDispatch(tmp, { id: dispatchId, status: "done", note: "SSTI 已验证" });
+	ok("派单可显式收口为 done", readBoard(tmp).dispatches[0].status === "done");
 	let threw = false;
+	try { boardUpdateDispatch(tmp, { id: "d999", status: "done" }); } catch { threw = true; }
+	ok("更新不存在的派单会报错", threw);
+	boardDispatch(tmp, { challengeId: "Web-Easy", path: "旧路线" });
+	mutateBoard(tmp, (b) => {
+		const d = b.dispatches[b.dispatches.length - 1];
+		d.at = new Date(Date.now() - DISPATCH_STALE_MS - 1000).toISOString();
+		return b;
+	});
+	ok("超时 running 派单在快照中显示为超时路线", snapshotText(readBoard(tmp)).includes("超时路线 1"));
+	threw = false;
+	threw = false;
 	try { boardDispatch(tmp, { challengeId: "不存在的题", path: "x" }); } catch { threw = true; }
 	ok("派到不存在的题会报错（不允许凭空派单）", threw);
 

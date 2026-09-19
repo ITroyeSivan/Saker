@@ -11,6 +11,8 @@ Saker 的**模式/插件**是纯增量（`dsh plugin add` 即可）。以下改�
 | `apps/web/index.html` / `manifest.webmanifest` | title / manifest name → Saker | 浏览器标签与 PWA 名称 |
 | `packages/bundle/web-app/src/index.ts` | 启动时先打印 `Saker — 基于 DeepSeek Harness 的攻防平台` 横幅再打印 URL | 启动即见品牌 |
 | `packages/client/locale/src/locales/zh.ts` / `en.ts` | `brand.localBuild` → `Saker 攻防平台` / `Saker` | SPA 主界面空态抬头等处的应用名 |
+| `packages/util/atomic-write/src/index.ts` | `withFileLock` 在竞争时识别 `settings.yaml.lock` 里的死 PID，安全回收后立即重试；活进程、空锁和未知格式不碰 | 宿主崩溃留下的设置写锁不再永久堵住 API key / 模型端点保存 |
+| `packages/llm/llm-pi-ai/src/stream.ts` | `classifyPiAiError` 识别流式工具调用 JSON 截断（`Unterminated string in JSON...` / `Unexpected end of JSON input`）并归为可重试的 `TRANSPORT` | 上游断流导致的半截工具参数不再以不可重试的 `PI_AI_ERROR` 中止整个回合，长任务可自动重试继续 |
 
 应用后需重新构建：
 

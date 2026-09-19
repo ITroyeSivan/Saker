@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), "sb-home-"));
 const OUTSIDE = fs.mkdtempSync(path.join(os.tmpdir(), "sb-outside-"));
 
-const { apply, probeSkillDir, installSkillDir } = await import("../lib/index.js");
+const { apply, probeSkillDir, installSkillDir, runArchiveProcess } = await import("../lib/index.js");
 
 let pass = 0, fail = 0;
 const ok = (label, cond, extra) => {
@@ -131,6 +131,18 @@ const b64 = (buf) => buf.toString("base64");
 const SKILL_MD = (name, desc = "测试技能") => Buffer.from(`---\nname: ${name}\ndescription: ${desc}\n---\n\n# ${name}\n用法说明\n`, "utf8");
 
 const skillsRoot = path.join(HOME, "skills");
+
+// ── 0. 解包进程不得同步阻塞宿主事件循环 ────────────────────────────────────
+{
+	let timerTicked = false;
+	const timer = setTimeout(() => { timerTicked = true; }, 20);
+	const proc = await runArchiveProcess(process.execPath, [
+		"-e",
+		"setTimeout(() => process.stdout.write('ARCHIVE_ASYNC_OK'), 120)",
+	]);
+	clearTimeout(timer);
+	ok("解包不阻塞事件循环", timerTicked && proc.stdout.includes("ARCHIVE_ASYNC_OK"), JSON.stringify(proc).slice(0, 240));
+}
 
 // ── 1. 正常安装：目录式（含资源随迁）────────────────────────────────────────
 {
@@ -309,6 +321,18 @@ const skillsRoot = path.join(HOME, "skills");
 
 	const r2 = await rpc("remove-skill", { name: "flat-skill" });
 	ok("remove-skill 删掉平铺式 .md", r2 && r2.ok === true && !fs.existsSync(path.join(skillsRoot, "flat-skill.md")), JSON.stringify(r2).slice(0, 140));
+
+	// 删除不是真删：先移进同层 .trash/（同卷 rename，原子且可人工找回）。
+	// 背景：这条路径删的是用户自己安装/编写的技能，直接 rmSync 就永久没了。
+	ok("remove-skill 把目录式技能移进 .trash/（可找回）",
+		r1 && r1.ok === true && typeof r1.value?.trash === "string" && fs.existsSync(r1.value.trash)
+		&& fs.existsSync(path.join(r1.value.trash, "SKILL.md")), JSON.stringify(r1?.value));
+	ok("remove-skill 把平铺式技能也移进 .trash/",
+		r2 && r2.ok === true && typeof r2.value?.trash === "string" && fs.existsSync(r2.value.trash)
+		&& fs.readFileSync(r2.value.trash, "utf8").includes("flat-skill"), JSON.stringify(r2?.value));
+	// 回收站不能把删掉的技能又"发现"回来
+	const after = await rpc("list", {});
+	ok("回收站不出现在技能列表里", !JSON.stringify(after?.value?.skills || []).includes(".trash"), JSON.stringify(after?.value?.skills || []).slice(0, 160));
 
 	for (const bad of ["../my-skill", "..", ".", "a/b", "A", "a_b", ""]) {
 		const r = await rpc("remove-skill", { name: bad });

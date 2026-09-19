@@ -256,6 +256,40 @@ function findLibraryShell(key, dirOverride) {
 	if (!k) return null;
 	return listLibraryShells(dirOverride).shells.find((s) => s.name === k || s.file === k || s.id === k) || null;
 }
+
+/** 覆盖写用户文件前保留的份数上限。 */
+const BACKUP_KEEP = 5;
+
+/**
+ * 覆盖写用户文件前先留一份备份，返回备份路径（没得备份时返回空串）。
+ *
+ * 为什么必须做：`self-content-set` 是直接 `writeFileSync` 到用户的 WebShell 目录，
+ * **覆盖即不可恢复**（回收站收不到覆盖）。2026-09-19 验证时一次误操作就把
+ * `jsp_antsword.jsp` 覆盖成了测试字符串，翻遍本机没有任何副本可还原，
+ * 最后只能按同目录 JDK9 孪生文件重写一份「功能等价但不是原字节」的版本。
+ * 备份放同目录 `.backups/`（目录条目不会被库列表当成马），每个文件最多留 BACKUP_KEEP 份。
+ */
+export function backupBeforeWrite(dir, name) {
+	const src = path.join(dir, name);
+	if (!existsSync(src)) return "";
+	const backupDir = path.join(dir, ".backups");
+	try {
+		mkdirSync(backupDir, { recursive: true });
+		// 时间戳必须带毫秒 + 随机尾巴：只到「秒」的话，同一秒内连续保存会生成**同名**备份，
+		// 后一次把前一次覆盖掉 —— 实测连写 7 次只剩 1 份（保留策略形同虚设）。
+		const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 17)
+			+ "-" + crypto.randomBytes(2).toString("hex");
+		const dest = path.join(backupDir, `${name}.${stamp}.bak`);
+		writeFileSync(dest, readFileSync(src));
+		const mine = readdirSync(backupDir).filter((f) => f.startsWith(name + ".")).sort();
+		for (const old of mine.slice(0, Math.max(0, mine.length - BACKUP_KEEP))) {
+			try { fsUnlink(path.join(backupDir, old)); } catch { /* 清理旧备份失败不影响本次保存 */ }
+		}
+		return dest;
+	} catch {
+		return ""; // 备份失败不阻断保存：用户此刻的意图是写入，但要如实回报没有备份
+	}
+}
 loadWsCfg(); // 模块加载即读入自有配置（tools 端点可能在 settings 层就绪前被调用）
 const MAX_BODY = 8 * 1024 * 1024;
 const MAX_READ = 4 * 1024 * 1024;
@@ -277,16 +311,20 @@ function connOrThrow(id) {
 }
 
 /** 连接（自动识别 + 登记或刷新既有）。 */
-async function connectCore(p) {
-	const spec = {
+export function connectSpec(p = {}) {
+	return {
 		url: String(p.url ?? "").trim(),
 		password: String(p.password ?? ""),
-		secretKey: String(p.secretKey ?? ""),
-		passParam: String(p.passParam ?? "pass"),
-		cmdParam: String(p.cmdParam ?? "cmd"),
+		secretKey: String(p.secretKey ?? p.secret_key ?? ""),
+		passParam: String(p.passParam ?? p.pass_param ?? "pass"),
+		cmdParam: String(p.cmdParam ?? p.cmd_param ?? "cmd"),
 		method: p.method === "get" ? "get" : "post",
 		timeoutMs: Number(p.timeoutMs) || 8000
 	};
+}
+
+async function connectCore(p) {
+	const spec = connectSpec(p);
 	if (!spec.url) throw new Error("url 不能为空");
 	const result = await detectProtocol(spec);
 	if (!result.hit) {
@@ -1054,6 +1092,10 @@ function registerSettingsLayer(ctx, web) {
 	try {
 		connection.register(ctx, "/dsh-webshell-mgr-rpc", async (endpoint, payload) => {
 			const p = payload && typeof payload === "object" ? payload : {};
+			// 连接层的失败必须是 `{ok:false, error:{code,message,details}}`。
+			// 回字符串会被客户端 parseConnectionResponse 判成 invalid server-response
+			// 并 **reject**，界面卡在"保存中/上传中"且不显示任何错误（与 knowledge-hub 同源问题）。
+			const rpcFail = (message) => ({ ok: false, error: { code: "webshell-mgr", message: String(message), details: {} } });
 			if (endpoint === "settings-get") {
 				loadWsCfg();
 				return { ok: true, value: { genDir: WS_CFG.genDir || "", effective: genBase() } };
@@ -1087,14 +1129,14 @@ function registerSettingsLayer(ctx, web) {
 				const password = (() => { const v = String(p.password ?? ""); return v !== "" ? v : crypto.randomBytes(8).toString("hex"); })();
 				const fileName = String(p.fileName ?? "").replace(/[\\/]/g, "");
 				const b64 = String(p.dataBase64 ?? "");
-				if (!fileName || !b64) return { ok: false, error: "缺少文件内容" };
-				if (b64.length > 3 * 1024 * 1024) return { ok: false, error: "文件过大（≤3MB）" };
+				if (!fileName || !b64) return rpcFail("缺少文件内容");
+				if (b64.length > 3 * 1024 * 1024) return rpcFail("文件过大（≤3MB）");
 				const buf = Buffer.from(b64, "base64");
 				const safe = ("self-" + Date.now().toString(36) + "-" + fileName.replace(/[^\w.-]+/g, "_")).slice(0, 80);
 				const dir = genBase();
 				mkdirSync(dir, { recursive: true });
 				const abs = path.join(dir, safe);
-				try { writeFileSync(abs, buf); } catch (e) { return { ok: false, error: "写入失败：" + (e && e.message) }; }
+				try { writeFileSync(abs, buf); } catch (e) { return rpcFail("写入失败：" + (e && e.message)); }
 				WS_CFG.selfShells = WS_CFG.selfShells || [];
 				const row = { id: "self-" + Date.now().toString(36), name, lang, obf, file: safe, password, createdAt: new Date().toISOString() };
 				WS_CFG.selfShells.push(row);
@@ -1112,7 +1154,7 @@ function registerSettingsLayer(ctx, web) {
 				const file = String(p.file ?? "").replace(/[\\/]/g, "");
 				let s = (WS_CFG.selfShells || []).find((x) => x.id === id || (file && x.file === file));
 				if (!s) {
-					if (!file) return { ok: false, error: "不存在" };
+					if (!file) return rpcFail("不存在");
 					const guessLang = (n) => { const l = n.toLowerCase(); if (l.includes(".jsp")) return "JSP"; if (l.includes(".aspx") || l.includes(".asmx") || l.includes(".ashx")) return "ASPX"; if (l.includes(".asp")) return "ASP"; return "PHP"; };
 					s = { id: "self-" + Date.now().toString(36), name: file.replace(/\.[^.]+$/, ""), lang: guessLang(file), obf: String(p.obf || "").trim() || "自定义", password: "", file, createdAt: new Date().toISOString() };
 					WS_CFG.selfShells = WS_CFG.selfShells || [];
@@ -1130,38 +1172,45 @@ function registerSettingsLayer(ctx, web) {
 				const file = String(p.file ?? "").replace(/[\\/]/g, "");
 				WS_CFG.selfShells = (WS_CFG.selfShells || []).filter((x) => x.id !== id && (file ? x.file !== file : true));
 				saveWsCfg();
+				let removedBackup = "";
 				if (file && p.deleteFile) {
+					// 删文件前同样先留一份：这是用户的马库，删掉就是永久没了
+					// （同目录 .backups/，复用与"编辑覆盖"一致的保留策略）。
+					removedBackup = backupBeforeWrite(genBase(), file);
 					try { fsUnlink(path.join(genBase(), file)); } catch { /* 文件不存在忽略 */ }
+					logOp(theStore(), "", "self.remove", `${file} backup=${removedBackup ? path.basename(removedBackup) : "none"}`);
 				}
-				return { ok: true };
+				return { ok: true, value: { backup: removedBackup } };
 			}
 			if (endpoint === "self-content-get") {
 				const file = String(p.file ?? "").replace(/[\\/]/g, "");
 				const rec = (WS_CFG.selfShells || []).find((x) => x.id === String(p.id ?? "") || x.file === file);
 				const name = file || (rec && rec.file) || "";
-				if (!name) return { ok: false, error: "缺 file" };
+				if (!name) return rpcFail("缺 file");
 				try {
 					const content = readFileSync(path.join(genBase(), name), "utf8");
 					return { ok: true, value: { file: name, content } };
-				} catch (e) { return { ok: false, error: "读取文件失败：" + (e && e.message) }; }
+				} catch (e) { return rpcFail("读取文件失败：" + (e && e.message)); }
 			}
 			if (endpoint === "self-content-set") {
 				const file = String(p.file ?? "").replace(/[\\/]/g, "");
 				const rec = (WS_CFG.selfShells || []).find((x) => x.id === String(p.id ?? "") || x.file === file);
 				const name = file || (rec && rec.file) || "";
-				if (!name) return { ok: false, error: "缺 file" };
+				if (!name) return rpcFail("缺 file");
 				const content = String(p.content ?? "");
-				if (!content) return { ok: false, error: "内容为空" };
+				if (!content) return rpcFail("内容为空");
+				// 覆盖前先备份：这一条路径直接写用户目录，覆盖不可恢复。
+				const backup = backupBeforeWrite(genBase(), name);
 				try { writeFileSync(path.join(genBase(), name), content, "utf8"); }
-				catch (e) { return { ok: false, error: "写入失败：" + (e && e.message) }; }
-				logOp(theStore(), "", "self.edit", `${name} (${content.length} chars)`);
-				return { ok: true, value: { file: name } };
+				catch (e) { return rpcFail("写入失败：" + (e && e.message)); }
+				logOp(theStore(), "", "self.edit", `${name} (${content.length} chars)${backup ? " backup=" + path.basename(backup) : " backup=none"}`);
+				return { ok: true, value: { file: name, backup } };
 			}
 			if (endpoint === "conn-list-plain") {
 				// 设置页管理用：返回连接含明文口令（自用 UI）；模型 manifest 仍走脱敏版
 				return { ok: true, value: { connections: listConns(theStore()).map((c) => ({ ...publicConn(c), password: c.password || "" })) } };
 			}
-			return { ok: false, error: "unknown endpoint " + endpoint };
+			return rpcFail("unknown endpoint " + endpoint);
 		}, { authority: "loopback" });
 	} catch (e) {
 		ctx.logger?.warn?.("dsh-webshell-mgr: loopback rpc failed: %s", e && e.message ? e.message : String(e));

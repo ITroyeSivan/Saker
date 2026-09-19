@@ -17,7 +17,7 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -118,9 +118,14 @@ const ok = (label, cond, extra) => {
   writeFileSync(join(target, 'marker.txt'), 'PRE-EXISTING')
 
   const probeTgz = join(fixture, 'plugins', 'dsh-probe', `dsh-external-dsh-probe-${PROBE_VERSION}.tgz`)
+  // Use a profile-relative file spec on purpose. pnpm resolves `file:` from the
+  // profile directory; the installer used to resolve it from cwd, classify the
+  // still-valid dependency as dangling, prune it, and leave the profile broken
+  // if the subsequent install failed.
+  const relativeProbeTgz = relative(profileDir, probeTgz).replace(/\\/g, '/')
   writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
     name: 'profile', private: true,
-    dependencies: { [PROBE_NAME]: 'file:' + probeTgz.replace(/\\/g, '/') },
+    dependencies: { [PROBE_NAME]: 'file:' + relativeProbeTgz },
     dsh: { profile: { bundles: [PROBE_NAME] } },
   }, null, 2) + '\n')
 
@@ -147,6 +152,8 @@ const ok = (label, cond, extra) => {
   const out = `${r.stdout || ''}${r.stderr || ''}`
 
   ok('端到端：install-all 以非零码结束（失败被上报）', r.status !== 0, `status=${r.status}`)
+  ok('端到端：有效的 profile 相对 file: 依赖不会被误判为 dangling',
+    !/pruned 1 dangling dep/.test(out), out.split('\n').filter((l) => /dangling|pruned/.test(l)).join(' | ').slice(0, 200))
   ok('端到端：确实走到了探针包的升级分支（假 CLI 对它报过 FAIL）',
     new RegExp(`FAIL\\s+dsh-probe`).test(out), out.split('\n').filter((l) => /dsh-probe|UPGRADE/.test(l)).join(' | ').slice(0, 200))
   ok('端到端：**升级失败后旧插件仍在**（这就是本次修复的核心断言）', existsSync(target), '插件目录不见了')

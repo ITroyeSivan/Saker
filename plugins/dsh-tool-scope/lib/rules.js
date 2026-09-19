@@ -53,6 +53,14 @@ export const RULES = [
     source: 'dsh-redteam-results MODES / dsh-campaign-memory·dsh-trace-vault·dsh-knowledge-hub 的 MODE_IDS',
     note: '四个插件的模式清单均为 ["pentest","code-audit","ctf-solver"]；标准模式（宿主默认预设）下它们的注入与入库都不生效',
   },
+  {
+    id: 'toolPack',
+    label: '按需工具包入口',
+    prefixes: ['tool_pack'],
+    modes: DEFAULT_MODES,
+    source: 'dsh-tool-scope/lib/packs.js —— 工具包是三个安全预设的运行期能力',
+    note: '标准模式下没有安全工具包，入口不暴露',
+  },
 ]
 
 /**

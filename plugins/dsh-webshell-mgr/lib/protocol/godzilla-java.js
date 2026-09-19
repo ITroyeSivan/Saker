@@ -12,6 +12,7 @@ import { createCipheriv, createDecipheriv } from "node:crypto";
 import { httpRequest, b64, unb64, md5hex, cookieHeaderFor, absorbCookies, clearCookies } from "./http-client.js";
 import { JAVA_PAYLOADS } from "./payloads-java.js";
 import { shapeHeaders, stripResponse } from "./profile.js";
+import { parseJsonResponse } from "./json-response.js";
 
 const inited = new Map(); // scope → boolean（dispatcher 已装入 session）
 
@@ -132,7 +133,7 @@ export async function fetchInfo(conn) {
 }
 
 export async function listDir(conn, path) {
-	return JSON.parse((await call(conn, "ls", { p: path })).toString("utf8"));
+	return parseJsonResponse(await call(conn, "ls", { p: path }), "哥斯拉 Java 目录列表");
 }
 
 export async function readFile(conn, path) {

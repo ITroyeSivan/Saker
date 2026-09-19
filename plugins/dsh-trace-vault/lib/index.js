@@ -24,7 +24,7 @@ import path from "node:path";
 import os from "node:os";
 import z from "@deepseek-ai/schemastery";
 import { defineTool } from "@deepseek-ai/dsh-tools";
-import { openStore, insertTrace, searchTraces, getTrace, listRecent, statsTraces, sessionStats, classifyOutcome, argsTextOf, resultTextOf } from "./store.js";
+import { openStore, insertTrace, beginTrace, finishTrace, heartbeatRunning, recoverStaleRunning, searchTraces, getTrace, listRecent, statsTraces, sessionStats, classifyOutcome, argsTextOf, resultTextOf } from "./store.js";
 
 const name = "dsh-trace-vault";
 const inject = ["tools", "agentPresets", "systemPrompt"];
@@ -44,8 +44,14 @@ const Config = z.object({
  *  无信号/信号未变时零 token 成本。 */
 export const ENVELOPE_TAG = "dsh-trace-vault";
 export function buildOutcomeHint(stats, { windowMinutes = 30, threshold = 2 } = {}) {
-	if (!stats || Number(stats.blocked) < threshold) return "";
-	return `<${ENVELOPE_TAG}>拦截信号：近 ${windowMinutes} 分钟 blocked ${stats.blocked} 次（403/WAF/429/验证码类）——连续受阻先换路径/降速/换 UA 再硬撞；trace_search 可检索拦截响应原文。</${ENVELOPE_TAG}>`;
+	if (!stats) return "";
+	const blocked = Number(stats.blocked) || 0;
+	const interrupted = Number(stats.interrupted) || 0;
+	if (blocked < threshold && interrupted < 1) return "";
+	const parts = [];
+	if (blocked >= threshold) parts.push(`拦截信号：blocked ${blocked} 次（403/WAF/429/验证码类）`);
+	if (interrupted > 0) parts.push(`中断信号：interrupted ${interrupted} 次——先确认任务是否需要重试`);
+	return `<${ENVELOPE_TAG}>近 ${windowMinutes} 分钟 ${parts.join("；")}。trace_search 可检索原始调用。</${ENVELOPE_TAG}>`;
 }
 
 const DB_PATH = path.join(DSH_HOME, "trace-vault", "traces.db");
@@ -104,7 +110,11 @@ export function createCapture(ctx, st, modeResolver = modeOfSession) {
 		const tool = event?.data?.name;
 		if (typeof callId !== "string" || typeof tool !== "string") return;
 		if (inflight.size >= INFLIGHT_CAP) inflight.clear();
-		inflight.set(`${sessionId}:${callId}`, { tool, args: argsTextOf(event.data.arguments), t0: Date.now() });
+		const key = `${sessionId}:${callId}`;
+		const mode = modeResolver(ctx, sessionId);
+		const entry = { tool, args: argsTextOf(event.data.arguments), t0: Date.now(), mode };
+		inflight.set(key, entry);
+		if (MODE_IDS.includes(mode)) beginTrace(st, { id: key, sessionId, mode, tool, args: entry.args });
 	};
 	const onResult = (sessionId, event) => {
 		const callId = callIdOfResult(event);
@@ -116,16 +126,16 @@ export function createCapture(ctx, st, modeResolver = modeOfSession) {
 		const mode = modeResolver(ctx, sessionId);
 		if (!MODE_IDS.includes(mode)) return; // 仅安全模式入库
 		const result = resultTextOf(event?.data?.message?.content);
-		insertTrace(st, {
+		const patch = {
 			id: key,
-			sessionId: String(sessionId ?? ""),
-			mode,
-			tool: entry.tool,
-			args: entry.args,
 			result,
 			isError: isErrorResult(event),
-			durMs: Date.now() - entry.t0
-		});
+			durMs: Date.now() - entry.t0,
+			tool: entry.tool,
+			args: entry.args,
+		};
+		if (entry.mode && MODE_IDS.includes(entry.mode)) finishTrace(st, patch);
+		else insertTrace(st, { ...patch, sessionId: String(sessionId ?? ""), mode });
 	};
 	// 人工介入画像：真人用户消息落 '(intervention)' 行（插件注入的 followup 按 id 前缀排除）
 	const onHuman = (sessionId, event) => {
@@ -138,7 +148,8 @@ export function createCapture(ctx, st, modeResolver = modeOfSession) {
 		const text = Array.isArray(msg.content) ? msg.content.map((b) => (b?.type === "text" ? String(b.text ?? "") : "")).join("") : String(msg.content ?? "");
 		insertTrace(st, { id: `${sessionId}:human:${id}`, sessionId: String(sessionId ?? ""), mode, tool: "(intervention)", args: text.slice(0, 2000), result: "", isError: false });
 	};
-	return { onCall, onResult, onHuman, inflight };
+	const heartbeat = () => heartbeatRunning(st, [...inflight.keys()]);
+	return { onCall, onResult, onHuman, inflight, heartbeat };
 }
 
 function sessionKey(subject) {
@@ -165,6 +176,17 @@ function apply(ctx, config) {
 	let capture;
 	if (cfg.capture) {
 		capture = createCapture(ctx, theStore());
+		const recovered = recoverStaleRunning(theStore(), { staleMs: 120000 });
+		if (recovered > 0) console.log(`[trace-vault] recovered ${recovered} stale running call(s) as interrupted`);
+		const heartbeat = setInterval(() => capture.heartbeat(), 30000);
+		const recover = setInterval(() => {
+			const n = recoverStaleRunning(theStore(), { staleMs: 120000 });
+			if (n > 0) console.log(`[trace-vault] marked ${n} stale running call(s) as interrupted`);
+		}, 60000);
+		ctx.effect(() => () => {
+			clearInterval(heartbeat);
+			clearInterval(recover);
+		}, "dsh-trace-vault: running heartbeat");
 		ctx.on("session/event", (subject, event) => {
 			if (event?.type === "tool/call") {
 				capture.onCall(sessionKey(subject), event);
@@ -281,7 +303,7 @@ function apply(ctx, config) {
 		},
 		output: {
 			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
-			render: (_a, v) => [{ type: "text", text: v.ok ? `会话画像：调用 ${v.stats.calls} 次（ok ${v.stats.ok} / blocked ${v.stats.blocked} / error ${v.stats.error}，成功率 ${v.stats.successRate ?? "-"}%）｜自救信号 ${v.stats.selfRecovered ? "有（blocked 后推进到 ok）" : "无"}｜人工介入 ${v.stats.interventions} 次${v.stats.blockedTools.length ? `｜受阻工具 top：${v.stats.blockedTools.join("、")}` : ""}` : `统计失败：${v.error}` }]
+			render: (_a, v) => [{ type: "text", text: v.ok ? `会话画像：调用 ${v.stats.calls} 次（ok ${v.stats.ok} / blocked ${v.stats.blocked} / error ${v.stats.error} / interrupted ${v.stats.interrupted} / running ${v.stats.running}，成功率 ${v.stats.successRate ?? "-"}%）｜自救信号 ${v.stats.selfRecovered ? "有（blocked 后推进到 ok）" : "无"}｜人工介入 ${v.stats.interventions} 次${v.stats.blockedTools.length ? `｜受阻工具 top：${v.stats.blockedTools.join("、")}` : ""}` : `统计失败：${v.error}` }]
 		},
 		execute(args, exec) {
 			const session = sessionOfExec(ctx, exec);

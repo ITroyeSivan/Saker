@@ -22,6 +22,8 @@ export const MAX_CANDIDATES = 40;
 const DUP_MIN = 8;
 /** 准则文本可能落在的字段名（防御性：读的是别的插件的文件，字段名以对方为准）。 */
 const CRITERION_KEYS = ["text", "desc", "detail", "summary", "criterion"];
+/** 候选清单条数行：`- 候选：N 条`（renderCandidates 产出）。 */
+const CANDIDATE_COUNT_RE = /^-\s*候选：(\d+)\s*条/m;
 
 function clean(value, max) {
 	return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
@@ -58,6 +60,20 @@ export function readLedger(cwd) {
 			pending: Array.isArray(state.pending) ? state.pending.map((line) => clean(line, 200)).filter(Boolean) : []
 		};
 	} catch { return null; }
+}
+
+/**
+ * 读「本工作区还有几条未入库候选」。装配期每轮都会问一次：候选清单只有几十行，
+ * 直接读比做缓存更安全——缓存按 mtime+size 判失效时，"同尺寸改写"会读到旧条数，
+ * 而这里的错误代价是给模型一条假提示。读不到 / 文件被删 / 格式变了都按 0 处理。
+ */
+export function readCandidateCount(cwd) {
+	if (typeof cwd !== "string" || cwd === "") return 0;
+	const file = path.join(cwd, OUT_FILE);
+	try {
+		const match = CANDIDATE_COUNT_RE.exec(fs.readFileSync(file, "utf8"));
+		return match ? Math.min(Number(match[1]) || 0, MAX_CANDIDATES) : 0;
+	} catch { return 0; }
 }
 
 /** 抽候选（纯函数）。existing = 已有记忆 [{id,title,content}]，仅用于判重标注。 */

@@ -5,4 +5,4 @@ export declare const name = "dsh-mcp-studio";
 export declare const inject: string[];
 /** Settings namespace owned by this plugin (client and Host spell the same value). */
 export declare const STUDIO_SETTINGS_NAMESPACE = "mcp-studio";
-export declare function apply(ctx: Context, config: StudioSection): void;
+export declare function apply(ctx: Context, config: StudioSection): Promise<void>;

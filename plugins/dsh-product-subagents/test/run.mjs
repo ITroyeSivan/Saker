@@ -2,7 +2,7 @@
 // faked end to end (spawnFn injectable), so nothing here talks to a model.
 import { EventEmitter } from "node:events";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { normalizePrompt, buildClaudeArgs, buildCodexArgs, runCli, createProviders, Config } from "../lib/index.js";
 
@@ -268,7 +268,8 @@ const fakeSpawn = (script) => (bin, args, opts) => {
 	runHandle = await providers.find((p) => p.name === "claude-code").start({ prompt: "x", signal: null });
 	const r = await runHandle.result;
 	ok("provider argv 含 stream-json 标志", seenArgs.includes("--output-format") && seenArgs.includes("stream-json"));
-	ok("provider traceFile 落集中目录", runHandle.traceFile.includes(path.join(".dsh", "product-subagents", "traces")) && runHandle.traceFile.endsWith(".ndjson"));
+	const expectedTraceRoot = process.env.DSH_HOME || path.join(homedir(), ".dsh");
+	ok("provider traceFile 落集中目录", runHandle.traceFile.includes(path.join(expectedTraceRoot, "product-subagents", "traces")) && runHandle.traceFile.endsWith(".ndjson"));
 	ok("provider 终稿自流提取", r.output[0].text.startsWith("via provider"));
 	ok("streamTrace=false 关闭留痕", (() => {
 		const p2 = createProviders(Config({ claudeCode: { bin: "claude", streamTrace: false } }), child);

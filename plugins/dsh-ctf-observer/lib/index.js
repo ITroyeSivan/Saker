@@ -44,7 +44,7 @@ const MODE_ID = "ctf-solver";
 // BreachWeave 的 Manager 面：单会话里由模型自己当调度者（自派单 + 自纠偏 + 读快照）。
 // Observer 面：nudge 同时落 Observer Notes；steer 由本插件在轮次边界投递并消费。
 import { defineTool } from "@deepseek-ai/dsh-tools";
-import { readBoard, upsertChallenge, dispatch as boardDispatch, steer as boardSteer, addNote, peekSteers, markSteersConsumed, snapshotText, BOARD_FILE } from "./board.js";
+import { readBoard, upsertChallenge, dispatch as boardDispatch, updateDispatch as boardUpdateDispatch, steer as boardSteer, addNote, peekSteers, markSteersConsumed, snapshotText, BOARD_FILE } from "./board.js";
 
 const inject = ["agentPresets", "tools"];
 
@@ -334,9 +334,11 @@ function apply(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "ctf_dispatch",
-		description: "派一条攻击路线（登记「谁在打哪条路」）。多路并行探索时必须先派单再动手：看板上的 dispatches 是防撞车的唯一依据——同一题的两条路若怀疑重叠，先 ctf_state 看一眼。path 写清具体路线（如「LFI 读 /proc/self/environ 找源码」），不要只写「试试文件包含」。",
+		description: "新建或更新一条攻击路线派单。没有 id 时新建：多路并行探索必须先派单再动手；有 id 时更新已有派单的 status=done/stale 与备注，避免旧路线永久占位。path 写清具体路线（如「LFI 读 /proc/self/environ 找源码」）。",
 		parameters: {
-			path: { type: "string", required: true, description: "攻击路线（具体到手段与目标点）" },
+			id: { type: "string", description: "更新已有派单时的 dN id" },
+			status: { type: "string", enum: ["running", "done", "stale"], description: "更新派单状态" },
+			path: { type: "string", description: "攻击路线（新建必填；更新可省略）" },
 			challengeId: { type: "string", description: "题目标识（题名或 cN id；可省略=跨题通用手段）" },
 			owner: { type: "string", description: "执行者标注（如 solver-1 / 子代理名）" },
 			note: { type: "string", description: "备注" },
@@ -349,6 +351,12 @@ function apply(ctx) {
 			const ws = toolWs(exec);
 			if (!ws) return Promise.resolve({ ok: false, error: "仅 CTF 模式会话内可用" });
 			try {
+				if (args.id) {
+					const b = boardUpdateDispatch(ws, args);
+					const d = b.dispatches.find((x) => x.id === String(args.id));
+					return Promise.resolve({ ok: true, id: d.id, path: d.path, status: d.status });
+				}
+				if (!args.path) return Promise.resolve({ ok: false, error: "新建派单需要 path" });
 				const b = boardDispatch(ws, args);
 				const d = b.dispatches[b.dispatches.length - 1];
 				return Promise.resolve({ ok: true, id: d.id, path: d.path });

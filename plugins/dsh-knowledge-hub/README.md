@@ -13,15 +13,19 @@ Saker 的知识库中心：随包 refs、用户积累、自动同步知识包与
 ## 安装
 
 ```powershell
-dsh plugin --profile web add "file:./plugins/dsh-knowledge-hub/dsh-external-dsh-knowledge-hub-0.2.0.tgz"
+dsh plugin --profile web add "file:./plugins/dsh-knowledge-hub/dsh-external-dsh-knowledge-hub-0.3.18.tgz"
 ```
 
 设置页出现「知识库」tab。
 
 ## 功能
 
-- 三层目录树：随包手册（只读预览）/ 用户积累（可写）/ 导入知识源（可写）。
+- 源码标签页 + 独立滚动：PATT / 随包手册 / 用户积累 / 导入知识源一次只展开一层，全局检索结果直接替代目录区，避免四棵树纵向堆叠。
+- 来源内筛选：每个目录区可按键筛选当前来源；目录未展开时也会用来源限定的检索索引跨目录找文件，面对 PATT 的数十个分类不再逐项滚动或先展开碰运气。
+- 阅读状态保持：打开文章只隐藏目录区，不卸载；返回后保留分类展开和滚动位置。
+- 精读结果带磁盘绝对路径：`knowledge_read` 返回 `root/absPath`，证据引用不需要模型再扫文件系统定位。
 - 文件预览、编辑（写用户层）、新建、删除（仅用户/导入层，包内永不写）。
+- 阅读体验：打开文章后占满内容区；包内文档默认 Markdown 预览，可一键切源码，不再挤在窄列里看原始文本。
 - Git 导入：URL + 名称 → 克隆到 `imports/<name>`。
 - 知识包：`packs/knowledge-packs.json` 定义来源、许可证、分支、稀疏路径、适用模式和优先级；支持 `DSH_HOME/refs/packs/*.json` 用户覆盖或扩展。
 - 自动同步：启动后后台同步推荐包，默认 7 天刷新；`DSH_KNOWLEDGE_AUTOSYNC=0` 可关闭。
@@ -41,6 +45,40 @@ dsh plugin --profile web add "file:./plugins/dsh-knowledge-hub/dsh-external-dsh-
 同步器只拉稀疏文本子集，例如 HackTricks 只拉 `src/**/*.md`，Sigma 只拉规则 YAML；大图片、靶场二进制和无关源码不进入知识库。
 
 ## 安全
+
+### 混合语种检索（0.3.0）
+
+中文提问 + 英文术语混合是最常见的用法（"Sigma 检测规则 powershell 编码命令"），
+但旧实现只靠一条 BM25 排序，CJK bigram 会把中文文档顶上来、把对症的英文文档挤掉
+（实测该查询只命中一篇无关中文文档，`sigma-rules/...powershell_base64_encoded_*.yml`
+排在第 9）。0.3.0 做了三件确定性的事（不引入向量库、不调模型）：
+
+1. **术语替换**：中文安全术语按固定对照表替换成英文说法（编码命令→encoded command、
+   检测规则→detection rule、计划任务→scheduled task…），替换后的整句再检索一遍（命中 -1.5）。
+2. **拉丁术语单独成计划**：混合查询额外跑一遍"只含拉丁术语"的 FTS 计划，
+   让 powershell / cve-xxxx 这类高精度词有自己的进榜机会（命中 -1.5）。
+3. **覆盖度 rerank**：按"命中查询概念数 × 3（封顶 +12）"重排同一个候选集——
+   命中 powershell/encoded/base64/rule 四个概念的文档会超过只命中 rule 的元数据噪声。
+
+评测（真实知识库，40 条人工核对用例 + 5 条负样例）：
+Top-1 **95.0%** / Top-5 **100%** / MRR **0.968** / 负样例标记 4/5；
+平均耗时 **~35ms**（见下）。
+
+### 顺带修掉的性能坑（0.3.1）
+
+加了替换检索与额外 FTS 计划后平均耗时一度从 ~230ms 涨到 ~375ms。用 CPU profile 一查，
+大头根本不在检索：`ensureKnowledgeIndex()` **每次检索都会调一次 `status()`**，
+而旧实现每次都 `SELECT COUNT(*)` 整表（8.4 万 chunk，实测 ~140ms）——
+等于每次知识检索都在做全表计数。计数只在重建/失效时变，改成进程内缓存
+（`invalidate()` 清空、`status({ counts: true })` 强制刷新）后：
+平均耗时 **375ms → 34.9ms**（比加检索改动前的 230ms 还快 6.6 倍），
+Top-1/Top-5/MRR/负样例指标一字未变。
+
+知识包的 clone / pull 属于**基础设施出站**，会先过统一出站策略
+（`$DSH_HOME/saker-egress/policy.json`，实现见根包 `dsh-saker/lib/egress.js`）：
+`frozen` 档下 `syncPack` 直接返回 `mode: "blocked"` 并且**一次 git 都不跑**；
+`allowlist` 档只放白名单里的仓库主机。本地路径仓库不算出站，不受影响。
+本插件自己的 `auto / manual / frozen` 同步模式照旧生效，两者是叠加关系。
 
 - 所有文件写操作受目录白名单约束（仅用户/导入层），相对路径越界直接拒绝。
 - RPC 走宿主 loopback 通道（`{ authority: 'loopback' }`），不暴露公网。

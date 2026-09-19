@@ -15,7 +15,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import { spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { randomBytes } from 'node:crypto'
@@ -198,7 +198,79 @@ function resolveTar() {
   return 'tar'
 }
 
-function unpackToTemp(archivePath, dest, isZip) {
+function cappedCollector(limit) {
+  const chunks = []
+  let size = 0
+  let total = 0
+  let overflow = false
+  return {
+    push(chunk) {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      total += bytes.length
+      if (size < limit) {
+        const room = limit - size
+        const kept = bytes.length > room ? bytes.subarray(0, room) : bytes
+        if (kept.length > 0) {
+          chunks.push(kept)
+          size += kept.length
+        }
+      }
+      if (total > limit) overflow = true
+    },
+    value() { return Buffer.concat(chunks, size) },
+    overflowed() { return overflow },
+  }
+}
+
+/** Async archive helper so a large upload cannot freeze the host event loop. */
+export function runArchiveProcess(bin, args, { timeoutMs = 60_000, maxBuffer = 4 * 1024 * 1024 } = {}) {
+  return new Promise((resolve) => {
+    let settled = false
+    let timedOut = false
+    const stdout = cappedCollector(maxBuffer)
+    const stderr = cappedCollector(maxBuffer)
+    let child
+    try {
+      child = spawn(bin, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    } catch (error) {
+      resolve({ status: null, stdout: '', stderr: '', error })
+      return
+    }
+    const timer = setTimeout(() => {
+      timedOut = true
+      try { child.kill() } catch { /* process may already be gone */ }
+    }, timeoutMs)
+    const finish = (result) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(result)
+    }
+    child.stdout?.on('data', (chunk) => {
+      stdout.push(chunk)
+      if (stdout.overflowed()) {
+        try { child.kill() } catch { /* already gone */ }
+      }
+    })
+    child.stderr?.on('data', (chunk) => {
+      stderr.push(chunk)
+      if (stderr.overflowed()) {
+        try { child.kill() } catch { /* already gone */ }
+      }
+    })
+    child.on('error', (error) => finish({ status: null, stdout: stdout.value().toString('utf8'), stderr: stderr.value().toString('utf8'), error }))
+    child.on('close', (status) => {
+      const error = timedOut
+        ? Object.assign(new Error('ETIMEDOUT: archive extraction exceeded its time limit'), { code: 'ETIMEDOUT' })
+        : stdout.overflowed() || stderr.overflowed()
+          ? Object.assign(new Error('ENOBUFS: archive extraction output exceeded the capture limit'), { code: 'ENOBUFS' })
+          : undefined
+      finish({ status, stdout: stdout.value().toString('utf8'), stderr: stderr.value().toString('utf8'), error })
+    })
+  })
+}
+
+async function unpackToTemp(archivePath, dest, isZip) {
   const ap = archivePath.replace(/\\/g, '/')
   const dp = dest.replace(/\\/g, '/')
   if (isZip) {
@@ -207,18 +279,18 @@ function unpackToTemp(archivePath, dest, isZip) {
         'Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null',
         `[System.IO.Compression.ZipFile]::ExtractToDirectory('${ap.replace(/'/g, "''")}', '${dp.replace(/'/g, "''")}')`,
       ].join('; ')
-      const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { encoding: 'utf8', timeout: 60_000 })
+      const r = await runArchiveProcess('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps])
       if (r.error) throw new Error('zip extract failed: ' + r.error.message)
       if (r.status !== 0) throw new Error('zip extract failed: ' + (r.stderr || r.stdout || '').slice(0, 300))
       return
     }
-    const r = spawnSync('unzip', ['-q', '-o', ap, '-d', dp], { encoding: 'utf8', timeout: 60_000 })
+    const r = await runArchiveProcess('unzip', ['-q', '-o', ap, '-d', dp])
     if (r.status !== 0) throw new Error('unzip failed: ' + (r.stderr || r.stdout || '').slice(0, 300))
     return
   }
   // tgz / tar.gz：System32 bsdtar 优先（原生支持 Windows 路径）
   const tarBin = resolveTar()
-  const r = spawnSync(tarBin, ['-xzf', ap, '-C', dp], { encoding: 'utf8', timeout: 60_000 })
+  const r = await runArchiveProcess(tarBin, ['-xzf', ap, '-C', dp])
   if (r.error) throw new Error('tar extract failed: ' + r.error.message)
   if (r.status !== 0) throw new Error('tar extract failed: ' + (r.stderr || r.stdout || '').slice(0, 300))
 }
@@ -305,6 +377,30 @@ export function installSkillDir(tmpRoot, userRoot) {
 function ok(value) { return { ok: true, value } }
 function failure(message, code = 'skill-browse') { return { ok: false, error: { code, message: String(message), details: {} } } }
 
+/**
+ * 删除用户技能前先移进同层 `.trash/`，返回落点（找不到源文件时返回空串）。
+ *
+ * 为什么：`remove-skill` 删的是**用户自己安装/编写的技能**，直接 rmSync 就永久没了。
+ * 同卷 rename 是原子的、几乎零成本，且可人工找回；`.trash` 以点开头，
+ * 技能发现（readdir 只认目录/<name>/SKILL.md 与顶层 .md）不会把它当成技能。
+ * 只留最近 50 条，避免删多了无限涨。
+ */
+function moveToTrash(root, target) {
+  if (!fs.existsSync(target)) return ''
+  const trashDir = path.join(root, '.trash')
+  fs.mkdirSync(trashDir, { recursive: true })
+  const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 17) + '-' + Math.random().toString(36).slice(2, 8)
+  const dest = path.join(trashDir, `${path.basename(target)}.${stamp}`)
+  fs.renameSync(target, dest)
+  try {
+    const kept = fs.readdirSync(trashDir).sort()
+    for (const old of kept.slice(0, Math.max(0, kept.length - 50))) {
+      fs.rmSync(path.join(trashDir, old), { recursive: true, force: true })
+    }
+  } catch { /* 清理旧回收项失败不影响本次删除 */ }
+  return dest
+}
+
 /** 随包技能名集合（shared + 全部 preset）——这些名字优先级高于用户层，用户同名上传会被遮蔽，直接拒绝。 */
 function bundledSkillNames() {
   const names = new Set()
@@ -361,7 +457,7 @@ export function apply(ctx, config = {}) {
         fs.mkdirSync(extracted, { recursive: true })
         archivePath = path.join(session, 'archive' + (isZip ? '.zip' : '.tgz'))
         fs.writeFileSync(archivePath, Buffer.from(p.dataBase64, 'base64'))
-        unpackToTemp(archivePath, extracted, isZip)
+        await unpackToTemp(archivePath, extracted, isZip)
         // 先只读探测，撞随包名（shared/preset rank 更高必遮蔽）即拒绝
         let probe
         try { probe = probeSkillDir(extracted) } catch (err) { return failure(err && err.message ? err.message : String(err)) }
@@ -387,9 +483,9 @@ export function apply(ctx, config = {}) {
         if (!fs.existsSync(flat) || !readSkillMd(flat) || readSkillMd(flat).name !== name) {
           return failure('未找到用户技能 ' + name)
         }
-        try { fs.unlinkSync(flat); return ok({ removed: name }) } catch (err) { return failure(err.message) }
+        try { const trash = moveToTrash(root, flat); return ok({ removed: name, trash }) } catch (err) { return failure(err.message) }
       }
-      try { fs.rmSync(target, { recursive: true, force: true }); return ok({ removed: name }) } catch (err) { return failure(err.message) }
+      try { const trash = moveToTrash(root, target); return ok({ removed: name, trash }) } catch (err) { return failure(err.message) }
     }
     return failure('unknown endpoint: ' + endpoint)
   }, { authority: 'loopback' })

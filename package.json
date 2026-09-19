@@ -1,12 +1,14 @@
 {
   "name": "dsh-saker",
-  "version": "0.3.2",
+  "version": "0.3.9",
   "description": "Saker 模式包 — 基于 DeepSeek Harness 的攻防平台：渗透测试 / 代码审计 / CTF 解题三种专业模式（含领域知识库、技能 playbook、协作子代理），自包含 bundle，随包只读注册、不污染 DSH_HOME。",
   "type": "module",
   "main": "./lib/preset-root.js",
   "exports": {
     ".": "./lib/preset-root.js",
     "./preset-root": "./lib/preset-root.js",
+    "./egress": "./lib/egress.js",
+    "./report-drafts": "./lib/report-drafts.mjs",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },

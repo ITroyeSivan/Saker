@@ -45,6 +45,46 @@ profiles/web/package.json：dependencies 加 `"@dsh-external/dsh-stage-gate": "l
 `dsh.profile.bundles` 加 `"@dsh-external/dsh-stage-gate"`，然后 profiles/web 下 `pnpm install`，
 重启 dsh web 后 `stage_gate` / `gates_list` 对全部预设可见。
 
+## 项目工作台（1.7.0）
+
+会话标签页「项目工作台」按**工作区**只读展示：目标契约、准则收口进度、意图/任务状态
+（含结果冲突 `⚠` 与 `interrupted`）、产物索引（证据行 / 扫描待处置 / 最近门禁 / `reports/`）
+与需要处理的 attention 清单。
+
+- 服务端：`lib/project-snapshot.mjs` 只读本工作区文件（**不读别的插件 SQLite**）；
+  `lib/project-channel.mjs` 自注册路由 `/dsh-stage-gate-project`，
+  同源信任栅栏 + CSRF，端点 `status`（只接受绝对路径且存在的工作区）。
+- 客户端：`lib/client.js` 注册 `conversation.view`。注意必须
+  `ctx.slots.inject("conversation.view", () => ctx.slots.register(...))`——
+  直接 `register` 不会出现在标签栏（实测）。
+- 与其它标签页的分工：finding 台账在「redteam 成果」，跨会话记忆在「战役记忆」，
+  覆盖矩阵在「AttackAtlas」；本页只管项目契约与执行状态。
+
 ## 测试
 
 `node test/run.mjs`：纯函数 runGate/listGates 的 fixture 测试（含通过/失败/缺 file/未知门/审计日志写入）。
+## 执行任务状态
+
+子代理结果回收（1.6.2）：`scanner`/`semgrep` 这类长工具由 `runTrackedTask` 自动收口；
+`subagent` 家族改为按宿主生命周期回收——`subagent/start` 把唯一匹配的 queued 任务转
+`running`，`subagent/end` 按 `stopReason` 收进 `succeeded`（写入子代理自己的最终输出）/
+`failed` / `interrupted`。绑定规则与长工具一致：同 owner 别名 + 同 session 且候选唯一
+才动，多候选一律交给模型自己收口。
+
+结果冲突只记不覆盖（1.6.3）：终态任务再收到**不同**结果时写 `task.conflicts[]`
+（最多留最近 5 条），**不改已落库的终态**；同结果重复上报按幂等处理（`updatedAt` 也不动）。
+`subagent/start` 时记 `runId→taskId`，`subagent/end` 按 runId 精确回收，
+并发同 provider 的子代理也能对上号。冲突会出现在项目工作台的 `任务结果冲突` attention 里。
+
+> 实现注意：`subagent/start|end` 是**作用域事件**，监听器只拿得到 `info`、拿不到 parent，
+> 所以必须挂 `agent/created` → `agent.ctx.on(...)` 把 agent 闭包进作用域监听；
+> 另外原生 `subagent` 是异步派发，`tools/result` 只代表"已启动"，不能拿它收口。
+
+`operation_intent` 可带 `owner` / `max_attempts`，将方向登记为可执行任务。
+`operation_task` 负责 `start / heartbeat / progress / succeed / fail / cancel / retry / interrupt`
+状态流转；长时间无心跳的 running 任务会在下一次状态写入时转 `interrupted`。
+`operation_task(action=claim)` 可在共享 workspace 里原子领取最老的 queued 任务，
+供多个内部子代理避免重复执行。
+长任务工具（`nuclei_scan` / `httpx_probe` / `ffuf_fuzz` / 注册表扫描器 / `semgrep_scan`）
+会按 `owner` 自动认领唯一 queued 任务，在工具执行体内完成
+`running → succeeded/failed`，不要求模型在调用前后手动补两条状态操作。

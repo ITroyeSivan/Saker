@@ -249,7 +249,8 @@ export function verifyMessage(finding) {
 			"- 复核推翻原结论 → 如实更新 description 与验证记录，不删行。"].join("\n")
 		: ["请按本模式验证纪律复核（渗透模式=对照三件套：基线/差分/marker 逐字回显），复核后调 redteam_finding_update 回写 status / verifyNote / secondRating+secondRatingNote（首次转 verified 须成对给齐，缺一被拒）：",
 			"- verified=验证完成且真实可再复现；",
-			"- 验证未完成或环境性失败（WAF 拦截/目标不可达/超时）→ 保持 pending，不得因此判 false-positive；",
+			"- suspect=疑似未定论（静态线索/侧信道现象成立，但影响链未闭环或复核只能部分复现）——合法中间态，报告按未验证项处理；",
+			"- 验证未完成或环境性失败（WAF 拦截/目标不可达/超时）→ 保持 pending，不得因此判 suspect/false-positive；",
 			"- false-positive=验证后确认漏洞不存在或误判；",
 			"- fixed=仅当此前已 verified 真实存在、用户修复后本次复测不成功才可标记（须有本次复测记录）。"].join("\n");
 	lines.push(statusGuide);
@@ -464,7 +465,7 @@ function apply(ctx) {
 			identity: { type: "string", description: "利用身份（云）" },
 			permission: { type: "string", description: "权限（云）" },
 			resource: { type: "string", description: "目标资源（云）" },
-			status: { type: "string", enum: STATUSES, description: "默认 pending；终态规则见 finding-fields.md" },
+			status: { type: "string", enum: STATUSES, description: "默认 pending；suspect=疑似未定论；终态规则见 finding-fields.md" },
 			evidenceLevel: { type: "string", enum: EVIDENCE_LEVELS, description: "impact / confirmed / partial / unknown；语义见 finding-fields.md" },
 			auditMode: { type: "string", enum: ["static", "dynamic"], description: "代码审计必填：static=静态，dynamic=动态复现成功" }
 		},

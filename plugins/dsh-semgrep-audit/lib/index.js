@@ -18,8 +18,21 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { defineTool } from "@deepseek-ai/dsh-tools";
+
+function sessionIdOf(exec) {
+	return String(exec?.agent?.session?.id ?? exec?.agent?.id ?? "");
+}
+
+/** Optional stage-gate bridge; standalone semgrep use is unaffected. */
+async function runWithTaskTracking(workspace, toolName, exec, run) {
+	let api;
+	try { api = await import("@dsh-external/dsh-stage-gate"); } catch { return { value: await run(), taskId: "" }; }
+	if (typeof api?.runTrackedTask !== "function") return { value: await run(), taskId: "" };
+	return api.runTrackedTask(workspace, { sessionId: sessionIdOf(exec), toolName }, run);
+}
 
 const BIN_HINT = "本机未装 semgrep——三级兜底：①已连接 MCP（如 kali MCP 的 semgrep_scan，只替引擎不替规则集，命中面收窄如实标注）；②征得用户批准后安装（pip install semgrep——安装请求制，本工具绝不自动装）；③规则降级章通用模式+脚本。";
 const IS_WIN = process.platform === "win32";
@@ -48,6 +61,56 @@ export function hasBin(bin) {
 			? spawnSync("where", [name], { stdio: "ignore", env: { ...process.env, PATHEXT: process.env.PATHEXT || WIN_PATHEXT } }).status === 0
 			: spawnSync("/bin/sh", ["-c", `command -v -- ${name} >/dev/null 2>&1`]).status === 0;
 	} catch { return false; }
+}
+
+/**
+ * sec-config owns the operator's tool catalog. Semgrep must use the same
+ * configured path convention as scanner-tools; otherwise a local venv or
+ * non-PATH install is reported as missing even though the UI says it exists.
+ */
+export function configuredSemgrepBin(section) {
+	if (!section || typeof section !== "object") return "";
+	const hidden = new Set(Array.isArray(section.hiddenTools)
+		? section.hiddenTools.map((key) => String(key).toLowerCase())
+		: []);
+	if (hidden.has("semgrep")) return "";
+	const read = (value) => typeof value === "string" ? value.trim() : "";
+	if (Array.isArray(section.entries)) {
+		for (const entry of section.entries) {
+			if (!entry || typeof entry !== "object") continue;
+			if (String(entry.key || "").toLowerCase() !== "semgrep") continue;
+			const value = read(entry.path);
+			if (value) return value;
+		}
+	}
+	if (section.tools && typeof section.tools === "object") {
+		for (const [key, value] of Object.entries(section.tools)) {
+			if (String(key).toLowerCase() !== "semgrep") continue;
+			const pathValue = read(value);
+			if (pathValue) return pathValue;
+		}
+	}
+	return "";
+}
+
+function resolveConfiguredSemgrepPath(value) {
+	const raw = String(value || "").trim();
+	if (!raw || (!raw.includes("/") && !raw.includes("\\"))) return raw;
+	try {
+		if (fs.statSync(raw).isFile()) return raw;
+		if (fs.statSync(raw).isDirectory()) {
+			const names = IS_WIN ? ["semgrep.exe", "semgrep.cmd", "semgrep.bat", "semgrep"] : ["semgrep"];
+			for (const name of names) {
+				const candidate = path.join(raw, name);
+				try { if (fs.statSync(candidate).isFile()) return candidate; } catch { /* try next */ }
+			}
+		}
+	} catch { /* configured path may be a command name or stale path */ }
+	return raw;
+}
+
+export function resolveSemgrepBin(section) {
+	return resolveConfiguredSemgrepPath(configuredSemgrepBin(section)) || "semgrep";
 }
 
 /** 定位 code-audit refs/（三层规则集随预设分发）。候选按序探测，供测试注入。 */
@@ -124,6 +187,84 @@ export function parseSemgrepJson(raw, cap = 200) {
 
 function ensureDirs(workspace) {
 	fs.mkdirSync(path.join(workspace, "artifacts", "scans"), { recursive: true });
+}
+
+function cappedCollector(limit) {
+	const chunks = [];
+	let size = 0;
+	let total = 0;
+	let overflow = false;
+	return {
+		push(chunk) {
+			const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+			total += bytes.length;
+			if (size < limit) {
+				const room = limit - size;
+				const kept = bytes.length > room ? bytes.subarray(0, room) : bytes;
+				if (kept.length > 0) {
+					chunks.push(kept);
+					size += kept.length;
+				}
+			}
+			if (total > limit) overflow = true;
+		},
+		value() { return Buffer.concat(chunks, size); },
+		overflowed() { return overflow; },
+	};
+}
+
+/** Run semgrep asynchronously so a long code scan cannot freeze the dsh host. */
+export function runSemgrepProcess(bin, args, { timeoutMs = 600_000, maxBuffer = 64 * 1024 * 1024 } = {}) {
+	return new Promise((resolve) => {
+		let settled = false;
+		let timedOut = false;
+		const stdout = cappedCollector(maxBuffer);
+		const stderr = cappedCollector(maxBuffer);
+		let child;
+		try {
+			child = spawn(bin, args, {
+				windowsHide: true,
+				stdio: ["ignore", "pipe", "pipe"],
+				// Semgrep uses Python pathlib defaults when reading bundled UTF-8 rule
+				// files. On zh-CN Windows that is GBK and crashes on non-ASCII rules.
+				env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
+			});
+		} catch (error) {
+			resolve({ status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0), error });
+			return;
+		}
+		const timer = setTimeout(() => {
+			timedOut = true;
+			try { child.kill(); } catch { /* process may already be gone */ }
+		}, timeoutMs);
+		const finish = (result) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			resolve(result);
+		};
+		child.stdout?.on("data", (chunk) => {
+			stdout.push(chunk);
+			if (stdout.overflowed()) {
+				try { child.kill(); } catch { /* already gone */ }
+			}
+		});
+		child.stderr?.on("data", (chunk) => {
+			stderr.push(chunk);
+			if (stderr.overflowed()) {
+				try { child.kill(); } catch { /* already gone */ }
+			}
+		});
+		child.on("error", (error) => finish({ status: null, stdout: stdout.value(), stderr: stderr.value(), error }));
+		child.on("close", (status) => {
+			const error = timedOut
+				? Object.assign(new Error("ETIMEDOUT: semgrep exceeded its time limit"), { code: "ETIMEDOUT" })
+				: stdout.overflowed() || stderr.overflowed()
+					? Object.assign(new Error("ENOBUFS: semgrep output exceeded the capture limit"), { code: "ENOBUFS" })
+					: undefined;
+			finish({ status, stdout: stdout.value(), stderr: stderr.value(), error });
+		});
+	});
 }
 
 /**
@@ -213,9 +354,9 @@ export function appendReconcile(fsMod, workspace, rows) {
 }
 
 /** 运行核心（spawn/fs/二进制检测均可注入供测试）。 */
-export function runSemgrep({ workspace, target, layer = "builtin-java", rulesPath, extraArgs, spawnFn, fsMod, refsCandidates, cap, hasBinFn }) {
+export async function runSemgrep({ workspace, target, layer = "builtin-java", rulesPath, extraArgs, spawnFn, fsMod, refsCandidates, cap, hasBinFn, bin = "semgrep" }) {
 	const fsx = fsMod ?? fs;
-	if (!(hasBinFn ?? hasBin)("semgrep")) return { ok: false, error: BIN_HINT };
+	if (!(hasBinFn ?? hasBin)(bin)) return { ok: false, error: BIN_HINT };
 	const refsDir = findRefsDir(refsCandidates);
 	if (layer !== "custom" && !refsDir) return { ok: false, error: "未定位到 code-audit refs/（三层规则集随预设分发）——请用 layer=custom + rules_path 指定规则路径，或检查预设部署布局" };
 	if (layer === "custom" && !rulesPath) return { ok: false, error: "layer=custom 必填 rules_path（规则文件或目录）" };
@@ -225,9 +366,14 @@ export function runSemgrep({ workspace, target, layer = "builtin-java", rulesPat
 	const full = [...args, ...(extraArgs ?? [])];
 	const cmdStr = `semgrep ${full.join(" ")}`;
 	ensureDirs(workspace);
-	const ts = new Date().toISOString().replace(/[-:T.]/g, "").slice(0, 14);
+	const ts = new Date().toISOString().replace(/[-:.]/g, "").slice(0, 17) + "-" + randomBytes(6).toString("hex");
 	const outFile = path.join(workspace, "artifacts", "scans", `semgrep-${ts}.json`);
-	const proc = (spawnFn ?? ((bin, a) => spawnSync(bin, a, { timeout: 600_000, maxBuffer: 64 * 1024 * 1024 })))("semgrep", full);
+	let proc;
+	try {
+		proc = spawnFn ? await spawnFn(bin, full) : await runSemgrepProcess(bin, full);
+	} catch (error) {
+		return { ok: false, error: `执行失败：${error && error.message ? error.message : String(error)}` };
+	}
 	if (proc.error) return { ok: false, error: `执行失败：${proc.error.message}` };
 	const parsed = parseSemgrepJson(proc.stdout ? proc.stdout.toString() : "", cap);
 	if (!parsed.ok) return { ok: false, error: parsed.error };
@@ -239,7 +385,7 @@ export function runSemgrep({ workspace, target, layer = "builtin-java", rulesPat
 }
 
 const name = "semgrep-audit";
-const inject = ["tools"];
+const inject = ["tools", "settings"];
 
 function apply(ctx) {
 	ctx.tools.register(defineTool({
@@ -255,8 +401,14 @@ function apply(ctx) {
 			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
 			render: (_a, v) => [{ type: "text", text: v.ok ? `semgrep：${v.summaryText ?? ""}（证据 ${v.evidenceId}）` : `semgrep 拒绝/失败：${v.error}` }]
 		},
-		execute(args) {
-			return Promise.resolve(runSemgrep({ workspace: path.resolve(args.workspace), target: path.resolve(args.target), layer: args.layer, rulesPath: args.rules_path }));
+		async execute(args, exec) {
+			const workspace = path.resolve(args.workspace);
+			let semgrepBin = "semgrep";
+			try { semgrepBin = resolveSemgrepBin(ctx.settings.get("sec-config")); } catch { /* fall back to PATH */ }
+			const tracked = await runWithTaskTracking(workspace, "semgrep_scan", exec, () =>
+				runSemgrep({ workspace, target: path.resolve(args.target), layer: args.layer, rulesPath: args.rules_path, bin: semgrepBin })
+			);
+			return tracked.taskId ? { ...tracked.value, task_id: tracked.taskId } : tracked.value;
 		}
 	}));
 }

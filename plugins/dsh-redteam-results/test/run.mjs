@@ -70,13 +70,41 @@ ok("状态语义：code-reviewed 可用、不记 verifiedAt；fixed 需先 verif
 	st.close();
 });
 
-ok("register 越权值回落（severity/status/evidenceLevel 白名单）+ 长文本截断", () => {
+ok("register 越权值：severity/evidenceLevel 回落，status 显式拒绝 + 长文本截断", () => {
 	const st = openStore(":memory:");
 	const long = "x".repeat(500);
-	const r = registerFinding(st, SID, "pentest", { title: `  ${long}  `, severity: "超高", status: "hacked", evidenceLevel: "maybe" });
+	assert.throws(
+		() => registerFinding(st, SID, "pentest", { title: "bad", status: "hacked" }),
+		/status "hacked" 不适用于 pentest/,
+		"非法状态必须显式报错，不能静默写成 pending",
+	);
+	const r = registerFinding(st, SID, "pentest", { title: `  ${long}  `, severity: "超高", evidenceLevel: "maybe" });
 	assert.equal(r.severity, "medium");
 	assert.equal(r.status, "pending");
 	assert.equal(r.title.length, 200);
+});
+
+ok("finding 疑似态：pentest/code-audit 可流转 suspect，其他模式显式拒绝", () => {
+	const st = openStore(":memory:");
+	const p = registerFinding(st, SID, "pentest", { title: "疑似 SSRF", target: "http://t", summary: "s" });
+	const ps = updateFinding(st, SID, "pentest", p.id, { status: "suspect", verifyNote: "静态线索成立，未获得 OOB 实证" });
+	assert.equal(ps.status, "suspect");
+	assert.equal(ps.verifiedAt, "", "suspect 不是验证终态，不得写 verifiedAt");
+	const a = registerFinding(st, SID, "code-audit", { title: "疑似反序列化", target: "A.java:1", summary: "s" });
+	assert.equal(updateFinding(st, SID, "code-audit", a.id, { status: "suspect" }).status, "suspect");
+	const v = registerFinding(st, SID, "pentest", { title: "先验证后降级", target: "http://t/2", summary: "s" });
+	updateFinding(st, SID, "pentest", v.id, { status: "verified", ...RV });
+	assert.ok(getFinding(st, SID, v.id).verifiedAt, "verified 首次写入时间");
+	const down = updateFinding(st, SID, "pentest", v.id, { status: "suspect", verifyNote: "复核挑战原验证" });
+	assert.equal(down.verifiedAt, "", "降级离开 verified 必须清空旧验证时间");
+	const ad = registerFinding(st, SID, "attack-defense", { title: "战果", target: "host", summary: "s" });
+	assert.throws(
+		() => updateFinding(st, SID, "attack-defense", ad.id, { status: "suspect" }),
+		/status "suspect" 不适用于 attack-defense/,
+		"模式专属词表不得被跨模式状态污染",
+	);
+	assert.equal(getFinding(st, SID, ad.id).status, "pending", "拒绝后不得改库");
+	st.close();
 });
 
 ok("evidenceLevel 四档：impact 最高档可登记入统计，回落语义不变", () => {
@@ -89,6 +117,26 @@ ok("evidenceLevel 四档：impact 最高档可登记入统计，回落语义不�
 	assert.equal(stats.byEvidence.confirmed, 1);
 	assert.equal(stats.byEvidence.unknown, 1, "越权值照旧回落 unknown");
 	assert.ok(!("maybe" in stats.byEvidence));
+});
+
+// 回归背景：导出菜单的「结构化报告（JSON）」用的是**跨会话全局统计**，
+// 而 computeStatsAll 直接把 snake_case 裸行喂给读 camelCase 的 statsOf，
+// 于是导出的 JSON 里 byEvidence 四档全 0、还多一个 "undefined": null，
+// bySource 全算成 manual。会话内统计是对的，所以这个 bug 只在导出里露出来。
+ok("全局统计与导出口径：evidenceLevel / sourceOrigin 不能读成 undefined", () => {
+	const st = openStore(":memory:");
+	registerFinding(st, SID, "pentest", { title: "全局一", evidenceLevel: "impact" });
+	registerFinding(st, "session-global-2", "pentest", { title: "全局二", evidenceLevel: "partial" });
+	const all = computeStatsAll(st, "pentest");
+	assert.equal(all.byEvidence.impact, 1, "全局统计必须认出 impact");
+	assert.equal(all.byEvidence.partial, 1, "全局统计必须认出 partial");
+	assert.equal(all.byEvidence.unknown, 0);
+	assert.ok(!("undefined" in all.byEvidence), "不得出现 undefined 键");
+	assert.equal(all.total, 2);
+	// bySource 依赖 sourceOrigin（裸行里叫 source_origin）：读不到就会全落 manual
+	const manual = (all.bySource || []).find((x) => x.source === "manual");
+	assert.equal(manual?.count, 2, "未标注来源归 manual，且计数正确");
+	st.close();
 });
 
 ok("update 状态翻转落 verifiedAt，字段白名单修订，模式/会话隔离", () => {
@@ -409,8 +457,12 @@ ok("listFindingsAll 跨会话按模式聚合（行带 sessionId，范围过滤�
 		assert.equal(r.type, "jsp");
 		const u1 = updateFinding(st, "s-av", "code-audit", r.id, { status: "detected" });
 		assert.equal(u1.status, "detected", "被检出 合法");
-		const u2 = updateFinding(st, "s-av", "code-audit", r.id, { status: "fixed" });
-		assert.equal(u2.status, "detected", "fixed 不在 av 子集——回落保持原状态");
+		assert.throws(
+			() => updateFinding(st, "s-av", "code-audit", r.id, { status: "fixed" }),
+			/status "fixed" 不适用于 code-audit/,
+			"fixed 不在 av 子集——显式拒绝，不得静默保持旧状态",
+		);
+		assert.equal(getFinding(st, "s-av", r.id).status, "detected", "拒绝后原状态不变");
 	});
 	ok("分模式状态：ctf=未解/卡点/已解（stuck 合法、verified 落 verifiedAt）", () => {
 		const r = registerFinding(st, "s-ctf", "ctf-solver", { title: "web1", target: "board#1", summary: "题", type: "hard" });
@@ -468,16 +520,13 @@ ok("CSRF 头校验：匹配放行/缺失或错值拒", () => {
 		assert.equal(groups[0].count, 105);
 		st2.close();
 	});
-	const av = registerFinding(st, "s-m", "code-audit", { title: "载荷", status: "detected" });
 	const pen = registerFinding(st, "s-m", "pentest", { title: "注入" });
-	const m1 = await dispatch(null, st, "finding.mark", { sessionId: "s-m", id: av.id, status: "verified" , ...RV });
-	ok("mark 按模式词表：av verified 合法", () => { assert.equal(m1.ok, true); assert.equal(m1.status, "verified"); });
-	const m2 = await dispatch(null, st, "finding.mark", { sessionId: "s-m", id: av.id, status: "false-positive" });
-	ok("mark 按模式词表：av 无 false-positive 词——拒绝（不再静默回落报成功）", () => { assert.equal(m2.ok, false); assert.match(m2.error, /status 必须/); });
-	const m3 = await dispatch(null, st, "finding.mark", { sessionId: "s-m", id: pen.id, status: "false-positive" });
-	ok("mark 漏洞型 false-positive 合法", () => { assert.equal(m3.ok, true); assert.equal(m3.status, "false-positive"); });
-	const m4 = await dispatch(null, st, "finding.mark", { sessionId: "s-m", id: av.id, status: "detected" });
-	ok("mark 产物型本体词（detected）可标——旧白名单根本不含", () => { assert.equal(m4.ok, true); assert.equal(m4.status, "detected"); });
+	const m1 = await dispatch(null, st, "finding.mark", { sessionId: "s-m", id: pen.id, status: "verified" , ...RV });
+	ok("mark 按模式词表：pentest verified 合法", () => { assert.equal(m1.ok, true); assert.equal(m1.status, "verified"); });
+	const m2 = await dispatch(null, st, "finding.mark", { sessionId: "s-m", id: pen.id, status: "detected" });
+	ok("mark 按模式词表：pentest 无 detected 词——拒绝（不再静默回落报成功）", () => { assert.equal(m2.ok, false); assert.match(m2.error, /status 必须/); });
+	const m4 = await dispatch(null, st, "finding.mark", { sessionId: "s-m", id: pen.id, status: "suspect" });
+	ok("mark 渗透疑似态可标——旧状态词表没有", () => { assert.equal(m4.ok, true); assert.equal(m4.status, "suspect"); });
 	// 人工复核兜底通道（finding.mark）必须透传二次评级——否则 UI「标记已验证」在成对校验上线后永久失败。
 	const pk = registerFinding(st, "s-mark", "redteam", { title: "兜底标记", target: "http://t/x", summary: "s", severity: "medium" });
 	let markRejected = "";
@@ -509,9 +558,14 @@ ok("CSRF 头校验：匹配放行/缺失或错值拒", () => {
 // ===== attack-defense 批：ad 战果状态集 / verify 分支 / 链路互联 =====
 {
 	const st = openStore(":memory:");
-	ok("ad 状态集：code-reviewed 回落 pending、fixed=已交付（登记即拒+须先 verified）", () => {
-		const r = registerFinding(st, "s-ad", "attack-defense", { title: "域控成果", type: "域控成果", target: "DC01", summary: "s", status: "code-reviewed" });
-		assert.equal(r.status, "pending", "code-reviewed 不在战果词表——回落 pending");
+	ok("ad 状态集：code-reviewed 显式拒绝、fixed=已交付（登记即拒+须先 verified）", () => {
+		assert.throws(
+			() => registerFinding(st, "s-ad", "attack-defense", { title: "X", status: "code-reviewed" }),
+			/status "code-reviewed" 不适用于 attack-defense/,
+			"code-reviewed 不在战果词表——必须显式拒绝",
+		);
+		const r = registerFinding(st, "s-ad", "attack-defense", { title: "域控成果", type: "域控成果", target: "DC01", summary: "s" });
+		assert.equal(r.status, "pending", "省略 status 仍默认 pending");
 		assert.throws(() => registerFinding(st, "s-ad", "attack-defense", { title: "X", status: "fixed" }), /攻防=已交付/);
 		assert.throws(() => updateFinding(st, "s-ad", "attack-defense", r.id, { status: "fixed" }), /已交付/);
 		updateFinding(st, "s-ad", "attack-defense", r.id, { status: "verified" , ...RV });
@@ -859,6 +913,13 @@ ok("对账渲染：超过 12 条悬挂引用时不因省略行抛错", () => {
 	const dangling = Array.from({ length: 13 }, (_, i) => ({ nodeId: `n${i}`, findingRef: `f${i}`, reason: "missing" }));
 	const text = renderChainReconcile({ ok: true, unlinked: [], dangling, checked: { findings: 0, nodes: 13 } });
 	assert.match(text, /另有 1 处/);
+});
+
+ok("客户端报告导出含稳定 JSON schema 入口", () => {
+	const src = fs.readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
+	assert.match(src, /saker\.redteam\.report\.v1/);
+	assert.match(src, /schemaVersion:\s*1/);
+	assert.match(src, /结构化报告（JSON）/);
 });
 
 // 端到端：自动上图之后，该成果不该再出现在 unlinked 里（真实 atlas 库）

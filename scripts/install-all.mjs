@@ -36,6 +36,13 @@ const cli = process.env.DSH_CLI || 'dsh'
  * 设 SAKER_RETRIES=1 即可快速失败一次看结果。
  */
 const MAX_TRIES = Math.max(1, Number(process.env.SAKER_RETRIES || 5) || 5)
+/**
+ * `--force`：同版本也重装一次。
+ * 为什么需要：安装器按**版本号**跳过同版本包，所以「改了 lib 但没升版本」
+ * 会静默不生效（宿主跑的还是旧代码）。发版前若确认根包/插件内容变了却不打算
+ * 动版本号，用 `--force` 强制刷一遍；平时仍走版本号，避免无谓重装。
+ */
+const FORCE = process.argv.includes('--force')
 
 // profile home: honour DSH_HOME like the harness does, else ~/.dsh
 const homeRoot = process.env.DSH_HOME || join(process.env.USERPROFILE || process.env.HOME || '', '.dsh')
@@ -76,7 +83,13 @@ function pruneDanglingSakerDeps() {
   for (const [name, spec] of Object.entries(deps)) {
     if (!sakerPackages.has(name)) continue
     if (typeof spec !== 'string' || !spec.startsWith('file:')) continue
-    if (existsSync(spec.slice('file:'.length))) continue
+    const rawPath = spec.slice('file:'.length)
+    // `file:` specs in a profile are resolved from the profile directory by pnpm.
+    // Resolving from the current working directory falsely prunes valid relative
+    // specs such as `file:saker(github)/...` whenever the installer is run from
+    // the repository root, and a later install failure leaves the plugin gone.
+    const targetPath = resolve(dirname(profilePkgPath), rawPath)
+    if (existsSync(targetPath)) continue
     delete deps[name]
     removed.push(name)
     if (bundles) {
@@ -189,11 +202,13 @@ function addWithRetry(label, pkgName, spec, version) {
   const want = String(version || '')
   if (installed.has(pkgName)) {
     const have = installed.get(pkgName)
-    if (have && want && have === want) {
+    if (have && want && have === want && !FORCE) {
       console.log(`SKIP ${label}  (already installed: ${pkgName}@${have})`)
       return true
     }
-    console.log(`UPGRADE ${label}  ${pkgName}@${have || '?'} -> ${want || '?'}`)
+    console.log(FORCE && have === want
+      ? `FORCE ${label}  (--force，重装同版本 ${pkgName}@${have})`
+      : `UPGRADE ${label}  ${pkgName}@${have || '?'} -> ${want || '?'}`)
   }
   // 替换前先把旧副本改名到暂存区：装成功就丢弃，装失败就放回。
   const stash = stashDir(pkgName)
@@ -273,5 +288,27 @@ if (fail) process.exit(1)
 //    installed yet never loaded (silent "my feature disappeared" reports).
 const ensured = ensureBundles()
 if (ensured.length) console.log(`re-added ${ensured.length} bundle layer(s): ${ensured.join(', ')}`)
+
+// 3b. Keep hand-declared model reasoning metadata in sync. The selector is
+// invisible without it, and a fresh profile otherwise requires a manual YAML
+// edit. Failure is non-fatal: the plugin install itself already succeeded.
+if ((process.env.SAKER_MODEL_REASONING || 'auto') !== '0') {
+  const settingsFile = join(homeRoot, 'settings.yaml')
+  const reasoningScript = join(root, 'scripts', 'configure-model-reasoning.mjs')
+  if (existsSync(settingsFile) && existsSync(reasoningScript)) {
+    const r = spawnSync(process.execPath, [
+      reasoningScript,
+      '--settings', settingsFile,
+      '--provider', process.env.SAKER_MODEL_PROVIDER || 'custom',
+      '--model', process.env.SAKER_MODEL_ID || 'deepseek-flash',
+      '--apply',
+    ], { encoding: 'utf8', env: { ...process.env, DSH_SRC: process.env.DSH_SRC || root } })
+    const output = `${r.stdout || ''}${r.stderr || ''}`.trim()
+    if (output) console.log(output)
+    if (r.status !== 0) {
+      console.warn('model reasoning metadata was not updated; install remains valid')
+    }
+  }
+}
 
 console.log('Restart `dsh web`, then open 设置 → 安全配置 to point tools / MCP endpoints at your local services.')

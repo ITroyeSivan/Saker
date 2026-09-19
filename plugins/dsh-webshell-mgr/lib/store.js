@@ -98,11 +98,11 @@ export function rowToConn(row) {
  * 磁盘满、进程被强杀、网盘/杀软回写、误把别的文件改名成 .db 都会造成这种文件。
  * 数据已经读不出来，能做的是**保住原文件**（改名备份，不删）并让插件继续可用。
  */
-function healCorruptDb(dbPath) {
+function healCorruptDb(dbPath, force = false) {
 	if (dbPath === ":memory:") return;
 	let head = "";
 	try { head = readFileSync(dbPath).subarray(0, 16).toString("latin1"); } catch { return; }
-	if (head.startsWith("SQLite format 3")) return;   // 正常的库头
+	if (!force && head.startsWith("SQLite format 3")) return;   // 正常的库头
 	let bak = dbPath + ".corrupt-" + Date.now();
 	let n = 1;
 	while (existsSync(bak)) bak = dbPath + ".corrupt-" + Date.now() + "-" + n++;   // 绝不覆盖已有备份
@@ -122,9 +122,34 @@ function healCorruptDb(dbPath) {
 
 export function openStore(dbPath) {
 	if (dbPath !== ":memory:") mkdirSync(dirname(dbPath), { recursive: true });
-	healCorruptDb(dbPath);   // **必须在开库前**：坏文件会让 new DatabaseSync 直接抛
-	const db = new DatabaseSync(dbPath);
-	db.exec("PRAGMA journal_mode = WAL;");
+	const deadline = Date.now() + 5000;
+	let waitMs = 10;
+	let db;
+	for (;;) {
+		try {
+			db = new DatabaseSync(dbPath);
+			// node:sqlite 在构造时不读文件头，坏库错误要到首条 SQL 才出现。
+			db.exec("PRAGMA busy_timeout = 5000;");
+			db.exec("PRAGMA journal_mode = WAL;");
+			break;
+		} catch (error) {
+			try { db?.close(); } catch { /* 打开失败时可能没有可关闭的句柄 */ }
+			const message = String(error?.message ?? error);
+			// journal_mode 首次切换在多进程首开时可能仍报 LOCKED；短退避后重试，不误判坏库。
+			if (/database is locked|database is busy|SQLITE_BUSY|SQLITE_LOCKED/i.test(message) && Date.now() < deadline) {
+				Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
+				waitMs = Math.min(250, waitMs * 2);
+				continue;
+			}
+			// 只有 SQLite 明确判为 NOTADB 时才备份重建；普通 BUSY/LOCKED 必须原样抛出。
+			if (!/not a database|SQLITE_NOTADB/i.test(message)) throw error;
+			healCorruptDb(dbPath, true);
+			db = new DatabaseSync(dbPath);
+			db.exec("PRAGMA busy_timeout = 5000;");
+			db.exec("PRAGMA journal_mode = WAL;");
+			break;
+		}
+	}
 	db.exec(SCHEMA);
 	// 存量库迁移：连接形态列（file=文件马 / mem=内存马——内存马注入管理为二期，字段先预留）
 	try { db.exec("ALTER TABLE connections ADD COLUMN kind TEXT NOT NULL DEFAULT 'file'"); } catch { /* 已有列 */ }

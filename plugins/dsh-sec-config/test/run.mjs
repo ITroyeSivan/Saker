@@ -1,9 +1,12 @@
 // dsh-sec-config 离线单测：内置模型代理的剥字段与目标地址推导。
 //
 // 全部为纯函数，**不联网**、不起服务 —— 需要真打上游的活体测试见同目录 live-upstream.mjs。
-import { readFileSync } from 'node:fs'
-import { sanitizeBody, outboundHeaders } from '../lib/model-proxy.js'
-import { modelBaseUrl, scheduleSync, trimUrl, normalizeEndpoints, planEndpointUse, suggestEndpoints, matchEndpoint, endpointPool, unsetFailureHint, shouldCaptureBaseline } from '../lib/index.js'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import http from 'node:http'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { sanitizeBody, outboundHeaders, redactBody, redactText, resolveUpstreamUrl, startModelProxy, checkUpstreamEgress } from '../lib/model-proxy.js'
+import { modelBaseUrl, scheduleSync, trimUrl, normalizeEndpoints, planEndpointUse, suggestEndpoints, matchEndpoint, endpointPool, unsetFailureHint, shouldCaptureBaseline, egressEndpoint, recoverStaleSettingsLock, mutateSettingsWithLockRecovery } from '../lib/index.js'
 
 let pass = 0
 let fail = 0
@@ -14,6 +17,70 @@ const ok = (label, cond) => {
   } else {
     fail++
     console.log(`FAIL ${label}`)
+  }
+}
+
+// 0b. 设置写入的兼容兜底：仅在确认锁所有者已死后重试一次
+{
+  let calls = 0
+  const settings = {
+    async mutate() {
+      calls += 1
+      if (calls === 1) throw new Error('atomic-write: timed out waiting for the writer lock at /tmp/settings.yaml.lock')
+      return 'written'
+    },
+  }
+  const result = await mutateSettingsWithLockRecovery(
+    settings,
+    'probe',
+    [{ op: 'set', path: ['value'], value: 1 }],
+    undefined,
+    () => ({ recovered: true }),
+  )
+  ok('死 PID 锁回收后自动重试一次', result === 'written' && calls === 2)
+
+  let unrelatedCalls = 0
+  const unrelated = {
+    async mutate() {
+      unrelatedCalls += 1
+      throw new Error('permission denied')
+    },
+  }
+  let propagated = false
+  try {
+    await mutateSettingsWithLockRecovery(unrelated, 'probe', [], undefined, () => ({ recovered: true }))
+  } catch (error) {
+    propagated = String(error.message).includes('permission denied')
+  }
+  ok('非锁错误不被吞掉也不重试', propagated && unrelatedCalls === 1)
+}
+
+// 0. 死 PID 的设置写锁：崩溃残留会永久堵住密钥保存，但活锁绝不能被偷
+{
+  const home = mkdtempSync(join(tmpdir(), 'sec-lock-'))
+  const lockPath = join(home, 'settings.yaml.lock')
+  try {
+    ok('锁不存在时不动作', recoverStaleSettingsLock(home).reason === 'missing')
+
+    writeFileSync(lockPath, 'not-a-pid\n', 'utf8')
+    ok('未知格式锁原样保留',
+      recoverStaleSettingsLock(home).reason === 'unrecognized'
+      && readFileSync(lockPath, 'utf8') === 'not-a-pid\n')
+
+    writeFileSync(lockPath, `${process.pid}\n`, 'utf8')
+    ok('当前活进程锁不回收',
+      recoverStaleSettingsLock(home).reason === 'current-process'
+      && readFileSync(lockPath, 'utf8') === `${process.pid}\n`)
+
+    writeFileSync(lockPath, '2147483646\n', 'utf8')
+    const recovered = recoverStaleSettingsLock(home, { warn: () => {} })
+    ok('明确已退出的 PID 锁可回收', recovered.recovered === true && recovered.reason === 'owner-dead')
+    ok('回收后锁文件确实消失', !existsSync(lockPath))
+  } catch (error) {
+    ok(`设置锁测试未抛异常（${error && error.message ? error.message : error}）`, false)
+  } finally {
+    try { unlinkSync(lockPath) } catch {}
+    rmSync(home, { recursive: true, force: true })
   }
 }
 
@@ -80,6 +147,145 @@ const ok = (label, cond) => {
   ok('空 body 原样放过', sanitizeBody(Buffer.alloc(0), true).stripped === 0)
 }
 
+// 2d. 模型出站脱敏：只处理凭据类内容，目标 IP/域名/URL 与工具 schema 保持可读
+{
+  const raw = Buffer.from(JSON.stringify({
+    model: 'm',
+    tools: [{ type: 'function', function: { name: 'f', parameters: { properties: { password: { type: 'string' } } } } }],
+    messages: [{
+      role: 'user',
+      content: 'Authorization: Bearer super-secret-token\nCookie: sid=abc123\npassword=hunter2\ntarget http://10.0.0.5/admin?token=url-secret',
+    }],
+    input: [{ role: 'user', content: [{ type: 'text', text: '-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n-----END RSA PRIVATE KEY-----' }] }],
+  }))
+  const out = redactBody(raw, 'secrets')
+  const body = JSON.parse(out.body.toString('utf8'))
+  const message = body.messages[0].content
+  const key = body.input[0].content[0].text
+  ok('脱敏 Authorization / Cookie / password', !message.includes('super-secret-token') && !message.includes('sid=abc123') && !message.includes('hunter2'))
+  ok('保留目标 IP、域名/路径，只脱敏 URL 里的秘密值', message.includes('http://10.0.0.5/admin') && message.includes('[REDACTED:query-secret]'))
+  ok('脱敏私钥块', key.includes('[REDACTED:private-key]'))
+  ok('工具 schema 不因脱敏被改动', body.tools[0].function.parameters.properties.password.type === 'string')
+  ok('统计到脱敏次数', out.redacted >= 4)
+  ok('脱敏按字段类型分桶', out.byKind.authorization >= 1 && out.byKind.secret >= 1 && out.byKind['query-secret'] >= 1)
+  ok('off 模式原样返回', redactBody(raw, 'off').body.equals(raw))
+  ok('redactText 不把普通密码学术语一刀切',
+    redactText('cookie policy is documented; password field is required', 'secrets').text.includes('documented'))
+}
+
+// 2d-2. 目标流量字段分类：默认 secrets 不动 PII；显式切换后才脱敏高置信 PII，
+//       目标 IP、URL 与普通业务字段仍保留。
+{
+  const text = [
+    'target http://10.0.0.5/admin',
+    'email alice@example.com',
+    'phone 13800138000',
+    'id 11010519491231002X',
+    'card 4111 1111 1111 1111',
+    'ordinary order_id=1234567890123456',
+  ].join('\n')
+  const base = redactText(text, 'secrets')
+  ok('默认 secrets 模式不脱敏 PII（避免影响实战载荷）',
+    base.text.includes('alice@example.com') && base.text.includes('13800138000') && base.text.includes('4111 1111 1111 1111'))
+  const pii = redactText(text, 'secrets+pii')
+  ok('PII 模式脱敏邮箱', pii.text.includes('[REDACTED:email]') && !pii.text.includes('alice@example.com'))
+  ok('PII 模式脱敏中国手机号', pii.text.includes('[REDACTED:phone-cn]') && !pii.text.includes('13800138000'))
+  ok('PII 模式脱敏身份证号', pii.text.includes('[REDACTED:id-cn]') && !pii.text.includes('11010519491231002X'))
+  ok('PII 模式脱敏 Luhn 通过的银行卡号', pii.text.includes('[REDACTED:bank-card]') && !pii.text.includes('4111 1111 1111 1111'))
+  ok('PII 模式保留目标 URL 与普通业务字段', pii.text.includes('http://10.0.0.5/admin') && pii.text.includes('ordinary order_id=1234567890123456'))
+  ok('PII 分类进入类型分桶', pii.byKind.email === 1 && pii.byKind['phone-cn'] === 1 && pii.byKind['id-cn'] === 1 && pii.byKind['bank-card'] === 1)
+  ok('Luhn 不通过的数字不脱敏', redactText('card 4111 1111 1111 1112', 'secrets+pii').text.includes('4111 1111 1111 1112'))
+  const bodyRaw = Buffer.from(JSON.stringify({ messages: [{ role: 'user', content: text }] }))
+  ok('redactBody 支持 PII 模式', redactBody(bodyRaw, 'secrets+pii').byKind.email === 1)
+}
+
+// 2e. 字段级分类：值本身不像 token，但字段名是凭据时也必须按字段策略脱敏。
+//     这补的是 Presidio “recognizer 按实体类型 → operator 按策略执行”里的关键一层。
+{
+  const raw = Buffer.from(JSON.stringify({
+    model: 'm',
+    messages: [{
+      role: 'user',
+      content: {
+        target: 'http://10.0.0.5/admin',
+        username: 'alice',
+        password: 'hunter2',
+        userPassword: 'camel-pass',
+        xApiToken: 'camel-token',
+        tenantSecret: 'camel-secret',
+        nested: { access_token: 'opaque-value-without-token-shape' },
+        authorization: { scheme: 'Basic', token: 'dXNlcjpwYXNz' },
+        headers: [
+          { name: 'Authorization', value: 'Basic dXNlcjpwYXNz' },
+          { name: 'X-Trace', value: 'keep-me' },
+        ],
+        normal: { key: 'difficulty', value: 'hard' },
+      },
+    }],
+    input: [{ type: 'function_call_output', output: { client_secret: 's3cr3t', note: 'target 10.0.0.5' } }],
+  }))
+  const out = redactBody(raw, 'secrets')
+  const body = JSON.parse(out.body.toString('utf8'))
+  const content = body.messages[0].content
+  ok('字段级：结构化 password 即使值不像 token 也脱敏',
+    content.password === '[REDACTED:secret]')
+  ok('字段级：驼峰/自定义边界字段也命中（userPassword / xApiToken / tenantSecret）',
+    content.userPassword === '[REDACTED:secret]'
+    && content.xApiToken === '[REDACTED:secret]'
+    && content.tenantSecret === '[REDACTED:secret]')
+  ok('字段级：嵌套 access_token 脱敏', content.nested.access_token === '[REDACTED:secret]')
+  ok('字段级：敏感对象保留结构，只替换叶子值',
+    content.authorization && typeof content.authorization === 'object'
+    && content.authorization.scheme.startsWith('[REDACTED:')
+    && content.authorization.token.startsWith('[REDACTED:')
+    && content.authorization.token !== 'dXNlcjpwYXNz')
+  ok('字段级：name/value 形式的 Authorization 整体脱敏',
+    content.headers[0].value === '[REDACTED:authorization]' && content.headers[1].value === 'keep-me')
+  ok('字段级：目标 URL 和普通字段仍保留',
+    content.target === 'http://10.0.0.5/admin' && content.normal.value === 'hard')
+  ok('字段级：input / tool output 里的 client_secret 也脱敏',
+    body.input[0].output.client_secret === '[REDACTED:secret]')
+  ok('字段级统计进入类型分桶', out.byKind.authorization >= 1 && out.byKind.secret >= 3)
+  ok('字段级：普通词 monkey / tokenizer 不误伤',
+    redactText(JSON.stringify({ monkey: 'banana', tokenizer: 'lexer' }), 'secrets').text
+      === JSON.stringify({ monkey: 'banana', tokenizer: 'lexer' }))
+
+  const cloudText = [
+    `gcp=${'AIza' + 'A'.repeat(35)}`,
+    `gitlab=${'glpat-' + 'B'.repeat(24)}`,
+    `slack=${'xoxb-' + '1'.repeat(10) + '-' + 'c'.repeat(18)}`,
+    `stripe=${'sk_live_' + 'D'.repeat(20)}`,
+    `azure=${'abc1Q~' + 'e'.repeat(31)}`,
+  ].join('\n')
+  const cloudOut = redactText(cloudText, 'secrets')
+  ok('高置信云/SaaS 凭据全部脱敏',
+    cloudOut.byKind['google-api-key'] === 1
+    && cloudOut.byKind['gitlab-token'] === 1
+    && cloudOut.byKind['slack-token'] === 1
+    && cloudOut.byKind['stripe-key'] === 1
+    && cloudOut.byKind['azure-client-secret'] === 1
+    && cloudOut.text.includes('[REDACTED:google-api-key]')
+    && cloudOut.text.includes('[REDACTED:gitlab-token]')
+    && cloudOut.text.includes('[REDACTED:slack-token]')
+    && cloudOut.text.includes('[REDACTED:stripe-key]')
+    && cloudOut.text.includes('[REDACTED:azure-client-secret]'))
+  ok('高置信凭据规则不把普通前缀当秘密',
+    redactText('glpat-is-not-enough; xoxb; sk_live', 'secrets').redacted === 0)
+  ok('off 模式不触发字段级脱敏',
+    JSON.parse(redactBody(raw, 'off').body.toString('utf8')).messages[0].content.password === 'hunter2')
+
+  const basic = redactText('Authorization: Basic dXNlcjpwYXNz\nX-Trace: keep', 'secrets')
+  ok('Authorization Basic 的整个凭据被替换（旧实现只吃掉 Basic 一词）',
+    !basic.text.includes('dXNlcjpwYXNz') && basic.text.includes('[REDACTED:authorization]') && basic.text.includes('X-Trace: keep'))
+
+  const jsonArgs = JSON.stringify({ Authorization: 'Basic dXNlcjpwYXNz', 'X-Trace': 'keep' })
+  const redactedArgs = redactText(jsonArgs, 'secrets').text
+  let parsedArgs = null
+  try { parsedArgs = JSON.parse(redactedArgs) } catch { /* 下面的断言会亮红 */ }
+  ok('字符串里的 JSON 工具参数脱敏后仍是合法 JSON',
+    parsedArgs && parsedArgs.Authorization === '[REDACTED:authorization]' && parsedArgs['X-Trace'] === 'keep')
+}
+
 // 3. 注入头：会话头必须有值；逐跳头不能带过去
 {
   const h = outboundHeaders(
@@ -93,6 +299,14 @@ const ok = (label, cond) => {
   ok('authorization 原样透传（代理不碰密钥）', h.authorization === 'Bearer k')
   ok('逐跳头不外传', h.host === undefined && h.connection === undefined && h['content-length'] === undefined)
   ok('强制未压缩（避免解压后 content-encoding 错位）', h['accept-encoding'] === 'identity')
+  const joined = resolveUpstreamUrl('https://upstream.example/zen/go', '/v1/chat/completions?q=1')
+  ok('代理转发保留上游路径前缀与查询串',
+    joined.origin === 'https://upstream.example' && joined.pathname === '/zen/go/v1/chat/completions' && joined.search === '?q=1')
+  for (const bad of ['http://evil.example/v1', '//evil.example/v1']) {
+    let rejected = false
+    try { resolveUpstreamUrl('https://upstream.example/zen/go', bad) } catch { rejected = true }
+    ok(`代理拒绝改换 origin：${bad}`, rejected)
+  }
 }
 
 // 4. MCP bridge 等待 mcp-studio 命名空间就绪（启动顺序竞态）
@@ -307,6 +521,165 @@ const ok = (label, cond) => {
   ok('响应里回的是 effBaseline 而不是写前的 b0', src.includes('baseline: effBaseline,'))
   ok('插件 UI 文案里不残留 markdown 星号（React 不会渲染 markdown）',
     !readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8').includes('**初始地址**'))
+  const clientSrc = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
+  ok('模型代理面板显示最近出站与脱敏类型', clientSrc.includes('最近出站：') && clientSrc.includes('stats.events') && clientSrc.includes('redactedKinds'))
+}
+
+// 16b. 统一出站策略：模型上游算 infra 出站，冻结档必须拦在 fetch 之前
+{
+  const home = mkdtempSync(join(tmpdir(), 'sec-egress-'))
+  const policyDir = join(home, 'saker-egress')
+  mkdirSync(policyDir, { recursive: true })
+  writeFileSync(join(policyDir, 'policy.json'), JSON.stringify({ version: 1, mode: 'frozen', allowHosts: [] }), 'utf8')
+  try {
+    const frozen = await checkUpstreamEgress(home, 'opencode.ai', 'POST /v1/chat/completions')
+    ok('冻结档：远端模型上游判定为拦截', frozen.decision === 'deny' && frozen.reason === 'infra_frozen')
+    const loop = await checkUpstreamEgress(home, '127.0.0.1', 'POST /v1/chat/completions')
+    ok('冻结档：本机上游（回环）不算出站，仍放行', loop.decision === 'allow' && loop.reason === 'loopback')
+
+    // HTTP 路径：闸门必须在 fetch 之前 —— 上游一次都不该被打到
+    let hits = 0
+    const upstream = http.createServer((req, res) => {
+      hits += 1
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end('{"ok":true}')
+    })
+    await new Promise((resolve) => upstream.listen(0, '127.0.0.1', resolve))
+    const upstreamPort = upstream.address().port
+    let verdict = { decision: 'deny', reason: 'infra_frozen', mode: 'frozen' }
+    const proxy = await startModelProxy({
+      host: '127.0.0.1',
+      port: 0,
+      upstreamBase: `http://127.0.0.1:${upstreamPort}`,
+      log: () => {},
+      egressCheck: async () => verdict,
+    })
+    try {
+      const blocked = await fetch(`http://127.0.0.1:${proxy.port}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }),
+      })
+      const blockedBody = await blocked.json()
+      ok('冻结档：代理返回 403 EgressBlocked', blocked.status === 403 && blockedBody?.error?.type === 'EgressBlocked')
+      ok('冻结档：上游一次都没收到请求（拦在 fetch 之前）', hits === 0)
+      const health = await fetch(`http://127.0.0.1:${proxy.port}/__health`).then((r) => r.json())
+      ok('健康检查暴露最近一次出站判定', health.egress?.reason === 'infra_frozen' && health.egress?.decision === 'deny')
+
+      verdict = { decision: 'allow', reason: 'allow-all', mode: 'allow' }
+      const passed = await fetch(`http://127.0.0.1:${proxy.port}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }),
+      })
+      ok('放行档：同一代理恢复转发（闸门不是一刀切）', passed.status === 200 && hits === 1)
+    } finally {
+      await proxy.close()
+      await new Promise((resolve) => upstream.close(resolve))
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
+}
+
+// 16c. 设置端点：面板改档位走的就是这两个端点，读写必须是同一份策略文件
+{
+  const home = mkdtempSync(join(tmpdir(), 'sec-egress-ep-'))
+  const previous = process.env.DSH_HOME
+  process.env.DSH_HOME = home
+  try {
+    const before = await egressEndpoint('egress/get', {})
+    ok('egress/get：无策略文件时给默认档并标注来源',
+      before.ok && before.value.policy.mode === 'allow' && before.value.source === 'policy-missing')
+    const set = await egressEndpoint('egress/set', { mode: 'frozen', allowHosts: [] })
+    ok('egress/set：写入冻结档', set.ok && set.value.policy.mode === 'frozen')
+    const after = await egressEndpoint('egress/get', {})
+    ok('改完立刻读回冻结档（同一份文件，不是内存态）',
+      after.ok && after.value.policy.mode === 'frozen' && after.value.source === 'file')
+    const bad = await egressEndpoint('egress/set', { mode: 'nonsense' })
+    ok('非法档位被拒（不静默降级成 allow）',
+      bad.ok === false && /未知出站策略档位/.test(String(bad.error && bad.error.message)))
+    const normalized = await egressEndpoint('egress/set', { mode: 'allowlist', allowHosts: [' GitHub.com ', 'github.com', ''] })
+    ok('白名单归一化并去重', normalized.ok && normalized.value.policy.allowHosts.join(',') === 'github.com')
+  } finally {
+    if (previous === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previous
+    rmSync(home, { recursive: true, force: true })
+  }
+}
+
+// 17. 代理链路的真实行为：上游收到的是 HTTP 请求体本身，不是脱敏函数的单元返回值。
+{
+  let seen = null
+  const upstream = http.createServer(async (req, res) => {
+    const chunks = []
+    for await (const chunk of req) chunks.push(chunk)
+    seen = Buffer.concat(chunks).toString('utf8')
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end('{"ok":true}')
+  })
+  await new Promise((resolve) => upstream.listen(0, '127.0.0.1', resolve))
+  const upstreamPort = upstream.address().port
+  const proxy = await startModelProxy({
+    host: '127.0.0.1',
+    port: 0,
+    upstreamBase: `http://127.0.0.1:${upstreamPort}`,
+    redaction: 'secrets',
+    log: () => {},
+  })
+  try {
+    const response = await fetch(`http://127.0.0.1:${proxy.port}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'm',
+        messages: [{ role: 'user', content: 'Authorization: Bearer abcdef1234567890\n目标 http://10.0.0.5/admin' }],
+      }),
+    })
+    ok('代理链路 HTTP 200', response.status === 200)
+    ok('上游收到脱敏后的 Authorization', seen && !seen.includes('abcdef1234567890') && seen.includes('[REDACTED:authorization]'))
+    ok('上游仍收到目标 IP/路径', seen && seen.includes('http://10.0.0.5/admin'))
+    const structured = await fetch(`http://127.0.0.1:${proxy.port}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'm',
+        messages: [{
+          role: 'user',
+          content: {
+            target: 'http://10.0.0.5/admin',
+            password: 'hunter2',
+            headers: [{ name: 'Authorization', value: 'Basic dXNlcjpwYXNz' }],
+          },
+        }],
+      }),
+    })
+    ok('字段级结构化请求 HTTP 200', structured.status === 200)
+    ok('上游收到字段级脱敏后的 password / Authorization',
+      seen && !seen.includes('hunter2') && !seen.includes('dXNlcjpwYXNz')
+      && seen.includes('[REDACTED:secret]') && seen.includes('[REDACTED:authorization]'))
+    ok('字段级脱敏仍保留目标 URL', seen && seen.includes('http://10.0.0.5/admin'))
+    ok('代理统计累计脱敏数', proxy.stats().redacted > 0)
+    const health = await fetch(`http://127.0.0.1:${proxy.port}/__health`).then((r) => r.json())
+    ok('健康检查暴露固定上游 origin', health.upstream_origin === `http://127.0.0.1:${upstreamPort}`)
+    ok('健康检查保留最近出站审计摘要',
+      health.stats.events.length === 2
+      && health.stats.events.every((event) => event.status === 200)
+      && health.stats.events[health.stats.events.length - 1].redacted > 0)
+    ok('健康检查保留脱敏类型分桶', health.stats.redactedKinds.authorization >= 1)
+    const rejectedStatus = await new Promise((resolve, reject) => {
+      const req = http.request({ host: '127.0.0.1', port: proxy.port, method: 'GET', path: 'http://evil.example/v1' }, (res) => {
+        res.resume()
+        res.on('end', () => resolve(res.statusCode))
+      })
+      req.on('error', reject)
+      req.end()
+    })
+    ok('代理拒绝绝对 URL 改换 origin', rejectedStatus === 400)
+  } finally {
+    await proxy.close()
+    await new Promise((resolve) => upstream.close(resolve))
+  }
 }
 
 console.log(fail === 0 ? `\nall ${pass} tests passed` : `\n${fail} FAILED, ${pass} passed`)

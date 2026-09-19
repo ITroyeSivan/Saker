@@ -16,9 +16,29 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { TOOL_DEFS, buildArgs, tiersLine } from "./registry.js";
+
+function sessionIdOf(exec) {
+	return String(exec?.agent?.session?.id ?? exec?.agent?.id ?? "");
+}
+
+/**
+ * Optional bridge to stage-gate: a long-running scanner inherits any queued
+ * intent whose owner matches the tool name, then closes it with the tool's
+ * real result. The dynamic import keeps scanner-tools runnable outside Saker.
+ */
+async function runWithTaskTracking(workspace, toolName, exec, run) {
+	let api;
+	try { api = await import("@dsh-external/dsh-stage-gate"); } catch { return { value: await run(), taskId: "" }; }
+	if (typeof api?.runTrackedTask !== "function") return { value: await run(), taskId: "" };
+	return api.runTrackedTask(workspace, { sessionId: sessionIdOf(exec), toolName }, run);
+}
+
+function withTaskId(result) {
+	return result.taskId ? { ...result.value, task_id: result.taskId } : result.value;
+}
 
 /**
  * 落盘文件名的时间戳（含毫秒 + 4 位随机后缀）。
@@ -31,7 +51,7 @@ import { TOOL_DEFS, buildArgs, tiersLine } from "./registry.js";
  * 格式仍可读可排序：`nmap-20260914T001234567-a1b2.txt`。
  */
 function stamp() {
-	return new Date().toISOString().replace(/[-:.]/g, "").slice(0, 17) + "-" + randomBytes(2).toString("hex");
+	return new Date().toISOString().replace(/[-:.]/g, "").slice(0, 17) + "-" + randomBytes(6).toString("hex");
 }
 
 const RATE_DEFAULTS = { nuclei: 15, httpx: 25, ffuf: 50 }; // 保守默认；显式覆盖会留痕
@@ -44,7 +64,10 @@ export function hasBin(bin) {
 	const name = String(bin ?? "");
 	if (!name) return false;
 	if (name.includes("/") || name.includes("\\")) {
-		try { return fs.existsSync(name); } catch { return false; }
+		try {
+			if (!fs.existsSync(name)) return false;
+			return IS_WIN ? true : fs.statSync(name).isFile();
+		} catch { return false; }
 	}
 	try {
 		const dirs = String(process.env.PATH || process.env.Path || "").split(path.delimiter).filter(Boolean);
@@ -62,6 +85,219 @@ export function hasBin(bin) {
 			? spawnSync("where", [name], { stdio: "ignore", env: { ...process.env, PATHEXT: process.env.PATHEXT || WIN_PATHEXT } }).status === 0
 			: spawnSync("/bin/sh", ["-c", `command -v -- ${name} >/dev/null 2>&1`]).status === 0;
 	} catch { return false; }
+}
+
+/**
+ * sec-config owns the operator's tool catalog. scanner-tools reads that same
+ * namespace instead of maintaining a second path list: entries win when
+ * present (the v2 catalog representation), legacy tools remain as a fallback,
+ * and hidden tools are deliberately unavailable.
+ */
+export function configuredToolPaths(section) {
+	const out = {};
+	if (!section || typeof section !== "object") return out;
+	const hidden = new Set(Array.isArray(section.hiddenTools)
+		? section.hiddenTools.map((key) => String(key).toLowerCase())
+		: []);
+	const add = (key, value) => {
+		const k = String(key || "").toLowerCase();
+		const p = typeof value === "string" ? value.trim() : "";
+		if (!k || !p || hidden.has(k) || out[k] !== undefined) return;
+		out[k] = p;
+	};
+	if (Array.isArray(section.entries) && section.entries.length > 0) {
+		for (const entry of section.entries) {
+			if (entry && typeof entry === "object") add(entry.key, entry.path);
+		}
+		return out;
+	}
+	if (section.tools && typeof section.tools === "object") {
+		for (const [key, value] of Object.entries(section.tools)) add(key, value);
+	}
+	return out;
+}
+
+function executablePathCandidates(value) {
+	const raw = String(value || "");
+	if (!IS_WIN || /\.[A-Za-z0-9]+$/.test(raw)) return [raw];
+	return [raw, `${raw}.exe`, `${raw}.cmd`, `${raw}.bat`, `${raw}.com`];
+}
+
+function firstExistingFile(paths) {
+	for (const candidate of paths) {
+		try {
+			if (fs.statSync(candidate).isFile()) return candidate;
+		} catch { /* try next candidate */ }
+	}
+	return null;
+}
+
+const ROOT_SEARCH_SKIP = new Set([".git", ".hg", ".svn", "node_modules", ".venv", "venv", "__pycache__"]);
+const rootIndexCache = new Map(); // root → { at, index: Map<basename, { file, score }> }
+const ROOT_SEARCH_TTL_MS = 60_000;
+
+function buildRootIndex(root) {
+	const index = new Map();
+	const noisy = new Set(["responder", "multirelay", "thirdparty", "third_party", "vendor", "docs", "doc", "test", "tests", "build", "dist", ".github"]);
+	const stack = [{ dir: root, depth: 0 }];
+	while (stack.length > 0) {
+		const current = stack.pop();
+		if (!current || current.depth > 6) continue;
+		let entries;
+		try { entries = fs.readdirSync(current.dir, { withFileTypes: true }); } catch { continue; }
+		for (const entry of entries) {
+			if (entry.isDirectory()) {
+				if (!ROOT_SEARCH_SKIP.has(entry.name)) stack.push({ dir: path.join(current.dir, entry.name), depth: current.depth + 1 });
+				continue;
+			}
+			if (entry.isFile()) {
+				const file = path.join(current.dir, entry.name);
+				const parts = path.relative(root, file).split(/[\\/]/).filter(Boolean).map((part) => part.toLowerCase());
+				let score = parts.length * 10;
+				if (parts.includes("examples")) score -= 4;
+				for (const part of parts) if (noisy.has(part)) score += 40;
+				const key = entry.name.toLowerCase();
+				const previous = index.get(key);
+				if (previous === undefined || score < previous.score) {
+					index.set(key, { file, score });
+				}
+			}
+		}
+	}
+	return index;
+}
+
+function getRootIndex(root) {
+	const now = Date.now();
+	const cached = rootIndexCache.get(root);
+	if (cached && now - cached.at < ROOT_SEARCH_TTL_MS) return cached.index;
+	const index = buildRootIndex(root);
+	rootIndexCache.set(root, { at: now, index });
+	return index;
+}
+
+function findToolFileInRoots(candidate, roots) {
+	const wanted = new Set(executablePathCandidates(candidate).map((item) => path.basename(item).toLowerCase()));
+	let best = null;
+	let bestScore = Number.POSITIVE_INFINITY;
+	for (const root of roots) {
+		if (typeof root !== "string" || !root.trim()) continue;
+		try { if (!fs.statSync(root).isDirectory()) continue; } catch { continue; }
+		const index = getRootIndex(root);
+		for (const name of wanted) {
+			const hit = index.get(name);
+			if (hit && hit.score < bestScore) {
+				best = hit.file;
+				bestScore = hit.score;
+			}
+		}
+	}
+	return best;
+}
+
+function configuredPathForTool(configured, def) {
+	if (!configured || typeof configured !== "object") return "";
+	const keys = [def?.id, def?.bin, ...(Array.isArray(def?.bins) ? def.bins : [])]
+		.map((key) => String(key || "").toLowerCase());
+	return keys.map((key) => configured[key]).find((value) => typeof value === "string" && value) || "";
+}
+
+/**
+ * Resolve one registry candidate against the configured path first, then PATH.
+ * A configured file wins as-is; a configured directory is treated as a tool
+ * root and candidates are searched below it with Windows executable suffixes.
+ * This is the missing bridge between the settings page and actual execution:
+ * without it a tool configured only in sec-config is reported missing unless
+ * the operator also edits PATH.
+ */
+function stripScriptExtension(value) {
+	return path.basename(String(value || "")).replace(/\.[^.]+$/, "").toLowerCase();
+}
+
+/**
+ * Resolve one configured path to the actual file for a candidate. A file
+ * whose logical name matches the candidate wins; for a single-command tool an
+ * operator-renamed binary remains accepted. For multi-name suites (for
+ * example netexec/nxc) a mismatched file is treated as a directory anchor and
+ * the sibling candidate is searched first, preventing the wrong module from
+ * being executed merely because it was the entry selected in sec-config.
+ */
+export function resolveToolBin(candidate, configuredPath = "", options = {}) {
+	const name = String(candidate || "");
+	const configured = String(configuredPath || "").trim();
+	const acceptAnyFile = options.acceptAnyFile !== false;
+	const roots = Array.isArray(options.roots) ? options.roots : [];
+	if (configured) {
+		if (configured.includes("/") || configured.includes("\\")) {
+			const exact = firstExistingFile(executablePathCandidates(configured));
+			if (exact) {
+				const sameName = stripScriptExtension(exact) === stripScriptExtension(name);
+				if (sameName || acceptAnyFile) return exact;
+				const sibling = firstExistingFile(executablePathCandidates(path.join(path.dirname(exact), name)));
+				if (sibling) return sibling;
+			}
+			let stat = null;
+			try { stat = fs.statSync(configured); } catch { stat = null; }
+			if (stat && stat.isDirectory()) {
+				const found = firstExistingFile(executablePathCandidates(path.join(configured, name)));
+				if (found) return found;
+			}
+		} else if (hasBin(configured)) {
+			return configured;
+		}
+	}
+	const fromRoots = roots.length > 0 ? findToolFileInRoots(name, roots) : null;
+	if (fromRoots) return fromRoots;
+	return hasBin(name) ? name : null;
+}
+
+function resolvePythonLauncher(configured) {
+	const map = configured && typeof configured === "object" ? configured : {};
+	const candidates = [map.python, map.python3, process.env.PYTHON, process.env.PYTHON3]
+		.filter((value) => typeof value === "string" && value.trim());
+	for (const candidate of candidates) {
+		const resolved = resolveToolBin("python", candidate);
+		if (resolved) return { bin: resolved, prefix: [] };
+	}
+	if (IS_WIN && hasBin("py")) return { bin: "py", prefix: ["-3"] };
+	for (const name of (IS_WIN ? ["python", "python3"] : ["python3", "python"])) {
+		if (hasBin(name)) return { bin: name, prefix: [] };
+	}
+	return null;
+}
+
+/**
+ * Convert a resolved file into a spawn invocation. Python scripts are a
+ * first-class case because the security catalog intentionally contains
+ * repositories such as sqlmap and impacket whose executable entry is a .py
+ * file; treating that file as a native binary silently fails on Windows.
+ */
+export function resolveToolInvocation(candidate, configuredPath = "", options = {}) {
+	const file = resolveToolBin(candidate, configuredPath, options);
+	if (!file) return null;
+	const ext = path.extname(file).toLowerCase();
+	if (ext === ".py" || ext === ".pyw") {
+		const launcher = resolvePythonLauncher(options.configured);
+		if (!launcher) return { bin: file, prefix: [], file, error: "检测到 Python 脚本，但找不到可用的 Python 解释器（请在安全配置中配置 python，或把 Python 加入 PATH）" };
+		return { bin: launcher.bin, prefix: [...launcher.prefix, file], file };
+	}
+	if (ext === ".js" || ext === ".mjs" || ext === ".cjs") {
+		return { bin: process.execPath, prefix: [file], file };
+	}
+	return { bin: file, prefix: [], file };
+}
+
+/**
+ * Return the definitions that should enter the model tool surface. Optional
+ * advanced tools are skipped until at least one known binary name exists, so
+ * broad capability coverage does not become an always-on schema tax.
+ */
+export function registerableDefs(defs, probe = hasBin) {
+	return Object.values(defs).filter((def) => {
+		if (!def.optional) return true;
+		const candidates = def.bins ?? [def.bin];
+		return candidates.some((candidate) => !String(candidate).includes("{module}") && probe(candidate, def));
+	});
 }
 
 /** target host must appear in the baseline file (active scans only). Returns {ok, hint, baseline}.
@@ -198,38 +434,169 @@ export function persistScanRecords(workspace, { command, file, rows = [] }) {
 	});
 }
 
+function cappedCollector(limit) {
+	const chunks = [];
+	let size = 0;
+	let total = 0;
+	let overflow = false;
+	return {
+		push(chunk) {
+			const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+			total += bytes.length;
+			if (size < limit) {
+				const room = limit - size;
+				const kept = bytes.length > room ? bytes.subarray(0, room) : bytes;
+				if (kept.length > 0) {
+					chunks.push(kept);
+					size += kept.length;
+				}
+			}
+			if (total > limit) overflow = true;
+		},
+		value() { return Buffer.concat(chunks, size); },
+		overflowed() { return overflow; },
+	};
+}
+
+/**
+ * Run one external tool without blocking the host event loop. The previous
+ * spawnSync implementation froze the entire dsh host for the lifetime of a
+ * scan (up to 15 minutes for nuclei), which also froze the UI and every other
+ * session sharing the process.
+ */
+function runProcess(bin, args, { timeoutMs, maxBuffer }) {
+	return new Promise((resolve) => {
+		let settled = false;
+		let timedOut = false;
+		const stdout = cappedCollector(maxBuffer);
+		const stderr = cappedCollector(maxBuffer);
+		let child;
+		try {
+			child = spawn(bin, args, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+		} catch (error) {
+			resolve({ status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0), error });
+			return;
+		}
+		const timer = setTimeout(() => {
+			timedOut = true;
+			try { child.kill(); } catch { /* process may already be gone */ }
+		}, timeoutMs);
+		const finish = (result) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			resolve(result);
+		};
+		child.stdout?.on("data", (chunk) => {
+			stdout.push(chunk);
+			if (stdout.overflowed()) {
+				try { child.kill(); } catch { /* already gone */ }
+			}
+		});
+		child.stderr?.on("data", (chunk) => {
+			stderr.push(chunk);
+			if (stderr.overflowed()) {
+				try { child.kill(); } catch { /* already gone */ }
+			}
+		});
+		child.on("error", (error) => finish({ status: null, stdout: stdout.value(), stderr: stderr.value(), error }));
+		child.on("close", (status) => {
+			const error = timedOut
+				? Object.assign(new Error("ETIMEDOUT: tool exceeded its time limit"), { code: "ETIMEDOUT" })
+				: stdout.overflowed() || stderr.overflowed()
+					? Object.assign(new Error("ENOBUFS: tool output exceeded the capture limit"), { code: "ENOBUFS" })
+					: undefined;
+			finish({ status, stdout: stdout.value(), stderr: stderr.value(), error });
+		});
+	});
+}
+
+/**
+ * 目录里（限深度）是否真有 nuclei 模板文件。
+ * 限深度是为了不把 13000+ 模板全遍历一遍——命中第一个就返回。
+ */
+function dirHasTemplateYaml(fsys, dir, maxDepth = 3) {
+	let entries;
+	try { entries = fsys.readdirSync(dir, { withFileTypes: true }); } catch { return false; }
+	for (const e of entries) {
+		if (e.isFile() && /\.ya?ml$/i.test(e.name)) return true;
+		if (e.isDirectory() && maxDepth > 0) {
+			if (dirHasTemplateYaml(fsys, path.join(dir, e.name), maxDepth - 1)) return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * 挑一个**确实含模板**的 nuclei 模板目录（挑不到返回空串）。
+ *
+ * 顺序：Windows 默认位置优先，其次 .config（Linux 惯例，本机是个符号链接），
+ * 最后 macOS 位置。只"存在"不算数——必须是目录里真能找到 .yaml，
+ * 否则就是本机踩过的那个坑：目录在、nuclei 却不认，空模板集启动后联网卡十几分钟。
+ */
+export function pickNucleiTemplateDir(fsys, home) {
+	const candidates = [
+		path.join(home, "nuclei-templates"),
+		path.join(home, ".config", "nuclei", "templates"),
+		path.join(home, "Library", "Application Support", "nuclei", "templates")
+	];
+	for (const d of candidates) {
+		if (!d) continue;
+		try { if (!fsys.existsSync(d)) continue; } catch { continue; }
+		if (!dirHasTemplateYaml(fsys, d)) continue;
+		// 必须回**真实路径**：nuclei 不跟符号链接。
+		// 实测 `-t <符号链接>` 直接报 `no templates provided for scan`；
+		// 换成它指向的真实目录，同一个靶标 8.8 秒跑完。
+		try { return fsys.realpathSync(d); } catch { return d; }
+	}
+	return "";
+}
+
 /** Run one scanner with rate discipline + evidence + reconcile. Pure-ish core (fs injectable in tests). */
-export function runScan({ bin, args, workspace, tool, rate, defaultRate, active, target, parse, outFile: outFileOverride }) {
+export async function runScan({ bin, args, workspace, tool, rate, defaultRate, active, target, parse, outFile: outFileOverride, configured = {}, roots = [] }) {
 	const cooldown = breakerCheck(tool);
 	if (cooldown > 0) return { ok: false, error: `熔断中：${tool} 连续失败 3 次进入 60s 冷却（剩 ${cooldown}s）——改走工具调用阶梯下级通道（MCP/替代/脚本）或稍后重试`, bin };
-	if (!hasBin(bin)) return { ok: false, error: BIN_HINT, bin };
+	const configuredPath = configuredPathForTool(configured, { id: tool, bin });
+	const invocation = resolveToolInvocation(bin, configuredPath, { configured, roots });
+	if (!invocation || invocation.error) {
+		const pathHint = configuredPath ? `已配置路径不可执行：${configuredPath}；` : "";
+		return { ok: false, error: `${invocation?.error ? invocation.error + "；" : ""}${pathHint}${BIN_HINT}`, bin };
+	}
+	const resolvedBin = invocation.file;
 	if (active) {
 		const reg = checkRegistered(fs, workspace, target);
 		if (!reg.ok) return { ok: false, error: reg.hint, bin };
 	}
 	ensureDirs(workspace);
 	const home = process.env.HOME || process.env.USERPROFILE || "";
-	const nucleiTemplateDirs = [
-		path.join(home, "nuclei-templates"),
-		path.join(home, "Library", "Application Support", "nuclei", "templates"),
-		path.join(home, ".config", "nuclei", "templates")
-	];
-	if (bin === "nuclei" && !nucleiTemplateDirs.some((d) => fs.existsSync(d))) {
-		return { ok: false, error: "nuclei 模板库不存在——首次使用需一次性下载（nuclei -update-templates，数据非工具安装）。按用户基准需批准：请在 DSH 会话外自行执行，或明确批准后由模型执行。", bin };
+	const isNuclei = path.basename(resolvedBin).toLowerCase().startsWith("nuclei");
+	// nuclei 模板库：**必须显式 -t 指过去**，不能只"检查一下存在性就放行"。
+	//
+	// 踩过的坑（2026-09-19 实测）：候选表里混了 macOS/Linux 路径，
+	// 本机 `~/.config/nuclei/templates` 是个指向 E 盘的**符号链接**且真有 13742 个模板，
+	// existsSync 通过 → 闸放行；但 **Windows 版 nuclei 只认 `%USERPROFILE%\nuclei-templates`**，
+	// 它不认这个路径 → 空模板集启动 → 联网初始化 → 实测卡 8 分 52 秒（超时上限 15 分钟）。
+	// 护网现场每次调用白等十几分钟，还占着 CPU。
+	// 修法：自己挑一个**确实含模板**的目录，再用 `-t` 明确告诉它。
+	const nucleiTemplateDir = isNuclei ? pickNucleiTemplateDir(fs, home) : "";
+	if (isNuclei && !nucleiTemplateDir) {
+		return { ok: false, error: "nuclei 模板库不存在（候选目录里没有 .yaml 模板）——首次使用需一次性下载（nuclei -update-templates，数据非工具安装）。按用户基准需批准：请在 DSH 会话外自行执行，或明确批准后由模型执行。", bin };
 	}
 	const ts = stamp();
 	const outFile = outFileOverride ?? path.join(workspace, "artifacts", "scans", `${tool}-${ts}.json`);
 	const full = [...args];
+	if (nucleiTemplateDir) full.push("-t", nucleiTemplateDir);
 	if (rate && rate !== defaultRate) full.push(...(tool === "nuclei" ? ["-rl", String(rate)] : tool === "httpx" ? ["-rl", String(rate)] : ["-rate", String(rate)]));
 	else full.push(...(tool === "ffuf" ? ["-rate", String(defaultRate)] : ["-rl", String(defaultRate)]));
-	const cmdStr = `${bin} ${full.join(" ")}`;
-	const timeoutMs = bin === "nuclei" ? 900_000 : 300_000;
-	const proc = spawnSync(bin, full, { timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 });
-	if (proc.error) { breakerRecord(tool, false); return { ok: false, error: `执行失败：${proc.error.message}${proc.error.code === "ETIMEDOUT" ? `（超时 ${timeoutMs / 1000}s${bin === "nuclei" ? "——模板库缺失时首次会尝试拉取导致超时" : ""}）` : ""}`, bin }; }
+	const spawnArgs = [...invocation.prefix, ...full];
+	const cmdStr = `${invocation.bin} ${spawnArgs.join(" ")}`;
+	const timeoutMs = path.basename(resolvedBin).toLowerCase().startsWith("nuclei") ? 900_000 : 300_000;
+	const proc = await runProcess(invocation.bin, spawnArgs, { timeoutMs, maxBuffer: 64 * 1024 * 1024 });
+	if (proc.error) { breakerRecord(tool, false); return { ok: false, error: `执行失败：${proc.error.message}${proc.error.code === "ETIMEDOUT" ? `（超时 ${timeoutMs / 1000}s${path.basename(resolvedBin).toLowerCase().startsWith("nuclei") ? "——模板库缺失时首次会尝试拉取导致超时" : ""}）` : ""}`, bin }; }
 	breakerRecord(tool, proc.status === 0);
 
 	const raw = proc.stdout ? proc.stdout.toString() : "";
-	const parsed = parse ? parse(raw, proc) : { raw: raw };
+	const parsed = parse ? parse(raw, { ...proc, outFile }) : { raw: raw };
 	// 落盘所有权：工具已自行写出结果文件（如 ffuf -o）时不得再覆盖——否则证据原件被 stdout 顶掉，
 	// 扫描命中的结构化数组消失而工具仍报成功。缺文件时兜底回写 stdout，保证证据指针不悬空。
 	if (parsed.__skipWrite) {
@@ -252,7 +619,7 @@ export function runScan({ bin, args, workspace, tool, rate, defaultRate, active,
 //#region 注册表工具执行器：声明式 def → 构参 → 治理执行（预览封顶 + 全文落盘 + 熔断 + 阶梯提示）
 
 /** 按注册表 def 执行一个工具。输出治理：全文永落盘（证据原件 + 回读指针），返回模型的是封顶预览。 */
-export function runGoverned({ def, params, workspace, fsMod = fs }) {
+export async function runGoverned({ def, params, workspace, fsMod = fs, configured = {}, roots = [] }) {
 	const ws = path.resolve(workspace);
 	const cooldown = breakerCheck(def.id);
 	if (cooldown > 0) return { ok: false, error: `熔断中：${def.id} 连续失败 3 次进入 60s 冷却（剩 ${cooldown}s）——改走工具调用阶梯下级通道（MCP/替代/脚本）或稍后重试` };
@@ -263,13 +630,26 @@ export function runGoverned({ def, params, workspace, fsMod = fs }) {
 	}
 	// 二进制候选解析：def.bins 按序探测（支持 {module} 占位——impacket 的 impacket-<m>/<m>.py 双安装名）
 	const binCandidates = (def.bins ?? [def.bin]).map((c) => c.replace("{module}", String(params.module ?? def.bin)));
+	const configuredPath = configuredPathForTool(configured, def);
 	let bin = null;
-	for (const cand of binCandidates) if (hasBin(cand)) { bin = cand; break; }
-	if (!bin) return { ok: false, error: `${BIN_HINT}\n${tiersLine(def)}`, bin: def.bin, tiers: tiersLine(def) };
+	for (const cand of binCandidates) {
+		const resolved = resolveToolInvocation(cand, configuredPath, {
+			configured,
+			roots,
+			acceptAnyFile: (def.bins ?? [def.bin]).length === 1,
+		});
+		if (resolved && !resolved.error) { bin = resolved; break; }
+		if (resolved?.error) return { ok: false, error: resolved.error, bin: def.bin, tiers: tiersLine(def) };
+	}
+	if (!bin) {
+		const pathHint = configuredPath ? `已配置路径不可执行：${configuredPath}；\n` : "";
+		return { ok: false, error: `${pathHint}${BIN_HINT}\n${tiersLine(def)}`, bin: def.bin, tiers: tiersLine(def) };
+	}
 	let built;
 	try { built = buildArgs(def, params); } catch (e) { return { ok: false, error: `参数拒绝：${e.message}` }; }
-	const cmdStr = `${bin} ${built.argv.join(" ")}`;
-	const proc = spawnSync(bin, built.argv, { timeout: def.limits.timeoutMs, maxBuffer: 32 * 1024 * 1024 });
+	const spawnArgs = [...bin.prefix, ...built.argv];
+	const cmdStr = `${bin.bin} ${spawnArgs.join(" ")}`;
+	const proc = await runProcess(bin.bin, spawnArgs, { timeoutMs: def.limits.timeoutMs, maxBuffer: 32 * 1024 * 1024 });
 	if (proc.error) {
 		breakerRecord(def.id, false);
 		return { ok: false, error: `执行失败：${proc.error.message}${proc.error.code === "ETIMEDOUT" ? `（超时 ${def.limits.timeoutMs / 1000}s）` : ""}\n${tiersLine(def)}`, tiers: tiersLine(def) };
@@ -315,17 +695,58 @@ const httpxParse = (raw) => {
 	return { __writeRaw: JSON.stringify(out, null, 2), __hits: [], __summary: { alive: out.length }, __summaryText: `存活 ${out.length}；探测未登记资产属测绘行为，结果请回填资产基线（assets.md / cloud-assets.md）` };
 };
 
-export const ffufParse = (_raw, proc) => {
-	// ffuf -o 已直接写 JSON 到 -o 文件；这里只汇总额外信息
-	return { __skipWrite: true, __writeRaw: null, __hits: [], __summary: { note: "结果见 -o 输出文件（已由 ffuf 写入）" }, __summaryText: `ffuf 完成（exit ${proc.status}），结果见产物文件` };
+export const ffufParse = (_raw, proc = {}) => {
+	// ffuf -o 已直接写 JSON；从该文件抽回命中，避免模型只拿到 evidenceId
+	// 却看不到任何路径，反而要额外读一次产物。
+	let results = [];
+	try {
+		const parsed = JSON.parse(fs.readFileSync(proc.outFile, "utf8"));
+		results = Array.isArray(parsed?.results) ? parsed.results : [];
+	} catch { /* 文件缺失/不是 JSON 时保持空结果，落盘兜底仍保留 */ }
+	const hits = results.map((row) => ({
+		source: "ffuf",
+		hit: `${String(row.status ?? "?")} ${String(row.length ?? "?")}B ${String(row.url ?? row.input?.FUZZ ?? "?")}`,
+	}));
+	const preview = hits.slice(0, 8).map((item) => item.hit).join("；");
+	return {
+		__skipWrite: true,
+		__writeRaw: null,
+		__hits: hits,
+		__summary: { total: results.length },
+		__summaryText: results.length
+			? `ffuf 命中 ${results.length} 条：${preview}${results.length > 8 ? "；…" : ""}`
+			: `ffuf 完成（exit ${proc.status}），0 命中`,
+	};
 };
 
 //#endregion
 
 const name = "scanner-tools";
-const inject = ["tools"];
+const inject = ["tools", "settings"];
+
+function liveConfiguredToolPaths(ctx) {
+	try {
+		return configuredToolPaths(ctx.settings.get("sec-config"));
+	} catch {
+		return {};
+	}
+}
+
+function liveConfiguredToolRoots(ctx) {
+	try {
+		const section = ctx.settings.get("sec-config");
+		return Array.isArray(section?.roots) ? section.roots : [];
+	} catch {
+		return [];
+	}
+}
 
 function apply(ctx) {
+	// Optional tools are registered at plugin load, so their availability probe
+	// must consider the sec-config path map as well as PATH. The same live map
+	// is read again at execution time for all tools, which lets an operator fix
+	// a path without restarting the host.
+	const initialConfigured = liveConfiguredToolPaths(ctx);
 	ctx.tools.register(defineTool({
 		name: "nuclei_scan",
 		description: "Template-based vuln scan (local nuclei). Conservative rate by default (-rl 15); explicit `rate` override is audit-logged. Requires the target registered in the workspace assets.md (防盲打). Hits append to scan-reconcile.md as 待处置 (hit ≠ vuln — verify with 对照三件套 before reporting).",
@@ -336,10 +757,14 @@ function apply(ctx) {
 			rate: { type: "integer", description: "requests/sec override (default 15; override is audit-logged)" }
 		},
 		output: { schema: { type: "object", additionalProperties: true }, render: (_a, v) => [{ type: "text", text: v.ok ? `nuclei: ${v.__summaryText ?? ""}${v.stdout ? " — " + v.stdout : ""}（证据 ${v.evidenceId}）` : `nuclei 拒绝/失败：${v.error}` }] },
-		execute(args) {
+		async execute(args, exec) {
 			const severity = args.severity ?? "high,critical";
 			const args2 = ["-u", args.target, "-severity", severity, "-jsonl", "-silent", "-nc"];
-			return Promise.resolve(runScan({ bin: "nuclei", args: args2, workspace: path.resolve(args.workspace), tool: "nuclei", rate: args.rate, defaultRate: RATE_DEFAULTS.nuclei, active: true, target: args.target, parse: nucleiParse }));
+			const workspace = path.resolve(args.workspace);
+			const tracked = await runWithTaskTracking(workspace, "nuclei_scan", exec, () =>
+				runScan({ bin: "nuclei", args: args2, workspace, tool: "nuclei", rate: args.rate, defaultRate: RATE_DEFAULTS.nuclei, active: true, target: args.target, parse: nucleiParse, configured: liveConfiguredToolPaths(ctx), roots: liveConfiguredToolRoots(ctx) })
+			);
+			return withTaskId(tracked);
 		}
 	}));
 	ctx.tools.register(defineTool({
@@ -351,9 +776,13 @@ function apply(ctx) {
 			rate: { type: "integer", description: "requests/sec override (default 25; audit-logged)" }
 		},
 		output: { schema: { type: "object", additionalProperties: true }, render: (_a, v) => [{ type: "text", text: v.ok ? `httpx: ${v.stdout ?? ""}（证据 ${v.evidenceId}）` : `httpx 失败：${v.error}` }] },
-		execute(args) {
+		async execute(args, exec) {
 			const args2 = ["-u", args.targets, "-json", "-silent", "-title", "-tech-detect", "-status-code"];
-			return Promise.resolve(runScan({ bin: "httpx", args: args2, workspace: path.resolve(args.workspace), tool: "httpx", rate: args.rate, defaultRate: RATE_DEFAULTS.httpx, active: false, target: args.targets, parse: httpxParse }));
+			const workspace = path.resolve(args.workspace);
+			const tracked = await runWithTaskTracking(workspace, "httpx_probe", exec, () =>
+				runScan({ bin: "httpx", args: args2, workspace, tool: "httpx", rate: args.rate, defaultRate: RATE_DEFAULTS.httpx, active: false, target: args.targets, parse: httpxParse, configured: liveConfiguredToolPaths(ctx), roots: liveConfiguredToolRoots(ctx) })
+			);
+			return withTaskId(tracked);
 		}
 	}));
 	ctx.tools.register(defineTool({
@@ -367,19 +796,28 @@ function apply(ctx) {
 			rate: { type: "integer", description: "requests/sec override (default 50; audit-logged)" }
 		},
 		output: { schema: { type: "object", additionalProperties: true }, render: (_a, v) => [{ type: "text", text: v.ok ? `ffuf: ${v.stdout ?? ""}（证据 ${v.evidenceId}）` : `ffuf 拒绝/失败：${v.error}` }] },
-		execute(args) {
+		async execute(args, exec) {
 			const wl = args.wordlist ?? "common.txt";
-			if (!fs.existsSync(path.resolve(wl))) return Promise.resolve({ ok: false, error: `字典不存在：${wl}——请给 wordlist 参数（绝对路径或 SecLists）；本工具不代装字典。` });
+			const workspace = path.resolve(args.workspace);
+			const tracked = await runWithTaskTracking(workspace, "ffuf_fuzz", exec, () => {
+				if (!fs.existsSync(path.resolve(wl))) return { ok: false, error: `字典不存在：${wl}——请给 wordlist 参数（绝对路径或 SecLists）；本工具不代装字典。` };
 			const u = args.mode === "param" ? (args.url.includes("FUZZ=") ? args.url : args.url + (args.url.includes("?") ? "&" : "?") + "FUZZ=1") : args.url;
-			ensureDirs(path.resolve(args.workspace));
+				ensureDirs(workspace);
 			const ts = stamp();
-			const outFile = path.join(path.resolve(args.workspace), "artifacts", "scans", `ffuf-${ts}.json`);
+				const outFile = path.join(workspace, "artifacts", "scans", `ffuf-${ts}.json`);
 			const args2 = ["-u", u, "-w", wl, "-mc", "200,204,301,302,307,401,403", "-o", outFile, "-of", "json", "-s"];
-			return Promise.resolve(runScan({ bin: "ffuf", args: args2, workspace: path.resolve(args.workspace), tool: "ffuf", rate: args.rate, defaultRate: RATE_DEFAULTS.ffuf, active: true, target: args.url, parse: ffufParse, outFile }));
+				return runScan({ bin: "ffuf", args: args2, workspace, tool: "ffuf", rate: args.rate, defaultRate: RATE_DEFAULTS.ffuf, active: true, target: args.url, parse: ffufParse, outFile, configured: liveConfiguredToolPaths(ctx), roots: liveConfiguredToolRoots(ctx) });
+			});
+			return withTaskId(tracked);
 		}
 	}));
 	// 注册表工具统一注册：def 带全部工具面元数据（名称/摘要/参数 schema/阶梯/守卫），新增工具只改 registry.js
-	for (const def of Object.values(TOOL_DEFS)) {
+	const configuredProbe = (candidate, def) => resolveToolBin(
+		candidate,
+		configuredPathForTool(initialConfigured, def),
+		{ roots: liveConfiguredToolRoots(ctx) },
+	) !== null;
+	for (const def of registerableDefs(TOOL_DEFS, configuredProbe)) {
 		ctx.tools.register(defineTool({
 			name: def.name,
 			// 六段降级阶梯只在“本机缺工具”时才有决策价值；runGoverned 的缺装错误已原样返回 tiersLine，
@@ -390,8 +828,12 @@ function apply(ctx) {
 				extra: { type: "string", description: "Explicit extra args (audit-logged escape hatch; shell metacharacters rejected)" }
 			}, def.params),
 			output: { schema: { type: "object", additionalProperties: true }, render: (_a, v) => [{ type: "text", text: v.ok ? `${v.summaryText}\n${v.preview}` : `${def.id} 拒绝/失败：${v.error}` }] },
-			execute(args) {
-				return Promise.resolve(runGoverned({ def, params: args, workspace: args.workspace }));
+			async execute(args, exec) {
+				const workspace = path.resolve(args.workspace);
+				const tracked = await runWithTaskTracking(workspace, def.name, exec, () =>
+					runGoverned({ def, params: args, workspace, configured: liveConfiguredToolPaths(ctx), roots: liveConfiguredToolRoots(ctx) })
+				);
+				return withTaskId(tracked);
 			}
 		}));
 	}

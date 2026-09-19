@@ -4,10 +4,19 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { isAdvanceTool, isProgressTool, isAdvanceableTurnEnd, readOpenIntents, intentHintOf, decideAdvance, MODE_IDS, MODE_VOICE, Config } from "../lib/index.js";
+import { isAdvanceTool, isProgressTool, isAdvanceableTurnEnd, readOpenIntents, intentHintOf, decideAdvance, isBoundedDiscoveryTask, MODE_IDS, MODE_VOICE, Config } from "../lib/index.js";
 
 let pass = 0, fail = 0;
 const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); } else { fail++; console.log(`FAIL ${label}`); } };
+
+ok("有界发现任务：中文“至少一个可复现证据”", isBoundedDiscoveryTask("请发现并验证漏洞，至少给出一个可复现证据") === true);
+ok("有界发现任务：英文 at least one vulnerability", isBoundedDiscoveryTask("find and verify at least one vulnerability on the target") === true);
+ok("有界发现任务：组合措辞“只选一个/立即收口/不扩展全量”不漏判", isBoundedDiscoveryTask("这是有界发现 + 状态语义复验。请只选一个证据不足的风险，完成状态回写后立即收口，不要扩展全量扫描") === true);
+ok("有界发现任务：只发现首个+停止扩展中文表述", isBoundedDiscoveryTask("先找一个真实漏洞，验证后停止扩大测试") === true);
+ok("完整评估任务不被误判为有界发现", isBoundedDiscoveryTask("请完成全量渗透测试、覆盖矩阵和最终报告") === false);
+ok("完整评估后立即收口仍按全量处理", isBoundedDiscoveryTask("请完成全量渗透测试、覆盖矩阵和最终报告，完成后立即收口") === false);
+ok("全量发现并验证所有漏洞不被发现词误判", isBoundedDiscoveryTask("请全面发现并验证所有漏洞后交付完整报告") === false);
+ok("明确至少一个时，即使提全面也按有界交付", isBoundedDiscoveryTask("先全面侦察，但至少给出一个可复现漏洞证据后收口") === true);
 
 /** 推一格时钟：注入是**延后一拍**执行的（必须在 Session.append 发布临界区之外，
  *  见 lib/index.js 的说明），不推的话同步断言看到的是「还没投递」的旧状态。 */

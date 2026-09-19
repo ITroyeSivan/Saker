@@ -248,18 +248,19 @@ function ToolLibrary(props) {
 
   var el = React.createElement;
   var children = [];
-  // 1) 目录格式提示
-  children.push(el('div', { key: 'hint', style: { fontSize: 12, lineHeight: 1.7, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', marginBottom: 10, padding: '10px 12px', borderRadius: 8, background: 'var(--dsw-alias-bg-layer-2,#f6f6f7)', border: '1px dashed var(--dsw-alias-border-l1,#d9d9de)' } },
-    el('div', { style: { fontWeight: 600, color: 'var(--dsw-alias-label-primary,#1a1a1a)', marginBottom: 4 } }, '推荐的工具目录格式'),
-    el('div', null, '默认工具库为空；添加「工具根目录」（可多个）后一键探测，按目录自动分类导入。推荐结构（一个目录 = 一个工具）：'),
-    el('code', { style: { background: 'rgba(127,127,127,.12)', padding: '1px 5px', borderRadius: 4 } }, '工具根/05-内网与域渗透/Kerbrute/kerbrute_windows_amd64.exe'),
-    el('div', null, '分类取根目录下一级的分类目录名（如 01-WebShell管理、05-内网与域渗透），没有编号目录时按名称线索归类。探测按「工具」而非「文件」收录：exe/jar 各自成项，脚本需与所在目录同名（如 sqlmap/sqlmap.py），仓库内部模块与测试文件自动排除。分散在别处的工具用「按分类手动导入」。'),
-    el('div', { style: { marginTop: 6, paddingTop: 6, borderTop: '1px dashed var(--dsw-alias-border-l1,#d9d9de)' } },
-      el('span', { style: { fontWeight: 600, color: 'var(--dsw-alias-label-primary,#1a1a1a)' } }, '探测不到某个工具？先看这里：'),
-      el('div', null, '① 只有安装包的情况很常见（典型如 Nmap：官网只发 nmap-7.99-setup.exe）。安装包不被当作工具收录——探测器会跳过 '),
-      el('code', { style: { background: 'rgba(127,127,127,.12)', padding: '1px 5px', borderRadius: 4 } }, '*-setup.exe / *.msi / *.zip / *.7z / *.tar*'),
-      el('div', null, '② 想免安装使用：把解压/安装后的真实可执行文件放到工具根目录下的任意分类目录里（如 03-扫描与信息收集/Nmap/nmap.exe），再点「探测并自动导入」即可识别。'),
-      el('div', null, '③ 已装但不在 PATH、也不想放进工具根目录：用下面的「按分类手动导入」直接填绝对路径，或把该目录加进系统 PATH。'))));
+  // 1) 目录格式提示（默认折叠，避免长说明压住真实操作区）
+  children.push(el('details', { key: 'hint', style: { marginBottom: 10, borderRadius: 8, background: 'var(--dsw-alias-bg-layer-2,#f6f6f7)', border: '1px dashed var(--dsw-alias-border-l1,#d9d9de)' } },
+    el('summary', { style: { cursor: 'pointer', padding: '8px 12px', fontSize: 12, fontWeight: 600, color: 'var(--dsw-alias-label-primary,#1a1a1a)' } }, '工具目录格式与探测说明'),
+    el('div', { style: { padding: '0 12px 10px', fontSize: 12, lineHeight: 1.7, color: 'var(--dsw-alias-label-tertiary,#6e6e73)' } },
+      el('div', null, '默认工具库为空；添加「工具根目录」（可多个）后一键探测，按目录自动分类导入。推荐结构（一个目录 = 一个工具）：'),
+      el('code', { style: { background: 'rgba(127,127,127,.12)', padding: '1px 5px', borderRadius: 4 } }, '工具根/05-内网与域渗透/Kerbrute/kerbrute_windows_amd64.exe'),
+      el('div', null, '分类取根目录下一级的分类目录名（如 01-WebShell管理、05-内网与域渗透），没有编号目录时按名称线索归类。探测按「工具」而非「文件」收录：exe/jar 各自成项，脚本需与所在目录同名（如 sqlmap/sqlmap.py），仓库内部模块与测试文件自动排除。分散在别处的工具用「按分类手动导入」。'),
+      el('div', { style: { marginTop: 6, paddingTop: 6, borderTop: '1px dashed var(--dsw-alias-border-l1,#d9d9de)' } },
+        el('span', { style: { fontWeight: 600, color: 'var(--dsw-alias-label-primary,#1a1a1a)' } }, '探测不到某个工具？先看这里：'),
+        el('div', null, '① 只有安装包的情况很常见（典型如 Nmap：官网只发 nmap-7.99-setup.exe）。安装包不被当作工具收录——探测器会跳过 '),
+        el('code', { style: { background: 'rgba(127,127,127,.12)', padding: '1px 5px', borderRadius: 4 } }, '*-setup.exe / *.msi / *.zip / *.7z / *.tar*'),
+        el('div', null, '② 想免安装使用：把解压/安装后的真实可执行文件放到工具根目录下的任意分类目录里（如 03-扫描与信息收集/Nmap/nmap.exe），再点「探测并自动导入」即可识别。'),
+        el('div', null, '③ 已装但不在 PATH、也不想放进工具根目录：用下面的「按分类手动导入」直接填绝对路径，或把该目录加进系统 PATH。')))));
   // 2) 根目录编辑 + 探测
   var rootRow = [];
   rootRow.push(el(Input, { key: 'ri', value: S.rootInput, placeholder: '工具根目录，如 D:\\Tools（可添加多个）', onChange: setRootInput }));
@@ -409,10 +410,17 @@ function ConfigForm(props) {
       setBusy(false);
       if (res && res.ok) { setMsg('已保存'); props.onSaved && props.onSaved(); refreshStatus(); }
       else setMsg('保存失败：' + ((res && res.error && res.error.message) || '未知错误'));
+    }).catch(function (e) {
+      // 没有 catch 时 RPC 一旦 reject（宿主重启 / 连接层协议错）busy 永远为 true，
+      // 保存按钮就一直是"保存中…"且没有任何提示。补上兜底。
+      setBusy(false); setMsg('保存失败：' + String((e && e.message) || e));
     });
   }
 
   return React.createElement('div', null,
+    React.createElement('div', { style: { marginBottom: 12 } },
+      React.createElement('div', { style: { fontSize: 16, fontWeight: 700, color: 'var(--dsw-alias-label-primary,#1a1a1a)' } }, '安全配置'),
+      React.createElement('div', { style: hintStyle() }, '管理工具库、Burp / Yakit 服务地址、DNSLog 与平台安全策略。')),
     React.createElement(ToolLibrary, { connection: props.connection, value: v, onChange: function (patch) {
       var next = JSON.parse(JSON.stringify(v));
       Object.keys(patch).forEach(function (k) { next[k] = patch[k]; });
@@ -516,6 +524,11 @@ var MODEL_MODES = [
   { id: 'direct', label: '直连上游（dsh 会 400，仅供排查）' },
   { id: 'custom', label: '自定义地址' },
 ];
+var REDACTION_MODES = [
+  { id: 'secrets', label: '密钥脱敏（推荐）' },
+  { id: 'secrets+pii', label: '密钥 + PII' },
+  { id: 'off', label: '关闭脱敏' },
+];
 
 function ModelLink(props) {
   var [st, setSt] = useState({ status: 'loading', value: null });
@@ -607,11 +620,26 @@ function ModelLink(props) {
         color: active ? '#1d4ed8' : 'var(--dsw-alias-label-primary,#1a1a1a)' },
     }, m.label);
   }
+  function redactionBtn(r) {
+    var active = (v.redaction || 'secrets') === r.id;
+    return React.createElement('button', {
+      key: r.id, type: 'button', disabled: busy !== '',
+      onClick: function () { writeField('redaction', r.id); },
+      style: { padding: '5px 10px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
+        border: '1px solid ' + (active ? '#2f81f7' : 'var(--dsw-alias-border-l1,#d9d9de)'),
+        background: active ? '#e8f1fe' : 'transparent', color: active ? '#1d4ed8' : 'var(--dsw-alias-label-primary,#1a1a1a)' },
+    }, r.label);
+  }
 
   return React.createElement(Group, { title: '模型接入（OpenCode Go）' },
     React.createElement('div', { style: hintStyle() },
       'OpenCode Go 这类网关要求请求带 x-opencode-session 头，dsh 没有注入自定义头的入口，直连会被判 400 MissingSessionID。开启本机代理即可：代理由本插件自带并在宿主内运行，不需要另装或手动启动任何程序。目标地址只写到 /v1，剩下的路径由 dsh 自己拼。'),
     React.createElement('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 } }, MODEL_MODES.map(modeBtn)),
+    v.mode === 'proxy' ? React.createElement('div', { style: { marginBottom: 8 } },
+      React.createElement('label', { style: labelStyle() }, '出站脱敏（只作用于本机模型代理）'),
+      React.createElement('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } }, REDACTION_MODES.map(redactionBtn)),
+      React.createElement('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary, #6e6e73)', marginTop: 4 } },
+        '默认按字段名与内容识别 Authorization/Cookie、密码、私钥、云密钥和常见 token；保留目标 IP、域名、URL 与普通验证载荷。「密钥 + PII」再脱敏邮箱、手机号、身份证和 Luhn 校验通过的银行卡号，按需开启。')) : null,
     v.mode === 'proxy' ? React.createElement('div', null,
       React.createElement('label', { style: labelStyle() }, '代理监听端口（本机回环，内置代理用这个端口）'),
       React.createElement(Input, {
@@ -637,9 +665,21 @@ function ModelLink(props) {
             (v.proxy.ok && v.proxy.health)
               ? '（' + (v.proxy.health.kind === 'builtin' ? '内置代理' : '已有服务在监听该端口')
                 + (v.proxy.health.stats ? ' · 已转发 ' + v.proxy.health.stats.requests + ' 次 · 剥字段 ' + v.proxy.health.stats.stripped : '')
+                + (v.proxy.health.stats ? ' · 脱敏 ' + (v.proxy.health.stats.redacted || 0) : '')
+                + (v.proxy.health.stats && v.proxy.health.stats.redactedKinds
+                  ? '（' + Object.entries(v.proxy.health.stats.redactedKinds).sort(function (a, b) { return b[1] - a[1]; }).slice(0, 3).map(function (pair) { return pair[0] + ':' + pair[1]; }).join(' / ') + '）'
+                  : '')
                 + '）'
               : '')
         : null),
+    (v.mode === 'proxy' && v.proxy && v.proxy.ok && v.proxy.health && v.proxy.health.stats
+      && Array.isArray(v.proxy.health.stats.events) && v.proxy.health.stats.events.length > 0)
+      ? React.createElement('div', null, '最近出站：',
+          React.createElement('code', null,
+            (v.proxy.health.stats.events[v.proxy.health.stats.events.length - 1].method || 'GET') + ' '
+            + (v.proxy.health.stats.events[v.proxy.health.stats.events.length - 1].path || '/')
+            + ' → ' + (v.proxy.health.stats.events[v.proxy.health.stats.events.length - 1].status || '?')))
+      : null,
     (v.builtinProxy && v.builtinProxy.error)
       ? React.createElement('div', { style: { color: '#d1242f', fontSize: 12, marginTop: 4 } }, v.builtinProxy.error)
       : null,
@@ -839,6 +879,97 @@ function EndpointProfiles(props) {
     msg ? React.createElement('div', { style: msgStyle(msg.ok) }, msg.text) : null);
 }
 
+// 统一出站策略：跨插件总闸（infra 出站）。判定逻辑在根包 dsh-saker/egress，
+// 这里只负责让用户改档位并看到最近判定。
+var EGRESS_MODES = [
+  { id: 'allow', label: '不拦（默认）', hint: '基础设施出站全部放行' },
+  { id: 'allowlist', label: '只放白名单', hint: '只有下面列出的域名/主机能出网' },
+  { id: 'frozen', label: '冻结基础设施出站', hint: '模型上游、知识同步、包下载全部拦下' },
+];
+
+function EgressPolicy(props) {
+  var [state, setState] = useState({ status: 'loading', policy: null, source: '', audit: [] });
+  var [hosts, setHosts] = useState('');
+  var [busy, setBusy] = useState('');
+  var [msg, setMsg] = useState(null);
+
+  function applyPayload(payload) {
+    var p = payload || {};
+    setState({ status: 'ready', policy: p.policy || null, source: p.source || '', audit: p.audit || [] });
+    setHosts((((p.policy || {}).allowHosts) || []).join('\n'));
+  }
+  function load() {
+    rpc(props.connection, 'egress/get', {}).then(function (res) {
+      if (res && res.ok && res.value) applyPayload(res.value);
+      else setState({ status: 'error', policy: null, source: '', audit: [] });
+    });
+  }
+  useEffect(load, []);
+
+  function save(mode) {
+    setBusy(mode); setMsg(null);
+    rpc(props.connection, 'egress/set', { mode: mode, allowHosts: String(hosts || '').split(/\s+/).filter(Boolean) }).then(function (res) {
+      setBusy('');
+      if (res && res.ok && res.value) { applyPayload(res.value); setMsg({ ok: true, text: '已保存：' + mode }); }
+      else setMsg({ ok: false, text: errText(res, '保存失败') });
+    });
+  }
+
+  if (state.status === 'loading') {
+    return React.createElement(Group, { title: '统一出站策略' }, React.createElement('div', { style: hintStyle() }, '加载中…'));
+  }
+  if (state.status === 'error') {
+    return React.createElement(Group, { title: '统一出站策略' },
+      React.createElement('div', { style: { fontSize: 12, color: '#d1242f' } }, '读不到策略文件（dsh-saker 根包未装或过旧）。'));
+  }
+  var policy = state.policy || { mode: 'allow', allowHosts: [] };
+  var recent = (state.audit || []).slice(-6).reverse();
+  return React.createElement(Group, { title: '统一出站策略（跨插件总闸）' },
+    React.createElement('div', { style: hintStyle() },
+      '管的是基础设施出站：模型上游、知识包 git 同步、MCP 包下载（npx/uvx）。',
+      '目标流量（打目标站点与服务）不归它管——那由授权范围与 scope 约束。'),
+    React.createElement('div', { style: hintStyle() },
+      '当前档位：', React.createElement('code', null, policy.mode || 'allow'),
+      ' · 策略文件来源：', React.createElement('code', null, state.source || 'file'),
+      policy.updatedAt ? ' · 更新于 ' + String(policy.updatedAt).replace('T', ' ').slice(0, 19) : ''),
+    React.createElement('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 6 } },
+      EGRESS_MODES.map(function (m) {
+        var on = (policy.mode || 'allow') === m.id;
+        return React.createElement('button', {
+          key: m.id, type: 'button', title: m.hint, disabled: busy !== '',
+          onClick: function () { save(m.id); },
+          style: { padding: '6px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
+            border: '1px solid ' + (on ? '#2f81f7' : 'var(--dsw-alias-border-l1,#d9d9de)'),
+            background: on ? '#e8f1fe' : 'transparent', color: on ? '#1d4ed8' : 'var(--dsw-alias-label-primary,#1a1a1a)' },
+        }, busy === m.id ? '切换中…' : (on ? '● ' + m.label : m.label));
+      })),
+    React.createElement('label', { style: labelStyle() }, '白名单（每行一个域名；只放白名单档生效，子域按标签后缀命中）'),
+    React.createElement('textarea', {
+      value: hosts, rows: 4, spellCheck: false, placeholder: 'github.com\nregistry.npmjs.org',
+      onChange: function (e) { setHosts(e.target.value); },
+      style: Object.assign({}, fieldStyle(), { width: '100%', resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }),
+    }),
+    React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' } },
+      React.createElement('button', {
+        type: 'button', style: btnStyle(false), disabled: busy !== '',
+        onClick: function () { save(policy.mode || 'allow'); },
+      }, busy === (policy.mode || 'allow') ? '保存中…' : '保存白名单'),
+      React.createElement('button', { type: 'button', style: btnStyle(false), disabled: busy !== '', onClick: load }, '刷新')),
+    recent.length
+      ? React.createElement('div', { style: { marginTop: 10, fontSize: 11, lineHeight: 1.8, color: 'var(--dsw-alias-label-tertiary,#6e6e73)' } },
+          React.createElement('div', { style: { fontWeight: 600 } }, '最近出站判定'),
+          recent.map(function (row, i) {
+            return React.createElement('div', { key: i },
+              String(row.at || '').replace('T', ' ').slice(11, 19), ' · ',
+              React.createElement('code', null, row.plugin || '?'), ' → ',
+              row.host || '(local)', ' · ',
+              React.createElement('span', { style: { color: row.decision === 'deny' ? '#d1242f' : '#1a7f37' } }, row.decision),
+              '（', row.reason, '）');
+          }))
+      : React.createElement('div', { style: hintStyle() }, '（还没有出站判定记录）'),
+    msg ? React.createElement('div', { style: msgStyle(msg.ok) }, msg.text) : null);
+}
+
 function Page(props) {
   var [state, setState] = useState({ status: 'loading', value: null });
   // 切档后要刷新 ModelLink 的「当前生效」——用 key 触发重挂载，避免把两处状态耦合起来。
@@ -861,6 +992,8 @@ function Page(props) {
     React.createElement(ModelLink, { key: 'model-' + rev, connection: props.connection }),
     React.createElement('hr', { style: { border: 'none', borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', margin: '20px 0' } }),
     React.createElement(EndpointProfiles, { connection: props.connection, onChanged: function () { setRev(function (n) { return n + 1; }); } }),
+    React.createElement('hr', { style: { border: 'none', borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', margin: '20px 0' } }),
+    React.createElement(EgressPolicy, { connection: props.connection }),
     React.createElement('hr', { style: { border: 'none', borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', margin: '20px 0' } }),
     React.createElement(PasswordForm, { connection: props.connection }));
 }

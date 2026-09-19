@@ -11,8 +11,8 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 const SEVERITIES = ["critical", "high", "medium", "low"];
-const STATUSES = ["pending", "code-reviewed", "verified", "false-positive", "fixed"];
-/** 分模式状态子集：漏洞生命周期五态=发现型（渗透/代审/攻防/应急/云）；
+const STATUSES = ["pending", "code-reviewed", "suspect", "verified", "false-positive", "fixed"];
+/** 分模式状态子集：漏洞生命周期词表=发现型（渗透/代审/应急）；
  *  产物型模式用各自本体词——免杀=在验/过检/被检出、CTF=未解/卡点/已解、二进制=分析中/疑似/已定论。
  *  verified 语义通用（各模式的"验证类终态"），verifiedAt 落库逻辑不变。 */
 const MODE_STATUSES = {
@@ -135,11 +135,11 @@ export function openStore(dbPath) {
 	// 而磁盘满/强杀/网盘回写/误改名都会造成这个问题。数据已经读不出来，
 	// 能做的是**保住原文件**（改名备份，不删）并让插件继续可用；
 	// 备份路径打到 stderr（只此一次），用户能据此找回或求助。
-	function healCorruptDb(dbPath) {
+	function healCorruptDb(dbPath, force = false) {
 		if (dbPath === ':memory:') return;
 		let head = '';
 		try { head = fs.readFileSync(dbPath).subarray(0, 16).toString("latin1"); } catch { return; }
-		if (head.startsWith("SQLite format 3")) return;   // 正常的库头
+		if (!force && head.startsWith("SQLite format 3")) return;   // 正常的库头
 		let bak = dbPath + ".corrupt-" + Date.now();
 		let n = 1;
 		while (fs.existsSync(bak)) bak = dbPath + ".corrupt-" + Date.now() + "-" + n++;   // 绝不覆盖已有备份
@@ -160,10 +160,38 @@ export function openStore(dbPath) {
 		}
 	}
 
-healCorruptDb(dbPath);   // **必须在开库前**：坏文件会让 new DatabaseSync 直接抛
-	const db = new DatabaseSync(dbPath);
-	db.exec("PRAGMA journal_mode = WAL;");
-	db.exec("PRAGMA busy_timeout = 5000;"); // 多进程（两个 dsh web）并发写不直接抛 SQLITE_BUSY
+	function openDatabase() {
+		const deadline = Date.now() + 5000;
+		let waitMs = 10;
+		for (;;) {
+			let db;
+			try {
+				db = new DatabaseSync(dbPath);
+				// node:sqlite 在构造时不读文件头，坏库错误要到首条 SQL 才出现。
+				db.exec("PRAGMA busy_timeout = 5000;");
+				db.exec("PRAGMA journal_mode = WAL;");
+				return db;
+			} catch (error) {
+				try { db?.close(); } catch { /* 打开失败时可能没有可关闭的句柄 */ }
+				const message = String(error?.message ?? error);
+				// journal_mode 首次切换在多进程首开时可能仍报 LOCKED；短退避后重试，不误判坏库。
+				if (/database is locked|database is busy|SQLITE_BUSY|SQLITE_LOCKED/i.test(message) && Date.now() < deadline) {
+					Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
+					waitMs = Math.min(250, waitMs * 2);
+					continue;
+				}
+				// 只有 SQLite 明确判为 NOTADB 时才备份重建；普通 BUSY/LOCKED 必须原样抛出。
+				if (!/not a database|SQLITE_NOTADB/i.test(message)) throw error;
+				healCorruptDb(dbPath, true);
+				db = new DatabaseSync(dbPath);
+				db.exec("PRAGMA busy_timeout = 5000;");
+				db.exec("PRAGMA journal_mode = WAL;");
+				return db;
+			}
+		}
+	}
+
+	const db = openDatabase(); // busy_timeout/WAL 已就绪；首开会与其他实例竞争
 	db.exec(SCHEMA);
 	for (const col of MIGRATION_COLUMNS) {
 	try { db.exec(`ALTER TABLE findings ADD COLUMN ${col} TEXT NOT NULL DEFAULT ''`); } catch { /* 列已存在 */ }
@@ -197,6 +225,14 @@ const cleanText = (v, max = 20000) => {
 	const s = typeof v === "string" ? v.trim() : "";
 	return s.length > max ? s.slice(0, max) : s;
 	};
+const cleanStatus = (value, mode, fallback) => {
+	const allowed = statusesOf(mode);
+	if (value === undefined || value === null || value === "") return fallback;
+	if (!allowed.includes(value)) {
+		throw new Error(`status ${JSON.stringify(value)} 不适用于 ${mode || "当前"} 模式；允许：${allowed.join("/")}`);
+	}
+	return value;
+};
 
 /**
  * 二次复核成对校验（纯函数，供测试与存储层共用）：返回错误文案，或 null 表示放行。
@@ -261,7 +297,7 @@ function rowToFinding(row) {
  *  序号走 counters 独立计数器（永不复用——删除末尾行后新登记不回收 id，报告引用 finding id 不漂移）。 */
 export function registerFinding(store, sessionId, mode, input) {
 	// 状态词表按模式取（产物型=各自本体词）——与 update/mark 同源。
-	const status = cleanEnum(input.status, statusesOf(mode), "pending");
+	const status = cleanStatus(input.status, mode, "pending");
 	// 漏洞生命周期模式：fixed=已修复终态，不可在登记时直接写入（先登记、验证成立后经 update 流转）；
 	// redteam 台账语义 fixed=已路由——登记即已路由的任务合法。
 	if (mode !== "redteam" && status === "fixed") throw new Error("fixed 不可在登记时直接写入——先登记（pending/verified），经 update 流转标记 fixed（渗透/代审=已修复（修复复测不成功）；攻防=已交付；应急=已处置）");
@@ -312,6 +348,10 @@ export function updateFinding(store, sessionId, mode, id, patch = {}) {
 	if (row === undefined || row.mode !== mode) return undefined;
 	const prev = rowToFinding(row);
 	const statusSet = statusesOf(mode);
+	// 状态是报告结论的一部分，不能像普通展示字段一样静默回落。旧实现把
+	// 模型请求的 suspect 悄悄写成 pending，工具却返回成功，导致复核结论与
+	// 台账不一致；这里在写库前显式拒绝不适用状态，让调用方修正而不是丢信息。
+	cleanStatus(patch.status, mode, prev.status);
 	// fixed 只接受"此前已验证真实存在"的流转：先 verified、修复后复测不成功才可标记——
 	// 仅漏洞生命周期模式适用；redteam 台账语义 fixed=已路由（收口的替代路径），无此前置。
 	if (mode !== "redteam" && statusSet.includes("fixed") && cleanEnum(patch.status, statusSet, prev.status) === "fixed" && prev.status !== "verified") {
@@ -321,10 +361,20 @@ export function updateFinding(store, sessionId, mode, id, patch = {}) {
 	// 强制在"同一次调用"里给齐——分两次写等于把复核变成事后补笔记。
 	const reviewError = secondReviewError(mode, prev, patch);
 	if (reviewError !== null) throw new Error(reviewError);
+	const nextStatus = cleanEnum(patch.status, statusSet, prev.status);
+	// verifiedAt 是当前结论的验证时间，不是“历史上曾被验证过”的墓碑：
+	// 复核把 verified 挑战为 suspect/false-positive/pending 时必须清空，
+	// 否则报告会同时显示“疑似/误报”和旧的验证时间。fixed 是已修复的派生终态，
+	// 保留原验证时间供追溯。
+	const nextVerifiedAt = nextStatus === "verified"
+		? (prev.status === "verified" ? prev.verifiedAt : nowIso())
+		: nextStatus === "fixed"
+			? prev.verifiedAt
+			: "";
 	const next = {
 	title: cleanText(patch.title, 200) || prev.title,
 	severity: cleanEnum(patch.severity, SEVERITIES, prev.severity),
-	status: cleanEnum(patch.status, statusSet, prev.status),
+	status: nextStatus,
 	evidenceLevel: cleanEnum(patch.evidenceLevel, EVIDENCE_LEVELS, prev.evidenceLevel),
 	type: patch.type !== undefined ? cleanText(patch.type, 60) : prev.type,
 	target: patch.target !== undefined ? cleanText(patch.target, 500) : prev.target,
@@ -336,7 +386,7 @@ export function updateFinding(store, sessionId, mode, id, patch = {}) {
 	fix: patch.fix !== undefined ? cleanText(patch.fix) : prev.fix,
 	verifyNote: patch.verifyNote !== undefined ? cleanText(patch.verifyNote) : prev.verifyNote,
 	updatedAt: nowIso(),
-	verifiedAt: prev.status !== "verified" && cleanEnum(patch.status, statusSet, prev.status) === "verified" ? nowIso() : prev.verifiedAt,
+	verifiedAt: nextVerifiedAt,
 	sourceOrigin: cleanEnum(patch.sourceOrigin, SOURCE_ORIGINS, prev.sourceOrigin),
 	secondRating: patch.secondRating !== undefined ? cleanEnum(patch.secondRating, SECOND_RATINGS, prev.secondRating) : prev.secondRating,
 	secondRatingNote: patch.secondRatingNote !== undefined ? cleanText(patch.secondRatingNote) : prev.secondRatingNote
@@ -421,9 +471,11 @@ function statsOf(all, mode = "") {
 	const targetMap = new Map();
 	let lastAt = "";
 	for (const f of all) {
-	bySeverity[f.severity] += 1;
+	bySeverity[f.severity] = (bySeverity[f.severity] ?? 0) + 1;
 	byStatus[f.status] = (byStatus[f.status] ?? 0) + 1;
-	byEvidence[f.evidenceLevel] += 1;
+	// 未登记等级归 unknown —— 旧版直接 `byEvidence[undefined] += 1`，
+	// 结果多出一个 "undefined": null 的键，四个真实档位全是 0。
+	byEvidence[f.evidenceLevel] = (byEvidence[f.evidenceLevel] ?? byEvidence.unknown ?? 0) + 1;
 	typeMap.set(f.type || "未分类", (typeMap.get(f.type || "未分类") ?? 0) + 1);
 	if (f.cwe) cweMap.set(f.cwe, (cweMap.get(f.cwe) ?? 0) + 1);
 	if (f.family) familyMap.set(f.family, (familyMap.get(f.family) ?? 0) + 1);
@@ -458,9 +510,14 @@ export function computeStats(store, sessionId, mode) {
 /** 跨会话统计：按登记时间（created_at）范围过滤后的全模式数据聚合。 */
 export function computeStatsAll(store, mode, { from = "", to = "" } = {}) {
 	const rows = store.listGlobalMode.all(mode)
-	.filter((row) => (from === "" || row.created_at >= from) && (to === "" || row.created_at <= to));
+	// 必须先过 rowToFinding：`COLS` 是 snake_case，而 statsOf 读的是 camelCase 字段。
+	// 旧版直接把裸行喂进去，导致 evidenceLevel / sourceOrigin / auditMode / updatedAt
+	// 全部读不到 —— 导出的 JSON 里 byEvidence 四档全 0、多一个 "undefined": null，
+	// bySource 全算成 manual，byAuditMode 永远为空。
+	.map(rowToFinding)
+	.filter((f) => (from === "" || f.createdAt >= from) && (to === "" || f.createdAt <= to));
 	return statsOf(rows, mode);
-	}
+}
 
 /** 跨会话模式计数（侧栏总数，全时域）。 */
 export function modeCountsAll(store) {

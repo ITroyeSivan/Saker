@@ -19,6 +19,7 @@ export type StudioLocaleKey =
   | 'statTools'
   | 'addServer'
   | 'removeServer'
+  | 'confirmRemoveServer'
   | 'serverEnabled'
   | 'unnamedServer'
   | 'serverName'
@@ -129,6 +130,7 @@ export const en: Record<StudioLocaleKey, string> = {
   statTools: 'Tools',
   addServer: 'Add server',
   removeServer: 'Remove server',
+  confirmRemoveServer: 'Click again to confirm removal',
   serverEnabled: 'Enabled',
   unnamedServer: '(unnamed server)',
   serverName: 'Server name',
@@ -240,6 +242,7 @@ export const zh: Record<StudioLocaleKey, string> = {
   statTools: '工具',
   addServer: '添加服务器',
   removeServer: '删除服务器',
+  confirmRemoveServer: '再次点击确认删除',
   serverEnabled: '启用',
   unnamedServer: '（未命名服务器）',
   serverName: '服务器名称',

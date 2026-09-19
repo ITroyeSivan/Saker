@@ -53,6 +53,10 @@ export function parseBasicInfo(output, os) {
 
 //#region 文件操作 → 命令
 
+/** Windows cmd.exe command-line limit is ~8191 chars; base64 expands 4/3.
+ *  4000 raw bytes => ~5334 chars, leaving room for path and PowerShell syntax. */
+export const WINDOWS_CMD_SAFE_CHUNK_RAW = 4000;
+
 /**
  * 统一文件操作 → 目标机命令。
  * @param {string} action ls|read|write-first|write-append|delete|delete-dir|mkdir|mv|chmod|chmod-attr|touch|stat|wget|hash
@@ -140,8 +144,11 @@ export function parseDir(text) {
 		const line = raw.trim();
 		if (!line) continue;
 		if (/^(Volume in|Directory of|File\(s\)|Dir\(s\)|Total Files)/i.test(line)) continue;
-		const m = /^(\d{1,2}[/.]\d{1,2}[/.]\d{2,4})\s+(\d{1,2}:\d{2}\s*[AP]M)\s+(<DIR>|<JUNCTION>|<SYMLINKD>)\s+(.+)$/.exec(line)
-			?? /^(\d{1,2}[/.]\d{1,2}[/.]\d{2,4})\s+(\d{1,2}:\d{2}\s*[AP]M)\s+(\d[\d,]*)\s+(.+)$/.exec(line);
+		// zh-CN Windows emits 24-hour time without AM/PM; en-US emits 12-hour.
+		// Support both en-US MM/DD/YYYY and zh-CN YYYY/MM/DD.
+		const date = "(?:\\d{1,4}[/.]\\d{1,2}[/.]\\d{2,4})";
+		const m = new RegExp(`^(${date})\\s+(\\d{1,2}:\\d{2}(?:\\s*[AP]M)?)\\s+(<DIR>|<JUNCTION>|<SYMLINKD>)\\s+(.+)$`).exec(line)
+			?? new RegExp(`^(${date})\\s+(\\d{1,2}:\\d{2}(?:\\s*[AP]M)?)\\s+(\\d[\\d,]*)\\s+(.+)$`).exec(line);
 		if (!m) continue;
 		const name = m[4].trim();
 		if (name === "." || name === "..") continue;
@@ -159,7 +166,15 @@ export function parseDir(text) {
 
 /** base64 读通道输出清洗：剥 certutil 头尾/换行。 */
 export function cleanB64Output(text) {
-	return String(text ?? "")
+	const source = String(text ?? "");
+	const begin = "-----BEGIN CERTIFICATE-----";
+	const end = "-----END CERTIFICATE-----";
+	const start = source.indexOf(begin);
+	const stop = source.indexOf(end, start + begin.length);
+	const body = start >= 0 && stop > start
+		? source.slice(start + begin.length, stop)
+		: source;
+	return body
 		.split(/\r?\n/)
 		.filter((l) => !/CERTIFICATE/i.test(l) && !/CertUtil/i.test(l) && l.trim() !== "")
 		.join("")

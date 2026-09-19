@@ -149,6 +149,25 @@ export function dispatch(workspace, { challengeId, path, owner = "", note = "" }
 	});
 }
 
+const DISPATCH_STATUS = new Set(["running", "done", "stale"]);
+export const DISPATCH_STALE_MS = 2 * 60 * 60 * 1000;
+
+/** 更新一条派单的终态。running 可按需恢复；done/stale 用于避免旧路线永久占位。 */
+export function updateDispatch(workspace, { id, status, note = "" }) {
+	return mutateBoard(workspace, (b) => {
+		const did = clean(id, 40);
+		if (!did) throw new Error("派单 id 必填");
+		const d = b.dispatches.find((x) => x.id === did);
+		if (!d) throw new Error(`派单不存在：${did}`);
+		const nextStatus = clean(status, 20);
+		if (!DISPATCH_STATUS.has(nextStatus)) throw new Error("status 须为 running / done / stale");
+		d.status = nextStatus;
+		if (note) d.note = clean(note, 200);
+		d.at2 = now();
+		return b;
+	});
+}
+
 /** 纠偏：给某个方向下指令（BreachWeave 的 steer）。写入后由 Solver 在下一轮读到。 */
 export function steer(workspace, { challengeId, text }) {
 	return mutateBoard(workspace, (b) => {
@@ -197,8 +216,11 @@ export function snapshotText(b) {
 	const solved = b.challenges.filter((c) => c.status === "solved");
 	lines.push(`题目 ${b.challenges.length}（未解 ${open} / 已解 ${solved.length}）`);
 	if (solved.length) lines.push(`已解 flag：${solved.map((c) => `${c.name}=${c.flag || "(未记录)"}`).join("；")}`);
-	const running = b.dispatches.filter((d) => d.status === "running");
+	const nowMs = Date.now();
+	const stale = b.dispatches.filter((d) => d.status === "running" && nowMs - Date.parse(d.at || 0) > DISPATCH_STALE_MS);
+	const running = b.dispatches.filter((d) => d.status === "running" && !stale.includes(d));
 	if (running.length) lines.push(`进行中路线 ${running.length}：` + running.map((d) => `${d.challengeId || "?"}:${d.path}${d.owner ? "@" + d.owner : ""}`).join("；"));
+	if (stale.length) lines.push(`超时路线 ${stale.length}：` + stale.map((d) => `${d.id}:${d.path}`).join("；") + "（用 ctf_dispatch 更新为 stale/done，或重新派单）");
 	const unread = b.steers.filter((s) => !s.consumed);
 	if (unread.length) lines.push(`未读纠偏 ${unread.length}：` + unread.map((s) => s.text).join("；"));
 	if (b.notes.length) lines.push(`最近 observer 记录：` + b.notes.slice(-3).map((n) => `[${n.kind}] ${n.text}`).join("；"));

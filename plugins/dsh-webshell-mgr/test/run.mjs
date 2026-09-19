@@ -30,6 +30,12 @@ function phpAvailable() {
 //#region 1. 命令翻译层
 
 import * as cb from "../lib/protocol/command-build.js";
+const { connectSpec } = await import("../lib/index.js");
+
+await ok("connectSpec：模型工具 snake_case 参数映射到内部 camelCase", () => {
+	const spec = connectSpec({ url: "http://127.0.0.1/x.php", pass_param: "x", cmd_param: "do", secret_key: "salt" });
+	if (spec.passParam !== "x" || spec.cmdParam !== "do" || spec.secretKey !== "salt") throw new Error(JSON.stringify(spec));
+});
 
 await ok("quotePosix 单引号转义", () => {
 	if (cb.quotePosix("it's") !== "'it'\\''s'") throw new Error(cb.quotePosix("it's"));
@@ -73,15 +79,38 @@ await ok("parseDir：windows 目录/文件/表头跳过", () => {
 	if (rows[1].name !== "data.bin" || rows[1].size !== 12345) throw new Error("bin");
 });
 
+await ok("parseDir：zh-CN Windows 24 小时时间格式", () => {
+	const rows = cb.parseDir([
+		" 驱动器 C 中的卷是 Windows",
+		" C:\\Temp\\wsm 的目录",
+		"",
+		"2026/09/19  05:42    <DIR>          .",
+		"2026/09/19  05:42             4,000 chunk.bin",
+		"               1 个文件          4,000 字节"
+	].join("\r\n"));
+	if (rows.length !== 1 || rows[0].name !== "chunk.bin" || rows[0].size !== 4000) throw new Error(JSON.stringify(rows));
+});
+
 await ok("cleanB64Output：certutil 头尾剥离", () => {
 	const out = cb.cleanB64Output("-----BEGIN CERTIFICATE-----\nQUJD\nRVBG==\n-----END CERTIFICATE-----\nCertUtil: -encode command completed successfully.");
 	if (out !== "QUJDRVBG==") throw new Error(out);
+});
+
+await ok("cleanB64Output：certutil 中文状态行数字不得污染 base64", () => {
+	const out = cb.cleanB64Output("输入长度 = 20\n输出字节 = 86\nCertUtil: -encode 命令成功完成。\n-----BEGIN CERTIFICATE-----\nQUFBQUFBQUFBQUFBQUFBQUFBQUE=\n-----END CERTIFICATE-----\n");
+	if (out !== "QUFBQUFBQUFBQUFBQUFBQUFBQUE=") throw new Error(out);
 });
 
 await ok("buildFileCommand：动作映射", () => {
 	if (!cb.buildFileCommand("ls", { path: "/t" }, "linux").includes("ls -la")) throw new Error("ls");
 	if (!cb.buildFileCommand("read", { path: "C:/t" }, "windows").includes("certutil")) throw new Error("read-win");
 	if (!cb.buildFileCommand("write-first", { path: "/t", b64: "QUJD" }, "linux").includes("base64 -d >")) throw new Error("write");
+});
+
+await ok("buildFileCommand：Windows cmd 分块低于 8191 命令行上限", () => {
+	const b64 = Buffer.alloc(cb.WINDOWS_CMD_SAFE_CHUNK_RAW, 0x41).toString("base64");
+	const cmd = cb.buildFileCommand("write-first", { path: "C:\\Windows\\Temp\\wsm.bin", b64 }, "windows");
+	if (cmd.length >= 8191) throw new Error(`command length=${cmd.length}`);
 });
 
 //#endregion
@@ -123,6 +152,7 @@ import { patchClass, readFieldValues, classNameOf } from "../lib/protocol/javapa
 import { JAVA_PAYLOADS } from "../lib/protocol/payloads-java.js";
 import { decodeSeg } from "../lib/protocol/dsh-mem.js";
 import { runCommand as capRunCommand } from "../lib/protocol/capabilities.js";
+import { parseJsonResponse } from "../lib/protocol/json-response.js";
 
 await ok("javapatch：五载荷嵌入 + 补丁/改名往返 + 未知字段报错", () => {
 	for (const name of ["WsmProbe", "WsmCmd", "WsmList", "WsmRead", "WsmWrite"]) {
@@ -647,7 +677,11 @@ if (phpAvailable()) {
 		});
 	}
 	php.kill();
-	rmSync(tmp, { recursive: true, force: true });
+	// Windows may retain PHP/SQLite file handles briefly after SIGTERM.
+	// Cleanup failure must not turn a fully passing functional suite red.
+	await new Promise((resolve) => setTimeout(resolve, 300));
+	try { rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
+	catch { /* OS temp will be reclaimed later */ }
 } else {
 	skip("PHP 回路烟测", "本机无 php");
 }
@@ -732,6 +766,86 @@ await ok("编辑内容读失败要有 catch，不允许静默停在「加载中�
 	});
 }
 //#endregion
+
+//#region 8. 协议响应 JSON 解析必须带上下文错误
+await ok("合法 JSON 响应原样解析", () => {
+	const value = parseJsonResponse('[{"n":"a.txt"}]', "测试协议");
+	if (!Array.isArray(value) || value[0].n !== "a.txt") throw new Error(JSON.stringify(value));
+});
+await ok("非法 JSON 响应带协议上下文和响应预览", () => {
+	let caught;
+	try { parseJsonResponse("<html>bad gateway</html>", "冰蝎 Java 目录列表"); }
+	catch (error) { caught = error; }
+	if (!caught) throw new Error("坏响应没有被拒绝");
+	if (!/冰蝎 Java 目录列表返回非 JSON/.test(caught.message)) throw new Error(caught.message);
+	if (!/响应预览：<html>bad gateway<\/html>/.test(caught.message)) throw new Error(caught.message);
+});
+//#endregion
+
+// 连接层契约：/dsh-webshell-mgr-rpc 的失败必须是结构化错误对象。
+// 回字符串会被客户端 parseConnectionResponse 判成 invalid server-response result
+// 并 reject 掉 Promise —— 界面卡在"上传中"且不显示任何原因（实测同源问题在
+// knowledge-hub 上表现为「点开 EDB 命中后详情区白板 + 卡在保存中」）。
+await ok("RPC 失败返回结构化错误（连接层契约）", () => {
+	const server = readFileSync(join(PKG, "lib", "index.js"), "utf8");
+	const start = server.indexOf('connection.register(ctx, "/dsh-webshell-mgr-rpc"');
+	if (start < 0) throw new Error("找不到 RPC 注册块");
+	// 取到下一个 connection.register 或文件末尾
+	const next = server.indexOf("connection.register(", start + 10);
+	const block = server.slice(start, next < 0 ? undefined : next);
+	if (!block.includes("const rpcFail = (message) => ({ ok: false, error: { code:")) {
+		throw new Error("RPC 块缺少结构化失败助手 rpcFail");
+	}
+	const legacy = block.match(/ok:\s*false,\s*error:\s*"/);
+	if (legacy) throw new Error(`RPC 块仍有字符串错误：${legacy[0]}`);
+});
+
+await ok("客户端按结构化错误取文案（不会把对象塞进 React 子节点）", () => {
+	const client = readFileSync(join(PKG, "lib", "client.js"), "utf8");
+	if (!client.includes("function errOf(r)")) throw new Error("client 缺少 errOf 助手");
+	if (/(r && r\.error) \|\|/.test(client)) throw new Error("client 仍在直接把 r.error 当文案");
+});
+
+// 覆盖写用户文件前必须留备份：self-content-set 直接写用户的 WebShell 目录，
+// 覆盖不可恢复（回收站收不到覆盖）。2026-09-19 一次误操作把 jsp_antsword.jsp
+// 覆盖成测试串，本机无副本，只能按 JDK9 孪生文件重写一份功能等价版本。
+await ok("覆盖写前留备份（内容一致 + 每个文件只留 5 份）", async () => {
+	const { backupBeforeWrite } = await import("../lib/index.js");
+	const dir = mkdtempSync(join(tmpdir(), "wsm-backup-"));
+	try {
+		const name = "shell.jsp";
+		const original = "ORIGINAL-CONTENT-请勿丢失";
+		writeFileSync(join(dir, name), original, "utf8");
+		const first = backupBeforeWrite(dir, name);
+		if (!first) throw new Error("首次备份没有返回路径");
+		if (readFileSync(first, "utf8") !== original) throw new Error("备份内容与原文件不一致");
+		// 连写 7 次，最多留 5 份
+		for (let i = 0; i < 7; i += 1) {
+			writeFileSync(join(dir, name), `v${i}`, "utf8");
+			backupBeforeWrite(dir, name);
+		}
+		const kept = readdirSync(join(dir, ".backups")).filter((f) => f.startsWith(name + "."));
+		if (kept.length !== 5) throw new Error(`备份份数应为 5，实际 ${kept.length}`);
+		// 不存在的文件不产生备份
+		if (backupBeforeWrite(dir, "not-there.jsp") !== "") throw new Error("不存在的文件不该产生备份");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+// 删除文件同样要先备份：self-remove(deleteFile) 删的是用户的马库文件。
+await ok("删除文件前也先备份（不是直接 unlink）", () => {
+	const src = readFileSync(join(PKG, "lib", "index.js"), "utf8");
+	const start = src.indexOf('if (endpoint === "self-remove")');
+	if (start < 0) throw new Error("找不到 self-remove 分支");
+	const next = src.indexOf('if (endpoint ===', start + 10);
+	const block = src.slice(start, next < 0 ? undefined : next);
+	const backupAt = block.indexOf("backupBeforeWrite(genBase(), file)");
+	const unlinkAt = block.indexOf("fsUnlink(");
+	if (backupAt < 0) throw new Error("self-remove 没有先备份");
+	if (unlinkAt < 0) throw new Error("self-remove 没有删除动作（分支写错了？）");
+	if (backupAt > unlinkAt) throw new Error("备份必须发生在 unlink 之前");
+});
 
 console.log(`\n结果：${results.pass} 通过 / ${results.fail} 失败 / ${results.skip} 跳过`);
 process.exit(results.fail ? 1 : 0);

@@ -13,7 +13,7 @@
 | Burp 桥脚本 | `burpBridgeScript` | 可选：覆盖 stdio↔SSE 桥脚本路径（默认用包内副本） |
 | DNSLog | `url / token` | OOB 回调平台（如 ceye.io） |
 | API Keys | `deepseekKey` 等 | 平台密钥 |
-| 模型接入 | `model.mode / listenPort / upstream / sanitize` | 内置本机代理，把 dsh 接上 OpenCode Go 这类网关（见下） |
+| 模型接入 | `model.mode / listenPort / upstream / sanitize / redaction` | 内置本机代理，把 dsh 接上 OpenCode Go 这类网关；默认做模型出站密钥脱敏（见下） |
 | 改密表单 | `masterKey / newPassword / confirm` | 变更平台登录密码（master key 签发制，随宿主补丁启用） |
 
 ## 交付机制
@@ -55,8 +55,18 @@ node lib/model-proxy.js --port 8788 --upstream https://opencode.ai/zen/go
 1. 补 `x-opencode-session` / `User-Agent` / `x-opencode-client` / `x-opencode-project` / `x-opencode-request`
 2. 剥私有字段（`agent` / `messageId` / `traceId` / `usage` / `reasoning` / `annotations` 等）——
    不剥上游会回 `400 ... Extra inputs are not permitted`，且对话越长累计越多
-3. 原样回传，**包含 SSE 流**（不能整体缓冲，否则边生成边看就没了）
-4. 只监听 `127.0.0.1`，不对外暴露
+3. 默认对模型出站内容做双层脱敏：字段名识别（结构化 `password` / `token` /
+   `Authorization` / `name+value` 形式，含 `tenantSecret` / `xApiToken` 这类
+   驼峰或边界词变体）加内容识别（Bearer / Basic / Cookie、私钥、
+   云密钥与常见 token，含 GCP `AIza…`、GitLab `glpat-…`、Slack `xox…`、
+   Stripe `sk/rk_live…`、Azure AD client secret）。默认放行目标 IP、域名、URL 与普通验证载荷；脱敏类别为
+   `authorization` / `cookie` / `private-key` / `cloud-key` / `github-token` /
+   `jwt` / `api-key` / `secret`，计数按类别写入健康检查和最近出站审计
+4. 原样回传，**包含 SSE 流**（不能整体缓冲，否则边生成边看就没了）
+5. 只监听 `127.0.0.1`，不对外暴露；所有请求目标必须与配置的上游同源，
+   拒绝绝对 URL / 协议相对 URL 改换 origin
+6. 健康检查保留最近 20 次出站摘要（方法、路径、状态、剥字段/脱敏计数），
+   面板显示最近一条，便于确认没有异常外发
 
 「安全配置 → 模型接入」三档，选定后点「写入配置」：
 
@@ -73,7 +83,7 @@ node lib/model-proxy.js --port 8788 --upstream https://opencode.ai/zen/go
 **一个字段**，不重述也不误删同一命名空间下的其他 provider 与模型列表。
 provider 名不存在时会明确拒绝，不会凭空建一个。
 
-面板显示：目标地址 / 当前实际生效值 / 是否一致 / 代理状态（含已转发次数与剥字段数），
+面板显示：目标地址 / 当前实际生效值 / 是否一致 / 代理状态（含已转发次数、剥字段数、脱敏类型与最近出站），
 并提供「启动 / 停止内置代理」。**测试连通**会对目标地址发一次
 `GET <baseURL>/models`（不消耗 token）并回显状态码与耗时。
 
@@ -83,6 +93,28 @@ provider 名不存在时会明确拒绝，不会凭空建一个。
 
 写完需**重启 dsh** 生效。密钥由 dsh 自己的凭据库提供（`apiKeyEnv` → `~/.dsh/.credentials.yaml`
 的 `refs`），本面板不碰密钥；代理对 `Authorization` 头**原样透传**。
+
+## 统一出站策略（跨插件总闸）
+
+护网/OPSEC 场景下，「谁能出网」需要一个总闸，而不是每个插件各管一段。
+策略是**一份文件**，实现住在根包 `dsh-saker/lib/egress.js`（`dsh-saker/egress` 导出），
+本插件只负责让用户在「安全配置 → 统一出站策略」里改档位并看到最近判定：
+
+```text
+$DSH_HOME/saker-egress/policy.json   { version, mode, allowHosts[], updatedAt }
+$DSH_HOME/saker-egress/audit.jsonl   每次判定一行（超 256KB 轮转成 .1，只留最近记录）
+```
+
+三档：`allow`（默认，不拦） / `allowlist`（只放白名单域名，子域按标签后缀命中） /
+`frozen`（基础设施出站全冻）。
+
+**只管基础设施出站**：模型上游、知识包 git 同步、MCP 包下载（npx / uvx）。
+**不管目标流量**：打目标站点与服务由授权范围与 scope 约束——判定里这类请求
+一律记 `target-traffic` 放行，避免"开了 OPSEC 就干不了活"。
+回环地址（本机代理/本机服务）也不算出站，任何档位都放行。
+
+设置页端点：`egress/get` / `egress/set`（`/dsh-sec-config` 通道）。
+模型代理在转发前判定上游；冻结档下直接返回 `403 EgressBlocked`，请求不会发出去。
 
 ## 端点档案（一键换供应商）
 
@@ -133,3 +165,7 @@ the installed catalog does not describe this route
 ## 存储
 
 命名空间数据经 `settings` 服务写入 `~/.dsh/settings.yaml`（明文与 mcp-studio 等插件同策略；读取时对 secret 字段做 `***` 脱敏）。
+
+宿主写设置时会用 `settings.yaml.lock` 串行化跨进程写入。若进程崩溃留下锁，
+`sec-config` 只在锁内容是可解析 PID 且该 PID 已不存在时回收并重试一次；
+活进程锁、空锁和未知格式一律保留，避免误偷另一个宿主的写锁。

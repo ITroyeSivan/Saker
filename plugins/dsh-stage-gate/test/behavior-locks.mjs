@@ -31,8 +31,13 @@ const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`) }
 for (const p of ['dsh-campaign-memory', 'dsh-attack-atlas', 'dsh-redteam-results', 'dsh-trace-vault']) {
   const store = readFileSync(`${P}/${p}/lib/store.js`, 'utf8')
   ok(`${p}: 库损坏时自愈（备份 + 重建，而不是抛）`, store.includes('healCorruptDb'))
-  ok(`${p}: 自愈在**开库前**调用（坏了才不抛）`,
-    /healCorruptDb\(dbPath\);[\s\S]{0,120}?new DatabaseSync\(dbPath\)/.test(store))
+  const firstOpenAt = store.indexOf('new DatabaseSync(dbPath)')
+  const notDbAt = store.search(/not a database\|SQLITE_NOTADB/i)
+  const healAt = store.indexOf('healCorruptDb(dbPath, true)')
+  ok(`${p}: 先尝试开库，只有 NOTADB 才自愈`,
+    firstOpenAt >= 0 && notDbAt > firstOpenAt && healAt > notDbAt && !/\n\s*healCorruptDb\(dbPath\);\s*\/\/.*开库前/.test(store))
+  ok(`${p}: 并发首开前先设 busy_timeout`,
+    store.indexOf('PRAGMA busy_timeout') >= 0 && store.indexOf('PRAGMA busy_timeout') < store.indexOf('PRAGMA journal_mode'))
   ok(`${p}: 自愈会清掉 -wal/-shm 残留（否则新库也被回放坏）`, store.includes('"-wal", "-shm"'))
   ok(`${p}: 备份名冲突不覆盖（追加序号）`, store.includes('while (fs.existsSync(bak))'))
   ok(`${p}: 备份失败时**如实抛出**而不是装作自愈成功`, /catch \(e\) \{[\s\S]{0,320}?throw e;/.test(store))

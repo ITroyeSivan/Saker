@@ -18,7 +18,7 @@ fs.mkdirSync(scans, { recursive: true });
 // 写入工具自产的 JSON（模拟 ffuf -of json）；WRITE=0 时不写，用于验证兜底分支。
 const mkScript = (write) => `const fs=require("fs");const a=process.argv.slice(1);const i=a.indexOf("-o");if(${write})fs.writeFileSync(a[i+1],JSON.stringify([{url:"http://t/admin",status:200,length:1234}],null,2));process.exit(0);`;
 
-function run(tool, outFile, parseFn, write) {
+async function run(tool, outFile, parseFn, write) {
   return runScan({
     // hasBin() 走 `where <bin>`，只认 PATH 名字，绝对路径会被判为无效模式 → 用 "node"
     bin: "node",
@@ -31,25 +31,25 @@ function run(tool, outFile, parseFn, write) {
 // 分支 1：工具自写 + parse 声明 __skipWrite → 文件必须保留工具产出的 JSON
 // （用真实的 ffufParse，覆盖"解析→落盘"真实接线，而非仿制品）
 const f1 = path.join(scans, "ffuf-self.json");
-run("ffuf", f1, ffufParse, 1);
+await run("ffuf", f1, ffufParse, 1);
 const c1 = fs.existsSync(f1) ? fs.readFileSync(f1, "utf8") : "";
 expect("自写文件不被覆盖（保留结构化数组）", c1.includes('"url"') && c1.includes('"status"'), `实际=${c1.slice(0, 80)}`);
 
 // 分支 2：声明 __skipWrite 但工具未写出 → 兜底回写 stdout，证据指针不悬空
 const f2 = path.join(scans, "ffuf-missing.json");
-run("ffuf", f2, ffufParse, 0);
+await run("ffuf", f2, ffufParse, 0);
 expect("自写缺失时兜底建文件（指针不悬空）", fs.existsSync(f2), "文件不存在");
 
 // 分支 3：既有行为回归——parse 交出 __writeRaw 时仍由框架落盘
 // （用 ffuf 而非 nuclei：nuclei 有模板库前置校验会提前返回）
 const f3 = path.join(scans, "ffuf-framework.json");
-run("ffuf", f3, () => ({ __writeRaw: JSON.stringify([{ t: 1 }], null, 2), __hits: [], __summary: {}, __summaryText: "z" }), 0);
+await run("ffuf", f3, () => ({ __writeRaw: JSON.stringify([{ t: 1 }], null, 2), __hits: [], __summary: {}, __summaryText: "z" }), 0);
 const c3 = fs.existsSync(f3) ? fs.readFileSync(f3, "utf8") : "";
 expect("框架落盘分支未被破坏", c3.includes('"t"'), `实际=${c3.slice(0, 80)}`);
 
 // 分支 4：无 parse 的裸调用仍落盘 stdout（httpx 等默认路径）
 const f4 = path.join(scans, "raw-default.json");
-run("httpx", f4, undefined, 0);
+await run("httpx", f4, undefined, 0);
 expect("无 parse 时落盘 stdout（原行为）", fs.existsSync(f4) && fs.readFileSync(f4, "utf8").includes("raw"), "未按原行为落盘");
 
 fs.rmSync(ws, { recursive: true, force: true });

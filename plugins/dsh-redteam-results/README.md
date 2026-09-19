@@ -6,10 +6,10 @@
 
 - **模型工具**（宿主平面，两预设可见）：`redteam_finding_register` / `redteam_finding_update` / `redteam_finding_delete`——执行时自动取当前会话 id 与模式（`exec.agent.session`），模型不指定归属。
 - **会话标签页**（`conversation.view` slot）：与 会话/轨迹/EASM暴露面 并列的「redteam 成果」页。左侧模式入口（渗透测试 / 代码审计，带计数徽标）+「任务台账视图」跨会话大屏：
-  - 上部统计：总数 + 严重/高危/中危/低危计数卡（点击即筛选）、占比堆叠条、状态分布 chips（待验证/已验证/误报/已修复，点击筛选）、类型分布 top；
+  - 上部统计：总数 + 严重/高危/中危/低危计数卡（点击即筛选）、占比堆叠条、状态分布 chips（待验证/疑似/已验证/误报/已修复，点击筛选）、类型分布 top；
   - 下部列表：一条漏洞一行（序号/名称/级别标签/状态/简介/时间），点击行手动展开详情（描述、测试过程与复现 EXP、证据引用、修复建议、复核注记）；分页 10 条/页；
   - 操作：单条**验证**（把复核请求注入当前会话，模型按对照三件套复核后回写状态）、单条**删除**（两步确认，统计动态更新）；
-  - 导出：**导出全部**=当前筛选范围的 MD 表格；**勾选导出**=逐漏洞 MD 报告（名称/描述/等级/地址/测试过程/修复建议）。
+  - 导出菜单四项：**总览（MD）**=当前筛选范围的总览报告；**全部（表格）**=翻页取全后的 MD 表格（不受单页 100 条截断）；**报告包（HTML）**=可浏览器打印成 PDF 的自包含 HTML；**结构化报告（JSON）**=`schema=saker.redteam.report.v1` / `schemaVersion: 1`，可用 `scripts/validate-redteam-report.mjs` 校验（无 `schema` 的旧导出按 v1 迁移并标 `migrated=true`，未知 schema 拒绝）。另有**导出选中报告**=逐漏洞 MD 报告（名称/描述/等级/地址/测试过程/修复建议）。
 - **存储**：node:sqlite 单库 `~/.dsh/redteam-results/results.db`（行级持久——删除某条成果即删除对应行，除非删库，数据永远在；会话隔离由 session_id 主键保证）。
 - **Web 通道**：不走 connection.rpc（该 API 在部分 fiber 上注册 webServer 路由会静默 405），采用 better-sidebar 同款配方——静态注入 webServer/webRuntime 自注册 `/dsh-redteam-results` 前缀路由 + 同源信任栅栏（回环/受信 Host + Origin 同源校验）。
 - **渗透 vs 代码审计的差异化**（导出与视图）：
@@ -20,7 +20,7 @@
 
 ## 字段
 
-`title / severity(critical|high|medium|low) / status / evidenceLevel(confirmed|partial|unknown) / type / target / summary / description / poc / evidence / fix / verifyNote / createdAt / verifiedAt`。status 词表为漏洞型五态：`pending / code-reviewed / verified / false-positive / fixed`（fixed=已修复须先 verified）。扩展字段（代审双链/CWE/patch 等）按模式落库，SQLite 冗余列保留兼容旧数据。
+`title / severity(critical|high|medium|low) / status / evidenceLevel(confirmed|partial|unknown) / type / target / summary / description / poc / evidence / fix / verifyNote / createdAt / verifiedAt`。status 词表为漏洞型六态：`pending / code-reviewed / suspect / verified / false-positive / fixed`（suspect=疑似未定论；fixed=已修复须先 verified）。扩展字段（代审双链/CWE/patch 等）按模式落库，SQLite 冗余列保留兼容旧数据。
 
 ## 验证
 

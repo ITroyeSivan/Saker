@@ -67,18 +67,18 @@ dsh web
 每个目录都是独立的dsh bundle。先安装根模式包，再按需要添加插件：
 
 ```powershell
-dsh plugin --profile web add "file:C:/packages/dsh-saker-0.3.2.tgz"
-dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-sec-config-1.3.9.tgz"
-dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-knowledge-hub-0.2.0.tgz"
-dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-skill-browse-1.1.8.tgz"
-dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-stage-gate-1.5.6.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-saker-0.3.9.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-sec-config-1.3.23.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-knowledge-hub-0.3.18.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-skill-browse-1.1.10.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-stage-gate-1.7.2.tgz"
 ```
 
 三个模式共用同一套扫描插件（靶场/CTF 场景也走同一批工具）。使用完整模式能力时一并安装：
 
 ```powershell
-dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-scanner-tools-1.0.5.tgz"
-dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-semgrep-audit-1.0.4.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-scanner-tools-1.0.16.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-semgrep-audit-1.0.7.tgz"
 ```
 
 </details>

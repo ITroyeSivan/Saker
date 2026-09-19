@@ -154,7 +154,12 @@ function Page(props) {
   function cancelRemove() { setConfirmName(''); }
   function remove(name) {
     rpc(props.connection, 'remove-skill', { name: name }).then(function (res) {
-      if (res && res.ok) { setReloadTick(function (t) { return t + 1; }); }
+      if (res && res.ok) {
+        setReloadTick(function (t) { return t + 1; });
+        // 服务端是「移进同层 .trash/」而不是直接删 —— 告诉用户还能找回
+        var trashed = res.value && res.value.trash;
+        setMsg({ ok: true, text: trashed ? '已卸载（移入技能目录 .trash/，可人工找回）' : '已卸载' });
+      }
       else setMsg({ ok: false, text: ((res && res.error && res.error.message) || '卸载失败') });
     }).catch(function (e) { setMsg({ ok: false, text: String(e && e.message || e) }); });
   }

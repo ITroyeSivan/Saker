@@ -113,6 +113,7 @@ export function ServerCard(props: {
   const [copied, setCopied] = useState(false)
   const [diagBusy, setDiagBusy] = useState(false)
   const [toolsOpen, setToolsOpen] = useState(false)
+  const [confirmRemove, setConfirmRemove] = useState(false)
   const badgeRef = useRef<HTMLButtonElement | null>(null)
   const [popPos, setPopPos] = useState<{ top: number; left: number; width: number; maxHeight: number } | undefined>(undefined)
   const [diag, setDiag] = useState<DiagnoseReport | { error: string } | undefined>(undefined)
@@ -134,6 +135,9 @@ export function ServerCard(props: {
   useEffect(() => {
     if (live?.state !== 'connected') setToolsOpen(false)
   }, [live?.state])
+  useEffect(() => {
+    if (!props.open) setConfirmRemove(false)
+  }, [props.open])
 
   /** Clamp the popover fully inside the viewport (flip/clamp/shrink), re-measured on scroll/resize while open. */
   const reposition = useCallback((initial: boolean) => {
@@ -235,9 +239,19 @@ export function ServerCard(props: {
           </button>
         )}
         <ToggleSwitch checked={server.enabled} label={t('serverEnabled')} onChange={enabled => set({ enabled })} />
-        <button type="button" className="dsh-mcs-iconbtn" title={t('removeServer')} aria-label={t('removeServer')}
+        <button
+          type="button"
+          className={confirmRemove ? 'dsh-mcs-iconbtn dsh-mcs-iconbtn--danger' : 'dsh-mcs-iconbtn'}
+          title={confirmRemove ? t('confirmRemoveServer') : t('removeServer')}
+          aria-label={confirmRemove ? t('confirmRemoveServer') : t('removeServer')}
           onClick={event => {
             event.stopPropagation()
+            if (!confirmRemove) {
+              setConfirmRemove(true)
+              window.setTimeout(() => setConfirmRemove(false), 3000)
+              return
+            }
+            setConfirmRemove(false)
             props.onRemove()
           }}
         >×</button>

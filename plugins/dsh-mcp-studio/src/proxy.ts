@@ -54,6 +54,25 @@ export type ExposureDecision = 'direct' | 'proxy' | 'pending'
 /* ── Pure logic (no I/O — the whole search/convert surface is testable offline) ── */
 
 /**
+ * Integration-specific contract hints that the upstream MCP server does not carry.
+ * Keep these at the front of the description so the bounded `mcp_search` line still
+ * retains the action the model must take to avoid a false-negative query.
+ */
+const TOOL_DESCRIPTION_HINTS: ReadonlyMap<string, string> = new Map([
+  [
+    'yakit.query_http_flow',
+    'sourceType:"all" is required for MCP request flows (mitm misses them); includePath/excludePath are arrays, not strings.',
+  ],
+])
+
+/** Add a known integration hint without mutating the upstream descriptor. */
+export function applyToolHint(server: string, name: string, description: string): string {
+  const hint = TOOL_DESCRIPTION_HINTS.get(`${server.toLowerCase()}.${name.toLowerCase()}`)
+  if (hint === undefined) return description
+  return description.trim() === '' ? hint : `${hint} ${description}`
+}
+
+/**
  * Effective exposure for one server.
  * @param server - configured row; `exposure` and `proxyThreshold` are read.
  * @param toolCount - tools the server advertises, or `undefined` before the first list.
@@ -67,13 +86,49 @@ export function decideExposure(server: Pick<ServerEntry, 'exposure' | 'proxyThre
   return toolCount >= server.proxyThreshold ? 'proxy' : 'direct'
 }
 
+/**
+ * Small, high-confidence Chinese-to-English expansion for MCP tool discovery.
+ * The tool catalogs are overwhelmingly English while operators commonly search in
+ * Chinese; without this, a query such as “HTTP 流量 查询” misses `query_http_flow`
+ * because the description says "flow" and "query".
+ */
+const SEARCH_ALIASES: ReadonlyMap<string, readonly string[]> = new Map([
+  ['查询', ['query', 'search']],
+  ['流量', ['flow', 'traffic']],
+  ['抓包', ['mitm', 'capture', 'proxy']],
+  ['历史', ['history']],
+  ['请求', ['request']],
+  ['响应', ['response']],
+  ['扫描', ['scan']],
+  ['端口', ['port']],
+  ['漏洞', ['vuln', 'risk']],
+  ['编码', ['encode']],
+  ['解码', ['decode']],
+  ['浏览器', ['browser']],
+  ['代理', ['proxy']],
+  ['文件', ['file']],
+  ['命令', ['command', 'exec']],
+  ['进程', ['process']],
+  ['内存', ['memory']],
+])
+
 /** Split a query into lowercase tokens on whitespace and common separators. */
 export function tokenize(query: unknown): string[] {
-  return String(query ?? '')
+  const raw = String(query ?? '')
     .toLowerCase()
     .split(/[\s,;|/]+/)
     .map(token => token.trim())
     .filter(token => token !== '')
+  const expanded: string[] = []
+  const seen = new Set<string>()
+  for (const token of raw) {
+    for (const candidate of [token, ...(SEARCH_ALIASES.get(token) ?? [])]) {
+      if (seen.has(candidate)) continue
+      seen.add(candidate)
+      expanded.push(candidate)
+    }
+  }
+  return expanded
 }
 
 /** Score one tool against query tokens: name hits dominate, an exact name short-circuits. */
@@ -426,7 +481,7 @@ export class ProxyRegistry {
         tools: raw.map(tool => ({
           server: server.name,
           name: tool.name,
-          description: tool.description,
+          description: applyToolHint(server.name, tool.name, tool.description),
           inputSchema: tool.inputSchema,
         })),
         listedAt: Date.now(),

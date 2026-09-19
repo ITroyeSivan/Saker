@@ -26,6 +26,10 @@
 但落地形态更轻：不造代理层、不加新工具、不改变任何调用语义，
 直接复用宿主已有的可见性过滤能力。
 
+此外提供 `tool_pack` 按需入口：只把 **WebShell 管理**这个低频大类默认收起，
+进入相应阶段时由模型用 `tool_pack(action=load, pack=webshell)` 加载。工具包只改可见性，
+不改变任何工具的行为或权限；基础侦察、记录、报告工具始终常驻。
+
 ## 实测收益（每个会话每轮）
 
 | 会话模式 | 隐藏工具 | 省下 |
@@ -44,6 +48,7 @@
   门禁改了这里必须跟着改 —— `test/run.mjs` 里有**源码契约锁**，漏改会亮红。
 - **失败可见**：`restrict` 抛错只 `logger.warn` 并**放行**（宁可多带工具，也不要把工具面改成半截）。
 - **可关**：`enable: false` 整体关闭；`rules: { webshell: false }` 逐条关闭。
+- **工具包可关**：`packs: { webshell: false, ad: false }` 可让指定包始终常驻。
 - **幂等**：同一 agent 只挂一次；`agent/disposed` 时释放过滤器。
 
 ## 配置
@@ -59,11 +64,13 @@
           webshell: true
           ctf: true
           security: true
+        packs:            # 低频工具包；false = 不收，始终可见
+          webshell: true
 ```
 
 ## 不做什么
 
-- 不动**无门禁**的插件工具（扫描器、stage-gate 等）—— 它们没有声明适用模式，
-  收窄它们就等于我替产品做决定，超出本插件职责。
+- 默认只收起上表列出的低频包；未进入 `packs.js` 的无门禁工具原样保留，
+  避免替产品擅自砍掉核心扫描器与阶段门禁。
 - 不改任何工具的**行为**，只改「模型能不能看见它」。
 - 不做 MCP 工具的收窄（那是 `dsh-mcp-studio` 的 `exposure` / `proxyThreshold` 职责）。

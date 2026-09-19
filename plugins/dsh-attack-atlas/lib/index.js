@@ -929,6 +929,39 @@ async function findFindingIdInResults(sessionId, mode, title) {
 
 /** 每主类一次的覆盖提醒限流（进程级；会话删除/重启自然重置）。 */
 const NUDGED_CATS = new Set();
+
+/** 有界发现任务的覆盖提醒同样要静音：用户明确“只找一个/立即收口/不扩展全量”时，
+ *  finding 自动点亮可以保留（图谱记录事实），但不能为了补 14 格矩阵再启动一轮模型。 */
+const FULL_SCOPE_RE = /全量|全面|完整(?:评估|覆盖|报告|测试)|覆盖矩阵|所有(?:资产|入口|漏洞|面)|全部(?:资产|入口|漏洞|面)|\b(?:full|complete)\s+(?:assessment|coverage|test|report)\b/i;
+const EXPLICIT_BOUNDED_RE = /有界(?:发现|任务|验证|排查)|(至少|最少).{0,6}(一个|1\s*个|一项|1\s*项)|只(?:选|要|需|需先|找|发现|验证|检查|测)\s*(?:一个|1\s*个|一项|1\s*项|首个)|先\s*(?:找|测|验证|发现).{0,8}(?:一个|首个)|不要\s*(?:扩展|继续扩大).{0,12}(?:全量|扫描|覆盖|测试)|不\s*(?:扩展|扩大).{0,12}(?:全量|扫描|覆盖|测试)|\bat\s+least\s+(one|1)\b|\bbounded\s+(?:discovery|task|probe)\b/i;
+const GENERIC_BOUNDED_RE = /发现(?:并|和)?验证|找到.{0,12}(?:漏洞|缺陷)|\bfind\s+(?:and\s+)?(?:verify\s+)?(?:a\s+)?vulnerabilit/i;
+function messageText(message) {
+	const content = message?.content ?? message;
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	return content.filter((b) => b?.type === "text").map((b) => b.text).join(" ");
+}
+function isInjectedTaskMessage(message) {
+	const id = String(message?.id ?? "");
+	return /^(auto-kickoff|auto-advance|atlas-nudge|rtr-)/.test(id);
+}
+/** 从会话轴取最近一条真实人类任务消息；插件 followup 的 source 也标 user，必须排除。 */
+export function isBoundedDiscoverySession(session) {
+	let events = [];
+	try { events = typeof session?.ownEvents === "function" ? session.ownEvents() : (typeof session?.snapshotEvents === "function" ? session.snapshotEvents() : []); } catch { return false; }
+	for (let i = events.length - 1; i >= 0; i--) {
+		const event = events[i];
+		if (event?.type !== "user/message" || event?.data?.source?.kind !== "user") continue;
+		const message = event.data;
+		if (isInjectedTaskMessage(message)) continue;
+		const text = messageText(message).trim();
+		if (!text) continue;
+		if (FULL_SCOPE_RE.test(text) && !EXPLICIT_BOUNDED_RE.test(text)) return false;
+		return EXPLICIT_BOUNDED_RE.test(text) || GENERIC_BOUNDED_RE.test(text);
+	}
+	return false;
+}
+
 function nudgeUndetermined(ctx, sessionId, mode, taxonomy, doneKeys, markedCats, deps = {}) {
 	const out = [];
 	let agent = null;
@@ -1003,7 +1036,10 @@ export async function autoLightFromFinding(ctx, st, sessionId, findingArgs, deps
 		marked.push(res.key);
 		markedCats.add(res.catId);
 	}
-	const nudged = markedCats.size ? nudgeUndetermined(ctx, sessionId, mode, taxonomy, done, [...markedCats], deps) : [];
+	const bounded = deps.bounded === true || (deps.bounded !== false && (() => {
+		try { return isBoundedDiscoverySession(resolveAgents(ctx)?.get?.(sessionId)?.session); } catch { return false; }
+	})());
+	const nudged = !bounded && markedCats.size ? nudgeUndetermined(ctx, sessionId, mode, taxonomy, done, [...markedCats], deps) : [];
 	return { marked, nudged };
 }
 

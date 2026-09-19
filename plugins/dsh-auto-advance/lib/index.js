@@ -111,6 +111,21 @@ function textOf(message) {
 	return content.filter((b) => b?.type === "text").map((b) => b.text).join(" ");
 }
 
+// 有界发现任务：用户把交付收敛到“至少一个/找到并验证漏洞”时，不应在轮次
+// 边界继续催全量覆盖。典型实战说法是“输入目标，发现漏洞”“至少给一个
+// 可复现证据”，而不是要求完整资产/全矩阵收口。
+const FULL_SCOPE_RE = /全量|全面|完整(?:评估|覆盖|报告|测试)|覆盖矩阵|所有(?:资产|入口|漏洞|面)|全部(?:资产|入口|漏洞|面)|\b(?:full|complete)\s+(?:assessment|coverage|test|report)\b/i;
+const EXPLICIT_BOUNDED_RE = /有界(?:发现|任务|验证|排查)|(至少|最少).{0,6}(一个|1\s*个|一项|1\s*项)|只(?:选|要|需|需先|找|发现|验证|检查|测)\s*(?:一个|1\s*个|一项|1\s*项|首个)|先\s*(?:找|测|验证|发现).{0,8}(?:一个|首个)|不要\s*(?:扩展|继续扩大).{0,12}(?:全量|扫描|覆盖|测试)|不\s*(?:扩展|扩大).{0,12}(?:全量|扫描|覆盖|测试)|\bat\s+least\s+(one|1)\b|\bbounded\s+(?:discovery|task|probe)\b/i;
+const BOUNDED_DISCOVERY_RE = /发现(?:并|和)?验证|找到.{0,12}(?:漏洞|缺陷)|快速(?:发现|排查|验证).{0,12}(?:漏洞|缺陷)|\bfind\s+(?:and\s+)?(?:verify\s+)?(?:a\s+)?vulnerabilit/i;
+export function isBoundedDiscoveryTask(message) {
+	const text = textOf(message).trim();
+	if (text.length === 0) return false;
+	// 完整评估里的“完成后立即收口”“发现并验证所有漏洞”不能因为收口词被误判成有界；
+	// 只有出现“至少一个/只找一个/有界发现”等明确交付上限时才压过全量语义。
+	if (FULL_SCOPE_RE.test(text) && !EXPLICIT_BOUNDED_RE.test(text)) return false;
+	return EXPLICIT_BOUNDED_RE.test(text) || BOUNDED_DISCOVERY_RE.test(text);
+}
+
 async function apply(ctx, config) {
 	const cfg = { enable: true, maxAutoTurns: 5, cooldownMs: 30000, kickoff: true, advanceOnTurnEnd: true, ...config };
 	if (!cfg.enable) return;
@@ -152,6 +167,7 @@ async function apply(ctx, config) {
 	const SINGLE_REPLY_RE = /(^|[，。；;\s])(请|麻烦)?(只|仅|只需|只需要|只用)\s*(回复|回答|输出|返回|用一句话|一句话)/i;
 	const NO_TOOL_RE = /(不要|别|请勿|无需|不需要|禁止)\s*(调用|使用|执行|运行|发起)\s*(任何)?\s*(工具|命令|tool)/i;
 	const NO_TOOL_EN_RE = /\b(do not|don't|never|without)\s+(call|use|run|invoke)\s+(any\s+)?tools?\b|\bonly\s+(reply|respond|answer|output)\b/i;
+	const boundedTasks = new Set();
 	function shouldSkipKickoff(message) {
 		const text = textOf(message).trim();
 		if (!text) return true;
@@ -159,7 +175,8 @@ async function apply(ctx, config) {
 		return TRIVIAL_KICKOFF_RE.test(text)
 			|| SINGLE_REPLY_RE.test(text)
 			|| NO_TOOL_RE.test(text)
-			|| NO_TOOL_EN_RE.test(text);
+			|| NO_TOOL_EN_RE.test(text)
+			|| isBoundedDiscoveryTask(message);
 	}
 
 	/** 开工提醒文案：模式化（本模式拆分理论+准则结构+分母语义）优先，降级通用三登记。 */
@@ -209,6 +226,8 @@ async function apply(ctx, config) {
 	const tryNudge = (sid, { trigger, toolName, argsRaw = "" }) => {
 		const agent = agentOf(sid);
 		if (!agent || typeof agent.followup !== "function") return;
+		// 有界发现任务不做自动续跑；模型完成当前轮后自然交付即可。
+		if (boundedTasks.has(sid)) return;
 		let mode = "";
 		try { mode = String(ctx.agentPresets?.composedPreset?.(agent.ctx) ?? ""); } catch { /* 组合未就绪 */ }
 		if (!MODE_IDS.includes(mode)) return;
@@ -237,6 +256,8 @@ async function apply(ctx, config) {
 		if (!isHumanUser(message) || myIds.has(message?.id)) return;
 		const sid = info?.agent?.session?.id ?? info?.agent?.id;
 		reset(sid);
+		if (isBoundedDiscoveryTask(message)) boundedTasks.add(sid);
+		else boundedTasks.delete(sid);
 		// 开工提醒（第 0 轮推进）：专业模式会话首条人类消息后，工作区无台账则一次性提醒
 		// 开工三登记——不硬拦（快任务可忽略），出口对账兜底。
 		if (cfg.kickoff && sid && !kickoffDone.has(sid)) {
@@ -260,7 +281,10 @@ async function apply(ctx, config) {
 	});
 	ctx.on("session/event", (subject, event) => {
 		if (event?.type === "user/message" && isHumanUser(event.data) && !myIds.has(event.data?.id)) {
-			reset(subject?.id ?? subject?.header?.id);
+			const sid = subject?.id ?? subject?.header?.id;
+			reset(sid);
+			if (isBoundedDiscoveryTask(event.data)) boundedTasks.add(sid);
+			else boundedTasks.delete(sid);
 			return;
 		}
 		const sid = String(subject?.id ?? subject?.header?.id ?? "");
@@ -311,6 +335,7 @@ async function apply(ctx, config) {
 		state.delete(sid);
 		turnProgressed.delete(sid);
 		kickoffDone.delete(sid);
+		boundedTasks.delete(sid);
 	});
 }
 

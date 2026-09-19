@@ -7,7 +7,7 @@
 模块化提示词 · 23 个独立插件 · 自定义工具链 · MCP 接入 · 安全知识库 · WebShell 管理
 
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek-Harness-111827?style=flat-square)](https://github.com/deepseek-ai/deepseek-harness)
-[![Saker](https://img.shields.io/badge/Saker-v0.3.0-4f46e5?style=flat-square)](https://github.com/ITroyeSivan/Saker)
+[![Saker](https://img.shields.io/badge/Saker-v0.3.9-4f46e5?style=flat-square)](https://github.com/ITroyeSivan/Saker)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.5-339933?style=flat-square&logo=node.js&logoColor=white)](./package.json)
 [![License](https://img.shields.io/badge/code-MIT-2563eb?style=flat-square)](./LICENSE)
 
@@ -85,7 +85,7 @@ dsh web                          # 重启宿主
 | 判断能力该用 dsh 宿主还是 Saker | [宿主能力对照](./docs/host-capabilities.md) |
 | 改代码、打包、发版 | [开发与发布](./docs/development.md) |
 | 确认能用在哪、哪些结论要人复核 | [边界与执行约束](./docs/boundaries.md) |
-| 看这一版改了什么 | [发布说明](./docs/release-v0.3.2.md) |
+| 看这一版改了什么 | [发布说明](./docs/release-v0.3.9.md) |
 
 ## 边界与授权
 

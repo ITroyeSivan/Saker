@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-hunter",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "DSH hunter plugin: FOFA / Hunter(qianxin) / Quake(360) aggregated asset search with unified DSL → per-platform syntax conversion, quota-aware pagination/export, API-key settings panel, and the code-audit live-verification pipeline (L0 fingerprint check on internet assets, L1 minimal-impact EXP only on user-authorized assets).",
   "files": [
     "lib",

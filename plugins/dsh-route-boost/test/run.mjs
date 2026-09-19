@@ -303,6 +303,7 @@ console.log(fail === 0 ? `\nall ${pass} tests passed` : `\n${fail} FAILED, ${pas
 	ok("full coverage renders bare segment", fullCov.includes("覆盖 4/4") && !fullCov.includes("未测"), fullCov.slice(0, 160));
 	ok("no coverage segment without ledger", !withOp.includes("覆盖 "));
 	ok("open intents render segment", buildEnvelope({ presetId: "pentest", mode, phase, refsHits: [], evidence: "unknown", gates: FALLBACK_GATES, operation: { ...op, openIntents: ["i1", "i3"] } }).includes("意图 2 未收口（i1,i3"));
+	ok("running/interrupted tasks render segment", buildEnvelope({ presetId: "pentest", mode, phase, refsHits: [], evidence: "unknown", gates: FALLBACK_GATES, maxChars: 2000, operation: { ...op, tasks: [{ id: "i2", state: "running", progress: 40, attempts: 1, maxAttempts: 3 }] } }).includes("执行任务 1 待续（i2:running 40% 1/3"));
 	ok("no intents segment when closed", !withOp.includes("意图 "));
 	ok("constraints render dedicated line", buildEnvelope({ presetId: "pentest", mode, phase, refsHits: [], evidence: "unknown", gates: FALLBACK_GATES, operation: { ...op, constraints: ["禁：不碰支付接口", "允：仅测 x.example.com"] } }).includes("约束红线:") && buildEnvelope({ presetId: "pentest", mode, phase, refsHits: [], evidence: "unknown", gates: FALLBACK_GATES, operation: { ...op, constraints: ["禁：不碰支付接口"] } }).includes("禁：不碰支付接口"));
 	ok("no constraints line without ledger", !withOp.includes("约束红线"));

@@ -18,6 +18,8 @@ export interface ToolMeta {
     readonly inputSchema: unknown;
 }
 export type ExposureDecision = 'direct' | 'proxy' | 'pending';
+/** Add a known integration hint without mutating the upstream descriptor. */
+export declare function applyToolHint(server: string, name: string, description: string): string;
 /**
  * Effective exposure for one server.
  * @param server - configured row; `exposure` and `proxyThreshold` are read.

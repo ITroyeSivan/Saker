@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-knowledge-hub",
-  "version": "0.2.0",
+  "version": "0.3.18",
   "description": "Saker knowledge hub: curated sparse knowledge packs, offline SQLite FTS5 hybrid retrieval, layered refs, and knowledge_search/read/list model tools.",
   "type": "module",
   "main": "./lib/index.js",

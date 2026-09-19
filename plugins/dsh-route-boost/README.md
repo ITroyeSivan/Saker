@@ -62,3 +62,5 @@ goal（截断 80）+ 准则 met 进度 + 未收口 id + 待办数 + 最近门判
 web profile `package.json`：dependencies 加 `@dsh-external/dsh-route-boost` link +
 `dsh.profile.bundles` 追加同名 bundle，`pnpm install`，**重启 dsh web 生效**。
 新环境随 Saker 发布用 `dsh plugin add` 增量安装（hostPlane 组）。
+恢复盘会在 operation-state 中存在 queued / running / interrupted 任务时，额外注入一行紧凑的
+任务摘要（id、状态、进度、尝试次数）；全收口时不占上下文。

@@ -16,17 +16,28 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 // ⚠ DSH_HOME 必须在**任何** dshHome() 调用之前设好（模块内 bundleRefs/pattRef 是懒缓存）。
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), "kh-home-"));
 process.env.DSH_HOME = HOME;
+// Unit fixtures own the user/import layers; keep the real repository bundle out
+// so assertions stay deterministic and do not depend on shipped refs.
+process.env.SAKER_DISABLE_BUNDLE = "1";
 
-const { dispatch, stats, searchAll, ensureKnowledgeIndex, closeKnowledgeIndex, apply } = await import("../lib/index.js");
+const { dispatch, stats, searchAll, ensureKnowledgeIndex, closeKnowledgeIndex, apply, autoSyncKnowledgePacks, getSyncMode, setSyncMode, translateQuery, queryConcepts, coverageBonusOf } = await import("../lib/index.js");
+const { syncPack } = await import("../lib/packs.js");
 
 let pass = 0, fail = 0;
 const ok = (label, cond, extra) => {
 	if (cond) { pass++; console.log(`ok   ${label}`); }
 	else { fail++; console.log(`FAIL ${label}${extra !== undefined ? " —— " + String(extra) : ""}`); }
+};
+/** RPC 失败是结构化对象 `{code,message,details}`；这里统一取文本，兼容旧字符串形状。 */
+const errOf = (r) => {
+	const e = r && r.error;
+	if (!e) return "";
+	return typeof e === "string" ? e : String(e.message || "");
 };
 
 const REFS = path.join(HOME, "refs");
@@ -60,6 +71,7 @@ write(path.join(IMPORTS, "team-notes", "win", "ad.md"), "# 域渗透\nKerberoast
 {
 	const hits = searchAll("布尔盲注", "pentest");
 	ok("检索命中 user 层", hits.some((h) => h.source === "user" && h.path.includes("sqli.md")));
+	ok("正常命中不标低置信", hits[0] && hits[0].lowConfidence === false);
 	ok("命中行号正确（1-based，指向含关键词那行）", hits.some((h) => h.path.includes("sqli.md") && h.line === 2), JSON.stringify(hits.map((h) => [h.path, h.line])));
 	ok("命中带预览行", hits.every((h) => typeof h.preview === "string" && h.preview.length > 0));
 
@@ -70,6 +82,13 @@ write(path.join(IMPORTS, "team-notes", "win", "ad.md"), "# 域渗透\nKerberoast
 	// 别名展开：中文词 → 英文术语
 	const alias = searchAll("盲注", "pentest");
 	ok("中文别名能命中英文术语（布尔盲注）", alias.some((h) => h.path.includes("sqli.md")));
+
+	// 来源限定搜索：知识库页面的“筛选当前来源”要求跨已折叠目录找文件，
+	// 不能先把其它来源的高分结果取满再过滤，否则单一来源会看起来“没有结果”。
+	const userOnly = searchAll("Kerberoasting", "pentest", 8, "user");
+	ok("来源限定搜索排除其它来源", userOnly.every((h) => h.source === "user"));
+	const importOnly = searchAll("Kerberoasting", "pentest", 8, "import");
+	ok("来源限定搜索保留目标来源", importOnly.some((h) => h.source === "import" && h.path.includes("ad.md")), JSON.stringify(importOnly));
 
 	// 空查询不炸（返回数组即可）
 	ok("空查询返回数组不抛", Array.isArray(searchAll("", "pentest")));
@@ -105,7 +124,7 @@ write(path.join(IMPORTS, "team-notes", "win", "ad.md"), "# 域渗透\nKerberoast
 {
 	for (const src of ["bundle", "patt"]) {
 		const r = await dispatch("write", { source: src, mode: "pentest", path: "hack.md", content: "x" });
-		ok(`${src} 层写被拒（只读）`, r && r.ok === false && /只读/.test(String(r.error)), JSON.stringify(r));
+		ok(`${src} 层写被拒（只读）`, r && r.ok === false && /只读/.test(errOf(r)), JSON.stringify(r));
 	}
 	// 未知来源
 	const r = await dispatch("write", { source: "nowhere", mode: "pentest", path: "a.md", content: "x" });
@@ -125,6 +144,20 @@ write(path.join(IMPORTS, "team-notes", "win", "ad.md"), "# 域渗透\nKerberoast
 	const hits = searchAll("内容行", "pentest");
 	ok("新写入的文件立刻可检索", hits.some((h) => h.path.includes("note.md")), JSON.stringify(hits.map((h) => h.path)));
 
+	// 覆盖写已有文件前必须留备份：用户改自己写的条目，保存一下不该永久覆盖上一版。
+	// （同一类问题 2026-09-19 已在 webshell-mgr 上真实踩过一次数据丢失。）
+	const w2 = await dispatch("write", { source: "user", mode: "pentest", path: "sub/dir/note.md", content: "# 笔记\n第二版\n" });
+	ok("覆盖写返回备份路径且备份内容是上一版",
+		w2 && w2.ok === true && typeof w2.value?.backup === "string" && fs.existsSync(w2.value.backup)
+		&& fs.readFileSync(w2.value.backup, "utf8").includes("内容行"), JSON.stringify(w2?.value));
+	ok("覆盖后新内容生效", fs.readFileSync(path.join(USER_PENTEST, "sub", "dir", "note.md"), "utf8").includes("第二版"));
+	ok("首次创建（原本不存在）不产生备份",
+		w && w.ok === true && (w.value?.backup === "" || w.value?.backup === undefined), JSON.stringify(w?.value));
+	// 备份目录不能出现在目录浏览里
+	const browseAfterWrite = await dispatch("browse", { source: "user", mode: "pentest", dir: "" });
+	const dirNamesAfterWrite = (browseAfterWrite.value?.dirs || []).map((x) => (typeof x === "string" ? x : x.name));
+	ok("备份目录不出现在浏览列表里", !dirNamesAfterWrite.includes(".backups"), JSON.stringify(dirNamesAfterWrite));
+
 	const d = await dispatch("remove", { source: "user", mode: "pentest", path: "sub/dir/note.md" });
 	ok("remove 删掉文件", d && d.ok === true && !fs.existsSync(path.join(USER_PENTEST, "sub", "dir", "note.md")), JSON.stringify(d));
 
@@ -132,6 +165,20 @@ write(path.join(IMPORTS, "team-notes", "win", "ad.md"), "# 域渗透\nKerberoast
 	const d2 = await dispatch("remove", { source: "user", mode: "pentest", path: "sub" });
 	ok("remove 递归删目录", d2 && d2.ok === true && !fs.existsSync(path.join(USER_PENTEST, "sub")), JSON.stringify(d2));
 	ok("兄弟目录未被误删（删的是子目录不是父）", fs.existsSync(path.join(USER_PENTEST, "web", "sqli.md")));
+
+	// 删除不是真删：先移进同层 .trash/（同卷 rename，原子且可人工找回）。
+	// 背景：这条路径删的是用户自己写的知识条目/导入包，直接 rm 就永久没了。
+	ok("删除会先移进同层 .trash/（可找回）",
+		d && d.ok === true && typeof d.value?.trash === "string" && fs.existsSync(d.value.trash)
+		// 删之前刚被覆盖成"第二版"，所以回收站里应是那一版
+		&& fs.readFileSync(d.value.trash, "utf8").includes("第二版"), JSON.stringify(d?.value));
+	ok("递归删除的目录也进 .trash/（整棵子树被搬走而不是 rm）",
+		d2 && d2.ok === true && fs.existsSync(d2.value.trash) && fs.statSync(d2.value.trash).isDirectory(),
+		JSON.stringify(d2?.value));
+	// 点开头的 .trash 必须从浏览列表里消失，否则用户会看到自己删掉的东西又冒出来
+	const browseAfter = await dispatch("browse", { source: "user", mode: "pentest", dir: "" });
+	const dirNames = (browseAfter.value?.dirs || []).map((x) => (typeof x === "string" ? x : x.name));
+	ok("回收站不出现在目录浏览里（点开头被跳过）", !dirNames.includes(".trash"), JSON.stringify(dirNames));
 }
 
 // ── 6. browse 列表（dirs/files 是对象数组：{name, rel, [fileCount|size]}）─────
@@ -186,6 +233,10 @@ write(path.join(IMPORTS, "team-notes", "win", "ad.md"), "# 域渗透\nKerberoast
 	// 引号内逗号：描述被完整解析（未把 csv 列错位）
 	const byDesc = searchAll("remote code execution", "pentest").filter((h) => h.edb);
 	ok("CSV 引号字段解析正确（引号内逗号不切列）", byDesc.some((h) => h.edbId === "52222"), JSON.stringify(byDesc));
+	const yearFalsePositive = searchAll("2026 世界杯 赛程", "pentest", 8).filter((h) => h.edb && h.edbId === "2026");
+	ok("普通年份不会被当成 EDB 精确 ID", yearFalsePositive.length === 0, JSON.stringify(yearFalsePositive));
+	const noisy = searchAll("Kerberoasting banana smoothie", "pentest", 3);
+	ok("低覆盖自然语言查询会标低置信", noisy[0] && noisy[0].lowConfidence === true, JSON.stringify(noisy[0]));
 
 	// 未验证标记：verified=0 的行预览带「(未验证)」
 	ok("未验证条目带 (未验证) 标记", byId.some((h) => /未验证/.test(h.preview)), JSON.stringify(byId));
@@ -221,13 +272,18 @@ write(path.join(IMPORTS, "team-notes", "win", "ad.md"), "# 域渗透\nKerberoast
 
 	// 真目录交给 import_git 时报「已存在」而不是静默覆盖
 	const g4 = await dispatch("import_git", { url: "https://example.invalid/repo.git", name: "team-notes" });
-	ok("import_git 不覆盖同名目录", g4 && g4.ok === false && /已存在/.test(String(g4.error)), JSON.stringify(g4).slice(0, 140));
+	ok("import_git 不覆盖同名目录", g4 && g4.ok === false && /已存在/.test(errOf(g4)), JSON.stringify(g4).slice(0, 140));
 }
 
 // ── 9. 未知端点 ────────────────────────────────────────────────────────────
 {
 	const r = await dispatch("nope", {});
-	ok("未知端点返回 fail 而非抛错", r && r.ok === false && /unknown endpoint/.test(String(r.error)), JSON.stringify(r));
+	ok("未知端点返回 fail 而非抛错", r && r.ok === false && /unknown endpoint/.test(errOf(r)), JSON.stringify(r));
+	// 连接层契约：失败必须是结构化错误对象，回字符串会被 parseConnectionResponse 判成
+	// invalid server-response result 并 reject，客户端界面直接卡死（实测详情区白板）。
+	ok("失败返回结构化错误（连接层契约）",
+		r && r.ok === false && typeof r.error === "object" && typeof r.error.code === "string"
+		&& typeof r.error.message === "string" && typeof r.error.details === "object", JSON.stringify(r));
 }
 
 // ── 10. 检索上限与去重（防一次调用把上下文灌满）─────────────────────────────
@@ -293,6 +349,320 @@ write(path.join(IMPORTS, "team-notes", "win", "ad.md"), "# 域渗透\nKerberoast
 	const readValue = await readTool.execute({ hitId, limit: 20 });
 	const readText = readTool.output.render({ hitId }, readValue)[0].text;
 	ok("knowledge_read render 返回真实原文", /布尔盲注/.test(readText) && /行 \d+-\d+/.test(readText), readText.slice(0, 220));
+	ok("knowledge_read 返回磁盘绝对路径，模型无需再 glob 反查",
+		readValue.ok && typeof readValue.value.absPath === "string" && fs.existsSync(readValue.value.absPath)
+		&& readText.includes(readValue.value.absPath),
+		JSON.stringify({ root: readValue.value.root, absPath: readValue.value.absPath }));
+}
+
+// ── 12b. 统一出站策略：冻结档必须在 git 之前拦下；本地路径不算出站 ──────────
+{
+	const { gateInfraEgress } = await import("../lib/packs.js");
+	const egressDir = path.join(HOME, "saker-egress");
+	const policyFile = path.join(egressDir, "policy.json");
+	const auditFile = path.join(egressDir, "audit.jsonl");
+	const writePolicy = (value) => {
+		fs.mkdirSync(egressDir, { recursive: true });
+		fs.writeFileSync(policyFile, JSON.stringify(value), "utf8");
+	};
+	const readAudit = () => (
+		fs.existsSync(auditFile)
+			? fs.readFileSync(auditFile, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line))
+			: []
+	);
+
+	fs.rmSync(egressDir, { recursive: true, force: true });
+	const missing = await gateInfraEgress({ source: "https://github.com/org/repo.git" });
+	ok("无策略文件→放行且标注 policy-missing",
+		missing.decision === "allow" && missing.policySource === "policy-missing", JSON.stringify(missing));
+
+	writePolicy({ version: 1, mode: "frozen", allowHosts: [] });
+	const frozen = await gateInfraEgress({ source: "https://github.com/org/repo.git" });
+	ok("冻结档→基础设施出站判定为拦截（infra_frozen）",
+		frozen.decision === "deny" && frozen.reason === "infra_frozen", JSON.stringify(frozen));
+	const local = await gateInfraEgress({ source: path.join(HOME, "local-origin.git") });
+	ok("冻结档→本地路径不算出站（local-source）",
+		local.decision === "allow" && local.reason === "local-source", JSON.stringify(local));
+
+	// 真调一次 syncPack：冻结档下 git 一次都不该跑
+	const calls = [];
+	const fakeGit = async (args) => { calls.push(args.join(" ")); return { ok: true, code: 0, stdout: "", stderr: "" }; };
+	const blocked = await syncPack({ id: "frozen-pack", repo: "https://github.com/org/repo.git", branch: "", sparse: [] }, { git: fakeGit });
+	ok("冻结档：syncPack 返回 blocked 且 git 未被调用",
+		blocked.ok === false && blocked.mode === "blocked" && calls.length === 0 && /统一出站策略拦截/.test(blocked.error),
+		`${JSON.stringify(blocked)} calls=${calls.length}`);
+
+	// 白名单命中 → 回到旧路径（git 真被调用）
+	writePolicy({ version: 1, mode: "allowlist", allowHosts: ["github.com"] });
+	const allowed = await syncPack({ id: "allow-pack", repo: "https://github.com/org/repo.git", branch: "", sparse: [] }, { git: fakeGit });
+	ok("白名单命中→不被拦（git 真被调用）",
+		calls.length > 0 && allowed.mode !== "blocked", `${JSON.stringify(allowed)} calls=${calls.length}`);
+
+	const rows = readAudit();
+	ok("审计留痕：deny 与 allow 都记了，且带 host",
+		rows.some((r) => r.decision === "deny" && r.host === "github.com") && rows.some((r) => r.decision === "allow"),
+		`${rows.length} rows`);
+	fs.rmSync(egressDir, { recursive: true, force: true });
+}
+
+// ── 13. 分叉的托管知识包必须自动重克隆，并保留旧目录备份 ────────────────────
+{
+	const git = (cwd, args) => execFileSync("git", args, {
+		cwd,
+		stdio: "ignore",
+		env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+	});
+	const origin = path.join(HOME, "diverged-origin.git");
+	const seed = path.join(HOME, "diverged-seed");
+	const packId = "diverged-pack";
+	const pack = { id: packId, repo: origin, branch: "master", sparse: [] };
+
+	execFileSync("git", ["init", "--bare", "--initial-branch=master", origin], { stdio: "ignore" });
+	execFileSync("git", ["clone", origin, seed], { stdio: "ignore" });
+	git(seed, ["config", "user.email", "saker-test@example.invalid"]);
+	git(seed, ["config", "user.name", "Saker Test"]);
+	write(path.join(seed, "upstream.md"), "v1\n");
+	git(seed, ["add", "."]);
+	git(seed, ["commit", "-m", "v1"]);
+	git(seed, ["push", "-u", "origin", "master"]);
+
+	const first = await syncPack(pack);
+	ok("分叉测试：首次 clone 成功", first.ok && first.mode === "clone", JSON.stringify(first));
+	ok("分叉测试：托管 clone 启用 core.longpaths", execFileSync("git", ["config", "--get", "core.longpaths"], { cwd: path.join(IMPORTS, packId), encoding: "utf8" }).trim() === "true");
+	git(path.join(IMPORTS, packId), ["config", "user.email", "saker-test@example.invalid"]);
+	git(path.join(IMPORTS, packId), ["config", "user.name", "Saker Test"]);
+
+	// 本地制造与上游分叉的提交
+	write(path.join(IMPORTS, packId, "local-only.md"), "local\n");
+	git(path.join(IMPORTS, packId), ["add", "."]);
+	git(path.join(IMPORTS, packId), ["commit", "-m", "local divergence"]);
+
+	// 上游继续前进；旧的 ff-only 实现会在这里永久失败
+	write(path.join(seed, "upstream.md"), "v2\n");
+	git(seed, ["add", "."]);
+	git(seed, ["commit", "-m", "v2"]);
+	git(seed, ["push"]);
+
+	const recovered = await syncPack(pack);
+	ok("分叉测试：pull 失败后自动重克隆成功", recovered.ok && recovered.mode === "recover" && recovered.recovered === true, JSON.stringify(recovered));
+	ok("分叉测试：新工作副本已对齐上游", fs.readFileSync(path.join(IMPORTS, packId, "upstream.md"), "utf8").trim() === "v2");
+	ok("分叉测试：本地分叉文件不在新工作副本", !fs.existsSync(path.join(IMPORTS, packId, "local-only.md")));
+	ok("分叉测试：旧目录已备份且保留本地文件", recovered.backup && fs.existsSync(path.join(recovered.backup, "local-only.md")), recovered.backup || "no backup");
+	const backupName = recovered.backup ? path.basename(recovered.backup) : "";
+	ok("分叉测试：备份使用隐藏目录名", backupName.startsWith("."), backupName);
+	const importBrowse = await dispatch("browse", { source: "import", dir: "" });
+	const importNames = (importBrowse.value?.dirs || []).map((item) => item.name);
+	ok("分叉测试：备份目录不出现在导入层浏览列表", !importNames.includes(backupName), JSON.stringify(importNames));
+}
+
+// ── 残骸回收：孤儿临时 clone 与多余的分叉备份 ─────────────────────────────
+// 背景：真 home 里堆了 4 份 `.hacktricks.recover-*`（其中 3 份是完整 1035 文件仓库）
+// 加 1 份旧 `.diverged-*`，合计 42MB —— 恢复逻辑只管建、没人回收。
+{
+	const { prunePackDebris } = await import("../lib/packs.js");
+	const junk = fs.mkdtempSync(path.join(os.tmpdir(), "packs-debris-"));
+	const mk = (name, ageMs) => {
+		const dir = path.join(junk, name);
+		fs.mkdirSync(dir, { recursive: true });
+		fs.writeFileSync(path.join(dir, "x.md"), "x");
+		const stamp = new Date(Date.now() - ageMs);
+		fs.utimesSync(dir, stamp, stamp);
+		return dir;
+	};
+	const orphanA = mk(".alpha.recover-111-2-aaaaaa", 10 * 60_000);
+	const orphanB = mk(".alpha.recover-222-2-bbbbbb", 10 * 60_000);
+	const oldDiverged = mk(".alpha.diverged-111-2-cccccc", 20 * 60_000);
+	const newDiverged = mk(".alpha.diverged-222-2-dddddd", 10 * 60_000);
+	const referenced = mk(".beta.diverged-333-2-eeeeee", 30 * 60_000);
+	const freshTemp = mk(".alpha.recover-333-2-ffffff", 1_000);
+
+	// 默认档：只清纯临时 clone，**一份分叉备份都不动**（里面可能有用户的本地修改）
+	const safe = prunePackDebris(junk, { packs: { beta: { backup: referenced } } }, { minAgeMs: 60_000 });
+	ok("残骸回收（默认档）：只清孤儿临时 clone", !fs.existsSync(orphanA) && !fs.existsSync(orphanB), JSON.stringify(safe.removed));
+	ok("残骸回收（默认档）：分叉备份一份都不删", fs.existsSync(oldDiverged) && fs.existsSync(newDiverged) && fs.existsSync(referenced));
+	ok("残骸回收：刚生成的临时目录不动（可能正在同步）", fs.existsSync(freshTemp));
+
+	// 显式档：才回收多余的分叉备份（state 引用的与每个 pack 最新一份仍保留）
+	const result = prunePackDebris(junk, { packs: { beta: { backup: referenced } } }, { minAgeMs: 60_000, includeBackups: true });
+	ok("残骸回收：孤儿临时 clone 被清掉", !fs.existsSync(orphanA) && !fs.existsSync(orphanB), JSON.stringify(result.removed));
+	ok("残骸回收：只留每个 pack 最新的一份分叉备份", !fs.existsSync(oldDiverged) && fs.existsSync(newDiverged));
+	ok("残骸回收：state 引用着的备份不动", fs.existsSync(referenced));
+	ok("残骸回收：刚生成的临时目录不动（可能正在同步）", fs.existsSync(freshTemp));
+	// 此时孤儿临时目录已被默认档清掉，剩下的 3 个都是备份：2 个保留 + 1 个多余被删
+	ok("残骸回收：清理结果可对账", result.removed.length === 1 && result.kept.length === 3, JSON.stringify(result));
+	const again = prunePackDebris(junk, { packs: { beta: { backup: referenced } } }, { minAgeMs: 60_000, includeBackups: true });
+	ok("残骸回收幂等（第二次零删除）", again.removed.length === 0, JSON.stringify(again));
+	fs.rmSync(junk, { recursive: true, force: true });
+}
+
+// ── 接线：syncPacks 必须真的调用回收（否则上面全绿、宿主里永远不回收）────────
+{
+	const { syncPacks, loadCatalog } = await import("../lib/packs.js");
+	const imports = path.join(HOME, "refs", "imports");
+	fs.mkdirSync(imports, { recursive: true });
+	const orphan = path.join(imports, ".wiring-pack.recover-111-2-aaaaaa");
+	fs.mkdirSync(orphan, { recursive: true });
+	fs.writeFileSync(path.join(orphan, "x.md"), "x");
+	const stamp = new Date(Date.now() - 10 * 60_000);
+	fs.utimesSync(orphan, stamp, stamp);
+
+	// 把所有 pack 标成"刚同步过" => 这一轮一个都不选（完全不联网），但回收仍要发生
+	const statePath = path.join(HOME, "refs", "knowledge-packs-state.json");
+	let state = { version: 1, packs: {}, syncMode: "auto" };
+	try { state = JSON.parse(fs.readFileSync(statePath, "utf8")); } catch { /* 首次运行时状态文件还没落盘 */ }
+	const nowIso = new Date().toISOString();
+	state.packs = state.packs || {};
+	for (const pack of loadCatalog().packs) {
+		state.packs[pack.id] = { ...(state.packs[pack.id] || {}), status: "ok", lastSyncAt: nowIso, lastAttemptAt: nowIso };
+	}
+	state.syncMode = "auto";
+	fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+
+	const summary = await syncPacks({});
+	ok("syncPacks 离线跑通（0 个待同步）", summary.requested === 0, JSON.stringify({ requested: summary.requested }));
+	ok("syncPacks 真的回收了残骸（接线没断）", summary.debris?.removed?.length === 1 && !fs.existsSync(orphan), JSON.stringify(summary.debris));
+}
+
+// ── 14. 同步模式：auto 自动、manual 手动、frozen 切断主动联网 ────────────────
+{
+	delete process.env.DSH_KNOWLEDGE_AUTOSYNC;
+	ok("同步模式默认 auto", getSyncMode() === "auto");
+	setSyncMode("manual");
+	ok("可持久化为 manual", getSyncMode() === "manual");
+	const manualAuto = await autoSyncKnowledgePacks(false);
+	ok("manual 下自动同步跳过", manualAuto.skipped === true && /manual/.test(manualAuto.reason), JSON.stringify(manualAuto));
+	setSyncMode("frozen");
+	const frozen = await dispatch("packs-sync", { force: true });
+	ok("frozen 下即使 force 也跳过同步", frozen.ok === true && frozen.value.skipped === true && /冻结/.test(frozen.value.reason), JSON.stringify(frozen));
+	const status = await dispatch("packs-status", {});
+	ok("packs-status 返回当前同步模式", status.ok === true && status.value.syncMode === "frozen", JSON.stringify(status).slice(0, 180));
+	await dispatch("packs-mode", { mode: "auto" });
+	ok("RPC 可恢复 auto", getSyncMode() === "auto");
+}
+
+// ── 混合语种检索（2026-09-18）：术语替换 + 覆盖度 rerank 的纯函数 ────────────────
+{
+	const translated = translateQuery("Sigma 检测规则 可疑 powershell 编码命令");
+	ok("中文术语被替换成英文说法（整句检索用）",
+		translated.includes("detection rule") && translated.includes("encoded command") && translated.includes("powershell"),
+		translated);
+	ok("纯英文查询不做替换（原样返回）",
+		translateQuery("sigma rule powershell encoded command") === "sigma rule powershell encoded command");
+	ok("空查询安全返回空串", translateQuery("") === "" && translateQuery("   ") === "");
+
+	const concepts = queryConcepts("Sigma 检测规则 可疑 powershell 编码命令");
+	ok("概念集含拉丁实词与翻译词",
+		concepts.includes("powershell") && concepts.includes("encoded") && concepts.includes("detection"),
+		concepts.join(","));
+	ok("概念集去重且有上限（≤10）", concepts.length <= 10 && new Set(concepts).size === concepts.length);
+	ok("纯中文查询也能产出英文概念", queryConcepts("计划任务持久化").includes("scheduled"));
+
+	const hitOf = (hay) => ({ path: hay, title: "", heading: "", preview: "" });
+	ok("覆盖度加成：命中越多分越高，封顶 12",
+		coverageBonusOf(hitOf("powershell_base64_encoded_rule.yml"), ["powershell", "encoded", "base64", "rule"]) === 12
+		&& coverageBonusOf(hitOf("powershell_base64_encoded_cmd.yml"), ["powershell", "encoded"]) === 6
+		&& coverageBonusOf(hitOf("powershell_base64_encoded_cmd.yml"), ["powershell", "encoded", "base64"]) === 9
+		&& coverageBonusOf(hitOf("unrelated.md"), ["powershell"]) === 0);
+	ok("没有概念时加成为 0", coverageBonusOf(hitOf("anything"), []) === 0);
+}
+
+// ── status() 计数缓存（2026-09-18 性能修复）──────────────────────────────────
+// ensureKnowledgeIndex() 每次检索都会问一次 status()，旧实现每次都 COUNT(*) 整表
+// （8.4 万 chunk ≈140ms）——等于每次知识检索都在做全表计数。这里锁住"缓存 + 失效重算"。
+{
+	const idx = ensureKnowledgeIndex();
+	if (!idx) {
+		ok("status 计数缓存（测试环境无索引，跳过）", true);
+	} else {
+		const first = idx.status();
+		const cached = idx.counts;
+		const second = idx.status();
+		ok("status() 复用计数缓存，不再每次全表 COUNT",
+			cached !== null && cached === idx.counts && second.docs === first.docs);
+		idx.invalidate();
+		ok("invalidate() 清掉计数缓存（重建后才会重新计数）", idx.counts === null && idx.dirty === true);
+		idx.markClean();
+		const refreshed = idx.status();
+		ok("失效后 status() 重新计数并回填", idx.counts !== null && Number(refreshed.chunks) >= 0);
+	}
+}
+
+// ── 外部知识变更的持久化指纹 ───────────────────────────────────────────────
+// 索引库可能由另一个进程构建；宿主重启时内存 dirty 标志是 false，必须用持久化
+// 指纹比较发现「索引后新增/修改了知识文件」，否则会悄悄继续搜旧库。
+{
+	const idx = ensureKnowledgeIndex();
+	if (!idx) {
+		ok("索引源指纹（测试环境无索引，跳过）", true);
+	} else {
+		idx.rebuild({ force: true });
+		const before = idx.status({ refreshFingerprint: true });
+		const lateFile = path.join(USER_PENTEST, "late-index.md");
+		write(lateFile, "# late\n\n新入库的知识\n");
+		const after = idx.status({ refreshFingerprint: true });
+		ok("新增源文件后 status 标记 dirty", before.dirty === false && after.dirty === true);
+		fs.rmSync(lateFile, { force: true });
+		idx.rebuild({ force: true });
+		ok("重建后指纹回到 clean", idx.status({ refreshFingerprint: true }).dirty === false);
+	}
+}
+
+// ── 提示词清单缓存（2026-09-18 性能修复）────────────────────────────────────
+// 这条 manifest 每个回合都会被装配一次；旧实现每次全量遍历知识目录（真实库实测 ~33ms/回合）。
+// 用"patch readdirSync 计数"做行为断言，不用计时断言（避免机器负载导致的 flaky）。
+{
+	const { knowledgeManifest } = await import("../lib/index.js");
+	const original = fs.readdirSync;
+	let calls = 0;
+	fs.readdirSync = (...args) => { calls += 1; return original(...args); };
+	try {
+		const first = knowledgeManifest();
+		const afterFirst = calls;
+		const second = knowledgeManifest();
+		ok("manifest 第二次命中缓存：不再遍历知识目录",
+			afterFirst > 0 && calls === afterFirst && second === first, `calls=${calls}/${afterFirst}`);
+		ok("manifest 形状正确（标记块或空串）",
+			first === "" || first.startsWith("<dsh-knowledge-hub>"), first.slice(0, 60));
+		const rebuilt = knowledgeManifest(Date.now() + 10 * 60 * 1000);
+		ok("超过 TTL 会重建（不是永久缓存）", calls > afterFirst && rebuilt === first);
+	} finally {
+		fs.readdirSync = original;
+	}
+}
+
+// ── 知识库目录交互契约（2026-09-19 实机复验）──────────────────────────────
+// 打开文章时旧实现直接卸载 TreeSection，返回目录后展开状态和滚动位置全丢，
+// 实战查资料只能在 66 个分类里反复翻。目录必须保持挂载（只在打开文章时隐藏），
+// 并提供来源内筛选作为快速定位入口。
+{
+	const client = fs.readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
+	ok("来源目录提供分类/文件筛选", client.includes("筛选当前来源的分类或文件"));
+	ok("打开文章时目录保持挂载（返回后保留展开与滚动状态）",
+		client.includes("display: activeFile ? 'none' : 'block'")
+		// 只禁止"把列表本身条件渲染成 null"这一种写法（会卸载、丢展开与滚动）；
+		// 列表下方的提示行用 `activeFile ? null : …` 是正常的，不能一起禁掉。
+		&& !/activeFile \? null : React\.createElement\('div', \{ style: \{ display: activeFile \? 'none'/.test(client));
+	// 未打开文件时不再留空的右半栏：旧布局 `280px minmax(0,1fr)` 把检索结果挤在
+	// 280px 里，路径被截断成 `exploitdb/…/5118…`，护网时扫一眼分不清命中。
+	ok("未打开文件时列表占满整宽（不再被空态右栏挤成 280px）",
+		client.includes("gridTemplateColumns: 'minmax(0,1fr)'")
+		&& !client.includes("'280px minmax(0,1fr)'"));
+	// 回归背景：onDeleted 里误用了 setNotice —— 那是 PackCard/EdbCard 内部的 state，
+	// Page 组件根本没有它。结果是删除其实成功了，但处理函数抛 ReferenceError，
+	// 「已删除（可找回）」提示永远不出现。这里锁住：Page 组件内不得出现 setNotice。
+	{
+		const start = client.indexOf("function Page(props)");
+		const end = client.indexOf("function apply(ctx)");
+		const pageSrc = client.slice(start, end > start ? end : undefined);
+		ok("Page 组件不使用它没声明的 setNotice（避免 ReferenceError 吞掉提示）",
+			start > 0 && !/\bsetNotice\s*\(/.test(pageSrc), (pageSrc.match(/\bsetNotice\s*\([^)]*/) || [""])[0]);
+		ok("删除后的提示走 Page 自己的 pageNotice", pageSrc.includes("setPageNotice("));
+	}
+	// 设了 busy 的 RPC 链必须有拒绝兜底：否则 RPC 一 reject（宿主重启 / 连接层协议错）
+	// busy 永远为 true，界面卡在"保存中…"且不显示原因 —— 这正是本轮修的那个白板形态。
+	ok("读/存/删/检索四条链都有拒绝兜底（不会卡在保存中）",
+		(client.match(/setBusy\(false\); setMsg\(\{ ok: false, text: '[^']*失败：/g) || []).length >= 3
+		&& client.includes("setSearchBusy(false); setHits([]); setSearchErr('检索失败："));
 }
 
 closeKnowledgeIndex();

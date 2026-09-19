@@ -9,7 +9,9 @@
 // registry (mcp__burp__* / mcp__yakit__*) — saves the operator a second trip
 // to the "MCP 工作台" for the same source-of-truth data.
 import z from '@deepseek-ai/schemastery'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, unlinkSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { startModelProxy } from './model-proxy.js'
 import { homedir } from 'node:os'
 import { basename, dirname, join, sep } from 'node:path'
@@ -21,6 +23,100 @@ export const inject = ['connection', 'settings', 'shellEnv', 'systemPrompt', 'we
 const NAMESPACE = 'sec-config'
 const CHANNEL = '/dsh-sec-config'
 const MCP_STUDIO_NAMESPACE = 'mcp-studio'
+const DSH_HOME = process.env.DSH_HOME || join(homedir(), '.dsh')
+
+/**
+ * dsh atomic-write 故意不按时间偷锁，因此进程崩溃留下的 `settings.yaml.lock`
+ * 会让后续所有设置写入（包括模型 API 密钥）永久超时。这里只做一种可证明安全的
+ * 回收：锁内容必须是纯数字 PID，且该 PID 已不存在；活进程锁、空锁和未知格式
+ * 一律原样保留，避免两个宿主同时写配置。
+ */
+export function recoverStaleSettingsLock(
+  home = DSH_HOME,
+  logger = console,
+) {
+  const lockPath = join(home, 'settings.yaml.lock')
+  if (!existsSync(lockPath)) return { recovered: false, reason: 'missing', path: lockPath }
+
+  let raw
+  try {
+    raw = readFileSync(lockPath, 'utf8')
+  } catch (error) {
+    return { recovered: false, reason: 'unreadable', path: lockPath, error }
+  }
+  const match = /^\s*(\d+)\s*$/.exec(raw)
+  const pid = match ? Number(match[1]) : 0
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    return { recovered: false, reason: 'unrecognized', path: lockPath }
+  }
+  if (pid === process.pid) {
+    return { recovered: false, reason: 'current-process', path: lockPath, pid }
+  }
+
+  let ownerAlive = true
+  try {
+    process.kill(pid, 0)
+  } catch (error) {
+    // EPERM means the PID exists but this process may not signal it: safer to
+    // treat that as a live owner than to steal a lock we cannot inspect.
+    ownerAlive = error && error.code === 'EPERM'
+  }
+  if (ownerAlive) return { recovered: false, reason: 'owner-alive', path: lockPath, pid }
+
+  try {
+    unlinkSync(lockPath)
+    logger?.warn?.(`dsh-sec-config: recovered stale settings lock from dead pid ${pid}`)
+    return { recovered: true, reason: 'owner-dead', path: lockPath, pid }
+  } catch (error) {
+    return { recovered: false, reason: 'remove-failed', path: lockPath, pid, error }
+  }
+}
+
+/**
+ * Run one settings mutation, recovering only the one failure mode the host's
+ * atomic-write reports when a crashed writer left its lock behind. This is a
+ * compatibility guard for host versions that do not yet reclaim dead-owner
+ * locks themselves; a live or unknown lock is rethrown unchanged.
+ */
+export async function mutateSettingsWithLockRecovery(
+  settings,
+  namespace,
+  ops,
+  revision,
+  recover = recoverStaleSettingsLock,
+) {
+  const run = () => revision === undefined
+    ? settings.mutate(namespace, ops)
+    : settings.mutate(namespace, ops, revision)
+  try {
+    return await run()
+  } catch (error) {
+    const message = error && typeof error.message === 'string' ? error.message : String(error)
+    if (!message.includes('timed out waiting for the writer lock')) throw error
+    const recovered = recover(undefined, console)
+    if (!recovered.recovered) throw error
+    return await run()
+  }
+}
+
+// 统一出站策略实现住在根包（`dsh-saker/egress`）：本插件只负责让用户改档位、
+// 并把它读出来展示。判定逻辑不在这里复制一份，避免和别的插件漂移。
+const requireFromConfig = createRequire(import.meta.url)
+const CONFIG_LIB_DIR = dirname(fileURLToPath(import.meta.url))
+let egressLib
+async function loadEgressLib() {
+  if (egressLib !== undefined) return egressLib
+  try {
+    egressLib = await import(pathToFileURL(requireFromConfig.resolve('dsh-saker/egress')).href)
+  } catch {
+    try {
+      egressLib = await import(pathToFileURL(join(CONFIG_LIB_DIR, '..', '..', '..', 'lib', 'egress.js')).href)
+    } catch {
+      egressLib = null
+    }
+  }
+  return egressLib
+}
 
 /**
  * Preset tool definitions shown in the 安全配置 page, grouped by category.
@@ -182,6 +278,9 @@ const Config = z.object({
     customBaseUrl: z.string().default(''),
     /** 剥掉客户端注入的私有字段（不剥上游会 400 Extra inputs are not permitted） */
     sanitize: z.boolean().default(true),
+    /** 模型出站脱敏：off / secrets。默认做字段名与内容双层识别：结构化
+     *  password/token/Authorization 字段也覆盖，保留目标 IP、域名、URL 与普通验证载荷。 */
+    redaction: z.string().default('secrets'),
     userAgent: z.string().default('saker-sec-config/1.0'),
     /**
      * 端点档案：可一键切换的多个上游地址。存在的意义是「换供应商不用手改配置」——
@@ -1091,6 +1190,7 @@ function createModelProxyController(logger) {
     Number(model.listenPort) || 8788,
     String(model.upstream || ''),
     model.sanitize !== false,
+    String(model.redaction || 'secrets'),
     String(model.userAgent || ''),
   ])
 
@@ -1114,6 +1214,7 @@ function createModelProxyController(logger) {
         upstreamBase: trimUrl(model.upstream || 'https://opencode.ai/zen/go'),
         userAgent: String(model.userAgent || 'saker-sec-config/1.0'),
         sanitize: model.sanitize !== false,
+        redaction: String(model.redaction || 'secrets'),
         log: (line) => logger?.info?.(`dsh-sec-config: ${line}`),
       })
       return { running: true, managed: true, port: handle.port }
@@ -1298,10 +1399,35 @@ export function renderManifest(section, listMountedMcpTools) {
   return escapePromptBraces(`<sec-config manifest>\n${lines.join('\n')}\n</sec-config manifest>`)
 }
 
+/**
+ * 统一出站策略的设置端点（`egress/get` / `egress/set`）。
+ * 独立成函数是为了能直接测：判定实现不在这里，这里只做读写与错误包装。
+ */
+export async function egressEndpoint(endpoint, payload) {
+  const lib = await loadEgressLib()
+  if (!lib) return failure('统一出站策略模块不可用（dsh-saker 根包未装或过旧）')
+  if (endpoint === 'egress/get') {
+    const { policy, source } = lib.readPolicy()
+    return ok({ policy, source, audit: lib.readAudit(undefined, 12) })
+  }
+  const raw = payload && typeof payload === 'object' ? payload : {}
+  try {
+    const policy = lib.writePolicy(undefined, {
+      mode: String(raw.mode || ''),
+      allowHosts: Array.isArray(raw.allowHosts) ? raw.allowHosts : [],
+    })
+    return ok({ policy, source: 'file', audit: lib.readAudit(undefined, 12) })
+  } catch (err) {
+    return failure(err && err.message ? err.message : String(err))
+  }
+}
+
 export function apply(ctx, config = {}) {
   let current = () => config
   let scope = null
   const base = { tools: {}, services: {}, dnslog: {}, apiKeys: {}, scanRoots: [], ...(config ?? {}) }
+
+  recoverStaleSettingsLock(undefined, ctx.logger)
 
   try {
     scope = ctx.settings.register(NAMESPACE, Config, { base })
@@ -1342,7 +1468,7 @@ export function apply(ctx, config = {}) {
           const before = current()
           const merged = applyOps(before, ops)
           const revision = typeof raw.expectedRevision === 'number' ? raw.expectedRevision : undefined
-          await settings.mutate(NAMESPACE, ops, revision)
+          await mutateSettingsWithLockRecovery(settings, NAMESPACE, ops, revision)
           const after = current()
           // Mirror services into mcp-studio on the same write so the operator
           // sees the MCP card turn green in the 工作台 without a second save.
@@ -1357,6 +1483,13 @@ export function apply(ctx, config = {}) {
           } catch (err) {
             return failure(err && err.message ? err.message : String(err))
           }
+        }
+        if (endpoint === 'egress/get' || endpoint === 'egress/set') {
+          const result = await egressEndpoint(endpoint, payload)
+          if (endpoint === 'egress/set' && result.ok) {
+            ctx.logger?.info?.(`dsh-sec-config: 出站策略改为 ${result.value.policy.mode}（白名单 ${result.value.policy.allowHosts.length} 条）`)
+          }
+          return result
         }
         if (endpoint === 'model/state') {
           // 模型接入：当前配置 + 该写进去的 baseURL + llm-pi-ai 里实际生效的值 + 代理健康
@@ -1385,6 +1518,7 @@ export function apply(ctx, config = {}) {
             listenPort: port,
             builtin: model.builtin !== false,
             sanitize: model.sanitize !== false,
+            redaction: String(model.redaction || 'secrets'),
             customBaseUrl: String(model.customBaseUrl || ''),
             proxy,
             builtinProxy: modelProxy.status(),
@@ -1420,7 +1554,7 @@ export function apply(ctx, config = {}) {
           if (readProviderBaseUrl(settings, provider) === null) {
             return failure(`llm-pi-ai 里没有 provider「${provider}」—— 先在「设置 → 模型」建好它，这里只负责改它的地址`)
           }
-          await settings.mutate(LLM_PI_AI_NAMESPACE, [
+          await mutateSettingsWithLockRecovery(settings, LLM_PI_AI_NAMESPACE, [
             { op: 'set', path: ['providers', provider, 'baseURL'], value: target },
           ])
           return ok({ applied: true, provider, baseURL: target, restartRequired: true })
@@ -1448,7 +1582,7 @@ export function apply(ctx, config = {}) {
           if (shouldCaptureBaseline(b0, provider, installed)) {
             effBaseline = { provider, baseURL: installed, capturedAt: new Date().toISOString() }
             try {
-              await settings.mutate(NAMESPACE, [{ op: 'set', path: ['model', 'baseline'], value: effBaseline }])
+              await mutateSettingsWithLockRecovery(settings, NAMESPACE, [{ op: 'set', path: ['model', 'baseline'], value: effBaseline }])
             } catch { /* 快照失败不影响读取（effBaseline 仍回报，便于界面提示）*/ }
           }
           const pool = endpointPool(model.endpoints, model)
@@ -1472,7 +1606,7 @@ export function apply(ctx, config = {}) {
           const installed = readProviderBaseUrl(settings, provider)
           if (!installed) return failure('当前 provider 没有生效的 baseURL，无从记录')
           const value = { provider, baseURL: installed, capturedAt: new Date().toISOString() }
-          await settings.mutate(NAMESPACE, [{ op: 'set', path: ['model', 'baseline'], value }])
+          await mutateSettingsWithLockRecovery(settings, NAMESPACE, [{ op: 'set', path: ['model', 'baseline'], value }])
           return ok({ baseline: value })
         }
         if (endpoint === 'model/endpoint-save') {
@@ -1499,7 +1633,7 @@ export function apply(ctx, config = {}) {
             saved = { id: nid, name, baseURL, kind, note }
             list.push(saved)
           }
-          await settings.mutate(NAMESPACE, [{ op: 'set', path: ['model', 'endpoints'], value: list }])
+          await mutateSettingsWithLockRecovery(settings, NAMESPACE, [{ op: 'set', path: ['model', 'endpoints'], value: list }])
           return ok({ saved, profiles: list })
         }
         if (endpoint === 'model/endpoint-delete') {
@@ -1507,7 +1641,7 @@ export function apply(ctx, config = {}) {
           const id = String((payload || {}).id || '').trim()
           if (!id) return failure('缺少 id')
           const list = normalizeEndpoints(model.endpoints).filter((p) => p.id !== id)
-          await settings.mutate(NAMESPACE, [{ op: 'set', path: ['model', 'endpoints'], value: list }])
+          await mutateSettingsWithLockRecovery(settings, NAMESPACE, [{ op: 'set', path: ['model', 'endpoints'], value: list }])
           return ok({ profiles: list })
         }
         if (endpoint === 'model/endpoint-use') {
@@ -1535,7 +1669,7 @@ export function apply(ctx, config = {}) {
             ? [{ op: 'unset', path: ['providers', provider, 'baseURL'] }]
             : [{ op: 'set', path: ['providers', provider, 'baseURL'], value: plan.baseURL }]
           try {
-            await settings.mutate(LLM_PI_AI_NAMESPACE, ops)
+            await mutateSettingsWithLockRecovery(settings, LLM_PI_AI_NAMESPACE, ops)
           } catch (err) {
             // 自定义 provider（模型不在 dsh 内建目录里）清掉 baseURL 会被判为非法配置。
             // 把宿主的原文翻译成能照做的指引，别让用户对着 "needs a baseURL" 发愣。

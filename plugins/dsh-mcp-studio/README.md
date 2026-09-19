@@ -44,6 +44,15 @@ npx @deepseek-ai/dsh plugin --profile web remove dsh-mcp-studio
 
 ## 使用 / Usage
 
+### 统一出站策略 / Unified egress policy
+
+包运行器（`npx` / `npm` / `pnpm` / `bunx` / `yarn` / `uvx` / `pipx`）首次启动会访问公网
+registry 拉包，这属于**基础设施出站**，会先过统一出站策略
+（`$DSH_HOME/saker-egress/policy.json`）：`frozen` 档下**不 spawn**，
+直接把该服务器标记为错误并写明原因；`allowlist` 档只放白名单里的 registry。
+普通可执行文件（`node`、绝对路径的二进制）不产生拉包流量，不受影响。
+下包被拦时改档位：设置 → 安全配置 → 统一出站策略。
+
 - **添加服务器**：点“添加服务器”手动配置，或“粘贴 JSON”导入现成配置（抽屉自带模板与格式化按钮，也可点预设芯片一键填入）
 - **对话调用**：直接对模型说“用 github 服务器查一下 xxx 仓库”，模型自动调用 `mcp__github__*` 工具
 - **看状态**：统计条实时显示服务器/已启用/已连接/工具总数；卡片状态灯绿色呼吸 = 已连接

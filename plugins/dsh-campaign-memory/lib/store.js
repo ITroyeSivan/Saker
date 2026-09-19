@@ -22,6 +22,7 @@ const KIND_LABELS = { tactic: "战术打法", fingerprint: "目标指纹", tooli
  *  与 Memory（单调增长的事实）分开维护——方向是滚动淘汰的，事实是只增不减的。 */
 export const IDEA_STATUSES = ["open", "confirmed", "ruled-out"];
 export const IDEA_STATUS_LABELS = { open: "待验证", confirmed: "已验证", "ruled-out": "已排除" };
+export const FEEDBACK_VERDICTS = ["helpful", "misleading", "obsolete"];
 export function kindLabel(kind) { return KIND_LABELS[kind] || "战术打法"; }
 
 const DETECT_DEFAULT_DAYS = 30;
@@ -29,7 +30,7 @@ const FINGERPRINT_DEFAULT_DAYS = 180;
 const HALF_LIFE_DAYS = 30;
 /** 单工作区（mode × workspace 名）记忆总量上限：写入查重的全表扫描因此有界；超限按热度×半衰最冷淘汰。 */
 export const MAX_ROWS_PER_WORKSPACE = 400;
-const COLD_ORDER = `ORDER BY (usage_count + 1.0) * pow(0.5, (julianday('now') - julianday(COALESCE(NULLIF(last_used_at, ''), created_at))) / ${HALF_LIFE_DAYS}.0) ASC, updated_at ASC, created_at ASC`;
+const COLD_ORDER = `ORDER BY max(0.01, usage_count + 1.0 + COALESCE(feedback_score, 0)) * pow(0.5, (julianday('now') - julianday(COALESCE(NULLIF(last_used_at, ''), created_at))) / ${HALF_LIFE_DAYS}.0) ASC, updated_at ASC, created_at ASC`;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS memories (
@@ -44,6 +45,9 @@ CREATE TABLE IF NOT EXISTS memories (
 	workspace_key TEXT NOT NULL DEFAULT '',
 	usage_count  INTEGER NOT NULL DEFAULT 0,
 	last_used_at TEXT DEFAULT '',
+	feedback_score INTEGER NOT NULL DEFAULT 0,
+	last_feedback_at TEXT NOT NULL DEFAULT '',
+	feedback_note TEXT NOT NULL DEFAULT '',
 	source_session TEXT NOT NULL DEFAULT '',
 	expires_at   TEXT,
 	idea_status  TEXT NOT NULL DEFAULT '',
@@ -70,11 +74,11 @@ export function openStore(dbPath) {
 	// 而磁盘满/强杀/网盘回写/误改名都会造成这个问题。数据已经读不出来，
 	// 能做的是**保住原文件**（改名备份，不删）并让插件继续可用；
 	// 备份路径打到 stderr（只此一次），用户能据此找回或求助。
-	function healCorruptDb(dbPath) {
+	function healCorruptDb(dbPath, force = false) {
 		if (dbPath === ':memory:') return;
 		let head = '';
 		try { head = fs.readFileSync(dbPath).subarray(0, 16).toString("latin1"); } catch { return; }
-		if (head.startsWith("SQLite format 3")) return;   // 正常的库头
+		if (!force && head.startsWith("SQLite format 3")) return;   // 正常的库头
 		let bak = dbPath + ".corrupt-" + Date.now();
 		let n = 1;
 		while (fs.existsSync(bak)) bak = dbPath + ".corrupt-" + Date.now() + "-" + n++;   // 绝不覆盖已有备份
@@ -95,16 +99,47 @@ export function openStore(dbPath) {
 		}
 	}
 
-	healCorruptDb(dbPath);   // **必须在开库前**：坏文件会让 new DatabaseSync 直接抛
-	const db = new DatabaseSync(dbPath);
-	db.exec("PRAGMA journal_mode = WAL");
-	db.exec("PRAGMA busy_timeout = 5000"); // 多进程（两个 dsh 实例）并发写不直接抛 SQLITE_BUSY
+	function openDatabase() {
+		const deadline = Date.now() + 5000;
+		let waitMs = 10;
+		for (;;) {
+			let db;
+			try {
+				db = new DatabaseSync(dbPath);
+				// node:sqlite 在构造时不读文件头，坏库错误要到首条 SQL 才出现。
+				db.exec("PRAGMA busy_timeout = 5000");
+				db.exec("PRAGMA journal_mode = WAL");
+				return db;
+			} catch (error) {
+				try { db?.close(); } catch { /* 打开失败时可能没有可关闭的句柄 */ }
+				const message = String(error?.message ?? error);
+				// journal_mode 首次切换在多进程首开时可能仍报 LOCKED；短退避后重试，不误判坏库。
+				if (/database is locked|database is busy|SQLITE_BUSY|SQLITE_LOCKED/i.test(message) && Date.now() < deadline) {
+					Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
+					waitMs = Math.min(250, waitMs * 2);
+					continue;
+				}
+				// 只有 SQLite 明确判为 NOTADB 时才备份重建；普通 BUSY/LOCKED 必须原样抛出。
+				if (!/not a database|SQLITE_NOTADB/i.test(message)) throw error;
+				healCorruptDb(dbPath, true);
+				db = new DatabaseSync(dbPath);
+				db.exec("PRAGMA busy_timeout = 5000");
+				db.exec("PRAGMA journal_mode = WAL");
+				return db;
+			}
+		}
+	}
+
+	const db = openDatabase(); // busy_timeout/WAL 已就绪；首开会与其他实例竞争
 	db.exec(SCHEMA);
 	try { db.exec("ALTER TABLE memories ADD COLUMN workspace TEXT NOT NULL DEFAULT ''"); } catch { /* 旧库已迁移 */ }
 	try { db.exec("ALTER TABLE memories ADD COLUMN workspace_key TEXT NOT NULL DEFAULT ''"); } catch { /* 旧库已迁移 */ }
 	try { db.exec("ALTER TABLE memories ADD COLUMN idea_status TEXT NOT NULL DEFAULT ''"); } catch { /* 旧库已迁移 */ }
 	try { db.exec("ALTER TABLE memories ADD COLUMN idea_basis TEXT NOT NULL DEFAULT ''"); } catch { /* 旧库已迁移 */ }
 	try { db.exec("ALTER TABLE memories ADD COLUMN idea_asset TEXT NOT NULL DEFAULT ''"); } catch { /* 旧库已迁移 */ }
+	try { db.exec("ALTER TABLE memories ADD COLUMN feedback_score INTEGER NOT NULL DEFAULT 0"); } catch { /* 旧库已迁移 */ }
+	try { db.exec("ALTER TABLE memories ADD COLUMN last_feedback_at TEXT NOT NULL DEFAULT ''"); } catch { /* 旧库已迁移 */ }
+	try { db.exec("ALTER TABLE memories ADD COLUMN feedback_note TEXT NOT NULL DEFAULT ''"); } catch { /* 旧库已迁移 */ }
 	purgeExpired({ db }); // 开库即清过期：免杀指纹等时效记忆不滞留
 	return { db, close() { db.close(); } };
 	}
@@ -176,6 +211,9 @@ function rowOut(r) {
 	...r,
 	usageCount: r.usage_count,
 	lastUsedAt: r.last_used_at,
+	feedbackScore: Number(r.feedback_score) || 0,
+	lastFeedbackAt: r.last_feedback_at || "",
+	feedbackNote: r.feedback_note || "",
 	sourceSession: r.source_session,
 	targetKind: r.target_kind,
 	ideaStatus: r.idea_status || "",
@@ -185,7 +223,7 @@ function rowOut(r) {
 	};
 	}
 
-const SELECT = "SELECT id, mode, kind, title, content, tags, target_kind, workspace, usage_count, last_used_at, source_session, expires_at, idea_status, idea_basis, idea_asset, created_at, updated_at FROM memories";
+const SELECT = "SELECT id, mode, kind, title, content, tags, target_kind, workspace, usage_count, last_used_at, feedback_score, last_feedback_at, feedback_note, source_session, expires_at, idea_status, idea_basis, idea_asset, created_at, updated_at FROM memories";
 
 function notExpired(expr = "") {
 	return ` expires_at IS NULL OR expires_at > datetime('now') ${expr ? "AND " + expr : ""}`;
@@ -193,7 +231,8 @@ function notExpired(expr = "") {
 
 /** 热度评分（排序用）：usage+1 为基数，按最后使用距今 ${HALF_LIFE_DAYS} 天半衰——
  *  早期高频记忆久未读取自然让位，新鲜记忆可入召回位；读取（get）刷新 last_used 即复活。 */
-const HOTNESS_ORDER = `ORDER BY (usage_count + 1.0) * pow(0.5, (julianday('now') - julianday(COALESCE(NULLIF(last_used_at, ''), created_at))) / ${HALF_LIFE_DAYS}.0) DESC, last_used_at DESC, created_at DESC`;
+const HOTNESS_ORDER = `ORDER BY max(0.01, usage_count + 1.0 + COALESCE(feedback_score, 0)) * pow(0.5, (julianday('now') - julianday(COALESCE(NULLIF(last_used_at, ''), created_at))) / ${HALF_LIFE_DAYS}.0) DESC, last_used_at DESC, created_at DESC`;
+const NOT_OBSOLETE = "(COALESCE(feedback_score, 0) > -5)";
 
 /** 检索（LIKE 关键词 × 类别/目标形态过滤），按热度×半衰排序；不记账——读全文（getMemory）才计。
  *  过期记忆不召回，唯一例外 fingerprint：目标指纹到期只是变陈旧不是失效，仍可命中（带 expired 标记）。 */
@@ -201,7 +240,7 @@ export function searchMemories(st, { mode, query = "", kind = "", target_kind = 
 	const m = clean(mode, 40);
 	if (!m) throw new Error("mode required");
 	const q = clean(query, 120);
-	const conds = ["mode = ?", "(expires_at IS NULL OR expires_at > datetime('now') OR kind = 'fingerprint')"];
+	const conds = ["mode = ?", "(expires_at IS NULL OR expires_at > datetime('now') OR kind = 'fingerprint')", NOT_OBSOLETE];
 	const args = [m];
 	if (q) { conds.push("(title LIKE ? OR content LIKE ? OR tags LIKE ?)"); args.push(`%${q}%`, `%${q}%`, `%${q}%`); }
 	if (kind && MEMORY_KINDS.includes(kind)) { conds.push("kind = ?"); args.push(kind); }
@@ -229,8 +268,8 @@ function preview(text, max) {
  *  wk=隔离键（basename@路径哈希）：按键精确隔离；缺省走旧 basename 语义（仅匹配无键行）。 */
 export function topForInjection(st, mode, workspace, n = 3, wk = "") {
 	const rows = wk
-	? st.db.prepare(`${SELECT} WHERE mode = ? AND workspace_key = ? AND (${notExpired()}) ${HOTNESS_ORDER} LIMIT ?`).all(clean(mode, 40), clean(wk, 80), n)
-	: st.db.prepare(`${SELECT} WHERE mode = ? AND workspace = ? AND workspace_key = '' AND (${notExpired()}) ${HOTNESS_ORDER} LIMIT ?`).all(clean(mode, 40), clean(workspace, 60), n);
+	? st.db.prepare(`${SELECT} WHERE mode = ? AND workspace_key = ? AND (${notExpired()}) AND ${NOT_OBSOLETE} ${HOTNESS_ORDER} LIMIT ?`).all(clean(mode, 40), clean(wk, 80), n)
+	: st.db.prepare(`${SELECT} WHERE mode = ? AND workspace = ? AND workspace_key = '' AND (${notExpired()}) AND ${NOT_OBSOLETE} ${HOTNESS_ORDER} LIMIT ?`).all(clean(mode, 40), clean(workspace, 60), n);
 	return rows.map(rowOut);
 	}
 
@@ -252,6 +291,24 @@ export function getMemory(st, id, { account = true } = {}) {
 	if (account) st.db.prepare("UPDATE memories SET usage_count = usage_count + 1, last_used_at = ? WHERE id = ?").run(now(), i);
 	const r = st.db.prepare(`${SELECT} WHERE id = ?`).get(i);
 	return r ? rowOut(r) : undefined;
+	}
+
+/** 使用后反馈：helpful 提权、misleading 降权、obsolete 从召回中退役。
+ *  反馈不是删除；obsolete 仍可经 id 读取和人工恢复式重写。 */
+export function feedbackMemory(st, { id, verdict, note = "" } = {}) {
+	const i = String(id ?? "");
+	const v = clean(verdict, 20);
+	if (!FEEDBACK_VERDICTS.includes(v)) throw new Error(`feedback verdict 必须是 ${FEEDBACK_VERDICTS.join("/")}`);
+	const cur = st.db.prepare("SELECT feedback_score FROM memories WHERE id = ?").get(i);
+	if (!cur) throw new Error(`记忆不存在：${i}`);
+	const delta = v === "helpful" ? 1 : v === "misleading" ? -2 : -5;
+	const score = Math.max(-10, Math.min(10, (Number(cur.feedback_score) || 0) + delta));
+	const at = now();
+	const obsolete = v === "obsolete" ? 1 : 0;
+	st.db.prepare(
+		"UPDATE memories SET feedback_score = ?, last_feedback_at = ?, feedback_note = ?, expires_at = CASE WHEN ? = 1 THEN ? ELSE expires_at END, updated_at = ? WHERE id = ?"
+	).run(score, at, clean(note, 300), obsolete, at, at, i);
+	return { id: i, verdict: v, feedbackScore: score, obsolete: !!obsolete, lastFeedbackAt: at };
 	}
 
 /** 方向状态流转：open（待验证）→ confirmed（已验证）/ ruled-out（已排除）。
@@ -295,15 +352,19 @@ export function removeMemory(st, id) {
 export function statsMemories(st, mode) {
 	const m = clean(mode, 40);
 	if (!m) throw new Error("mode required");
-	const rows = st.db.prepare("SELECT kind, expires_at FROM memories WHERE mode = ?").all(m);
+	const rows = st.db.prepare("SELECT kind, expires_at, feedback_score FROM memories WHERE mode = ?").all(m);
 	const byKind = {};
 	for (const k of MEMORY_KINDS) byKind[k] = 0;
 	let expired = 0;
+	let helpful = 0, misleading = 0, obsolete = 0;
 	for (const r of rows) {
 	byKind[r.kind] = (byKind[r.kind] ?? 0) + 1;
 	if (r.expires_at && r.expires_at <= now()) expired += 1;
+	if (r.feedback_score > 0) helpful += 1;
+	if (r.feedback_score < 0 && r.feedback_score > -5) misleading += 1;
+	if (r.feedback_score <= -5) obsolete += 1;
 	}
-	return { total: rows.length, byKind, expired };
+	return { total: rows.length, byKind, expired, feedback: { helpful, misleading, obsolete } };
 	}
 
 /** 清理只删过期的检测指纹（情报半衰期已过即无保留价值）；fingerprint 等其余到期行

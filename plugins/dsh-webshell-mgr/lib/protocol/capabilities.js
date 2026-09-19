@@ -164,17 +164,19 @@ export async function writeFile(conn, path, data) {
 	if (conn.protocol === "behinder-aspx") return axWrite(conn, path, buf);
 	if (conn.protocol === "godzilla-aspx") return gaWrite(conn, path, buf);
 	// do-while：空文件也要写一轮（file_put_contents 空串=创建空文件），否则 0 字节假成功
+	const viaEval = await canEval(conn);
+	const os = viaEval ? "" : await osOf(conn);
+	const chunkRaw = viaEval ? UPLOAD_CHUNK_RAW : (os === "windows" ? cb.WINDOWS_CMD_SAFE_CHUNK_RAW : UPLOAD_CHUNK_RAW);
 	let off = 0, first = true;
 	do {
-		const chunkB64 = buf.subarray(off, off + UPLOAD_CHUNK_RAW).toString("base64");
-		if (await canEval(conn)) {
+		const chunkB64 = buf.subarray(off, off + chunkRaw).toString("base64");
+		if (viaEval) {
 			const r = await runSnippet(conn, first ? sn.phpWrite(path, chunkB64) : sn.phpAppend(path, chunkB64));
 			if (r?.ok === false) throw new Error("马侧写入失败");
 		} else {
-			const os = await osOf(conn);
 			await runCommand(conn, cb.buildFileCommand(first ? "write-first" : "write-append", { path, b64: chunkB64 }, os));
 		}
-		off += UPLOAD_CHUNK_RAW;
+		off += chunkRaw;
 		first = false;
 	} while (off < buf.length);
 	return { ok: true, size: buf.length };

@@ -10,6 +10,7 @@ import { createCipheriv } from "node:crypto";
 import { httpRequest, b64, md5hex } from "./http-client.js";
 import { ASPX_PAYLOADS } from "./payloads-aspx.js";
 import { shapeHeaders, stripResponse } from "./profile.js";
+import { parseJsonResponse } from "./json-response.js";
 
 const keyOf = (conn) => md5hex(String(conn.password ?? "")).slice(0, 16);
 
@@ -59,7 +60,7 @@ export async function fetchInfo(conn) {
 }
 
 export async function listDir(conn, path) {
-	return JSON.parse(await sendAsm(conn, "ls", { p: path }));
+	return parseJsonResponse(await sendAsm(conn, "ls", { p: path }), "冰蝎 ASPX 目录列表");
 }
 
 export async function readFile(conn, path) {

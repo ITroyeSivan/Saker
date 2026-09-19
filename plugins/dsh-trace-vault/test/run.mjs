@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { openStore, insertTrace, searchTraces, getTrace, listRecent, statsTraces, sessionStats, purgeOld, capRows, classifyOutcome, argsTextOf, resultTextOf, escapeLike, ARGS_CAP, RESULT_CAP } from "../lib/store.js";
+import { openStore, insertTrace, beginTrace, finishTrace, heartbeatRunning, recoverStaleRunning, searchTraces, getTrace, listRecent, statsTraces, sessionStats, sessionMetrics, purgeOld, capRows, classifyOutcome, argsTextOf, resultTextOf, escapeLike, ARGS_CAP, RESULT_CAP } from "../lib/store.js";
 import { createCapture, callIdOfResult, isErrorResult, MODE_IDS } from "../lib/index.js";
 
 let pass = 0, fail = 0;
@@ -21,6 +21,20 @@ const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); 
 	ok("验证码归 blocked", classifyOutcome(false, "please complete the captcha") === "blocked");
 	ok("正常文本归 ok", classifyOutcome(false, "200 OK，返回登录页") === "ok");
 	ok("中文响应归 ok", classifyOutcome(false, "操作成功") === "ok");
+	// 纯本地工具的输出不是"目标把我们拦了"的证据：加载手册 / 读源码 / 搜日志
+	// 里出现 403/WAF 这些词，是内容不是被拦。实测一次真实会话 10 条 blocked
+	// 全是这种误判，把 toolFailureRate 抬到 17%。
+	ok("本地工具不因正文含 403 被记 blocked（skill）",
+		classifyOutcome(false, "手册正文：403 forbidden / WAF / rate-limit", "skill") === "ok");
+	ok("本地工具不因正文含 403 被记 blocked（read/grep）",
+		classifyOutcome(false, "1: if (status === 403) return forbidden", "read") === "ok"
+		&& classifyOutcome(false, "Line 12: HTTP/1.1 403 Forbidden", "grep") === "ok");
+	ok("台账类工具一律按 isError 判",
+		classifyOutcome(false, "redteam 覆盖：403 已测", "redteam_coverage_mark") === "ok"
+		&& classifyOutcome(true, "boom", "stage_gate") === "error");
+	ok("面向目标的工具仍按文本判 blocked",
+		classifyOutcome(false, "HTTP/1.1 403 Forbidden", "httpx_probe") === "blocked"
+		&& classifyOutcome(false, "request blocked by WAF", "nuclei_scan") === "blocked");
 }
 
 // 1b. 嵌套 tool-result 形态（真实管线实证 v0.2.1）：文本在内层 content
@@ -238,6 +252,59 @@ ok("安全模式清单", Array.isArray(MODE_IDS) && MODE_IDS.length === 3 && MOD
 	ok("受阻工具 top 记账", stats.blockedTools.length === 1 && stats.blockedTools[0].startsWith("bash"));
 	const empty = sessionStats(st, { sessionId: "nope" });
 	ok("空会话画像不炸", empty.calls === 0 && empty.successRate === null && empty.selfRecovered === false);
+	st.close();
+}
+
+// 18b. 跨会话评估：首次有效动作时间 + 工具失败率（均从真实 trace 行计算）
+{
+	const st = openStore(":memory:");
+	insertTrace(st, { id: "s1:i", sessionId: "s1", mode: "pentest", tool: "(intervention)", result: "开始", createdAt: "2026-09-18 10:00:00" });
+	insertTrace(st, { id: "s1:e", sessionId: "s1", mode: "pentest", tool: "bash", result: "boom", isError: true, createdAt: "2026-09-18 10:00:01" });
+	insertTrace(st, { id: "s1:o", sessionId: "s1", mode: "pentest", tool: "fetch", result: "ok", createdAt: "2026-09-18 10:00:03" });
+	insertTrace(st, { id: "s2:i", sessionId: "s2", mode: "pentest", tool: "(intervention)", result: "开始", createdAt: "2026-09-18 10:01:00" });
+	insertTrace(st, { id: "s2:o", sessionId: "s2", mode: "pentest", tool: "nmap", result: "open", createdAt: "2026-09-18 10:01:02" });
+	insertTrace(st, { id: "s3:b", sessionId: "s3", mode: "pentest", tool: "bash", result: "403 forbidden", createdAt: "2026-09-18 10:02:00" });
+	const metrics = sessionMetrics(st);
+	ok("跨会话指标：会话数与介入排除", metrics.sessions === 3);
+	ok("首次有效动作取中位数（3s / 2s → 2.5s）",
+		metrics.firstEffectiveActionMs === 2500 && metrics.firstEffectiveActionSamples === 2);
+	// 口径修正：blocked 是"目标拦了我们"（情报），不是工具故障 —— 单列。
+	ok("工具失败率只看 error/interrupted；blocked 单列，都不含 intervention",
+		metrics.toolFailureRate === 25 && metrics.errorRate === 25 && metrics.blockedRate === 25);
+	const s1 = metrics.rows.find((row) => row.sessionId === "s1");
+	const s3 = metrics.rows.find((row) => row.sessionId === "s3");
+	ok("单会话首次有效动作与失败率", s1.firstEffectiveActionMs === 3000 && s1.toolFailureRate === 50);
+	ok("只有 blocked 的会话失败率是 0、blockedRate 是 100",
+		s3.toolFailureRate === 0 && s3.blockedRate === 100);
+	ok("没有 ok 的会话首次有效动作为 null（不假装 0）", s3.firstEffectiveActionMs === null);
+	const empty = openStore(":memory:");
+	const emptyMetrics = sessionMetrics(empty);
+	ok("空库指标为 null 而不是 0", emptyMetrics.sessions === 0 && emptyMetrics.firstEffectiveActionMs === null && emptyMetrics.toolFailureRate === null);
+	empty.close();
+	st.close();
+}
+
+// ── running / interrupted recovery ────────────────────────────────────────
+{
+	const st = openStore(":memory:");
+	beginTrace(st, { id: "s1:c1", sessionId: "s1", mode: "pentest", tool: "nmap", args: "{\"target\":\"x\"}" });
+	const running = getTrace(st, "s1:c1");
+	ok("调用开始即落 running 行", running.outcome === "running" && running.result === "");
+
+	const startedAt = running.createdAt;
+	heartbeatRunning(st, ["s1:c1"]);
+	finishTrace(st, { id: "s1:c1", result: "open 22", durMs: 1234 });
+	const finished = getTrace(st, "s1:c1");
+	ok("结果回来后只更新同一行", finished.outcome === "ok" && finished.durMs === 1234);
+	ok("完成不覆盖原始开始时间", finished.createdAt === startedAt, `${startedAt} -> ${finished.createdAt}`);
+
+	beginTrace(st, { id: "s1:c2", sessionId: "s1", mode: "pentest", tool: "nuclei", args: "{}" });
+	st.db.prepare("UPDATE traces SET last_seen = '2000-01-01 00:00:00' WHERE id = ?").run("s1:c2");
+	const recovered = recoverStaleRunning(st, { staleMs: 1000 });
+	const interrupted = getTrace(st, "s1:c2");
+	ok("无心跳 running 自动转 interrupted", recovered === 1 && interrupted.outcome === "interrupted");
+	const stats = statsTraces(st, { sessionId: "s1" });
+	ok("统计包含 ok 与 interrupted", stats.ok >= 1 && stats.interrupted === 1 && stats.running === 0, JSON.stringify(stats));
 	st.close();
 }
 

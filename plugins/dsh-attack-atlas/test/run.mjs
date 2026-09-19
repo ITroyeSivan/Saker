@@ -1073,6 +1073,8 @@ await ok("caps.import：撞内置主类/子类标识的行被拒（同 key 遮�
 await ok("saveMethod：跨模式覆盖拒绝、同模式更新不受影响", async () => {
 	const st = openStore(":memory:");
 	const g1 = { nodes: [{ id: "n1", ref: "injection", nt: "tax" }], edges: [] };
+	assert.throws(() => saveMethod(st, { mode: "pentest", name: "坏 JSON", graph: "{bad" }), /图数据不是合法 JSON/);
+	assert.throws(() => saveMethod(st, { mode: "pentest", name: "坏形状", graph: "[]" }), /图数据必须是对象/);
 	const a = saveMethod(st, { mode: "pentest", name: "渗透模板", graph: g1 });
 	await assert.rejects(async () => saveMethod(st, { id: a.id, mode: "ctf-solver", name: "越权覆盖", graph: { nodes: [{ id: "n1", ref: "ctf-web", nt: "tax" }], edges: [] } }), /属于.*不得跨模式覆盖/);
 	const b = saveMethod(st, { id: a.id, mode: "pentest", name: "渗透模板改", graph: g1 });
@@ -1132,7 +1134,7 @@ await ok("CSRF 头校验：匹配放行/缺失或错值拒", () => {
 });
 
 // ===== 词典治理（R2 报错带候选 / R3 标签等价）=====
-import { resolveKey, canonicalKey, resolveStageId, resolveStateLabel, parseCoverageTable, applyCoverageRows, autoLightFromFinding, validateCoverageRef, validateStageRef } from "../lib/index.js";
+import { resolveKey, canonicalKey, resolveStageId, resolveStateLabel, parseCoverageTable, applyCoverageRows, autoLightFromFinding, validateCoverageRef, validateStageRef, isBoundedDiscoverySession } from "../lib/index.js";
 const CA = TAXONOMIES["code-audit"];
 
 await ok("R3·昨日七连拒实测标签全部自愈（code-audit）", () => {
@@ -1275,6 +1277,25 @@ await ok("autoLight·P3 覆盖提醒：每主类一次限流、文案带剩余�
 	// 模式语态：三选一词表进提醒 + 本模式收口纪律子句
 	assert.match(nudges[1].content[0].text, /已审·有 finding \/ 已审·无 finding/);
 	assert.match(nudges[1].content[0].text, /已审结论附 sink 指位与复现链/);
+	st.close();
+});
+
+await ok("有界发现：覆盖提醒静音，但 finding 自动点亮仍保留", async () => {
+	const st = openStore(":memory:");
+	const boundedSession = {
+		ownEvents: () => [
+			{ type: "user/message", data: { id: "task-1", source: { kind: "user" }, content: [{ type: "text", text: "这是有界发现：只选一个风险，完成回写后立即收口，不要扩展全量扫描" }] } },
+			{ type: "user/message", data: { id: "auto-kickoff-1", source: { kind: "user" }, content: [{ type: "text", text: "自动提醒" }] } }
+		]
+	};
+	assert.equal(isBoundedDiscoverySession(boundedSession), true, "真实任务消息判定为有界");
+	const ctx = { get: () => ({ get: () => ({ session: boundedSession }) }) };
+	const nudges = [];
+	const r = await autoLightFromFinding(ctx, st, "nudge-bounded", { title: "F-bounded", type: "任意文件上传" }, {
+		mode: "pentest", findFindingId: async () => "", followup: (m) => nudges.push(m)
+	});
+	assert.ok(r.marked.length > 0, "自动点亮照常记录事实");
+	assert.equal(nudges.length, 0, "有界任务不得注入覆盖提醒启动额外轮次");
 	st.close();
 });
 

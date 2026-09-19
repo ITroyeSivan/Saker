@@ -2,7 +2,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import url from "node:url";
-import { runGate, listGates, tableRows, setGoal, updateProgress, setScope, markTested, coverageCheck, syncOperationState, registerIntent, intentSummary, validateAnchor, setConstraints, constraintSummary, deriveScopeDraft, DECOMPOSITION, conclusionVerdict, apply, readOperationState as ros } from "../lib/index.js";
+import { runGate, listGates, tableRows, setGoal, updateProgress, setScope, markTested, coverageCheck, syncOperationState, registerIntent, intentSummary, taskTransition, validateAnchor, setConstraints, constraintSummary, deriveScopeDraft, DECOMPOSITION, conclusionVerdict, apply, isSubagentTool, summarizeToolResult, subagentOwnerAlias, startSubagentTask, finishSubagentTask, taskToolAliases, readOperationState as ros } from "../lib/index.js";
+import { projectSnapshot } from "../lib/project-snapshot.mjs";
+import { CSRF_TOKEN, ROUTE_PATH, checkCsrf, dispatchProject, isTrustedRequest } from "../lib/project-channel.mjs";
 
 const F = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), "fixture");
 let failed = 0;
@@ -15,6 +17,29 @@ function expect(name, cond, detail) {
 const t = tableRows("| a | b |\n|---|---|\n| c |  |\nplain");
 expect("tableRows counts 2 rows", t.length === 2, JSON.stringify(t));
 expect("tableRows counts non-empty cells", t[1].nonEmpty === 1, JSON.stringify(t));
+
+// 表格门失败信息必须自带可执行修法：列数要求 + 行号 + 实际格数
+// （回归背景：ctf-solver/board 只报「未填满行」，模型被迫去翻 node_modules 源码反推需求）
+{
+	const tmp = fs.mkdtempSync(path.join(path.dirname(F), "tbl-msg-"));
+	fs.writeFileSync(path.join(tmp, "challenge-board.md"), "| 题名 | 内容 |\n|---|---|\n| warmup | base64 编码 |\n");
+	fs.writeFileSync(path.join(tmp, "evidence-index.md"), "## tool-plane\nMCP\n\n| 平面 | 结果 |\n|---|---|\n| CLI | ok |\n");
+	const v = runGate(fs, { mode: "ctf-solver", stage: "board", workspace: tmp });
+	const detail = v.missing.join(" | ");
+	expect("table detail states the per-row cell requirement", detail.includes("每行 ≥3 个非空单元格"), detail);
+	expect("table detail names the short rows with counts", detail.includes("L1(2格)") && detail.includes("L3(2格)"), detail);
+	expect("table detail flags all-short case", detail.includes("全部行不达标"), detail);
+	// 达标时不再报失败
+	fs.writeFileSync(path.join(tmp, "challenge-board.md"), "| 题名 | 模块 | 线索 |\n|---|---|---|\n| warmup | web | base64 |\n");
+	const ok = runGate(fs, { mode: "ctf-solver", stage: "board", workspace: tmp });
+	expect("table detail passes when every row has enough cells", ok.pass === true, JSON.stringify(ok.missing));
+	// 完全没表格时给出可照抄的样式
+	fs.writeFileSync(path.join(tmp, "challenge-board.md"), "无表格正文\n");
+	const noTable = runGate(fs, { mode: "ctf-solver", stage: "board", workspace: tmp });
+	const noTableDetail = noTable.missing.join(" | ");
+	expect("table detail shows a copyable row shape when no table found", noTableDetail.includes("以 | 开头"), noTableDetail);
+	fs.rmSync(tmp, { recursive: true, force: true });
+}
 
 // pentest P1 pass
 let v = runGate(fs, { mode: "pentest", stage: "P1", workspace: F });
@@ -349,6 +374,33 @@ import os from "node:os";
 	try { updateProgress(ws, { intent_done: "i9" }); } catch { threw = true; }
 	expect("未知意图 id 拒", threw);
 	expect("intentSummary 全收口", intentSummary(ros(fs, ws)).open === 0);
+
+	// 执行层：owner/max_attempts 建 task；start → progress → fail → retry → start → succeed
+	registerIntent(ws, { summary: "全端口扫描", anchorKind: "boot", owner: "nmap", maxAttempts: 3 });
+	let task = taskTransition(ws, { id: "i3", action: "start" }).task;
+	expect("task start 置 running 且 attempts=1", task.state === "running" && task.attempts === 1);
+	task = taskTransition(ws, { id: "i3", action: "progress", progress: 40 }).task;
+	expect("task progress 落进度", task.progress === 40);
+	task = taskTransition(ws, { id: "i3", action: "fail", error: "timeout" }).task;
+	expect("task fail 落错误", task.state === "failed" && task.error === "timeout");
+	task = taskTransition(ws, { id: "i3", action: "retry" }).task;
+	expect("task retry 回 queued 且保留 attempts", task.state === "queued" && task.attempts === 1);
+	task = taskTransition(ws, { id: "i3", action: "start" }).task;
+	expect("task 第二次 start attempts=2", task.state === "running" && task.attempts === 2);
+	task = taskTransition(ws, { id: "i3", action: "succeed", result: "open 22/80", artifacts: ["out/nmap.txt"] }).task;
+	expect("task succeed 带结果与产物", task.state === "succeeded" && task.progress === 100 && task.artifacts[0] === "out/nmap.txt");
+	threw = false;
+	try { taskTransition(ws, { id: "i3", action: "start" }); } catch { threw = true; }
+	expect("task 终态不可直接 restart", threw);
+	expect("taskSummary 计入终态", intentSummary(ros(fs, ws)).tasks.succeeded >= 1);
+	// 过期 heartbeat：下一次状态写入时自动转 interrupted
+	registerIntent(ws, { summary: "长时间后台验证", anchorKind: "boot", owner: "worker", maxAttempts: 2 });
+	taskTransition(ws, { id: "i4", action: "start" });
+	const stale = ros(fs, ws);
+	stale.intents.find((i) => i.id === "i4").task.heartbeatAt = "2000-01-01T00:00:00.000Z";
+	fs.writeFileSync(path.join(ws, "operation-state.json"), JSON.stringify(stale, null, 2) + "\n");
+	updateProgress(ws, { note: "heartbeat recovery probe" });
+	expect("过期 running task 自动转 interrupted", ros(fs, ws).intents.find((i) => i.id === "i4").task.state === "interrupted");
 	fs.rmSync(tmp, { recursive: true, force: true });
 }
 
@@ -471,7 +523,11 @@ import os from "node:os";
 	for (const p of ["dsh-campaign-memory", "dsh-attack-atlas", "dsh-redteam-results", "dsh-trace-vault"]) {
 		const store = fs.readFileSync(`${P}/${p}/lib/store.js`, "utf8");
 		expect(`${p}: 库损坏时自愈（备份+重建而非抛）`, store.includes("healCorruptDb"));
-		expect(`${p}: 自愈在开库前调用`, /healCorruptDb\(dbPath\);[\s\S]{0,120}?new DatabaseSync\(dbPath\)/.test(store));
+		const firstOpenAt = store.indexOf("new DatabaseSync(dbPath)");
+		const notDbAt = store.search(/not a database\|SQLITE_NOTADB/i);
+		const healAt = store.indexOf("healCorruptDb(dbPath, true)");
+		expect(`${p}: 先尝试开库，只有 NOTADB 才自愈`, firstOpenAt >= 0 && notDbAt > firstOpenAt && healAt > notDbAt && !/\n\s*healCorruptDb\(dbPath\);\s*\/\/.*开库前/.test(store));
+		expect(`${p}: 并发首开前先设 busy_timeout`, store.indexOf("PRAGMA busy_timeout") >= 0 && store.indexOf("PRAGMA busy_timeout") < store.indexOf("PRAGMA journal_mode"));
 		expect(`${p}: 自愈清掉 -wal/-shm 残留`, store.includes('"-wal", "-shm"'));
 		expect(`${p}: 备份名冲突不覆盖`, store.includes("while (fs.existsSync(bak))"));
 		expect(`${p}: 备份失败如实抛出（不装作自愈成功）`, /catch \(e\) \{[\s\S]{0,320}?throw e;/.test(store));
@@ -601,6 +657,319 @@ import os from "node:os";
 		try { await tool.execute({}, {}); e2 = null; } catch (e) { e2 = e; }
 		expect("conclusion(行为): 缺参给出可读错误", e2 === null || !(e2 instanceof TypeError), String(e2 && e2.message).slice(0, 80));
 
+		fs.rmSync(ws, { recursive: true, force: true });
+	}
+}
+
+// ── 子代理结果回收（P1-9）：生命周期 start/end 把成败与摘要写回台账任务 ────────
+{
+	const ws = fs.mkdtempSync(path.join(path.dirname(F), "recycle-"));
+	try {
+		setGoal(ws, "子代理回收探针", "子代理复核完成");
+		expect("isSubagentTool 认原生与产品行",
+			isSubagentTool("subagent") && isSubagentTool("subagent_fork") && isSubagentTool("subagent_claude_code")
+			&& isSubagentTool("subagent_codex") && !isSubagentTool("bash") && !isSubagentTool("subagentx"));
+		expect("subagentOwnerAlias 把 provider 映射成 owner 别名",
+			subagentOwnerAlias("claude-code") === "subagent_claude_code" && subagentOwnerAlias("") === "subagent");
+		expect("事件 provider 别名也认通用 owner=subagent（模型登记时就是这么写的）",
+			taskToolAliases("subagent_dsh").includes("subagent") && taskToolAliases("subagent_codex").includes("codex"));
+		expect("summarizeToolResult 取 content 文本并压平空白",
+			summarizeToolResult({ content: [{ type: "text", text: " 复核 结论\n一致 " }] }) === "复核 结论 一致");
+		expect("summarizeToolResult 取 value 且封顶",
+			summarizeToolResult({ value: "x".repeat(900) }, 100).length === 100);
+
+		// start → running（attempts=1）：顺手挡住"还在跑就被别人 claim"
+		registerIntent(ws, { summary: "交叉复核 SQLi", anchorKind: "criterion", anchorRef: "g1", owner: "subagent_claude_code", sessionId: "s1", maxAttempts: 2 });
+		const started = startSubagentTask(ws, { sessionId: "s1", provider: "claude-code" });
+		expect("subagent/start → 任务转 running 且 attempts=1",
+			started?.task?.state === "running" && started.task.attempts === 1);
+
+		// end(completed) → succeeded + 子代理最后一条输出入账
+		const done = finishSubagentTask(ws, { sessionId: "s1", provider: "claude-code", stopReason: "completed", summary: "复核一致：SQLi 已复现" });
+		expect("subagent/end(completed) → succeeded 且摘要入账",
+			done?.task?.state === "succeeded" && done.task.result.includes("复核一致"));
+
+		// end(error) → failed
+		registerIntent(ws, { summary: "复核命令执行", anchorKind: "criterion", anchorRef: "g1", owner: "subagent_codex", sessionId: "s1", maxAttempts: 2 });
+		startSubagentTask(ws, { sessionId: "s1", provider: "codex" });
+		const bad = finishSubagentTask(ws, { sessionId: "s1", provider: "codex", stopReason: "error", summary: "CLI 退出码 1" });
+		expect("subagent/end(error) → failed 且错误入账", bad?.task?.state === "failed" && bad.task.error.includes("退出码 1"));
+
+		// end(aborted) → interrupted（可 retry，不是假成功）
+		registerIntent(ws, { summary: "复核被中断", anchorKind: "criterion", anchorRef: "g1", owner: "subagent_acp", sessionId: "s1", maxAttempts: 2 });
+		startSubagentTask(ws, { sessionId: "s1", provider: "acp" });
+		const aborted = finishSubagentTask(ws, { sessionId: "s1", provider: "acp", stopReason: "aborted" });
+		expect("subagent/end(aborted) → interrupted", aborted?.task?.state === "interrupted");
+
+		// 多候选 / provider 不同 / session 不匹配 → 不动账
+		registerIntent(ws, { summary: "复核 A", anchorKind: "criterion", anchorRef: "g1", owner: "subagent", sessionId: "s1", maxAttempts: 1 });
+		registerIntent(ws, { summary: "复核 B", anchorKind: "criterion", anchorRef: "g1", owner: "subagent", sessionId: "s1", maxAttempts: 1 });
+		const before = JSON.stringify(ros(fs, ws).intents.map((i) => i.task));
+		expect("多候选不动账（宁可不写也不猜归属）",
+			startSubagentTask(ws, { sessionId: "s1", provider: "" }) === null
+			&& JSON.stringify(ros(fs, ws).intents.map((i) => i.task)) === before);
+		expect("provider 不匹配不动账",
+			startSubagentTask(ws, { sessionId: "s1", provider: "codex" }) === null);
+		expect("session 不匹配不动账",
+			startSubagentTask(ws, { sessionId: "s9", provider: "" }) === null);
+		expect("已收口任务不会被二次收口", finishSubagentTask(ws, { sessionId: "s1", provider: "claude-code", stopReason: "completed" }) === null);
+
+		const emptyWs = fs.mkdtempSync(path.join(path.dirname(F), "recycle-empty-"));
+		try {
+			expect("无台账不抛错",
+				startSubagentTask(emptyWs, { sessionId: "s1", provider: "" }) === null
+				&& finishSubagentTask(emptyWs, { sessionId: "s1", provider: "", stopReason: "error" }) === null);
+		} finally {
+			fs.rmSync(emptyWs, { recursive: true, force: true });
+		}
+	} finally {
+		fs.rmSync(ws, { recursive: true, force: true });
+	}
+}
+
+// ── 项目工作台（只读快照 + web 通道栅栏）────────────────────────────────────
+{
+	const ws = fs.mkdtempSync(path.join(path.dirname(F), "workbench-"));
+	try {
+		fs.writeFileSync(path.join(ws, "operation-state.json"), JSON.stringify({
+			goal: "项目工作台探针",
+			criteria: [
+				{ id: "g1", text: "已完成项", status: "met" },
+				{ id: "g2", text: "待收口项", status: "open" },
+			],
+			intents: [
+				{ id: "i1", summary: "已收口方向", status: "done", task: { state: "succeeded", owner: "nmap", attempts: 1, maxAttempts: 1, result: "open 22/80" } },
+				{ id: "i2", summary: "中断方向", status: "open", task: { state: "interrupted", owner: "worker", attempts: 1, maxAttempts: 2, error: "heartbeat expired" } },
+				{
+					id: "i3",
+					summary: "有冲突的方向",
+					status: "open",
+					task: {
+						state: "succeeded",
+						owner: "subagent",
+						attempts: 1,
+						maxAttempts: 2,
+						result: "模型说完成",
+						conflicts: [{ at: "2026-09-18T00:00:00.000Z", from: "succeeded", to: "failed", detail: "子代理随后报失败" }],
+					},
+				},
+			],
+		}, null, 2), "utf8");
+		fs.writeFileSync(path.join(ws, "gate-log.md"), "PASS before\nFAIL 阶段门禁样例\n", "utf8");
+		fs.writeFileSync(path.join(ws, "evidence-index.md"), "| E1 | a | b | c | d |\n| E2 | a | b | c | d |\n", "utf8");
+		fs.writeFileSync(path.join(ws, "scan-reconcile.md"), "| scanner | hit | 待处置 |\n", "utf8");
+		fs.mkdirSync(path.join(ws, "reports"), { recursive: true });
+		fs.writeFileSync(path.join(ws, "reports", "01-漏洞.md"), "# r\n", "utf8");
+		fs.writeFileSync(path.join(ws, "reports", "exp.py"), "print('x')\n", "utf8");
+		fs.writeFileSync(path.join(ws, "reports", "ignore.zip"), "x", "utf8");
+
+		const snap = projectSnapshot(ws);
+		expect("工作台快照：目标/台账标记正确", snap.hasLedger === true && snap.goal === "项目工作台探针" && snap.name === path.basename(ws));
+		expect("工作台快照：准则统计（met/total/open）", snap.criteria.total === 2 && snap.criteria.met === 1 && snap.criteria.open === 1);
+		expect("工作台快照：意图与任务计数", snap.intents.total === 3 && snap.intents.open === 2 && snap.tasks.length === 3);
+		expect("工作台快照：冲突任务进计数与 attention",
+			snap.counts.conflicts === 1
+			&& snap.attention.some((a) => a.kind === "任务结果冲突" && a.text.includes("子代理随后报失败")));
+		expect("工作台快照：中断任务进 attention",
+			snap.attention.some((a) => a.kind === "中断任务" && a.text.includes("heartbeat expired")));
+		expect("工作台快照：产物索引（证据行/待处置/门禁/报告）",
+			snap.artifacts.evidenceRows === 2 && snap.artifacts.pendingScanRows === 1
+			&& /FAIL 阶段门禁样例/.test(snap.artifacts.gateLine)
+			&& snap.artifacts.reports.length === 2
+			&& snap.artifacts.reports.some((r) => r.name === "01-漏洞.md")
+			&& !snap.artifacts.reports.some((r) => r.name === "ignore.zip"));
+		expect("工作台快照：门禁 FAIL 进 attention",
+			snap.attention.some((a) => a.kind === "阶段门禁" && /FAIL/.test(a.text)));
+		expect("工作台快照：已登记目标时不报「目标契约」缺失",
+			snap.goalRegistered === true && !snap.attention.some((a) => a.kind === "目标契约"));
+
+		// 回归背景：真实端到端跑完发现模型可以跳过 operation_goal，
+		// 此时台账存在但 goal 为空 —— 工作台原来显示「0/0 准则已全部收口」，
+		// 把"根本没立标准"显示成了"全部做完"。现在必须显式区分。
+		const noGoal = fs.mkdtempSync(path.join(path.dirname(F), "workbench-nogoal-"));
+		try {
+			fs.writeFileSync(path.join(noGoal, "operation-state.json"), JSON.stringify({
+				version: 1, mode: "pentest", goal: "", criteria: [], intents: [], gates: {},
+			}));
+			const snapNoGoal = projectSnapshot(noGoal);
+			expect("工作台快照：台账在但没登记目标 -> goalRegistered=false",
+				snapNoGoal.hasLedger === true && snapNoGoal.goalRegistered === false);
+			expect("工作台快照：没登记目标进 attention（不能显示成健康 0/0）",
+				snapNoGoal.attention.some((a) => a.kind === "目标契约" && /0\/0/.test(a.text)));
+		} finally {
+			fs.rmSync(noGoal, { recursive: true, force: true });
+		}
+
+		const bare = fs.mkdtempSync(path.join(path.dirname(F), "workbench-bare-"));
+		try {
+			const empty = projectSnapshot(bare);
+			expect("无台账工作区：结构完整且不抛错",
+				empty.hasLedger === false && empty.criteria.total === 0 && empty.tasks.length === 0
+				&& empty.attention.some((a) => a.kind === "阶段门禁"));
+		} finally {
+			fs.rmSync(bare, { recursive: true, force: true });
+		}
+
+		// 端点：只读 + 入参校验
+		expect("dispatchProject：status 返回快照", (() => {
+			const r = dispatchProject("status", { workspace: ws });
+			return r.ok === true && r.snapshot.goal === "项目工作台探针";
+		})());
+		expect("dispatchProject：未知端点/缺工作区/相对路径/不存在目录都被拒",
+			dispatchProject("nope", { workspace: ws }).ok === false
+			&& dispatchProject("status", {}).ok === false
+			&& dispatchProject("status", { workspace: "relative/path" }).ok === false
+			&& dispatchProject("status", { workspace: path.join(ws, "missing-dir") }).ok === false);
+
+		// 同源栅栏：Host 回环 + Origin 同源才放行；跨端口/外站都拒
+		const req = (host, origin) => ({ headers: origin === undefined ? { host } : { host, origin } });
+		expect("栅栏：回环 Host + 同源 Origin 放行",
+			isTrustedRequest(req("127.0.0.1:3090", "http://127.0.0.1:3090"), []) === true
+			&& isTrustedRequest(req("localhost:3090"), []) === true);
+		expect("栅栏：跨端口/外站/无 Origin 但外站 Host 都拒",
+			isTrustedRequest(req("127.0.0.1:3090", "http://127.0.0.1:9999"), []) === false
+			&& isTrustedRequest(req("evil.example", "http://evil.example"), []) === false
+			&& isTrustedRequest(req("evil.example"), []) === false);
+		expect("栅栏：受信主机列表可按 hostname 放行",
+			isTrustedRequest(req("box.internal:3090", "http://box.internal:3090"), ["box.internal"]) === true);
+		expect("CSRF：缺头/错头拒绝，正确 token 放行",
+			checkCsrf({ headers: {} }, CSRF_TOKEN) === false
+			&& checkCsrf({ headers: { "x-dsh-csrf": "nope" } }, CSRF_TOKEN) === false
+			&& checkCsrf({ headers: { "x-dsh-csrf": CSRF_TOKEN } }, CSRF_TOKEN) === true);
+		expect("路由前缀常量与客户端一致", ROUTE_PATH === "/dsh-stage-gate-project");
+	} finally {
+		fs.rmSync(ws, { recursive: true, force: true });
+	}
+}
+
+// ── 任务结果冲突（P1-9 冲突处理）：终态只记冲突、绝不覆盖，同结果幂等 ──────────
+{
+	const ws = fs.mkdtempSync(path.join(path.dirname(F), "conflict-"));
+	try {
+		setGoal(ws, "冲突探针", "复核完成");
+		registerIntent(ws, { summary: "冲突复核", anchorKind: "criterion", anchorRef: "g1", owner: "subagent", sessionId: "s1", maxAttempts: 3 });
+		taskTransition(ws, { id: "i1", action: "start" });
+		const first = taskTransition(ws, { id: "i1", action: "succeed", result: "复核通过" });
+		expect("首次 succeeded 不带冲突", first.task.state === "succeeded" && (first.task.conflicts || []).length === 0 && first.conflict === undefined);
+
+		// 幂等重放：同结果再来一次不改账
+		const stampBefore = ros(fs, ws).intents[0].task.updatedAt;
+		const replay = taskTransition(ws, { id: "i1", action: "succeed", result: "复核通过" });
+		expect("同结果重复上报=幂等（不置冲突、不动 updatedAt）",
+			replay.task.state === "succeeded" && (replay.task.conflicts || []).length === 0
+			&& ros(fs, ws).intents[0].task.updatedAt === stampBefore);
+
+		// 不同结果：记冲突，状态不变
+		const clash = taskTransition(ws, { id: "i1", action: "fail", error: "子代理随后报 CLI 退出码 1" });
+		expect("终态后收到不同结果 → 记冲突且不覆盖终态",
+			clash.conflict === true && clash.task.state === "succeeded"
+			&& (clash.task.conflicts || []).length === 1
+			&& clash.task.conflicts[0].from === "succeeded" && clash.task.conflicts[0].to === "failed"
+			&& clash.task.conflicts[0].detail.includes("退出码 1"));
+
+		// 冲突记录有上限（最近 5 条）
+		for (let i = 0; i < 7; i += 1) taskTransition(ws, { id: "i1", action: "fail", error: `第 ${i} 次矛盾` });
+		const capped = ros(fs, ws).intents[0].task.conflicts;
+		expect("冲突记录封顶 5 条（只留最近）", capped.length === 5 && capped.at(-1).detail.includes("第 6 次矛盾"));
+
+		// 精确按 taskId 回收：模型已收口 + 子代理随后失败 → 同样只记冲突
+		registerIntent(ws, { summary: "精确回收冲突", anchorKind: "criterion", anchorRef: "g1", owner: "subagent_spawn", sessionId: "s1", maxAttempts: 2 });
+		startSubagentTask(ws, { sessionId: "s1", provider: "spawn" });
+		taskTransition(ws, { id: "i2", action: "succeed", result: "模型说完成了" });
+		const late = finishSubagentTask(ws, { sessionId: "s1", provider: "spawn", stopReason: "error", summary: "子代理其实失败了", taskId: "i2" });
+		expect("精确 taskId 回收：已收口任务收到相反结果 → 记冲突不抛错",
+			late?.conflict === true && late.task.state === "succeeded" && late.task.conflicts.length === 1);
+		const lateAbort = finishSubagentTask(ws, { sessionId: "s1", provider: "spawn", stopReason: "aborted", summary: "被中断", taskId: "i2" });
+		expect("精确 taskId 回收：终止原因 aborted 也记冲突（不覆盖）",
+			lateAbort?.conflict === true && lateAbort.task.state === "succeeded" && lateAbort.task.conflicts.length === 2);
+	} finally {
+		fs.rmSync(ws, { recursive: true, force: true });
+	}
+}
+
+// ── 子代理回收的**接线**：按 agent 作用域挂 subagent/start + subagent/end ──────
+//
+// 真宿主实测（2026-09-18）：这两个是**作用域事件**，监听器只拿得到 info、拿不到 parent。
+// 所以 apply 里必须挂 agent/created → 用 agent.ctx.on 注册，把 agent 闭包进去；
+// 直接写 ctx.on("subagent/start", (info, parent) => …) 会永远拿到 undefined。
+{
+	const ws = fs.mkdtempSync(path.join(path.dirname(F), "recycle-wire-"));
+	try {
+		setGoal(ws, "接线探针", "复核完成");
+		const handlers = {};
+		const tools = [];
+		apply({
+			tools: { register: (t) => tools.push(t) },
+			agentPresets: { composedPreset: () => "pentest" },
+			on: (event, fn) => { handlers[event] = fn; },
+		});
+		expect("apply 挂了 agent 生命周期钩子（agent/created、agent/disposed）",
+			typeof handlers["agent/created"] === "function" && typeof handlers["agent/disposed"] === "function"
+			&& typeof handlers["agent/inbox/inserted"] === "function");
+		expect("apply 仍注册原有工具", tools.length >= 9);
+		expect("apply 不再直接监听作用域事件（subagent/start 由 agent 作用域挂）",
+			handlers["subagent/start"] === undefined && handlers["subagent/end"] === undefined);
+
+		const agentHandlers = {};
+		let disposed = 0;
+		const agent = {
+			id: "a1",
+			session: { id: "s1", header: { cwd: ws } },
+			ctx: { on: (event, fn) => { agentHandlers[event] = fn; return () => { disposed += 1; }; } },
+		};
+		handlers["agent/created"]({ agent });
+		expect("agent 作用域挂上 subagent/start 与 subagent/end",
+			typeof agentHandlers["subagent/start"] === "function" && typeof agentHandlers["subagent/end"] === "function");
+		// 幂等：同一 agent 再来一次不得重复挂
+		const beforeCount = disposed;
+		handlers["agent/inbox/inserted"]({ agent });
+		expect("同一 agent 幂等（不重复挂监听）", disposed === beforeCount);
+
+		registerIntent(ws, { summary: "接线复核", anchorKind: "criterion", anchorRef: "g1", owner: "subagent", sessionId: "s1", maxAttempts: 2 });
+		agentHandlers["subagent/start"]({ provider: "spawn", runId: "r1", id: "child-1" });
+		expect("接线：真实事件形状把任务转 running",
+			ros(fs, ws).intents.at(-1).task.state === "running");
+		agentHandlers["subagent/end"]({
+			provider: "spawn",
+			stopReason: "completed",
+			lastAssistantMessage: [{ type: "text", text: "复核完成：一致" }],
+		});
+		const task = ros(fs, ws).intents.at(-1).task;
+		expect("接线：end 用最后一条子代理输出收口",
+			task.state === "succeeded" && task.result.includes("复核完成"));
+
+		// 别的会话：即使 provider 命中也不得动账
+		const otherHandlers = {};
+		const other = {
+			id: "a2",
+			session: { id: "s2", header: { cwd: ws } },
+			ctx: { on: (event, fn) => { otherHandlers[event] = fn; return () => {}; } },
+		};
+		handlers["agent/created"]({ agent: other });
+		const before = JSON.stringify(ros(fs, ws).intents.map((i) => i.task));
+		otherHandlers["subagent/start"]({ provider: "spawn" });
+		otherHandlers["subagent/end"]({ provider: "spawn", stopReason: "error" });
+		expect("接线：别的会话不动本会话的任务",
+			JSON.stringify(ros(fs, ws).intents.map((i) => i.task)) === before);
+
+		// runId 精确绑定：模型先收口、子代理随后失败 → 按 runId 找到同一条任务并记冲突
+		registerIntent(ws, { summary: "并发复核（runId 绑定）", anchorKind: "criterion", anchorRef: "g1", owner: "subagent", sessionId: "s1", maxAttempts: 2 });
+		agentHandlers["subagent/start"]({ provider: "spawn", runId: "r2", id: "child-2" });
+		taskTransition(ws, { id: "i2", action: "succeed", result: "模型先宣布完成" });
+		agentHandlers["subagent/end"]({
+			provider: "spawn",
+			runId: "r2",
+			stopReason: "error",
+			lastAssistantMessage: [{ type: "text", text: "子代理实际失败了" }],
+		});
+		const conflictTask = ros(fs, ws).intents.find((i) => i.id === "i2").task;
+		expect("接线：runId 精确绑定把矛盾记成冲突（终态不被覆盖）",
+			conflictTask.state === "succeeded" && (conflictTask.conflicts || []).length === 1
+			&& conflictTask.conflicts[0].detail.includes("子代理实际失败"));
+
+		handlers["agent/disposed"]({ agent });
+		expect("agent 销毁时释放作用域监听", disposed >= 2);
+	} finally {
 		fs.rmSync(ws, { recursive: true, force: true });
 	}
 }

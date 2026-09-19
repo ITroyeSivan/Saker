@@ -247,7 +247,8 @@ shared/refs/finding-fields.md）；成果页列表/详情/导出报告/统计分
 在 poc 字段**直接给可复现 EXP**（完整请求包/命令/构造输入），不绕「利用前提」措辞。
 只写复现条件不算完成——静态审计复核通过只登记 `code-reviewed`（代码侧已复核）；
 `verified` 仅限动态验证成功（EXP 本地复现真实生效，或在线授权环境实测 L1 通过）；
-无完整 EXP 的 finding 停在 `pending`（待动态验证）；
+无完整 EXP 的 finding 停在 `pending`（待动态验证）；静态线索成立但链路未闭合或
+双链不一致时登记 `suspect`（疑似未定论），不得用 `verified` 掩盖缺口；
 成果页登记的 poc 字段同步必含该 EXP（脚本路径+用法 或 直接可复现内容）。
 
 **一键实测配套（poc 顶部指纹节，hunter 实测按钮使用）**：登记 finding 时在 poc 字段

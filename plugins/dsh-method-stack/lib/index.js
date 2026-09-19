@@ -107,7 +107,17 @@ function readText(file) {
 }
 
 /** 全量目录：官方 + 用户覆盖（用户层同名替换官方正文与描述）。 */
-function fullCatalog() {
+// 方法目录缓存：fullCatalog() 会遍历内置/用户两层目录并逐个 readFileSync，
+// 而它被**每轮注入的 context 回调**调用（实测 8.5ms/回合，纯浪费）。
+// 目录只在用户改方法正文时才变 → 60s TTL + 保存路径显式失效（save-prompt 之后立刻重建）。
+let catalogCache = { at: 0, value: null }
+const CATALOG_TTL_MS = 60 * 1000
+function invalidateCatalog() {
+  catalogCache = { at: 0, value: null }
+}
+function fullCatalog({ fresh = false } = {}) {
+  const now = Date.now()
+  if (!fresh && catalogCache.value && now - catalogCache.at < CATALOG_TTL_MS) return catalogCache.value
   const catalog = []
   for (const g of builtinGroups()) {
     const merged = new Map(g.methods.map((m) => [m.id, m]))
@@ -117,6 +127,7 @@ function fullCatalog() {
     }
     catalog.push({ group: g.group, methods: [...merged.values()].sort((a, b) => a.order - b.order || (a.id < b.id ? -1 : 1)) })
   }
+  catalogCache = { at: now, value: catalog }
   return catalog
 }
 
@@ -219,6 +230,34 @@ function audit(presetId, action, detail) {
 function ok(value) { return { ok: true, value } }
 function failure(message) { return { ok: false, error: { code: 'method-stack', message: String(message), details: {} } } }
 
+/** 覆盖写用户文本前保留的份数上限。 */
+const BACKUP_KEEP = 5
+
+/**
+ * 覆盖写之前先留一份旧内容，返回备份路径（文件原本不存在时返回空串）。
+ *
+ * 为什么：`save-prompt` / `opening-save` 直接 `writeFileSync` 到用户目录 ——
+ * 用户改自己写的方法正文或开场文本，保存一下就永久覆盖上一版，没有回退手段。
+ * （同一类问题 2026-09-19 已在 webshell-mgr 上真实踩过一次数据丢失。）
+ * 备份放 `.backups/`：点开头不会被当成方法/开场文件读取；每个文件最多留 BACKUP_KEEP 份。
+ */
+function backupFile(target, backupDir) {
+  if (!fs.existsSync(target)) return ''
+  try {
+    fs.mkdirSync(backupDir, { recursive: true })
+    const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 17) + '-' + Math.random().toString(36).slice(2, 8)
+    const dest = path.join(backupDir, `${path.basename(target)}.${stamp}.bak`)
+    fs.copyFileSync(target, dest)
+    const mine = fs.readdirSync(backupDir).filter((f) => f.startsWith(path.basename(target) + '.')).sort()
+    for (const old of mine.slice(0, Math.max(0, mine.length - BACKUP_KEEP))) {
+      try { fs.rmSync(path.join(backupDir, old), { recursive: true, force: true }) } catch { /* 清理旧备份失败不影响本次写入 */ }
+    }
+    return dest
+  } catch {
+    return '' // 备份失败不阻断写入；调用方据返回值如实告知"没有备份"
+  }
+}
+
 export function apply(ctx, config = {}) {
   const cfg = { enable: true, ...config }
   if (!cfg.enable) return
@@ -310,6 +349,7 @@ export function apply(ctx, config = {}) {
         const dst = path.join(USER_METHODS_ROOT, group, id)
         fs.mkdirSync(dst, { recursive: true })
         fs.cpSync(src, dst, { recursive: true, force: true })
+        invalidateCatalog()
         audit('user', 'clone', `${group}/${id}`)
         return ok({ cloned: `${group}/${id}` })
       }
@@ -318,9 +358,16 @@ export function apply(ctx, config = {}) {
         const id = typeof p.id === 'string' ? p.id : ''
         const dst = path.join(USER_METHODS_ROOT, group, id)
         if (!fs.existsSync(path.join(dst, 'prompt.md'))) return failure('用户方法不存在：' + `${group}/${id}`)
-        fs.rmSync(dst, { recursive: true, force: true })
-        audit('user', 'restore', `${group}/${id}`)
-        return ok({ restored: `${group}/${id}` })
+        // 不直接 rm：用户层那份是**用户自己改过的正文**，删掉就永久没了。
+        // 同卷 rename 进 methods/.trash/，点开头不会被当成方法读，可人工找回。
+        const trashRoot = path.join(USER_METHODS_ROOT, '.trash')
+        fs.mkdirSync(trashRoot, { recursive: true })
+        const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 17) + '-' + Math.random().toString(36).slice(2, 8)
+        const trash = path.join(trashRoot, `${group}__${id}.${stamp}`)
+        fs.renameSync(dst, trash)
+        invalidateCatalog()
+        audit('user', 'restore', `${group}/${id} trash=${path.basename(trash)}`)
+        return ok({ restored: `${group}/${id}`, trash })
       }
       if (endpoint === 'render-preview') {
         const presetId = typeof p.presetId === 'string' && p.presetId ? p.presetId : 'pentest'
@@ -335,13 +382,16 @@ export function apply(ctx, config = {}) {
         const presetId = typeof p.presetId === 'string' && p.presetId ? p.presetId : 'pentest'
         const text = typeof p.text === 'string' ? p.text.trim() : ''
         fs.mkdirSync(openingDir(), { recursive: true })
+        const openingFile = path.join(openingDir(), `${presetId}.md`)
+        // 覆盖或清空之前都先留一份：这是用户自己写的开场文本，写没了没有回退手段
+        const backup = backupFile(openingFile, path.join(openingDir(), '.backups'))
         if (!text) {
-          try { fs.rmSync(path.join(openingDir(), `${presetId}.md`), { force: true }) } catch { /* ignore */ }
+          try { fs.rmSync(openingFile, { force: true }) } catch { /* ignore */ }
         } else {
-          fs.writeFileSync(path.join(openingDir(), `${presetId}.md`), text, 'utf8')
+          fs.writeFileSync(openingFile, text, 'utf8')
         }
         audit('user', 'opening-save', presetId + (text ? ` (${text.length} chars)` : ' (cleared)'))
-        return ok({ presetId, saved: true })
+        return ok({ presetId, saved: true, backup })
       }
       if (endpoint === 'opening-official') {
         const presetId = typeof p.presetId === 'string' && p.presetId ? p.presetId : 'pentest'
@@ -356,13 +406,20 @@ export function apply(ctx, config = {}) {
         if (!src) return failure('官方方法不存在：' + `${group}/${id}`)
         if (!text) return failure('正文不能为空')
         const dst = path.join(USER_METHODS_ROOT, group, id)
-        if (!fs.existsSync(path.join(dst, 'prompt.md'))) {
+        const userPrompt = path.join(dst, 'prompt.md')
+        // 先记下"用户层是否本来就有正文"：没有的话接下来是从官方克隆出来的，
+        // 那份不是用户写过的东西，不该产生备份。
+        const hadOwn = fs.existsSync(userPrompt)
+        if (!hadOwn) {
           fs.mkdirSync(dst, { recursive: true })
           fs.cpSync(src, dst, { recursive: true, force: true })
         }
-        fs.writeFileSync(path.join(dst, 'prompt.md'), text, 'utf8')
+        // 覆盖用户已有正文前先备份（首次克隆官方时不产生备份，因为没有用户旧版可丢）
+        const backup = hadOwn ? backupFile(userPrompt, path.join(USER_METHODS_ROOT, '.backups')) : ''
+        fs.writeFileSync(userPrompt, text, 'utf8')
+        invalidateCatalog()
         audit('user', 'save-prompt', `${group}/${id} (${text.length} chars)`)
-        return ok({ saved: `${group}/${id}`, cloned: true })
+        return ok({ saved: `${group}/${id}`, cloned: true, backup })
       }
       return failure('unknown endpoint: ' + endpoint)
     } catch (error) {

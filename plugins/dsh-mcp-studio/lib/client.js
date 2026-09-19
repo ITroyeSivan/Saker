@@ -405,6 +405,7 @@ function ServerCard(props) {
   const [copied, setCopied] = (0, import_react2.useState)(false);
   const [diagBusy, setDiagBusy] = (0, import_react2.useState)(false);
   const [toolsOpen, setToolsOpen] = (0, import_react2.useState)(false);
+  const [confirmRemove, setConfirmRemove] = (0, import_react2.useState)(false);
   const badgeRef = (0, import_react2.useRef)(null);
   const [popPos, setPopPos] = (0, import_react2.useState)(void 0);
   const [diag, setDiag] = (0, import_react2.useState)(void 0);
@@ -426,6 +427,9 @@ function ServerCard(props) {
   (0, import_react2.useEffect)(() => {
     if (live?.state !== "connected") setToolsOpen(false);
   }, [live?.state]);
+  (0, import_react2.useEffect)(() => {
+    if (!props.open) setConfirmRemove(false);
+  }, [props.open]);
   const reposition = (0, import_react2.useCallback)((initial) => {
     const badge = badgeRef.current;
     const card = badge?.closest(".dsh-mcs-card");
@@ -520,11 +524,17 @@ function ServerCard(props) {
             "button",
             {
               type: "button",
-              className: "dsh-mcs-iconbtn",
-              title: t("removeServer"),
-              "aria-label": t("removeServer"),
+              className: confirmRemove ? "dsh-mcs-iconbtn dsh-mcs-iconbtn--danger" : "dsh-mcs-iconbtn",
+              title: confirmRemove ? t("confirmRemoveServer") : t("removeServer"),
+              "aria-label": confirmRemove ? t("confirmRemoveServer") : t("removeServer"),
               onClick: (event) => {
                 event.stopPropagation();
+                if (!confirmRemove) {
+                  setConfirmRemove(true);
+                  window.setTimeout(() => setConfirmRemove(false), 3e3);
+                  return;
+                }
+                setConfirmRemove(false);
                 props.onRemove();
               },
               children: "\xD7"
@@ -677,6 +687,12 @@ var SERVER_PRESETS = [
     label: "Chrome DevTools",
     description: "Chrome DevTools MCP\uFF1A\u9875\u9762\u5FEB\u7167\u3001\u70B9\u51FB\u3001\u586B\u8868\u3001\u7F51\u7EDC\u4E0E\u63A7\u5236\u53F0\uFF08\u9ED8\u8BA4\u5173\u95ED\uFF1B\u56FA\u5B9A 1.9.0\uFF0Cauto/proxy \u907F\u514D 29 \u4E2A\u5DE5\u5177\u8FDB\u5165\u63D0\u793A\u8BCD\uFF09",
     json: '{\n  "mcpServers": {\n    "chrome-devtools": {\n      "command": "npx",\n      "args": ["-y", "chrome-devtools-mcp@1.9.0"],\n      "disabled": true\n    }\n  }\n}'
+  },
+  {
+    id: "playwright",
+    label: "Playwright",
+    description: "Playwright MCP\uFF1A\u6D4F\u89C8\u5668\u5BFC\u822A\u3001\u5FEB\u7167\u3001\u70B9\u51FB\u3001\u586B\u8868\u3001\u63A7\u5236\u53F0\u4E0E\u622A\u56FE\uFF08\u9ED8\u8BA4\u5173\u95ED\uFF1B\u56FA\u5B9A 0.0.80\uFF0C\u4F7F\u7528 Chrome channel\uFF1B24 \u4E2A\u5DE5\u5177\u5728 auto \u6A21\u5F0F\u4E0B\u8D70 proxy\uFF09",
+    json: '{\n  "mcpServers": {\n    "playwright": {\n      "command": "npx",\n      "args": ["-y", "@playwright/mcp@0.0.80", "--browser", "chrome", "--headless", "--isolated", "--image-responses", "omit"],\n      "disabled": true\n    }\n  }\n}'
   },
   {
     id: "kali",
@@ -1529,6 +1545,7 @@ var en = {
   statTools: "Tools",
   addServer: "Add server",
   removeServer: "Remove server",
+  confirmRemoveServer: "Click again to confirm removal",
   serverEnabled: "Enabled",
   unnamedServer: "(unnamed server)",
   serverName: "Server name",
@@ -1639,6 +1656,7 @@ var zh = {
   statTools: "\u5DE5\u5177",
   addServer: "\u6DFB\u52A0\u670D\u52A1\u5668",
   removeServer: "\u5220\u9664\u670D\u52A1\u5668",
+  confirmRemoveServer: "\u518D\u6B21\u70B9\u51FB\u786E\u8BA4\u5220\u9664",
   serverEnabled: "\u542F\u7528",
   unnamedServer: "\uFF08\u672A\u547D\u540D\u670D\u52A1\u5668\uFF09",
   serverName: "\u670D\u52A1\u5668\u540D\u79F0",
@@ -1799,6 +1817,7 @@ var CSS_TEXT = String.raw`
 .dsh-mcs-card.is-open .dsh-mcs-chevron{transform:rotate(90deg)}
 .dsh-mcs-iconbtn{flex:none;display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--dsw-alias-label-tertiary);font-size:15px;line-height:1;cursor:pointer}
 .dsh-mcs-iconbtn:hover{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 10%,transparent);color:var(--dsw-alias-state-error-primary)}
+.dsh-mcs-iconbtn--danger{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 16%,transparent);border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 45%,transparent);color:var(--dsw-alias-state-error-primary)}
 .dsh-mcs-carderr{margin:-4px 16px 12px;border-radius:0 0 10px 10px;padding:8px 12px;border-left:3px solid var(--dsw-alias-state-error-primary);border-radius:6px;background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 7%,transparent);color:var(--dsw-alias-state-error-primary);font:11px/16px ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}
 
 /* ---- expanded body: form + tool browser ---- */

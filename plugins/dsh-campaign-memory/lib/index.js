@@ -24,8 +24,8 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 import os from "node:os";
 import { defineTool } from "@deepseek-ai/dsh-tools";
-import { openStore, writeMemory, searchMemories, topForInjection, listMemories, getMemory, removeMemory, statsMemories, purgeExpired, kindLabel, MEMORY_KINDS, setIdeaStatus, listIdeas, IDEA_STATUSES } from "./store.js";
-import { readLedger, distillCandidates, renderCandidates, OUT_FILE } from "./distill.js";
+import { openStore, writeMemory, searchMemories, topForInjection, listMemories, getMemory, removeMemory, statsMemories, purgeExpired, kindLabel, MEMORY_KINDS, setIdeaStatus, listIdeas, IDEA_STATUSES, feedbackMemory, FEEDBACK_VERDICTS } from "./store.js";
+import { readLedger, distillCandidates, renderCandidates, readCandidateCount, OUT_FILE } from "./distill.js";
 
 const name = "dsh-campaign-memory";
 const inject = ["tools", "webServer", "webRuntime", "agentPresets", "systemPrompt"];
@@ -65,22 +65,27 @@ const MAX_BODY = 1024 * 1024;
 //#region 召回注入块（纯函数，供测试）
 
 const INJECT_TAG = "dsh-campaign-memory";
-const INJECT_BUDGET = 700;
+export const INJECT_BUDGET = 700;
 
 /** 装配期召回块：标记化（压缩后可识别）、预算内（超限先减记忆行——数据让位，指引行最后丢；
- *  n 属性随实留行数重建）。确定性：同库状态同文。 */
-export function buildMemoryBlock(mode, workspace, rows) {
-	if (!rows || rows.length === 0) return "";
+ *  n 属性随实留行数重建）。确定性：同库状态同文。
+ *  pendingCandidates>0 时追加一行候选提示——收尾蒸馏只落候选不落库，没有这行提示
+ *  模型看不到「有东西等着确认」，记忆库在真实会话里会一直是空的（本工作区实测）。 */
+export function buildMemoryBlock(mode, workspace, rows, pendingCandidates = 0) {
+	const pending = Number(pendingCandidates) > 0 ? Math.floor(Number(pendingCandidates)) : 0;
+	if ((!rows || rows.length === 0) && pending === 0) return "";
 	const close = `</${INJECT_TAG}>`;
 	const guide = "沉淀/检索：有效打法即时 campaign_memory_write 记忆（正文原样入库不脱敏——凭据可入库或只写指位指向本地凭据库）；开战/接案或换目标类型先 campaign_memory_search 检索。";
+	const pendingLine = pending > 0 ? `本工作区有 ${pending} 条未入库记忆候选（memory-candidates.md）：确认有效就 campaign_memory_write 落库，下次开局可直接召回；没用就删掉该文件。` : "";
 	const build = (kept) => {
 		const kinds = [...new Set(kept.map((r) => r.targetKind).filter(Boolean))];
 		const topicLine = kinds.length > 1 ? `本工作区记忆含多目标（${kinds.slice(0, 4).join("/")}${kinds.length > 4 ? " 等" : ""}）——适用性按目标自判，检索可加 target_kind 过滤。` : "";
 		return [
 			`<${INJECT_TAG} mode="${mode}" workspace="${workspace}" n="${kept.length}">`,
-			"本工作区战役记忆（历史战役沉淀；适用性自判——目标环境可能已变化）：",
+			...(kept.length > 0 ? ["本工作区战役记忆（历史战役沉淀；适用性自判——目标环境可能已变化）："] : []),
 			...kept.map((r, i) => `${i + 1}. [${kindLabel(r.kind)}${r.targetKind ? "·" + r.targetKind : ""}] ${r.title}——${String(r.content).split("\n")[0].slice(0, 160)}`),
 			...(topicLine ? [topicLine] : []),
+			...(pendingLine ? [pendingLine] : []),
 			guide
 		].join("\n") + "\n" + close;
 	};
@@ -252,7 +257,9 @@ function apply(ctx) {
 			if (!MODE_IDS.includes(presetId)) return "";
 			try {
 				const ws = workspaceOf(agent);
-				return buildMemoryBlock(presetId, ws.name, topForInjection(theStore(), presetId, ws.name, 3, ws.key));
+				const rows = topForInjection(theStore(), presetId, ws.name, 3, ws.key);
+				const pending = readCandidateCount(agent?.session?.header?.cwd);
+				return buildMemoryBlock(presetId, ws.name, rows, pending);
 			} catch { return ""; }
 		}
 	});
@@ -346,6 +353,29 @@ function apply(ctx) {
 			try {
 				const m = getMemory(theStore(), args.id);
 				return Promise.resolve(m ? { ok: true, memory: m } : { ok: false, error: `记忆不存在：${args.id}` });
+			} catch (e) {
+				return Promise.resolve({ ok: false, error: e?.message ?? String(e) });
+			}
+		}
+	}));
+
+	ctx.tools.register(defineTool({
+		name: "campaign_memory_feedback",
+		description: "记录记忆的实际效果：helpful 提权、misleading 降权、obsolete 退役。用于避免错误记忆反复被召回。",
+		parameters: {
+			id: { type: "string", required: true, description: "记忆 id（cm- 开头）" },
+			verdict: { type: "string", required: true, enum: FEEDBACK_VERDICTS, description: "helpful / misleading / obsolete" },
+			note: { type: "string", description: "反馈依据（可选，≤300 字符）" }
+		},
+		output: {
+			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
+			render: (_a, v) => [{ type: "text", text: v.ok ? `记忆反馈已记录：${v.id} → ${v.verdict}（score ${v.feedbackScore}${v.obsolete ? "，已退役" : ""}）` : `反馈失败：${v.error}` }]
+		},
+		execute(args, exec) {
+			const session = sessionOf(ctx, exec);
+			if (!session?.mode) return Promise.resolve({ ok: false, error: "仅安全模式会话内可用" });
+			try {
+				return Promise.resolve({ ok: true, ...feedbackMemory(theStore(), args) });
 			} catch (e) {
 				return Promise.resolve({ ok: false, error: e?.message ?? String(e) });
 			}

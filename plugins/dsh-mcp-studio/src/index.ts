@@ -51,6 +51,7 @@ export const STUDIO_SETTINGS_NAMESPACE = 'mcp-studio'
 interface Mount {
   readonly dispose: () => void
   readonly signature: string
+  readonly ready: Promise<unknown>
 }
 
 /** Minimal face of the tools registry the status aggregator needs. */
@@ -62,7 +63,7 @@ function signatureOf(server: ServerEntry): string {
   return JSON.stringify(toMcpClientConfig(server))
 }
 
-export function apply(ctx: Context, config: StudioSection): void {
+export async function apply(ctx: Context, config: StudioSection): Promise<void> {
   let current = (): StudioSection => config
   let alive = true
   const mounts = new Map<string, Mount>()
@@ -90,16 +91,19 @@ export function apply(ctx: Context, config: StudioSection): void {
   let metaTools: Array<() => void> | undefined
 
   /** Warm every proxied catalog, then settle: `auto` rows may now switch to a direct mount. */
-  let settling = false
-  const settleProxy = async (): Promise<void> => {
-    if (!alive || settling) return
-    settling = true
-    try {
-      await proxy.ensureAll()
-      if (alive) reconcile()
-    } finally {
-      settling = false
-    }
+  let settlePromise: Promise<void> | undefined
+  const settleProxy = (): Promise<void> => {
+    if (!alive) return Promise.resolve()
+    if (settlePromise !== undefined) return settlePromise
+    settlePromise = (async () => {
+      try {
+        await proxy.ensureAll()
+        if (alive) reconcile()
+      } finally {
+        settlePromise = undefined
+      }
+    })()
+    return settlePromise
   }
 
   /**
@@ -151,8 +155,9 @@ export function apply(ctx: Context, config: StudioSection): void {
         tracker.states.set(id, { state: 'error', error: String(error) })
         continue
       }
-      mounts.set(id, { dispose: () => fiber.dispose(), signature: JSON.stringify(clientConfig) })
-      Promise.resolve(fiber).then(
+      const ready = Promise.resolve(fiber)
+      mounts.set(id, { dispose: () => fiber.dispose(), signature: JSON.stringify(clientConfig), ready })
+      ready.then(
         () => {
           if (tracker.states.get(id)?.state === 'mounting') tracker.states.set(id, { state: 'mounted' })
         },
@@ -461,4 +466,21 @@ export function apply(ctx: Context, config: StudioSection): void {
   })
 
   reconcile()
+
+  /**
+   * Startup readiness barrier. `auto` small catalogs first mount through the proxy,
+   * learn their tool count, then switch to a direct mount. Without waiting, the first
+   * model request can see 91 tools and the second 94 — a real unstable prompt surface.
+   * The wait is bounded so an unreachable MCP server cannot hold host startup forever.
+   */
+  const STARTUP_MOUNT_SETTLE_MS = 5_000
+  const startupDeadline = Date.now() + STARTUP_MOUNT_SETTLE_MS
+  const remaining = (): number => Math.max(0, startupDeadline - Date.now())
+  const timeout = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
+  await Promise.race([settleProxy(), timeout(remaining())])
+  const directReadiness = [...mounts.values()].map(mount => mount.ready)
+  if (directReadiness.length > 0) await Promise.race([Promise.allSettled(directReadiness), timeout(remaining())])
+  if (Date.now() >= startupDeadline && mounts.size > 0) {
+    ctx.logger.info('mcp-studio: MCP startup still settling after %dms; first request may see a partial tool surface', STARTUP_MOUNT_SETTLE_MS)
+  }
 }

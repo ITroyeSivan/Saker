@@ -10,6 +10,9 @@
 // 渲染，故这里做**源码契约锁** —— 与 dsh-mcp-studio tests/ui-contract.test.ts 同一种纪律。
 // 这些断言在修复前全部失败。
 import { readFileSync } from 'node:fs'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 
 let pass = 0
 let fail = 0
@@ -166,6 +169,96 @@ const row = methodRowBody(src)
   ok('浮层有「全部关闭」入口', cli.includes("'全部关闭'"))
   ok('浮层有「全部启用」入口', cli.includes("'全部启用'"))
   ok('空态明示「不注入方法正文」', cli.includes('未启用任何方法'))
+}
+
+// ── 2026-09-18 轮次：装配期目录缓存必须有效且不能吃旧正文 ───────────────────
+// fullCatalog() 被 systemPrompt.context 每轮调用，旧实现每轮遍历目录并读取全部
+// prompt.md（实测 8.5ms/回合）。这里用临时 DSH_HOME 走真实 RPC handler：
+// 缓存命中不读目录；save/restore/clone 三个写路径必须显式失效并读到新状态。
+{
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-method-stack-cache-'))
+  const oldHome = process.env.DSH_HOME
+  process.env.DSH_HOME = tmpHome
+  let handler = null
+  try {
+    const mod = await import(new URL(`../lib/index.js?cache-test=${Date.now()}`, import.meta.url))
+    mod.apply({
+      connection: {
+        rpc: { handle: () => {} },
+        register: (_ctx, _channel, fn) => { handler = fn },
+      },
+      systemPrompt: { context: () => {}, section: () => {} },
+      agentPresets: { composedPreset: () => 'pentest' },
+      logger: { warn: () => {} },
+    })
+    ok('能拿到 method-stack RPC handler', typeof handler === 'function')
+
+    const findMethod = () => {
+      for (const group of mod.fullCatalog()) {
+        for (const method of group.methods) {
+          if (group.group === 'recon' && method.id === 'port-scan') return method
+        }
+      }
+      return null
+    }
+
+    const originalReaddir = fs.readdirSync
+    let reads = 0
+    fs.readdirSync = (...args) => { reads += 1; return originalReaddir(...args) }
+    try {
+      mod.fullCatalog()
+      const afterFirst = reads
+      mod.fullCatalog()
+      ok('第二次 fullCatalog 命中缓存：不再遍历方法目录',
+        afterFirst > 0 && reads === afterFirst, `reads=${reads}/${afterFirst}`)
+
+      const saved = await handler('save-prompt', { group: 'recon', id: 'port-scan', text: '# cache probe\n' })
+      const afterSave = reads
+      const savedMethod = findMethod()
+      ok('save-prompt 后目录缓存立即失效并读到用户正文',
+        saved?.ok === true && reads > afterSave && savedMethod?.prompt === '# cache probe',
+        `reads=${reads}/${afterSave}, prompt=${savedMethod?.prompt ?? ''}`)
+
+      // 覆盖写用户正文前必须先备份：第二次保存应留下第一版的副本。
+      // （同一类问题 2026-09-19 已在 webshell-mgr 上真实踩过一次数据丢失。）
+      ok('首次 save-prompt（用户层原本没有正文）不产生备份',
+        saved?.ok === true && !saved.value?.backup, JSON.stringify(saved?.value))
+      const saved2 = await handler('save-prompt', { group: 'recon', id: 'port-scan', text: '# cache probe v2\n' })
+      ok('save-prompt 覆盖前留备份（内容是上一版）',
+        saved2?.ok === true && typeof saved2.value?.backup === 'string' && fs.existsSync(saved2.value.backup)
+        && fs.readFileSync(saved2.value.backup, 'utf8').includes('cache probe'), JSON.stringify(saved2?.value))
+      ok('save-prompt 覆盖后新正文生效', findMethod()?.prompt === '# cache probe v2')
+
+      const restored = await handler('restore', { group: 'recon', id: 'port-scan' })
+      const afterRestore = reads
+      const restoredMethod = findMethod()
+      ok('restore 后目录缓存立即失效并恢复官方正文',
+        restored?.ok === true && reads > afterRestore && restoredMethod?.origin === 'official' && restoredMethod?.prompt !== '# cache probe',
+        `reads=${reads}/${afterRestore}, origin=${restoredMethod?.origin ?? ''}`)
+      // restore 不直接 rm：用户改过的正文移进 methods/.trash/，可人工找回。
+      ok('restore 把用户正文移进 .trash/（可找回）',
+        restored?.ok === true && typeof restored.value?.trash === 'string' && fs.existsSync(restored.value.trash)
+        && fs.existsSync(path.join(restored.value.trash, 'prompt.md'))
+        && fs.readFileSync(path.join(restored.value.trash, 'prompt.md'), 'utf8').includes('cache probe'),
+        JSON.stringify(restored?.value))
+
+      const cloned = await handler('clone', { group: 'recon', id: 'port-scan' })
+      const afterClone = reads
+      const clonedMethod = findMethod()
+      ok('clone 后目录缓存立即失效并切换为用户层来源',
+        cloned?.ok === true && reads > afterClone && clonedMethod?.origin === 'user',
+        `reads=${reads}/${afterClone}, origin=${clonedMethod?.origin ?? ''}`)
+    } finally {
+      fs.readdirSync = originalReaddir
+    }
+  } finally {
+    if (oldHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = oldHome
+    const resolved = path.resolve(tmpHome)
+    const tempRoot = path.resolve(os.tmpdir()) + path.sep
+    if (!resolved.startsWith(tempRoot)) throw new Error('refusing to remove non-temp path: ' + resolved)
+    fs.rmSync(resolved, { recursive: true, force: true })
+  }
 }
 
 console.log(fail === 0 ? `\nall ${pass} tests passed` : `\n${fail} FAILED, ${pass} passed`)

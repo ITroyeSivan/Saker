@@ -12,6 +12,7 @@ import { httpRequest, b64, unb64, md5hex, cookieHeaderFor, absorbCookies, clearC
 import { serializeParams, parseParams } from "./godzilla-java.js";
 import { ASPX_PAYLOADS } from "./payloads-aspx.js";
 import { shapeHeaders, stripResponse } from "./profile.js";
+import { parseJsonResponse } from "./json-response.js";
 
 const inited = new Map();
 
@@ -98,7 +99,7 @@ export async function fetchInfo(conn) {
 }
 
 export async function listDir(conn, path) {
-	return JSON.parse((await call(conn, "ls", { p: path })).toString("utf8"));
+	return parseJsonResponse(await call(conn, "ls", { p: path }), "哥斯拉 ASPX 目录列表");
 }
 
 export async function readFile(conn, path) {

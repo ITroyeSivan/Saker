@@ -16,6 +16,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { after, describe, it } from 'node:test'
 import {
+  applyToolHint,
   decideExposure,
   paramHint,
   ProxyRegistry,
@@ -122,6 +123,16 @@ async function httpFixture(options: { sse?: boolean; tools?: number } = {}) {
 }
 
 describe('proxy: pure logic', () => {
+  it('adds the Yakit flow-scope and array-parameter hints without changing unrelated descriptions', () => {
+    const hinted = applyToolHint('yakit', 'query_http_flow', 'Query HTTP flow data.')
+    assert.match(hinted, /sourceType:"all"/)
+    assert.match(hinted, /includePath\/excludePath are arrays/)
+    assert.ok(hinted.slice(0, 140).includes('sourceType:"all"'))
+    assert.ok(hinted.slice(0, 140).includes('includePath/excludePath'))
+    assert.equal(applyToolHint('yakit', 'auto_decode', 'decode'), 'decode')
+    assert.equal(applyToolHint('burp', 'send_http1_request', 'send'), 'send')
+  })
+
   it('decideExposure honours explicit settings and treats an unknown count as pending', () => {
     assert.equal(decideExposure({ exposure: 'direct', proxyThreshold: 10 }, 999), 'direct')
     assert.equal(decideExposure({ exposure: 'proxy', proxyThreshold: 10 }, 1), 'proxy')
@@ -134,11 +145,12 @@ describe('proxy: pure logic', () => {
     assert.equal(decideExposure({ exposure: 'auto', proxyThreshold: 30 }, 29), 'direct')
   })
 
-  it('tokenize splits on whitespace and separators, lowercases', () => {
+  it('tokenize splits on whitespace and separators, lowercases, and expands Chinese aliases', () => {
     assert.deepEqual(tokenize('Scan URL'), ['scan', 'url'])
     assert.deepEqual(tokenize('a,b;c|d/e'), ['a', 'b', 'c', 'd', 'e'])
     assert.deepEqual(tokenize('   '), [])
     assert.deepEqual(tokenize(undefined), [])
+    assert.deepEqual(tokenize('HTTP 流量 查询'), ['http', '流量', 'flow', 'traffic', '查询', 'query', 'search'])
   })
 
   const metas: ToolMeta[] = [
@@ -166,6 +178,16 @@ describe('proxy: pure logic', () => {
     const big: ToolMeta[] = Array.from({ length: 50 }, (_, i) => ({ server: 's', name: `t${i}`, description: '', inputSchema: {} }))
     assert.equal(rankTools(big, {}).length, SEARCH_DEFAULT_LIMIT)
     assert.equal(rankTools(big, { limit: 999 }).length, SEARCH_MAX_LIMIT)
+  })
+
+  it('Chinese flow-query aliases surface query_http_flow ahead of generic HTTP tools', () => {
+    const flow: ToolMeta = {
+      server: 'yakit',
+      name: 'query_http_flow',
+      description: 'Query HTTP flow data from the current project.',
+      inputSchema: {},
+    }
+    assert.equal(rankTools([...metas, flow], { query: 'HTTP 流量 查询' })[0]?.name, 'query_http_flow')
   })
 
   it('paramHint marks optionals and open schemas', () => {

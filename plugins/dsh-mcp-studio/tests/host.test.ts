@@ -1,6 +1,8 @@
 /** Integration test: mount engine lifecycle, settings seam wiring, loopback RPC registration. */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { Context, Service } from '@deepseek-ai/cordis'
 import {
   apply as studioApply,
@@ -9,6 +11,8 @@ import {
 } from '../src/index.ts'
 import type { StudioSection } from '../src/types.ts'
 import type { RpcResult } from '../src/settings-rpc.ts'
+
+const FIXTURE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'mcp-test-server.mjs').replace(/\\/g, '/')
 
 interface ScopeLike {
   get(): StudioSection
@@ -205,4 +209,80 @@ test('studio host: mounts per enabled row, hot-swaps on change, serves status RP
   const cleared = await debug()
   assert.deepEqual(cleared.mountedIds, [], 'unmounting must not leave a stale mount behind')
   assert.deepEqual(cleared.retry, [], 'unmounting must clear the retry ledger')
+})
+
+test('studio host: direct MCP tools are ready before apply resolves', async (t) => {
+  const root = new Context()
+  const tools = new StubTools(root)
+  const settings = new StubSettings(root)
+  const webServer = new StubWebServer(root)
+  const connection = new StubConnection(root)
+  void settings
+  void webServer
+  void connection
+
+  const section: StudioSection = {
+    servers: [{
+      id: 'direct-1',
+      enabled: true,
+      name: 'direct-fixture',
+      transport: 'stdio',
+      command: process.execPath,
+      argsLine: FIXTURE,
+      env: {},
+      cwd: '',
+      url: '',
+      headers: {},
+      toolCallTimeoutMs: 10_000,
+      failOnStartupError: false,
+      exposure: 'direct',
+      proxyThreshold: 10,
+      directTools: [],
+    }],
+  }
+  const fiber = root.plugin({ name: studioName, inject: studioInject, apply: studioApply }, section)
+  t.after(() => fiber.dispose())
+  await fiber
+  assert.ok(
+    tools.registered.some(name => name.startsWith('mcp__direct-fixture__')),
+    'apply() must not resolve before the direct server contributed its tools',
+  )
+})
+
+test('studio host: auto small catalogs finish their direct switch before apply resolves', async (t) => {
+  const root = new Context()
+  const tools = new StubTools(root)
+  const settings = new StubSettings(root)
+  const webServer = new StubWebServer(root)
+  const connection = new StubConnection(root)
+  void settings
+  void webServer
+  void connection
+
+  const section: StudioSection = {
+    servers: [{
+      id: 'auto-1',
+      enabled: true,
+      name: 'auto-fixture',
+      transport: 'stdio',
+      command: process.execPath,
+      argsLine: `${FIXTURE} --tools 3`,
+      env: {},
+      cwd: '',
+      url: '',
+      headers: {},
+      toolCallTimeoutMs: 10_000,
+      failOnStartupError: false,
+      exposure: 'auto',
+      proxyThreshold: 10,
+      directTools: [],
+    }],
+  }
+  const fiber = root.plugin({ name: studioName, inject: studioInject, apply: studioApply }, section)
+  t.after(() => fiber.dispose())
+  await fiber
+  assert.ok(
+    tools.registered.some(name => name.startsWith('mcp__auto-fixture__')),
+    'apply() must wait for proxy settle and the resulting direct mount',
+  )
 })

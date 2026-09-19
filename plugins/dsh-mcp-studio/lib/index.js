@@ -296,8 +296,96 @@ function registerStudioRpc(ctx, connection, settings, ns, status, diagnose, clea
 
 // src/transport.ts
 import { spawn } from "node:child_process";
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 var DEFAULT_REQUEST_TIMEOUT_MS = 1e4;
+var PACKAGE_RUNNER_HOSTS = {
+  npx: "registry.npmjs.org",
+  npm: "registry.npmjs.org",
+  pnpm: "registry.npmjs.org",
+  bunx: "registry.npmjs.org",
+  yarn: "registry.yarnpkg.com",
+  uvx: "pypi.org",
+  pipx: "pypi.org"
+};
+var EGRESS_MODES = ["allow", "allowlist", "frozen"];
+function runnerRegistryHost(command) {
+  const base = String(command ?? "").trim().split(/[\\/]/).pop()?.toLowerCase().replace(/\.(cmd|exe|ps1|bat)$/, "") ?? "";
+  return PACKAGE_RUNNER_HOSTS[base] ?? "";
+}
+function egressHome() {
+  const DSH_HOME = process.env.DSH_HOME || join(homedir(), ".dsh");
+  return DSH_HOME;
+}
+function readEgressPolicy() {
+  try {
+    const raw = JSON.parse(readFileSync(join(egressHome(), "saker-egress", "policy.json"), "utf8"));
+    const mode = EGRESS_MODES.includes(String(raw.mode)) ? String(raw.mode) : "allow";
+    const allowHosts = Array.isArray(raw.allowHosts) ? raw.allowHosts.map((host) => String(host).trim().toLowerCase()).filter(Boolean) : [];
+    return { mode, allowHosts };
+  } catch {
+    return { mode: "allow", allowHosts: [] };
+  }
+}
+function hostAllowed(host, allowHosts) {
+  for (const rule of allowHosts) {
+    if (rule === host) return true;
+    if (/^[0-9a-f:.]+$/.test(rule)) continue;
+    if (host.endsWith(`.${rule}`)) return true;
+  }
+  return false;
+}
+function appendEgressAudit(entry) {
+  try {
+    const file = join(egressHome(), "saker-egress", "audit.jsonl");
+    mkdirSync(dirname(file), { recursive: true });
+    appendFileSync(file, `${JSON.stringify({ at: (/* @__PURE__ */ new Date()).toISOString(), plugin: "dsh-mcp-studio", kind: "infra", ...entry })}
+`, "utf8");
+  } catch {
+  }
+}
+function evaluateRunnerEgress(server) {
+  const host = runnerRegistryHost(server.command);
+  if (host === "") return { decision: "allow", reason: "no-registry-fetch", mode: "allow", host: "" };
+  const policy = readEgressPolicy();
+  let decision = "allow";
+  let reason = "allow-all";
+  if (policy.mode === "frozen") {
+    decision = "deny";
+    reason = "infra_frozen";
+  } else if (policy.mode === "allowlist") {
+    decision = hostAllowed(host, policy.allowHosts) ? "allow" : "deny";
+    reason = decision === "allow" ? "allowlisted" : "not_allowed";
+  }
+  appendEgressAudit({ host, decision, reason, mode: policy.mode, note: `${server.name} ${server.command}` });
+  return { decision, reason, mode: policy.mode, host };
+}
+function blockedChannel(reason) {
+  return {
+    get alive() {
+      return false;
+    },
+    get closedReason() {
+      return reason;
+    },
+    request() {
+      return Promise.reject(new Error(reason));
+    },
+    notify() {
+      throw new Error(reason);
+    },
+    close() {
+    }
+  };
+}
 function stdioChannel(server) {
+  const gate = evaluateRunnerEgress(server);
+  if (gate.decision === "deny") {
+    return blockedChannel(
+      `\u7EDF\u4E00\u51FA\u7AD9\u7B56\u7565\u62E6\u622A\uFF08${gate.reason} / mode=${gate.mode}\uFF09\uFF1A${server.command} \u9700\u8981\u8BBF\u95EE ${gate.host} \u62C9\u5305\u3002\u6539\u6863\u4F4D\uFF1A\u8BBE\u7F6E \u2192 \u5B89\u5168\u914D\u7F6E \u2192 \u51FA\u7AD9\u7B56\u7565\u3002`
+    );
+  }
   const child = spawn(server.command, splitArgs(server.argsLine), {
     cwd: server.cwd === "" ? void 0 : server.cwd,
     env: { ...process.env, ...server.env },
@@ -543,14 +631,54 @@ var SEARCH_DEFAULT_LIMIT = 8;
 var SEARCH_MAX_LIMIT = 30;
 var HIT_DESCRIPTION_CHARS = 140;
 var RETRY_BACKOFF_MS = 1e4;
+var TOOL_DESCRIPTION_HINTS = /* @__PURE__ */ new Map([
+  [
+    "yakit.query_http_flow",
+    'sourceType:"all" is required for MCP request flows (mitm misses them); includePath/excludePath are arrays, not strings.'
+  ]
+]);
+function applyToolHint(server, name2, description) {
+  const hint = TOOL_DESCRIPTION_HINTS.get(`${server.toLowerCase()}.${name2.toLowerCase()}`);
+  if (hint === void 0) return description;
+  return description.trim() === "" ? hint : `${hint} ${description}`;
+}
 function decideExposure(server, toolCount) {
   if (server.exposure === "direct") return "direct";
   if (server.exposure === "proxy" || server.exposure === "hybrid") return "proxy";
   if (toolCount === void 0) return "pending";
   return toolCount >= server.proxyThreshold ? "proxy" : "direct";
 }
+var SEARCH_ALIASES = /* @__PURE__ */ new Map([
+  ["\u67E5\u8BE2", ["query", "search"]],
+  ["\u6D41\u91CF", ["flow", "traffic"]],
+  ["\u6293\u5305", ["mitm", "capture", "proxy"]],
+  ["\u5386\u53F2", ["history"]],
+  ["\u8BF7\u6C42", ["request"]],
+  ["\u54CD\u5E94", ["response"]],
+  ["\u626B\u63CF", ["scan"]],
+  ["\u7AEF\u53E3", ["port"]],
+  ["\u6F0F\u6D1E", ["vuln", "risk"]],
+  ["\u7F16\u7801", ["encode"]],
+  ["\u89E3\u7801", ["decode"]],
+  ["\u6D4F\u89C8\u5668", ["browser"]],
+  ["\u4EE3\u7406", ["proxy"]],
+  ["\u6587\u4EF6", ["file"]],
+  ["\u547D\u4EE4", ["command", "exec"]],
+  ["\u8FDB\u7A0B", ["process"]],
+  ["\u5185\u5B58", ["memory"]]
+]);
 function tokenize(query) {
-  return String(query ?? "").toLowerCase().split(/[\s,;|/]+/).map((token) => token.trim()).filter((token) => token !== "");
+  const raw = String(query ?? "").toLowerCase().split(/[\s,;|/]+/).map((token) => token.trim()).filter((token) => token !== "");
+  const expanded = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const token of raw) {
+    for (const candidate of [token, ...SEARCH_ALIASES.get(token) ?? []]) {
+      if (seen.has(candidate)) continue;
+      seen.add(candidate);
+      expanded.push(candidate);
+    }
+  }
+  return expanded;
 }
 function scoreTool(meta, tokens) {
   if (tokens.length === 0) return 1;
@@ -804,7 +932,7 @@ var ProxyRegistry = class {
         tools: raw.map((tool) => ({
           server: server.name,
           name: tool.name,
-          description: tool.description,
+          description: applyToolHint(server.name, tool.name, tool.description),
           inputSchema: tool.inputSchema
         })),
         listedAt: Date.now(),
@@ -990,7 +1118,7 @@ var STUDIO_SETTINGS_NAMESPACE = "mcp-studio";
 function signatureOf(server) {
   return JSON.stringify(toMcpClientConfig(server));
 }
-function apply(ctx, config) {
+async function apply(ctx, config) {
   let current = () => config;
   let alive = true;
   const mounts = /* @__PURE__ */ new Map();
@@ -1002,16 +1130,19 @@ function apply(ctx, config) {
   const decide = (server) => decideExposure(server, proxy.listedCount(server.name));
   const promotions = /* @__PURE__ */ new Map();
   let metaTools;
-  let settling = false;
-  const settleProxy = async () => {
-    if (!alive || settling) return;
-    settling = true;
-    try {
-      await proxy.ensureAll();
-      if (alive) reconcile();
-    } finally {
-      settling = false;
-    }
+  let settlePromise;
+  const settleProxy = () => {
+    if (!alive) return Promise.resolve();
+    if (settlePromise !== void 0) return settlePromise;
+    settlePromise = (async () => {
+      try {
+        await proxy.ensureAll();
+        if (alive) reconcile();
+      } finally {
+        settlePromise = void 0;
+      }
+    })();
+    return settlePromise;
   };
   const serversOf = () => {
     try {
@@ -1049,8 +1180,9 @@ function apply(ctx, config) {
         tracker.states.set(id, { state: "error", error: String(error) });
         continue;
       }
-      mounts.set(id, { dispose: () => fiber.dispose(), signature: JSON.stringify(clientConfig) });
-      Promise.resolve(fiber).then(
+      const ready = Promise.resolve(fiber);
+      mounts.set(id, { dispose: () => fiber.dispose(), signature: JSON.stringify(clientConfig), ready });
+      ready.then(
         () => {
           if (tracker.states.get(id)?.state === "mounting") tracker.states.set(id, { state: "mounted" });
         },
@@ -1344,6 +1476,16 @@ function apply(ctx, config) {
     registerStudioRpc(scope, connection, settings, STUDIO_SETTINGS_NAMESPACE, status, diagnose, () => executions.clear(), debug);
   });
   reconcile();
+  const STARTUP_MOUNT_SETTLE_MS = 5e3;
+  const startupDeadline = Date.now() + STARTUP_MOUNT_SETTLE_MS;
+  const remaining = () => Math.max(0, startupDeadline - Date.now());
+  const timeout = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  await Promise.race([settleProxy(), timeout(remaining())]);
+  const directReadiness = [...mounts.values()].map((mount) => mount.ready);
+  if (directReadiness.length > 0) await Promise.race([Promise.allSettled(directReadiness), timeout(remaining())]);
+  if (Date.now() >= startupDeadline && mounts.size > 0) {
+    ctx.logger.info("mcp-studio: MCP startup still settling after %dms; first request may see a partial tool surface", STARTUP_MOUNT_SETTLE_MS);
+  }
 }
 export {
   STUDIO_SETTINGS_NAMESPACE,

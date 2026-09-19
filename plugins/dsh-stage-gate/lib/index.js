@@ -23,6 +23,7 @@ const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
 import fs from "node:fs";
 import path from "node:path";
 import { defineTool } from "@deepseek-ai/dsh-tools";
+import { ROUTE_PATH as PROJECT_ROUTE, createProjectHandler } from "./project-channel.mjs";
 
 //#region gate schema
 
@@ -404,9 +405,26 @@ function runCheck(fsm, check, resolve) {
 			const text = file && readSafe(fsm, file);
 			if (!text) return { ok: false, detail: `${file ?? "(missing $file)"} 不存在` };
 			const rows = tableRows(text);
-			const incomplete = rows.filter((r) => r.nonEmpty < (check.minCells ?? 1)).map((r) => `L${r.line}`);
-			const ok = rows.length >= (check.minRows ?? 1) && incomplete.length === 0;
-			return { ok, detail: `${file}: ${rows.length} 行（要求 ≥${check.minRows}），未填满行: ${incomplete.join(",") || "无"}` };
+			const minRows = check.minRows ?? 1;
+			const minCells = check.minCells ?? 1;
+			const incomplete = rows.filter((r) => r.nonEmpty < minCells);
+			const ok = rows.length >= minRows && incomplete.length === 0;
+			// 报错必须自带可执行修法：说明「要几行、每行几个非空格、哪几行差在哪」，
+			// 否则模型只能去翻 node_modules 源码反推需求。
+			const need = `需 ≥${minRows} 行、每行 ≥${minCells} 个非空单元格`;
+			const short = incomplete.map((r) => `L${r.line}(${r.nonEmpty}格)`).join("、");
+			let detail;
+			if (rows.length === 0) {
+				detail = `${file}: 未检测到 Markdown 表格行（${need}）；表格行须以 | 开头，形如 | 列1 | 列2 |`;
+			} else if (incomplete.length > 0) {
+				const scope = incomplete.length === rows.length ? "全部" : "部分";
+				detail = `${file}: 表格共 ${rows.length} 行，${scope}行不达标：${short}（${need}）`;
+			} else if (rows.length < minRows) {
+				detail = `${file}: 表格仅 ${rows.length} 行，行数不足（${need}）`;
+			} else {
+				detail = `${file}: 表格共 ${rows.length} 行，各行列数达标（${need}）`;
+			}
+			return { ok, detail };
 		}
 		case "provenance": {
 			const dir = resolve.workspace(check.dir ?? "artifacts");
@@ -483,7 +501,7 @@ export function listGates(mode) {
 //#region plugin
 
 const name = "stage-gate";
-const inject = ["tools", "agentPresets"];
+const inject = ["tools", "agentPresets", "webServer", "webRuntime"];
 
 /** Append the verdict line to <workspace>/gate-log.md (audit trail); write failure never flips the verdict. */
 function appendGateLog(workspace, verdict) {
@@ -606,6 +624,7 @@ function setGoal(workspace, goal, criteriaText) {
 function updateProgress(workspace, { met = "", failed = "", reopened = "", pending = "", note = "", intent_done = "", intent_blocked = "", intent_dropped = "" }) {
 	// 收口是并发热点（多路各自收口自己的准则/意图）：整段读改写进锁
 	const st = mutateStateLocked(fs, workspace, (cur) => {
+	recoverStaleTasks(cur);
 	const byId = new Map(cur.criteria.map((c) => [c.id, c]));
 	const unknown = [];
 	for (const [list, status] of [[met, "met"], [failed, "failed"], [reopened, "open"]]) {
@@ -625,7 +644,14 @@ function updateProgress(workspace, { met = "", failed = "", reopened = "", pendi
 			for (const id of parseIds(list)) {
 				const i = byIntent.get(id);
 				if (i === undefined) unknownIntents.push(id);
-				else { i.status = status; i.closed_at = new Date().toISOString(); }
+				else {
+					i.status = status;
+					i.closed_at = new Date().toISOString();
+					if (i.task) {
+						const task = taskOf(i);
+						i.task = { ...task, state: status === "done" ? "succeeded" : status === "blocked" ? "failed" : "cancelled", updatedAt: i.closed_at, heartbeatAt: i.closed_at };
+					}
+				}
 			}
 		}
 		if (unknownIntents.length) throw new Error(`未知意图 id：${unknownIntents.join(", ")}（有效：${[...byIntent.keys()].join(", ") || "无"}）`);
@@ -747,11 +773,68 @@ export function coverageCheck(fsm, workspace, reportFile) {
 //#region 意图台账（八专业模式）：方向登记带锚 + 收口联动
 
 export const ANCHOR_KINDS = ["boot", "criterion", "scope", "finding", "chain"];
+export const TASK_STATES = ["queued", "running", "succeeded", "failed", "cancelled", "interrupted"];
+const TASK_STALE_MS = 30 * 60 * 1000;
 
 /** 意图台账归一：intents 数组。status: open / done / blocked / dropped。 */
 function normalizeIntents(st) {
 	if (!Array.isArray(st?.intents)) return [];
 	return st.intents.filter((i) => i && typeof i === "object" && typeof i.id === "string" && i.id);
+}
+
+function taskOf(intent) {
+	const t = intent?.task;
+	if (!t || typeof t !== "object") return null;
+	return {
+		state: TASK_STATES.includes(t.state) ? t.state : "queued",
+		owner: cleanLine(t.owner, 80),
+		attempts: Math.max(0, Number(t.attempts) || 0),
+		maxAttempts: Math.max(1, Math.min(20, Number(t.maxAttempts) || 1)),
+		progress: Math.max(0, Math.min(100, Number(t.progress) || 0)),
+		error: cleanLine(t.error, 500),
+		result: cleanLine(t.result, 1000),
+		artifacts: Array.isArray(t.artifacts) ? t.artifacts.map((x) => cleanLine(x, 300)).filter(Boolean).slice(0, 20) : [],
+		// 冲突记录（P1-9）：终态之后又收到**不同**结果的次数与摘要。
+		// 只记不覆盖——台账保留第一个终态，矛盾本身进 attention 让人复核。
+		conflicts: Array.isArray(t.conflicts)
+			? t.conflicts.slice(-5).map((c) => ({
+				at: cleanLine(c?.at, 40),
+				from: cleanLine(c?.from, 20),
+				to: cleanLine(c?.to, 20),
+				detail: cleanLine(c?.detail, 300),
+			})).filter((c) => c.from || c.to)
+			: [],
+		startedAt: t.startedAt || "",
+		updatedAt: t.updatedAt || "",
+		heartbeatAt: t.heartbeatAt || "",
+	};
+}
+
+/** Mark stale running tasks as interrupted while holding the state lock. */
+function recoverStaleTasks(st, now = Date.now()) {
+	const intents = normalizeIntents(st);
+	let recovered = 0;
+	for (const intent of intents) {
+		const task = taskOf(intent);
+		if (!task || task.state !== "running") continue;
+		const last = Date.parse(task.heartbeatAt || task.updatedAt || "");
+		if (Number.isFinite(last) && now - last <= TASK_STALE_MS) continue;
+		intent.task = { ...task, state: "interrupted", error: task.error || "heartbeat expired", updatedAt: new Date(now).toISOString(), heartbeatAt: new Date(now).toISOString() };
+		recovered += 1;
+	}
+	if (recovered > 0) st.intents = intents;
+	return recovered;
+}
+
+/** Derive task counts for status/conclusion checks. */
+function taskSummary(st) {
+	const intents = normalizeIntents(st);
+	const counts = Object.fromEntries(TASK_STATES.map((state) => [state, 0]));
+	for (const intent of intents) {
+		const task = taskOf(intent);
+		if (task) counts[task.state] += 1;
+	}
+	return counts;
 }
 
 /** 锚点校验（纯函数，跨库解析器注入供测试）。返回 "" = 通过；非空 = 拒绝理由。
@@ -797,7 +880,7 @@ export function validateAnchor(st, { kind, ref }, resolvers = {}, sessionId = ""
 }
 
 /** 登记意图（方向带锚）。返回 {total, open}；校验失败 throw。 */
-export function registerIntent(workspace, { summary, anchorKind, anchorRef, note = "", sessionId = "", mode = "" }, resolvers = {}) {
+export function registerIntent(workspace, { summary, anchorKind, anchorRef, note = "", sessionId = "", mode = "", owner = "", maxAttempts = 1 }, resolvers = {}) {
 	const s = cleanLine(summary, 200);
 	if (!s) throw new Error("summary required（一句话方向，≤200 字符）");
 	const bad = validateAnchor(readOperationState(fs, workspace), { kind: anchorKind, ref: anchorRef }, resolvers, sessionId, mode);
@@ -806,7 +889,34 @@ export function registerIntent(workspace, { summary, anchorKind, anchorRef, note
 	const st = mutateStateLocked(fs, workspace, (cur) => {
 		const intents = normalizeIntents(cur);
 		const id = `i${intents.length + 1}`;
-		intents.push({ id, summary: s, anchor: { kind: anchorKind, ref: cleanLine(anchorRef, 80) }, status: "open", note: cleanLine(note, 300), created_at: new Date().toISOString() });
+		const now = new Date().toISOString();
+		const item = {
+			id,
+			summary: s,
+			anchor: { kind: anchorKind, ref: cleanLine(anchorRef, 80) },
+			status: "open",
+			note: cleanLine(note, 300),
+			sessionId: cleanLine(sessionId, 120),
+			mode: cleanLine(mode, 40),
+			created_at: now,
+		};
+		const hasTask = cleanLine(owner, 80) || Number(maxAttempts) > 1;
+		if (hasTask) {
+			item.task = {
+				state: "queued",
+				owner: cleanLine(owner, 80),
+				attempts: 0,
+				maxAttempts: Math.max(1, Math.min(20, Number(maxAttempts) || 1)),
+				progress: 0,
+				error: "",
+				result: "",
+				artifacts: [],
+				startedAt: "",
+				updatedAt: now,
+				heartbeatAt: now,
+			};
+		}
+		intents.push(item);
 		cur.intents = intents;
 		return cur;
 	});
@@ -818,7 +928,362 @@ export function registerIntent(workspace, { summary, anchorKind, anchorRef, note
 export function intentSummary(st) {
 	const intents = normalizeIntents(st);
 	const openIds = intents.filter((i) => i.status === "open").map((i) => i.id);
-	return { total: intents.length, open: openIds.length, openIds };
+	return { total: intents.length, open: openIds.length, openIds, tasks: taskSummary(st) };
+}
+
+/** Transition the execution state of an intent task. */
+export function taskTransition(workspace, { id, action, owner = "", progress, result = "", error = "", artifacts, note = "" }) {
+	const taskId = cleanLine(id, 40);
+	const act = cleanLine(action, 20);
+	if (!taskId) throw new Error("id required");
+	if (!["start", "heartbeat", "progress", "succeed", "fail", "cancel", "retry", "interrupt", "update"].includes(act)) {
+		throw new Error(`unknown task action: ${act}`);
+	}
+	let conflictFlag = false;
+	const st = mutateStateLocked(fs, workspace, (cur) => {
+		recoverStaleTasks(cur);
+		const intents = normalizeIntents(cur);
+		const intent = intents.find((item) => item.id === taskId);
+		if (!intent) throw new Error(`未知意图 id：${taskId}`);
+		if (!intent.task) throw new Error(`意图 ${taskId} 未登记任务执行层`);
+		const current = taskOf(intent);
+		const now = new Date().toISOString();
+		const next = { ...current, updatedAt: now };
+		const closed = new Set(["succeeded", "failed", "cancelled"]);
+		const running = new Set(["running"]);
+
+		if (act === "start") {
+			if (current.state !== "queued") throw new Error(`任务 ${taskId} 状态 ${current.state} 不能 start`);
+			next.attempts = current.attempts + 1;
+			if (next.attempts > current.maxAttempts) throw new Error(`任务 ${taskId} 尝试次数已达上限 ${current.maxAttempts}`);
+			next.state = "running";
+			next.startedAt = now;
+			next.heartbeatAt = now;
+			next.error = "";
+		} else if (act === "heartbeat") {
+			if (!running.has(current.state)) throw new Error(`任务 ${taskId} 状态 ${current.state} 不能 heartbeat`);
+			next.heartbeatAt = now;
+		} else if (act === "progress") {
+			if (!running.has(current.state)) throw new Error(`任务 ${taskId} 状态 ${current.state} 不能 progress`);
+			if (progress !== undefined) next.progress = Math.max(0, Math.min(100, Number(progress) || 0));
+			next.heartbeatAt = now;
+		} else if (act === "succeed" || act === "fail") {
+			const wanted = act === "succeed" ? "succeeded" : "failed";
+			if (closed.has(current.state)) {
+				// 终态之后又收到结果：同结果算幂等重放（不改账）；不同结果只记冲突，不覆盖。
+				const same = current.state === wanted
+					&& (act === "succeed" ? cleanLine(result, 1000) === current.result : cleanLine(error, 500) === current.error);
+				if (same) return cur; // 幂等重放：连 updatedAt 都不动
+				conflictFlag = true;
+				next.conflicts = [
+					...(current.conflicts || []),
+					{
+						at: now,
+						from: current.state,
+						to: wanted,
+						detail: act === "succeed" ? cleanLine(result, 300) : cleanLine(error, 300),
+					},
+				].slice(-5);
+				intent.task = next;
+				cur.intents = intents;
+				return cur;
+			}
+		}
+		if (act === "succeed") {
+			if (!running.has(current.state) && current.state !== "queued") throw new Error(`任务 ${taskId} 状态 ${current.state} 不能 succeed`);
+			next.state = "succeeded";
+			next.progress = 100;
+			next.result = cleanLine(result, 1000);
+			next.heartbeatAt = now;
+			if (Array.isArray(artifacts)) next.artifacts = artifacts.map((x) => cleanLine(x, 300)).filter(Boolean).slice(0, 20);
+		} else if (act === "fail") {
+			if (!running.has(current.state) && current.state !== "queued") throw new Error(`任务 ${taskId} 状态 ${current.state} 不能 fail`);
+			next.state = "failed";
+			next.error = cleanLine(error, 500);
+			next.heartbeatAt = now;
+		} else if (act === "cancel") {
+			if (closed.has(current.state)) throw new Error(`任务 ${taskId} 已是终态 ${current.state}`);
+			next.state = "cancelled";
+			next.error = cleanLine(error || note, 500);
+			next.heartbeatAt = now;
+		} else if (act === "retry") {
+			if (!["failed", "interrupted", "cancelled"].includes(current.state)) throw new Error(`任务 ${taskId} 状态 ${current.state} 不能 retry`);
+			if (current.attempts >= current.maxAttempts) throw new Error(`任务 ${taskId} 尝试次数已达上限 ${current.maxAttempts}`);
+			next.state = "queued";
+			next.error = cleanLine(error || current.error, 500);
+			next.heartbeatAt = now;
+		} else if (act === "interrupt") {
+			if (!running.has(current.state)) throw new Error(`任务 ${taskId} 状态 ${current.state} 不能 interrupt`);
+			next.state = "interrupted";
+			next.error = cleanLine(error || "manual interrupt", 500);
+			next.heartbeatAt = now;
+		} else if (act === "update") {
+			if (owner) next.owner = cleanLine(owner, 80);
+			if (progress !== undefined && running.has(current.state)) next.progress = Math.max(0, Math.min(100, Number(progress) || 0));
+			if (result) next.result = cleanLine(result, 1000);
+			if (error) next.error = cleanLine(error, 500);
+			if (Array.isArray(artifacts)) next.artifacts = artifacts.map((x) => cleanLine(x, 300)).filter(Boolean).slice(0, 20);
+			next.heartbeatAt = now;
+		}
+		intent.task = next;
+		cur.intents = intents;
+		return cur;
+	});
+	if (st === null) throw new Error("operation-state.json 不存在——先 operation_goal 登记目标契约");
+	const intent = normalizeIntents(st).find((item) => item.id === taskId);
+	return { id: taskId, task: taskOf(intent), summary: intentSummary(st), ...(conflictFlag ? { conflict: true } : {}) };
+}
+
+/** Atomically claim the oldest queued task in a workspace. Used by sibling
+ * agents that share one project state and must not execute the same task twice. */
+export function taskClaim(workspace, { owner = "" } = {}) {
+	const claimant = cleanLine(owner, 80);
+	let claimedId = "";
+	const st = mutateStateLocked(fs, workspace, (cur) => {
+		recoverStaleTasks(cur);
+		const intents = normalizeIntents(cur);
+		const candidates = intents
+			.filter((intent) => {
+				if (intent.status !== "open" || !intent.task || intent.task.state !== "queued") return false;
+				if (!claimant) return true;
+				return !cleanLine(intent.task.owner, 80) || ownerMatches(intent.task.owner, new Set([claimant]));
+			})
+			.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || String(a.id).localeCompare(String(b.id)));
+		if (candidates.length === 0) throw new Error("没有可领取的 queued 任务");
+		const intent = candidates[0];
+		const current = taskOf(intent);
+		if (current.attempts >= current.maxAttempts) throw new Error(`任务 ${intent.id} 尝试次数已达上限 ${current.maxAttempts}`);
+		const now = new Date().toISOString();
+		claimedId = intent.id;
+		intent.task = {
+			...current,
+			state: "running",
+			owner: claimant || current.owner,
+			attempts: current.attempts + 1,
+			startedAt: now,
+			updatedAt: now,
+			heartbeatAt: now,
+			error: "",
+		};
+		cur.intents = intents;
+		return cur;
+	});
+	if (st === null) throw new Error("operation-state.json 不存在——先 operation_goal 登记目标契约");
+	const intent = normalizeIntents(st).find((item) => item.id === claimedId);
+	return { id: claimedId, task: taskOf(intent), summary: intentSummary(st) };
+}
+
+const TASK_TOOL_SUFFIXES = ["_scan", "_probe", "_fuzz", "_audit", "_run", "_tool"];
+
+/** Tool-name aliases used only for automatic intent-task binding. */
+export function taskToolAliases(toolName) {
+	const raw = cleanLine(toolName, 80).toLowerCase();
+	if (!raw) return [];
+	const names = new Set([raw, raw.replace(/-/g, "_")]);
+	for (const value of [...names]) {
+		if (value.startsWith("subagent_")) {
+			names.add(value.slice("subagent_".length));
+			// 生命周期事件（subagent/start|end）只带 provider，模型登记 owner 时常用
+			// 通用名 `subagent`（工具名就是 subagent）。不补这条别名，事件侧永远匹配不上。
+			names.add("subagent");
+		}
+		for (const suffix of TASK_TOOL_SUFFIXES) {
+			if (value.endsWith(suffix) && value.length > suffix.length) names.add(value.slice(0, -suffix.length));
+		}
+	}
+	return [...names].filter(Boolean);
+}
+
+function ownerMatches(owner, aliases) {
+	const value = cleanLine(owner, 80).toLowerCase().replace(/-/g, "_");
+	if (!value) return false;
+	return [...aliases].some((alias) => {
+		const candidate = String(alias).toLowerCase().replace(/-/g, "_");
+		return value === candidate || value.startsWith(candidate + "_") || candidate.startsWith(value + "_");
+	});
+}
+
+/**
+ * Find the single open, queued task owned by a tool without making the model call
+ * operation_task at both ends. Session-scoped intents must match when both sides
+ * carry a session id; owner matching is deliberately conservative and excludes
+ * one generic fallback when several candidates exist.
+ */
+export function autoTaskForTool(st, { sessionId = "", toolName = "", states = ["queued"] } = {}) {
+	const wanted = new Set(taskToolAliases(toolName));
+	if (wanted.size === 0) return null;
+	const sid = cleanLine(sessionId, 120);
+	const wantedStates = new Set((Array.isArray(states) && states.length ? states : ["queued"]).map((x) => cleanLine(x, 20)));
+	const scored = [];
+	for (const intent of normalizeIntents(st)) {
+		if (intent.status !== "open") continue;
+		const task = taskOf(intent);
+		if (!task || !wantedStates.has(task.state)) continue;
+		if (sid && intent.sessionId && String(intent.sessionId) !== sid) continue;
+		const owner = cleanLine(task.owner, 80).toLowerCase().replace(/-/g, "_");
+		if (!owner) continue;
+		let score = -1;
+		if (owner === cleanLine(toolName, 80).toLowerCase()) score = 0;
+		else if (wanted.has(owner)) score = 1;
+		else if (ownerMatches(owner, wanted)) score = 2;
+		if (score >= 0) scored.push({ intent, score });
+	}
+	if (scored.length === 0) return null;
+	scored.sort((a, b) => a.score - b.score || String(a.intent.created_at).localeCompare(String(b.intent.created_at)));
+	if (scored.length > 1 && scored[0].score === scored[1].score) return null;
+	return scored[0].intent;
+}
+
+/** Start the queued task owned by a tool; returns null when no unambiguous binding exists. */
+export function startTaskForTool(workspace, { sessionId = "", toolName = "" } = {}) {
+	const intent = autoTaskForTool(readOperationState(fs, workspace), { sessionId, toolName });
+	if (!intent) return null;
+	return taskTransition(workspace, { id: intent.id, action: "start" });
+}
+
+/** Close a task started by startTaskForTool according to the tool's own result. */
+export function finishTaskForTool(workspace, { id, ok = true, result = "", error = "", artifacts } = {}) {
+	const taskId = cleanLine(id, 40);
+	if (!taskId) return null;
+	return taskTransition(workspace, {
+		id: taskId,
+		action: ok ? "succeed" : "fail",
+		result,
+		error: error || (!ok ? "tool failed" : ""),
+		artifacts,
+	});
+}
+
+/**
+ * Execution-body wrapper: one call at the tool boundary performs
+ * queued -> running -> succeeded/failed. Tracking is best-effort and never
+ * changes the wrapped tool's value or throw behavior.
+ */
+export async function runTrackedTask(workspace, { sessionId = "", toolName = "" } = {}, run) {
+	let taskId = "";
+	let trackingError = "";
+	try {
+		const started = startTaskForTool(workspace, { sessionId, toolName });
+		taskId = started?.id ?? "";
+	} catch (error) {
+		trackingError = error?.message ?? String(error);
+	}
+
+	let value;
+	try {
+		value = await run();
+	} catch (error) {
+		if (taskId) {
+			try { finishTaskForTool(workspace, { id: taskId, ok: false, error: error?.message ?? String(error) }); }
+			catch { /* task bookkeeping never replaces the tool error */ }
+		}
+		throw error;
+	}
+
+	if (taskId) {
+		const ok = value?.ok !== false && !value?.error;
+		try {
+			finishTaskForTool(workspace, {
+				id: taskId,
+				ok,
+				result: ok ? String(value?.summaryText ?? value?.summary ?? "completed") : "",
+				error: ok ? "" : String(value?.error ?? "tool failed"),
+				artifacts: value?.file ? [value.file] : value?.persisted ? [value.persisted] : [],
+			});
+		} catch (error) {
+			trackingError = error?.message ?? String(error);
+		}
+	}
+	return { value, taskId, trackingError };
+}
+
+/** subagent 家族工具名：原生 subagent / subagent_fork + 产品行 subagent_claude_code / subagent_codex。 */
+export function isSubagentTool(toolName) {
+	return /^subagent(_|$)/.test(cleanLine(toolName, 80).toLowerCase());
+}
+
+/**
+ * 从工具结果里抽一条可入账的摘要（`tools/result` 的载荷形如
+ * `{ content: [{type:'text',text}], isError, value }`）。空白压平、长度封顶，
+ * 只做"够主代理认得出发生了什么"的摘要，正文仍在会话里。
+ */
+export function summarizeToolResult(result, max = 400) {
+	const parts = [];
+	const value = result?.value;
+	if (typeof value === "string" && value.trim() !== "") parts.push(value);
+	const content = Array.isArray(result?.content) ? result.content : [];
+	for (const piece of content) {
+		if (typeof piece === "string") parts.push(piece);
+		else if (piece && typeof piece.text === "string") parts.push(piece.text);
+	}
+	return parts.join(" ").replace(/\s+/g, " ").trim().slice(0, Math.max(40, Number(max) || 400));
+}
+
+/**
+ * 子代理生命周期 → 台账任务（P1-9「子代理结果回收」）。
+ *
+ * 为什么不用 `tools/result`：原生 `subagent` 是**异步派发**——工具结果是
+ * `started subagent <id>`（派发确认），真正跑完是 `subagent/end`。
+ * 实测（真宿主 mock 子代理）：拿 tools/result 收口会把任务在派发瞬间标 succeeded，
+ * 结果摘要只有"started subagent …"，等于假成功。所以按宿主的两条生命周期事件接：
+ *   `subagent/start` → 唯一的 queued 任务转 running（顺手挡住重复认领）
+ *   `subagent/end`   → completed→succeeded / error→failed / aborted→interrupted
+ *
+ * 绑定沿用保守规则：同 owner 别名 + 同 session，且**唯一**才动；多候选一律不动。
+ */
+export function subagentOwnerAlias(provider) {
+	const name = cleanLine(provider, 40).replace(/-/g, "_");
+	return name ? `subagent_${name}` : "subagent";
+}
+
+/** 子代理起跑：把唯一匹配的 queued 任务转 running（没有台账/候选不唯一时返回 null）。 */
+export function startSubagentTask(workspace, { sessionId = "", provider = "" } = {}) {
+	try {
+		return startTaskForTool(workspace, { sessionId, toolName: subagentOwnerAlias(provider) });
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * 子代理结束：按 stopReason 收口（completed/error/aborted）。
+ * 已经不在 running/queued 的任务不动（模型可能自己收过了）。
+ */
+export function finishSubagentTask(workspace, { sessionId = "", provider = "", stopReason = "completed", summary = "", taskId = "" } = {}) {
+	const toolName = subagentOwnerAlias(provider);
+	const text = cleanLine(summary, 1000);
+	let intent = null;
+	try {
+		const st = readOperationState(fs, workspace);
+		if (!st) return null;
+		// 精确绑定优先：start 时记下的 runId→taskId（宿主重启后回退到保守匹配）。
+		const exact = cleanLine(taskId, 40);
+		intent = exact
+			? normalizeIntents(st).find((item) => item.id === exact)
+			: (autoTaskForTool(st, { sessionId, toolName, states: ["running"] })
+				?? autoTaskForTool(st, { sessionId, toolName, states: ["queued"] }));
+	} catch {
+		return null;
+	}
+	if (!intent) return null;
+	const id = intent.id;
+	const current = taskOf(intent);
+	try {
+		// 没经过 start（例如宿主没发 start 事件）时先补 running，让 attempts 与时间线完整
+		if (current.state === "queued") taskTransition(workspace, { id, action: "start" });
+		if (stopReason === "completed") {
+			return finishTaskForTool(workspace, { id, ok: true, result: text || "subagent 已完成（无输出）" });
+		}
+		if (stopReason === "aborted") {
+			// 还在跑 → interrupted（可 retry）；已经收口了还收到 aborted → 借 fail 分支记冲突，状态不变
+			return taskTransition(workspace, current.state === "running"
+				? { id, action: "interrupt", error: text || "subagent aborted" }
+				: { id, action: "fail", error: text || "subagent aborted" });
+		}
+		return finishTaskForTool(workspace, { id, ok: false, error: text || `subagent 失败（${cleanLine(stopReason, 40) || "unknown"}）` });
+	} catch {
+		return null;
+	}
 }
 
 /**
@@ -847,6 +1312,7 @@ export function conclusionVerdict(st) {
 			blockers: [],
 			criteria: { total: 0, open: 0 },
 			intents: { total: 0, open: 0 },
+			tasks: taskSummary(null),
 		};
 	}
 	const criteria = Array.isArray(st.criteria) ? st.criteria : [];
@@ -876,6 +1342,7 @@ export function conclusionVerdict(st) {
 		blockers,
 		criteria: { total: criteria.length, open: openCriteria.length },
 		intents: { total: intents.length, open: openIntents.length },
+		tasks: taskSummary(st),
 	};
 }
 
@@ -1109,6 +1576,77 @@ export function deriveScopeDraft(texts, mode = "") {
 //#endregion
 
 function apply(ctx) {
+	// 项目工作台 web 路由（只读 + 同源栅栏 + CSRF）。宿主没有 webServer（非 web 运行时）时静默跳过。
+	try {
+		if (ctx.webServer?.register) {
+			const trustedHosts = () => {
+				try { return ctx.webRuntime?.trustedHosts ?? []; } catch { return []; }
+			};
+			ctx.effect?.(() => ctx.webServer.register({
+				kind: "prefix",
+				path: PROJECT_ROUTE,
+				handler: createProjectHandler({ trustedHosts }),
+			}), "dsh-stage-gate: 项目工作台路由");
+		}
+	} catch { /* 路由注册失败不影响台账工具 */ }
+	// 子代理生命周期回收（P1-9）。
+	//
+	// ⚠️ 两个实测约束（2026-09-18，真宿主 mock 子代理）：
+	//  ① `subagent/start|end` 是**作用域事件**：dispatch 时用 parent 当 carrier，
+	//     监听器只拿得到 `info`，**拿不到 parent**（生命周期发射器只回调 info）。
+	//     所以在 apply 里写 `(info, parent) => …` 会永远拿到 undefined：
+	//     必须按 agent 作用域注册（agent.ctx.on），把 agent 闭包进来。
+	//  ② 事件 provider 是 provider id（原生工具是 `spawn`），不是工具名；
+	//     别名表已补 `subagent`，所以 owner=subagent / owner=subagent_spawn 都能命中。
+	const subagentBindings = new Map();
+	// runId → taskId：start 时精确记下，end 时按 runId 回收（宿主重启后退回保守匹配）。
+	// 有它才能分辨"同一 provider 并发跑了两个子代理"时哪一个对应哪条任务。
+	const subagentRunBindings = new Map();
+	const bindSubagentRecycle = (agent) => {
+		const id = agent?.id;
+		if (!id || !agent?.ctx || typeof agent.ctx.on !== "function") return;
+		if (subagentBindings.has(id)) return;
+		const intoLedger = (kind, info) => {
+			try {
+				const workspace = agent?.session?.header?.cwd;
+				if (typeof workspace !== "string" || workspace === "") return;
+				const sessionId = String(agent?.session?.id ?? "");
+				const provider = String(info?.provider ?? "");
+				const runId = String(info?.runId ?? "");
+				if (kind === "start") {
+					const started = startSubagentTask(workspace, { sessionId, provider });
+					if (runId && started?.id) {
+						if (subagentRunBindings.size >= 200) subagentRunBindings.delete(subagentRunBindings.keys().next().value);
+						subagentRunBindings.set(runId, started.id);
+					}
+					return;
+				}
+				const exact = runId ? (subagentRunBindings.get(runId) ?? "") : "";
+				if (runId) subagentRunBindings.delete(runId);
+				finishSubagentTask(workspace, {
+					sessionId,
+					provider,
+					stopReason: String(info?.stopReason ?? "completed"),
+					summary: summarizeToolResult({ content: info?.lastAssistantMessage }),
+					taskId: exact,
+				});
+			} catch { /* 回收是尽力而为：失败不影响子代理运行 */ }
+		};
+		const offStart = agent.ctx.on("subagent/start", (info) => intoLedger("start", info));
+		const offEnd = agent.ctx.on("subagent/end", (info) => intoLedger("end", info));
+		subagentBindings.set(id, { offStart, offEnd });
+	};
+	ctx.on?.("agent/created", (payload) => { try { bindSubagentRecycle(payload?.agent); } catch { /* 不影响创建 */ } });
+	ctx.on?.("agent/inbox/inserted", (info) => { try { bindSubagentRecycle(info?.agent); } catch { /* 不影响投递 */ } });
+	ctx.on?.("agent/disposed", (payload) => {
+		const agent = payload?.agent ?? payload;
+		const entry = subagentBindings.get(agent?.id);
+		if (!entry) return;
+		subagentBindings.delete(agent.id);
+		for (const off of [entry.offStart, entry.offEnd]) {
+			try { if (typeof off === "function") off(); } catch { /* 尽力释放 */ }
+		}
+	});
 	ctx.tools.register(defineTool({
 		name: "stage_gate",
 		description: "校验阶段产物是否满足当前模式的结构门禁，判定写入 gate-log.md。进入下一阶段或接受 finding/报告前调用；结构 PASS 不等于语义全过，manual 项仍需复核。",
@@ -1240,7 +1778,9 @@ function apply(ctx) {
 			summary: { type: "string", required: true, description: "一句话方向（做什么、追什么线索）≤200 字符" },
 			anchor_kind: { type: "string", required: true, enum: ANCHOR_KINDS, description: "锚点类型（boot=开局豁免，其余须带 anchor_ref）" },
 			anchor_ref: { type: "string", description: "锚点 id（boot 省略；criterion/scope/finding/chain 必填）" },
-			note: { type: "string", description: "备注（派单对象/预期产出等 ≤300 字符）" }
+			note: { type: "string", description: "备注（派单对象/预期产出等 ≤300 字符）" },
+			owner: { type: "string", description: "任务执行者（可选；填了就建立执行状态）" },
+			max_attempts: { type: "number", description: "最大尝试次数（1-20，默认 1）" }
 		},
 		output: {
 			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
@@ -1259,10 +1799,37 @@ function apply(ctx) {
 				let mode = "";
 				try { mode = String(ctx.agentPresets?.composedPreset?.(agent?.ctx) ?? ""); } catch { /* 组合未就绪 */ }
 				const resolvers = await theResolvers();
-				const s = registerIntent(path.resolve(args.workspace), { summary: args.summary, anchorKind: args.anchor_kind, anchorRef: args.anchor_ref, note: args.note, sessionId, mode }, resolvers);
+				const s = registerIntent(path.resolve(args.workspace), { summary: args.summary, anchorKind: args.anchor_kind, anchorRef: args.anchor_ref, note: args.note, owner: args.owner, maxAttempts: args.max_attempts, sessionId, mode }, resolvers);
 				return { ok: true, id: `i${s.total}`, anchor: `${args.anchor_kind}${args.anchor_ref ? ":" + args.anchor_ref : ""}`, open: s.open, total: s.total };
 			} catch (e) {
 				return { ok: false, error: e?.message ?? String(e) };
+			}
+		}
+	}));
+	ctx.tools.register(defineTool({
+		name: "operation_task",
+		description: "推进 intent 的执行状态：start/heartbeat/progress/succeed/fail/cancel/retry/interrupt。仅对登记了 task 的意图有效。",
+		parameters: {
+			workspace: { type: "string", required: true, description: "Task workspace root" },
+		id: { type: "string", description: "intent id（如 i1；action=claim 时省略）" },
+		action: { type: "string", required: true, enum: ["claim", "start", "heartbeat", "progress", "succeed", "fail", "cancel", "retry", "interrupt", "update"], description: "claim=原子领取下一个 queued 任务；其余动作传 id" },
+			owner: { type: "string", description: "执行者" },
+			progress: { type: "number", description: "进度 0-100" },
+			result: { type: "string", description: "结果摘要" },
+			error: { type: "string", description: "失败/中断原因" },
+			artifacts: { type: "array", items: { type: "string" }, description: "产物路径列表" },
+			note: { type: "string", description: "操作注记" }
+		},
+		output: {
+			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
+			render: (_args, v) => [{ type: "text", text: v.ok ? `任务 ${v.id}：${v.task.state} ${v.task.progress}% attempts ${v.task.attempts}/${v.task.maxAttempts}${v.task.error ? `｜${v.task.error}` : ""}` : `任务操作失败：${v.error}` }]
+		},
+		execute(args) {
+			try {
+				if (args.action === "claim") return Promise.resolve({ ok: true, ...taskClaim(path.resolve(args.workspace), args) });
+				return Promise.resolve({ ok: true, ...taskTransition(path.resolve(args.workspace), args) });
+			} catch (e) {
+				return Promise.resolve({ ok: false, error: e?.message ?? String(e) });
 			}
 		}
 	}));

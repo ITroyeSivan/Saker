@@ -304,7 +304,7 @@ function ConnForm(props) {
 		api("conn.save", payload).then(function (r) {
 			busy[1](false);
 			if (r.conn) props.onSaved(r.conn);
-			else msg[1](r.error || "保存失败");
+			else msg[1](errOf(r) || "保存失败");
 		}).catch(function (e) { busy[1](false); msg[1](String(e)); });
 	}
 	return h("div", { className: "dsh-wsm-modal-mask", onClick: props.onClose },
@@ -652,7 +652,7 @@ function FilesPane(props) {
 				path[1](p);
 				persist(p);
 			} else {
-				notice(r.error || "列目录失败", "error");
+				notice(errOf(r) || "列目录失败", "error");
 				entries[1]([]);
 			}
 		}).catch(function (e) { busy[1](false); notice(String(e), "error"); });
@@ -738,7 +738,7 @@ function FilesPane(props) {
 				a.href = url; a.download = entry.name; a.click();
 				URL.revokeObjectURL(url);
 				notice("");
-			} else notice(r.error || "读取失败", "error");
+			} else notice(errOf(r) || "读取失败", "error");
 		}).catch(function (e) { busy[1](false); notice(String(e), "error"); });
 	}
 	function openViewer(target) {
@@ -1394,6 +1394,13 @@ var REDTEAM_MANAGER_UI_NAMESPACE = "redteam-manager-ui";
 function wsRpc(connection, endpoint, payload) {
 	return connection.rpc.call("/dsh-webshell-mgr-rpc", endpoint, payload);
 }
+/** 取失败文案：连接层是结构化 `{code,message,details}`，HTTP 通道是字符串 —— 两种都接。
+ *  直接把对象塞进 React 子节点会抛 "Objects are not valid as a React child"。 */
+function errOf(r) {
+	var e = r && r.error;
+	if (!e) return "";
+	return typeof e === "string" ? e : String(e.message || "");
+}
 // ===== WebShell 设置页（内置库 v2：无目录配置 / 内容可编辑 / 分类可管理 / 口令明文）=====
 var wsCard = { border: "1px solid var(--dsw-alias-border-l1,#e4e4e7)", borderRadius: 10, padding: "12px 14px", marginBottom: 12, background: "var(--dsw-alias-bg-base,#fff)" };
 var wsTitle = { fontSize: 13, fontWeight: 700, margin: "0 0 2px" };
@@ -1441,14 +1448,19 @@ function ShellEditor(props) {
 		setContent(null); setMsg("");
 		wsRpc(props.connection, "self-content-get", { id: props.shell.id, file: props.shell.file }).then(function (r) {
 			if (r && r.ok) setContent(r.value.content);
-			else setMsg((r && r.error) || "读取失败");
+			else setMsg(errOf(r) || "读取失败");
 		}).catch(function (e) { setMsg("读取失败：" + String((e && e.message) || e)); });
 	}, [props.open, props.shell && props.shell.id]);
 	if (!props.open || !props.shell) return null;
 	function save() {
 		wsRpc(props.connection, "self-content-set", { id: props.shell.id, file: props.shell.file, content: content }).then(function (r) {
-			if (r && r.ok) { setMsg("已保存到文件"); setTimeout(function () { props.onClose(); }, 600); }
-			else setMsg((r && r.error) || "保存失败");
+			if (r && r.ok) {
+				// 服务端覆盖前会留备份；把这件事告诉用户，别让人以为"覆盖了就没了"。
+				var backed = r.value && r.value.backup;
+				setMsg(backed ? "已保存到文件（旧版已备份到 .backups/）" : "已保存到文件");
+				setTimeout(function () { props.onClose(); }, 900);
+			}
+			else setMsg(errOf(r) || "保存失败");
 		}).catch(function (e) { setMsg("保存失败：" + String((e && e.message) || e)); });
 	}
 	var card = h("div", { style: { width: 780, maxWidth: "94vw", background: "#fff", borderRadius: 12, padding: 14, border: "1px solid #e4e4e7", boxShadow: "0 12px 34px rgba(0,0,0,0.18)" } },
@@ -1623,7 +1635,7 @@ function WebShellSettings(props) {
 		wsRpc(props.connection, "settings-set", { genDir: dirCfg.trim() }).then(function (r) {
 			setBusy(false);
 			if (r && r.ok) { setEffective(r.value.effective || ""); setMsg(r.value.effective ? "目录已生效：" + r.value.effective : "已恢复自动探测"); setTimeout(function () { setMsg(""); }, 2600); load(); }
-			else setMsg((r && r.error) || "保存失败");
+			else setMsg(errOf(r) || "保存失败");
 		}).catch(function (e) { setBusy(false); setMsg(String(e && e.message || e)); });
 	}
 	function changePassword(file, password) {
@@ -1638,7 +1650,13 @@ function WebShellSettings(props) {
 		});
 	}
 	function doRemoveShell(sh) {
-		wsRpc(props.connection, "self-remove", { file: sh.file, deleteFile: true }).then(function () { load(); });
+		wsRpc(props.connection, "self-remove", { file: sh.file, deleteFile: true }).then(function (r) {
+			load();
+			// 服务端删文件前会留一份到 .backups/；明确告诉用户还能找回
+			var b = r && r.value && r.value.backup;
+			setMsg(b ? "已删除（原文件已备份到 .backups/）" : "已删除");
+			setTimeout(function () { setMsg(""); }, 3200);
+		}).catch(function (e) { setMsg("删除失败：" + String((e && e.message) || e)); });
 	}
 	function upload() {
 		if (!upFile) { setUpMsg("请先选择要上传的 webshell 文件"); return; }
@@ -1649,7 +1667,7 @@ function WebShellSettings(props) {
 			wsRpc(props.connection, "self-add", { name: upName.trim() || upFile.name, lang: upLang.trim() || "其他", obf: upObf.trim() || "自定义", password: upPwd, fileName: upFile.name, dataBase64: b64 }).then(function (r) {
 				setUpBusy(false);
 				if (r && r.ok) { setUpName(""); setUpObf(""); setUpPwd(""); setUpFile(null); if (fileRef.current) fileRef.current.value = ""; load(); }
-				else setUpMsg((r && r.error) || "上传失败");
+				else setUpMsg(errOf(r) || "上传失败");
 			}).catch(function (e) { setUpBusy(false); setUpMsg(String(e && e.message || e)); });
 		};
 		reader.readAsDataURL(upFile);

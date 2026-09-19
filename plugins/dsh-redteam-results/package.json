@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-redteam-results",
-  "version": "1.0.10",
+  "version": "1.0.18",
   "description": "Session-scoped redteam findings registry for the pentest / code-audit presets: model-side register/update/delete tools, a self-registered loopback web channel, and a per-session conversation tab (redteam 成果) with per-mode findings pages, severity stats, type distribution, lifecycle status, pagination, verify-to-session and MD/HTML exports, plus a cross-session global ledger overview.",
   "files": [
     "lib",

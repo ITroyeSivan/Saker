@@ -10,7 +10,8 @@
   自身会话库——需进主会话成果页的，由主会话（总控/报告员）登记。
 - **每条进入报告的 finding 必登**；status 保持诚实，语义矩阵：
   `pending`=尚未验证（含验证未完成或环境性失败——WAF 拦截/目标不可达/超时——保持
-  pending，不得因此判误报）；`verified`=验证完成且真实可再复现（**代码审计仅限动态
+  pending，不得因此判误报）；`suspect`=疑似未定论（静态线索/侧信道现象成立，但影响链
+  未闭环或复核只能部分复现，报告按未验证项处理）；`verified`=验证完成且真实可再复现（**代码审计仅限动态
   验证成功**：EXP 本地复现，或在线授权环境实测 L1 通过）；`code-reviewed`=代码审计
   静态复核通过（代码侧已复核，代码级推理不得升 verified）；`false-positive`=验证后
   确认不存在/误判；`fixed`=仅限此前已 `verified` 真实存在过、用户修复后复测不成功。
@@ -31,7 +32,7 @@
 | poc | 测试过程 + **完整 EXP（必填）** | 复杂漏洞=复现脚本（`exp/<finding-id>.py`，含用法）；简单漏洞=可直接复现的完整请求/命令/输入——只写「复现条件/利用前提」不算合格 |
 | evidence | 证据引用 | evidence-index 编号/产物路径；审计=双链比对文件 `artifacts/<id>-chains.md` |
 | fix | 修复建议（**每条 finding 必填**） | 针对该问题点的具体修法；免杀类=检测侧建议 |
-| status | pending/code-reviewed/verified/false-positive/fixed | 默认 pending；verified=动态验证成功可复现（代审静态复核填 code-reviewed）；fixed 需先 verified 且修复后复测不成功 |
+| status | pending/code-reviewed/suspect/verified/false-positive/fixed | 默认 pending；suspect=疑似未定论（可按模式省略）；verified=动态验证成功可复现（代审静态复核填 code-reviewed）；fixed 需先 verified 且修复后复测不成功 |
 | evidenceLevel | confirmed/partial/unknown | 证据等级，默认 unknown |
 
 ## 代码审计富字段（findings 板式；**登记时必填组**：auditMode / chain / chainTracer / chainVerdict / snippetEntry / snippetSink / poc（完整 EXP） / fix）

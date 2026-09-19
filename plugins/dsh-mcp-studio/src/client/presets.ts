@@ -18,6 +18,12 @@ export const SERVER_PRESETS: readonly ServerPreset[] = [
     json: '{\n  "mcpServers": {\n    "chrome-devtools": {\n      "command": "npx",\n      "args": ["-y", "chrome-devtools-mcp@1.9.0"],\n      "disabled": true\n    }\n  }\n}',
   },
   {
+    id: 'playwright',
+    label: 'Playwright',
+    description: 'Playwright MCP：浏览器导航、快照、点击、填表、控制台与截图（默认关闭；固定 0.0.80，使用 Chrome channel；24 个工具在 auto 模式下走 proxy）',
+    json: '{\n  "mcpServers": {\n    "playwright": {\n      "command": "npx",\n      "args": ["-y", "@playwright/mcp@0.0.80", "--browser", "chrome", "--headless", "--isolated", "--image-responses", "omit"],\n      "disabled": true\n    }\n  }\n}',
+  },
+  {
     id: 'kali',
     label: 'Kali MCP',
     description: '远程 Kali 武器库（nmap/nuclei/sqlmap/netexec/impacket/msf 等 100+ 工具）。默认关闭：先把 <kali-ip> 换成 Kali 机地址（服务端以 streamable-http 运行在 8765），再开启；长扫描工具建议调大单次调用超时',

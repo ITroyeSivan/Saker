@@ -41,6 +41,7 @@ const MAX_CHUNK_CHARS = 1400
 const CHUNK_OVERLAP_LINES = 4
 const DEFAULT_LIMIT = 8
 const MAX_LIMIT = 20
+const ROOTS_FINGERPRINT_TTL_MS = 60_000
 
 function nowIso() {
   return new Date().toISOString()
@@ -305,6 +306,12 @@ export class KnowledgeIndex {
     this.rebuildCount = 0
     this.dirty = false
     this.dirtyAt = 0
+    this.rootsFingerprint = null
+    this.rootsFingerprintAt = 0
+    // 计数缓存：status() 原来每次都 `COUNT(*)` 整表（8.4 万+ chunk，实测 ~140ms），
+    // 而 ensureKnowledgeIndex() 每次检索都会问一次 status —— 于是每次知识检索都在全表计数。
+    // 计数只在重建/失效时变，缓存后按需刷新（status({ counts: true })）。
+    this.counts = null
   }
 
   open() {
@@ -367,6 +374,9 @@ export class KnowledgeIndex {
 
   invalidate() {
     this.lastBuild = null
+    this.counts = null
+    this.rootsFingerprint = null
+    this.rootsFingerprintAt = 0
     this.dirty = true
     this.dirtyAt = Date.now()
   }
@@ -386,7 +396,33 @@ export class KnowledgeIndex {
     return count
   }
 
-  status() {
+  /**
+   * Durable source fingerprint used to detect knowledge changes made while the
+   * host was not running (git pack sync, external file drops, manual edits).
+   * Counting alone misses same-count edits, so the hash includes each indexed
+   * file's path, size and mtime.
+   */
+  currentRootsFingerprint() {
+    const hash = crypto.createHash('sha1')
+    let files = 0
+    for (const source of this.roots) {
+      if (!source || !source.root || !fs.existsSync(source.root)) continue
+      hash.update(`${source.id}\0${source.root}\0`)
+      for (const rel of walkFiles(source.root)) {
+        let stat
+        try {
+          stat = fs.statSync(path.join(source.root, rel))
+        } catch {
+          continue
+        }
+        hash.update(`${rel}\0${stat.size}\0${Math.trunc(stat.mtimeMs)}\0`)
+        files += 1
+      }
+    }
+    return { hash: hash.digest('hex'), files }
+  }
+
+  status(options = {}) {
     const db = this.open()
     const one = (key) => {
       try {
@@ -395,13 +431,33 @@ export class KnowledgeIndex {
         return ''
       }
     }
-    let chunks = 0
-    let docs = 0
-    try {
-      chunks = Number(db.prepare('SELECT COUNT(*) AS n FROM knowledge_chunks').get().n || 0)
-      docs = Number(db.prepare('SELECT COUNT(*) AS n FROM knowledge_docs').get().n || 0)
-    } catch {
-      // empty or partially created index
+    let chunks = Number(this.counts?.chunks || 0)
+    let docs = Number(this.counts?.docs || 0)
+    if (options.counts === true || this.counts === null) {
+      try {
+        chunks = Number(db.prepare('SELECT COUNT(*) AS n FROM knowledge_chunks').get().n || 0)
+        docs = Number(db.prepare('SELECT COUNT(*) AS n FROM knowledge_docs').get().n || 0)
+        this.counts = { chunks, docs }
+      } catch {
+        // empty or partially created index
+      }
+    }
+    const now = Date.now()
+    if (
+      options.refreshFingerprint === true
+      || this.rootsFingerprint === null
+      || now - this.rootsFingerprintAt >= ROOTS_FINGERPRINT_TTL_MS
+    ) {
+      const current = this.currentRootsFingerprint()
+      this.rootsFingerprint = current.hash
+      this.rootsFingerprintAt = now
+      const stored = one('roots_fingerprint')
+      if (!stored || stored !== current.hash) {
+        if (!this.dirty) {
+          this.dirty = true
+          this.dirtyAt = now
+        }
+      }
     }
     return {
       version: INDEX_VERSION,
@@ -533,16 +589,21 @@ export class KnowledgeIndex {
       }
 
       const meta = db.prepare('INSERT INTO knowledge_meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
+      const fingerprint = this.currentRootsFingerprint()
       meta.run('version', String(INDEX_VERSION))
       meta.run('indexed_at', nowIso())
       meta.run('build_ms', String(Date.now() - started))
       meta.run('stats', JSON.stringify(stats))
+      meta.run('roots_fingerprint', fingerprint.hash)
+      meta.run('roots_files', String(fingerprint.files))
       commit.run()
       this.lastError = ''
       this.lastBuild = { ...stats, ms: Date.now() - started, indexedAt: nowIso() }
       this.rebuildCount++
       this.dirty = false
       this.dirtyAt = 0
+      this.rootsFingerprint = fingerprint.hash
+      this.rootsFingerprintAt = Date.now()
       return this.lastBuild
     } catch (error) {
       try {
@@ -563,8 +624,24 @@ export class KnowledgeIndex {
     const mode = String(options.mode || '')
     const limit = Math.min(MAX_LIMIT, Math.max(1, Number(options.limit) || DEFAULT_LIMIT))
     const requestedSources = Array.isArray(options.sources) && options.sources.length ? new Set(options.sources) : null
-    const plans = [ftsQuery(text, 'and'), ftsQuery(text, 'or')].filter(Boolean)
-    const rows = []
+    // 混合语种查询的召回坑（2026-09-18 实测）：CJK bigram 数量远多于拉丁术语时，
+    // 单条 BM25 排序会被中文文档淹没——"Sigma 检测规则 powershell 编码命令" 的 AND 计划
+    // 只命中一篇无关中文文档，`sigma-rules/...powershell_base64_encoded_*.yml` 根本进不了
+    // 取数窗口（每计划只取 max(80, limit*12) 行）。加一条**只含拉丁术语**的计划，
+    // 让 powershell / cve-xxxx / 工具名这类高精度词单独有进榜机会，命中给 -1.5 的回落罚分
+    // （与别名扩展同量级），保证 AND 全量命中的结果仍排在前。
+    const allTerms = splitQueryTerms(text)
+    const latinTerms = allTerms.filter((term) => /^[\x00-\x7f]+$/.test(term))
+    const mixed = latinTerms.length > 0 && latinTerms.length < allTerms.length
+    const plans = [
+      { expr: ftsQuery(text, 'and'), penalty: 0 },
+      { expr: mixed ? ftsQuery(latinTerms.join(' '), 'and') : '', penalty: -1.5 },
+      { expr: ftsQuery(text, 'or'), penalty: 0 },
+    ].filter((plan) => plan.expr)
+    // 每个计划都跑（不再"凑够 limit 就提前退出"）：提前退出会让**后置的兜底计划**
+    // 把**主计划的召回**挤掉——实测 persist-zh 因此丢了原本命中的中文文档。
+    // 同一行在多计划里出现时取权重最高的一份（权重 = |bm25| + 计划罚分）。
+    const bestByRow = new Map()
     for (const plan of plans) {
       try {
         const result = db.prepare(`
@@ -579,13 +656,14 @@ export class KnowledgeIndex {
           WHERE knowledge_chunks MATCH ?
           ORDER BY rank ASC
           LIMIT ?
-        `).all(plan, Math.max(80, limit * 12))
+        `).all(plan.expr, Math.max(80, limit * 12))
         for (const row of result) {
           if (!sourceModeMatches({ mode: row.scope }, mode)) continue
           if (requestedSources && !requestedSources.has(row.source_id)) continue
-          rows.push(row)
+          const weight = Math.abs(Number(row.rank || 0)) + plan.penalty
+          const previous = bestByRow.get(row.rowid)
+          if (!previous || weight > previous.weight) bestByRow.set(row.rowid, { row, planPenalty: plan.penalty, weight })
         }
-        if (rows.length >= limit) break
       } catch (error) {
         // Invalid FTS syntax or an index created by a different version:
         // fall back to the legacy scanner at the caller.
@@ -594,9 +672,10 @@ export class KnowledgeIndex {
     }
 
     const perPath = new Map()
-    for (const row of rows) {
+    for (const entry of bestByRow.values()) {
+      const row = entry.row
       const rank = Math.abs(Number(row.rank || 0))
-      const score = rank + scoreBoost(text, row)
+      const score = rank + scoreBoost(text, row) + Number(entry.planPenalty || 0)
       const key = `${row.source_id}\u0000${row.path}`
       const previous = perPath.get(key)
       if (!previous || score > previous.score) {

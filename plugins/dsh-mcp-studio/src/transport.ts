@@ -10,6 +10,9 @@
  * @module dsh-mcp-studio/transport
  */
 import { spawn, type ChildProcess } from 'node:child_process'
+import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { splitArgs } from './types.ts'
 import type { ServerEntry } from './types.ts'
 
@@ -35,8 +38,104 @@ interface Pending {
   timer: NodeJS.Timeout
 }
 
+/**
+ * 统一出站策略（跨插件契约）：包运行器首次启动会从公网 registry 拉包，属于 infra 出站。
+ * 契约文件与判定语义见根包 `dsh-saker/lib/egress.js`；这里**同步**读同一份策略文件，
+ * 因为 `stdioChannel` 是同步的，而动态 import 是异步的——把整条 openChannel 链改成
+ * async 不值得。两边判定必须一致，由 `scripts/test-egress-policy-consistency.mjs` 锁住。
+ */
+const PACKAGE_RUNNER_HOSTS: Record<string, string> = {
+  npx: 'registry.npmjs.org',
+  npm: 'registry.npmjs.org',
+  pnpm: 'registry.npmjs.org',
+  bunx: 'registry.npmjs.org',
+  yarn: 'registry.yarnpkg.com',
+  uvx: 'pypi.org',
+  pipx: 'pypi.org',
+}
+const EGRESS_MODES = ['allow', 'allowlist', 'frozen']
+
+/** 命令是包运行器时返回它要访问的 registry 主机；普通可执行文件返回空串。 */
+export function runnerRegistryHost(command: string): string {
+  const base = String(command ?? '').trim().split(/[\\/]/).pop()?.toLowerCase().replace(/\.(cmd|exe|ps1|bat)$/, '') ?? ''
+  return PACKAGE_RUNNER_HOSTS[base] ?? ''
+}
+
+function egressHome(): string {
+  // 平台数据根统一跟随 $DSH_HOME，缺省回落 ~/.dsh（与其它插件的规范形态一致）
+  const DSH_HOME = process.env.DSH_HOME || join(homedir(), '.dsh')
+  return DSH_HOME
+}
+
+function readEgressPolicy(): { mode: string; allowHosts: string[] } {
+  try {
+    const raw = JSON.parse(readFileSync(join(egressHome(), 'saker-egress', 'policy.json'), 'utf8')) as Record<string, unknown>
+    const mode = EGRESS_MODES.includes(String(raw.mode)) ? String(raw.mode) : 'allow'
+    const allowHosts = Array.isArray(raw.allowHosts)
+      ? raw.allowHosts.map((host) => String(host).trim().toLowerCase()).filter(Boolean)
+      : []
+    return { mode, allowHosts }
+  } catch {
+    return { mode: 'allow', allowHosts: [] }
+  }
+}
+
+function hostAllowed(host: string, allowHosts: string[]): boolean {
+  for (const rule of allowHosts) {
+    if (rule === host) return true
+    if (/^[0-9a-f:.]+$/.test(rule)) continue
+    if (host.endsWith(`.${rule}`)) return true
+  }
+  return false
+}
+
+function appendEgressAudit(entry: Record<string, unknown>): void {
+  try {
+    const file = join(egressHome(), 'saker-egress', 'audit.jsonl')
+    mkdirSync(dirname(file), { recursive: true })
+    appendFileSync(file, `${JSON.stringify({ at: new Date().toISOString(), plugin: 'dsh-mcp-studio', kind: 'infra', ...entry })}\n`, 'utf8')
+  } catch { /* 审计不能反过来打断启动路径 */ }
+}
+
+/**
+ * 包运行器出站判定（同步）。非包运行器返回 `{ decision: 'allow', reason: 'no-registry-fetch' }`，
+ * 因为本地已装可执行文件不产生下载流量。
+ */
+export function evaluateRunnerEgress(server: ServerEntry): { decision: 'allow' | 'deny'; reason: string; mode: string; host: string } {
+  const host = runnerRegistryHost(server.command)
+  if (host === '') return { decision: 'allow', reason: 'no-registry-fetch', mode: 'allow', host: '' }
+  const policy = readEgressPolicy()
+  let decision: 'allow' | 'deny' = 'allow'
+  let reason = 'allow-all'
+  if (policy.mode === 'frozen') { decision = 'deny'; reason = 'infra_frozen' }
+  else if (policy.mode === 'allowlist') {
+    decision = hostAllowed(host, policy.allowHosts) ? 'allow' : 'deny'
+    reason = decision === 'allow' ? 'allowlisted' : 'not_allowed'
+  }
+  appendEgressAudit({ host, decision, reason, mode: policy.mode, note: `${server.name} ${server.command}` })
+  return { decision, reason, mode: policy.mode, host }
+}
+
+/** 被策略拦下的通道：不 spawn、任何请求都带原因失败（错误会落到该 server 的 note 上）。 */
+function blockedChannel(reason: string): McpChannel {
+  return {
+    get alive() { return false },
+    get closedReason() { return reason },
+    request() { return Promise.reject(new Error(reason)) },
+    notify() { throw new Error(reason) },
+    close() { /* nothing to close */ },
+  }
+}
+
 /** JSON-RPC over a spawned child process (newline-delimited). */
 function stdioChannel(server: ServerEntry): McpChannel {
+  const gate = evaluateRunnerEgress(server)
+  if (gate.decision === 'deny') {
+    return blockedChannel(
+      `统一出站策略拦截（${gate.reason} / mode=${gate.mode}）：${server.command} 需要访问 ${gate.host} 拉包。` +
+      '改档位：设置 → 安全配置 → 出站策略。',
+    )
+  }
   const child: ChildProcess = spawn(server.command, splitArgs(server.argsLine), {
     cwd: server.cwd === '' ? undefined : server.cwd,
     env: { ...process.env, ...server.env },

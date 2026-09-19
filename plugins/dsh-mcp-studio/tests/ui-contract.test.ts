@@ -51,3 +51,12 @@ test('ui-contract: 工具条状态标记让出换行顺序，不把「保存」�
   const toolbar = styles.match(/\.dsh-mcs-toolbar\{[^}]*\}/)?.[0] ?? ''
   assert.match(toolbar, /flex-wrap:\s*wrap/, '工具条仍是可换行的（这正是需要 order 让位的前提）')
 })
+
+test('ui-contract: 删除服务器必须先进入确认态，不能单击即删', () => {
+  const card = read('src/client/ServerCard.tsx')
+  const locales = read('src/client/locales.ts')
+  assert.ok(locales.includes("'confirmRemoveServer'"), 'locales 缺少 confirmRemoveServer 键')
+  assert.match(card, /const \[confirmRemove, setConfirmRemove\]/, '卡片缺少确认态')
+  assert.match(card, /if \(!confirmRemove\)/, '首次点击必须只进入确认态')
+  assert.match(card, /confirmRemove \? t\('confirmRemoveServer'\)/, '确认态必须提示再次点击')
+})

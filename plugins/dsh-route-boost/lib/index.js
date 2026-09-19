@@ -246,10 +246,13 @@ export function buildEnvelopeDetailed({ presetId, mode, phase, refsHits, evidenc
 		const lastGate = gateKeys.length > 0 ? `${gateKeys[gateKeys.length - 1]} ${op.gates[gateKeys[gateKeys.length - 1]]?.pass ? "pass" : "fail"}` : "无";
 		const cov = op.coverage ? `｜覆盖 ${op.coverage.tested}/${op.coverage.scope}${(op.coverage.untestedIds ?? []).length ? `（未测 ${op.coverage.untestedIds.slice(0, 5).join(",")}${op.coverage.untestedIds.length > 5 ? " 等" : ""}——operation_progress tested 补记）` : ""}` : "";
 		const intents = (op.openIntents ?? []).length ? `｜意图 ${op.openIntents.length} 未收口（${op.openIntents.slice(0, 5).join(",")}${op.openIntents.length > 5 ? " 等" : ""}——operation_progress intent_done/blocked/dropped 收口）` : "";
+		const taskText = (op.tasks ?? []).length
+			? `｜执行任务 ${op.tasks.length} 待续（${op.tasks.slice(0, 5).map((t) => `${t.id}:${t.state}${t.progress != null ? ` ${t.progress}%` : ""}${t.attempts ? ` ${t.attempts}/${t.maxAttempts}` : ""}`).join("、")}${op.tasks.length > 5 ? " 等" : ""}——operation_task start/progress/retry/interrupt）`
+			: "";
 		if ((op.constraints ?? []).length) {
 			lines.splice(2, 0, `约束红线: ${op.constraints.join("；")}${op.constraintsNote ?? ""}`);
 		}
-		lines.splice(1, 0, `operation 恢复: goal=${String(op.goal ?? "").slice(0, 80) || "（未登记）"}｜准则 ${op.met ?? 0}/${op.total ?? 0} met${op.failed ? ` / failed ${op.failed}` : ""}${(op.openIds ?? []).length ? `（未收口 ${op.openIds.join(",")}）` : ""}${cov}${intents}｜待办 ${(op.pending ?? []).length}｜最近门 ${lastGate}——先读 operation-state.json 对齐；准则均有结论（met/failed）+报告门过才可写 reports/（scope 已登记时报告须声明一致「覆盖：M/N」）；压缩续接先读四件套（WORKSPACE.md/gate-log 尾/evidence-index 认知节/findings）再动门禁`);
+		lines.splice(1, 0, `operation 恢复: goal=${String(op.goal ?? "").slice(0, 80) || "（未登记）"}｜准则 ${op.met ?? 0}/${op.total ?? 0} met${op.failed ? ` / failed ${op.failed}` : ""}${(op.openIds ?? []).length ? `（未收口 ${op.openIds.join(",")}）` : ""}${cov}${intents}${taskText}｜待办 ${(op.pending ?? []).length}｜最近门 ${lastGate}——先读 operation-state.json 对齐；准则均有结论（met/failed）+报告门过才可写 reports/（scope 已登记时报告须声明一致「覆盖：M/N」）；压缩续接先读四件套（WORKSPACE.md/gate-log 尾/evidence-index 认知节/findings）再动门禁`);
 	}
 	if (negated) {
 		lines.push("语境: 学习/防御语境——攻击执行相位已抑制，按讲解/防御口径作答");
@@ -367,11 +370,15 @@ function readOperationSummary(cwd) {
 		const testedIds = new Set((Array.isArray(st.tested) ? st.tested : []).map((t) => t?.id));
 		const untestedIds = scope.filter((s) => !testedIds.has(s.id)).map((s) => s.id);
 		// 意图台账：open 意图存在时投递
-		const openIntents = (Array.isArray(st.intents) ? st.intents : []).filter((i) => i && i.status === "open").map((i) => i.id);
+		const intentRows = Array.isArray(st.intents) ? st.intents.filter((i) => i && typeof i === "object") : [];
+		const openIntents = intentRows.filter((i) => i.status === "open").map((i) => i.id);
+		const tasks = intentRows
+			.filter((i) => i.task && ["queued", "running", "interrupted"].includes(i.task.state))
+			.map((i) => ({ id: i.id, state: i.task.state, progress: i.task.progress, attempts: i.task.attempts, maxAttempts: i.task.maxAttempts, owner: i.task.owner || "", error: i.task.error || "" }));
 		// 约束台账：登记即投递独立行（防压缩丢失——用户红线必须每轮可见）
 		const constraints = Array.isArray(st.constraints) ? st.constraints.filter((c) => c && (c.kind === "deny" || c.kind === "allow") && typeof c.text === "string" && c.text.trim()) : [];
-		if (openIds.length === 0 && pending.length === 0 && openIntents.length === 0 && constraints.length === 0 && (scope.length === 0 || untestedIds.length === 0)) return undefined;
-		return { goal: st.goal, total: st.criteria.length, met, failed, openIds, pending, gates: st.gates, coverage: scope.length > 0 ? { scope: scope.length, tested: scope.length - untestedIds.length, untestedIds } : undefined, openIntents, constraints: constraints.slice(0, 6).map((c) => `${c.kind === "deny" ? "禁" : "允"}：${String(c.text).slice(0, 60)}`) };
+		if (openIds.length === 0 && pending.length === 0 && openIntents.length === 0 && tasks.length === 0 && constraints.length === 0 && (scope.length === 0 || untestedIds.length === 0)) return undefined;
+		return { goal: st.goal, total: st.criteria.length, met, failed, openIds, pending, gates: st.gates, coverage: scope.length > 0 ? { scope: scope.length, tested: scope.length - untestedIds.length, untestedIds } : undefined, openIntents, tasks, constraints: constraints.slice(0, 6).map((c) => `${c.kind === "deny" ? "禁" : "允"}：${String(c.text).slice(0, 60)}`) };
 	} catch { /* 无状态或损坏：不投递 */ }
 	return undefined;
 }

@@ -186,11 +186,11 @@ export function openStore(dbPath) {
 	// 而磁盘满/强杀/网盘回写/误改名都会造成这个问题。数据已经读不出来，
 	// 能做的是**保住原文件**（改名备份，不删）并让插件继续可用；
 	// 备份路径打到 stderr（只此一次），用户能据此找回或求助。
-	function healCorruptDb(dbPath) {
+	function healCorruptDb(dbPath, force = false) {
 		if (dbPath === ':memory:') return;
 		let head = '';
 		try { head = fs.readFileSync(dbPath).subarray(0, 16).toString("latin1"); } catch { return; }
-		if (head.startsWith("SQLite format 3")) return;   // 正常的库头
+		if (!force && head.startsWith("SQLite format 3")) return;   // 正常的库头
 		let bak = dbPath + ".corrupt-" + Date.now();
 		let n = 1;
 		while (fs.existsSync(bak)) bak = dbPath + ".corrupt-" + Date.now() + "-" + n++;   // 绝不覆盖已有备份
@@ -211,9 +211,38 @@ export function openStore(dbPath) {
 		}
 	}
 
-healCorruptDb(dbPath);   // **必须在开库前**：坏文件会让 new DatabaseSync 直接抛
-	const db = new DatabaseSync(dbPath);
-	db.exec("PRAGMA journal_mode = WAL");
+	function openDatabase() {
+		const deadline = Date.now() + 5000;
+		let waitMs = 10;
+		for (;;) {
+			let db;
+			try {
+				db = new DatabaseSync(dbPath);
+				// node:sqlite 在构造时不读文件头，坏库错误要到首条 SQL 才出现。
+				db.exec("PRAGMA busy_timeout = 5000");
+				db.exec("PRAGMA journal_mode = WAL");
+				return db;
+			} catch (error) {
+				try { db?.close(); } catch { /* 打开失败时可能没有可关闭的句柄 */ }
+				const message = String(error?.message ?? error);
+				// journal_mode 首次切换在多进程首开时可能仍报 LOCKED；短退避后重试，不误判坏库。
+				if (/database is locked|database is busy|SQLITE_BUSY|SQLITE_LOCKED/i.test(message) && Date.now() < deadline) {
+					Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
+					waitMs = Math.min(250, waitMs * 2);
+					continue;
+				}
+				// 只有 SQLite 明确判为 NOTADB 时才备份重建；普通 BUSY/LOCKED 必须原样抛出。
+				if (!/not a database|SQLITE_NOTADB/i.test(message)) throw error;
+				healCorruptDb(dbPath, true);
+				db = new DatabaseSync(dbPath);
+				db.exec("PRAGMA busy_timeout = 5000");
+				db.exec("PRAGMA journal_mode = WAL");
+				return db;
+			}
+		}
+	}
+
+	const db = openDatabase(); // busy_timeout/WAL 已就绪；首开会与其他实例竞争
 	const legacy = prepareLegacy(db);
 	db.exec(SCHEMA);
 	if (legacy) copyLegacy(db);
@@ -479,7 +508,15 @@ export function saveMethod(st, { id, mode, name, target = "", notes = "", graph 
 	const nm = clean(name, 40);
 	if (!m) throw new Error("mode required");
 	if (!nm) throw new Error("name required");
-	const gObj = typeof graph === "string" ? JSON.parse(graph) : graph;
+	let gObj = graph;
+	if (typeof graph === "string") {
+		try {
+			gObj = JSON.parse(graph);
+		} catch {
+			throw new Error("图数据不是合法 JSON");
+		}
+	}
+	if (!gObj || typeof gObj !== "object" || Array.isArray(gObj)) throw new Error("图数据必须是对象");
 	const text = JSON.stringify(gObj);
 	if (text.length > 64 * 1024) throw new Error("图数据超体积上限");
 	let nodeId = clean(id, 40);

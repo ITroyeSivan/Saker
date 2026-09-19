@@ -13,6 +13,18 @@ export interface McpChannel {
     /** Why the channel ended, when it ended unexpectedly. */
     readonly closedReason?: string;
 }
+/** 命令是包运行器时返回它要访问的 registry 主机；普通可执行文件返回空串。 */
+export declare function runnerRegistryHost(command: string): string;
+/**
+ * 包运行器出站判定（同步）。非包运行器返回 `{ decision: 'allow', reason: 'no-registry-fetch' }`，
+ * 因为本地已装可执行文件不产生下载流量。
+ */
+export declare function evaluateRunnerEgress(server: ServerEntry): {
+    decision: 'allow' | 'deny';
+    reason: string;
+    mode: string;
+    host: string;
+};
 /** Open one channel to the configured server. Throws only on configuration problems, not on wire failures. */
 export declare function openChannel(server: ServerEntry): McpChannel;
 export interface HandshakeResult {

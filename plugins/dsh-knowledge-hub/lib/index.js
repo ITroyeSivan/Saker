@@ -18,9 +18,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import { spawn, spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { KnowledgeIndex, TEXT_EXTS } from './index-engine.js'
-import { loadCatalog, packRoots, packsStatus, syncPacks } from './packs.js'
+import { getSyncMode, loadCatalog, packRoots, packsStatus, setSyncMode, syncPacks } from './packs.js'
 import { indexBuildStatus, indexDbPath, startBackgroundIndexBuild } from './index-build.js'
 
 export const name = 'dsh-knowledge-hub'
@@ -29,6 +30,7 @@ export const inject = ['connection', 'tools', 'systemPrompt', 'webServer']
 const CHANNEL = '/dsh-knowledge-hub'
 const MODE_IDS = ['pentest', 'code-audit', 'ctf-solver']
 const MODE_LABELS = { pentest: '渗透测试', 'code-audit': '代码审计', 'ctf-solver': 'CTF 解题' }
+const SEARCH_SOURCES = new Set(['bundle', 'patt', 'user', 'import'])
 const MAX_READ_BYTES = 1024 * 1024 // 1 MiB single-file read cap
 const MAX_SEARCH_FILES = 500 // per search call
 const SMALL_FILE_LIMIT = 200 * 1024 // ≤200 KiB scanned fully; larger scans head + filename only
@@ -71,6 +73,25 @@ const ALIASES = {
   云安全: ['cloud security', 'aws', 'azure', 'gcp', 'kubernetes', 'cloud native'],
   'cloud security': ['cloud security', 'aws', 'azure', 'gcp', 'kubernetes', '云安全'],
   mobile: ['mobile', 'android', 'ios', 'frida', 'mastg', '移动安全'],
+  // 2026-09-18 补：混合语种查询里最常出现、但旧表没有的检测/取证类术语。
+  // 加这些的依据是真机评测：中文查询「Sigma 检测规则 powershell 编码命令」在补表前
+  // 只命中一篇无关中文文档，而同一语义的英文查询能命中 3 条 sigma 规则。
+  检测规则: ['detection rule', 'detection', 'sigma', 'rule', 'yara'],
+  编码命令: ['encoded command', 'encodedcommand', 'base64', 'obfuscation', 'command line'],
+  计划任务: ['scheduled task', 'schtasks', 'cron', 'task scheduler'],
+  持久化: ['persistence', 'persist', 'autorun', 'registry run'],
+  内存取证: ['memory forensics', 'volatility', 'memory dump', 'memory analysis'],
+  进程注入: ['process injection', 'inject', 'process hollowing'],
+  磁盘取证: ['disk forensics', 'filesystem timeline', 'autopsy'],
+  时间线: ['timeline', 'timelining', 'event log'],
+  日志分析: ['log analysis', 'event log', 'audit log'],
+  供应链: ['supply chain', 'dependency', 'npm', 'malicious package'],
+  证书模板: ['certificate template', 'ad cs', 'esc1', 'esc8'],
+  凭据: ['credential', 'lsass', 'secretsdump', 'credential dumping'],
+  权限维持: ['persistence', 'backdoor', 'maintain access'],
+  横向移动: ['lateral movement', 'psexec', 'wmi', 'smb'],
+  容器逃逸: ['container escape', 'docker escape', 'privileged container', 'cgroup'],
+  越权访问: ['broken access control', 'idor', 'authorization', 'bola'],
 }
 function expandTerms(query) {
   const q = String(query || '').trim().toLowerCase()
@@ -87,6 +108,79 @@ function expandTerms(query) {
   let edbId
   if ((edbId = q.match(/edb[-_ ]?(\d+)/i))) out.push(edbId[1])
   return out.slice(0, 6)
+}
+
+/**
+ * 混合语种查询的**术语替换**：把已知的中文安全术语替换成对应的英文说法，
+ * 让「Sigma 检测规则 powershell 编码命令」这类查询在英文语料（sigma 规则、hacktricks 等）
+ * 上也有命中的可能。只在术语表命中时生效，原查询照常参与检索，两者结果合并（替换结果 -1.5）。
+ * 不做机器翻译、不调模型——表里的每一条都是人工维护的固定对应。
+ */
+export function translateQuery(query) {
+  let out = String(query || '')
+  if (!out.trim()) return ''
+  for (const [cn, terms] of Object.entries(ALIASES)) {
+    if (!out.includes(cn)) continue
+    const replacement = terms.find((term) => /^[\x00-\x7f]/.test(term))
+    if (replacement) out = out.split(cn).join(` ${replacement} `)
+  }
+  return out.replace(/\s+/g, ' ').trim()
+}
+
+/** Lexical coverage terms used only as a confidence signal, never as a hard filter. */
+function coverageTerms(query) {
+  const out = []
+  for (const word of String(query || '').toLowerCase().match(/[a-z0-9][a-z0-9._-]{1,}|[\u4e00-\u9fff]{2,}/g) || []) {
+    if (/^[a-z0-9]/.test(word)) out.push(word)
+    else if (word.length <= 2) out.push(word)
+    else for (let i = 0; i < word.length - 1; i += 1) out.push(word.slice(i, i + 2))
+  }
+  return [...new Set(out)].slice(0, 32)
+}
+
+/**
+ * 查询概念（用于**覆盖度 rerank**）：拉丁实词 + 已知中文术语翻译后的英文词。
+ *
+ * 为什么需要：BM25 会把"路径/标题里出现 rule、sigma 这种元数据词"的文档顶到前面。
+ * 实测「Sigma 检测规则 powershell 编码命令」top-1 是 `net_connection_win_domain_ngrok.yml`
+ * （只匹配 rule），而真正对症的 `...powershell_base64_encoded_*.yml`（匹配
+ * powershell/encoded/base64/rule 四个概念）排在第 9。加覆盖度加成能把"命中概念多"的
+ * 文档提上来——这是确定性的重排，不引入向量库或外部模型。
+ */
+export function queryConcepts(query) {
+  const raw = String(query || '').toLowerCase()
+  const out = []
+  for (const token of raw.match(/[a-z0-9][a-z0-9_.:+-]{2,}/g) || []) out.push(token.replace(/[.:]+$/, ''))
+  for (const [cn, terms] of Object.entries(ALIASES)) {
+    if (!raw.includes(cn)) continue
+    const english = terms.find((term) => /^[\x00-\x7f]/.test(term)) || ''
+    for (const word of english.toLowerCase().split(/[^a-z0-9]+/)) if (word.length >= 4) out.push(word)
+  }
+  return [...new Set(out.filter(Boolean))].slice(0, 10)
+}
+
+/** 覆盖度加成：命中概念数 ×3，封顶 +12（够把对症文档提上来，又压不过精确 ID 命中）。 */
+export function coverageBonusOf(hit, concepts) {
+  if (!concepts.length) return 0
+  const hay = `${hit.path || ''}\n${hit.title || ''}\n${hit.heading || ''}\n${hit.preview || ''}`.toLowerCase()
+  const matched = concepts.filter((term) => hay.includes(term)).length
+  return Math.min(12, matched * 3)
+}
+
+function annotateCoverage(hits, query) {
+  const terms = coverageTerms(query)
+  if (terms.length === 0) return hits
+  return hits.map((hit) => {
+    const hay = `${hit.path || ''}\n${hit.title || ''}\n${hit.heading || ''}\n${hit.preview || ''}`.toLowerCase()
+    const matched = terms.filter((term) => hay.includes(term)).length
+    const termCoverage = matched / terms.length
+    const exactEdb = Number(hit.score || 0) >= 1000 && hit.edb
+    return {
+      ...hit,
+      termCoverage: Number(termCoverage.toFixed(3)),
+      lowConfidence: !exactEdb && terms.length >= 2 && termCoverage < 0.4,
+    }
+  })
 }
 
 // ── path resolution ─────────────────────────────────────────────────────────
@@ -106,12 +200,34 @@ function importsRoot() {
 
 /** Bundle refs, resolved once. Empty when dsh-saker is not installed (degrade: user layer only). */
 let bundleRefs = null
+function sakerRoot() {
+  if (process.env.SAKER_DISABLE_BUNDLE === '1') return ''
+  const candidates = []
+  if (process.env.SAKER_ROOT) candidates.push(process.env.SAKER_ROOT)
+  try {
+    const req = createRequire(import.meta.url)
+    candidates.push(path.dirname(req.resolve('dsh-saker/package.json')))
+  } catch {
+    // Source checkout outside an installed profile: fall back below.
+  }
+  // lib/index.js -> plugin -> plugins -> repository root
+  candidates.push(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..'))
+  for (const candidate of candidates) {
+    if (!candidate) continue
+    try {
+      if (fs.existsSync(path.join(candidate, 'package.json'))) return fs.realpathSync(candidate)
+    } catch {
+      // try the next candidate
+    }
+  }
+  return ''
+}
 function bundleRefsRoots() {
   if (bundleRefs !== null) return bundleRefs
   bundleRefs = []
   try {
-    const req = createRequire(import.meta.url)
-    const pkgRoot = path.dirname(req.resolve('dsh-saker/package.json'))
+    const pkgRoot = sakerRoot()
+    if (!pkgRoot) return bundleRefs
     for (const mode of MODE_IDS) {
       const dir = path.join(pkgRoot, 'preset', mode, 'refs')
       if (fs.existsSync(dir)) bundleRefs.push({ mode, root: fs.realpathSync(dir) })
@@ -129,8 +245,8 @@ function pattRoot() {
   if (pattRef !== null) return pattRef
   pattRef = ''
   try {
-    const req = createRequire(import.meta.url)
-    const pkgRoot = path.dirname(req.resolve('dsh-saker/package.json'))
+    const pkgRoot = sakerRoot()
+    if (!pkgRoot) return pattRef
     const dir = path.join(pkgRoot, 'preset', 'shared', 'refs', 'PayloadsAllTheThings')
     if (fs.existsSync(dir)) pattRef = fs.realpathSync(dir)
   } catch {
@@ -215,11 +331,64 @@ function ensureKnowledgeIndex(force = false) {
     index.markClean()
     return index
   }
-  if (status.dirty || !status.indexedAt || status.version !== 2) index.rebuild({ force: false })
+  if (status.dirty || !status.indexedAt || status.version !== 2) {
+    // A dirty index can mean thousands of files changed while the host was
+    // offline. Do not stall the first search on a full rebuild; serve the
+    // current index and let the detached builder publish the next generation.
+    if (status.dirty && index.countFiles() > 2500 && build.status !== 'running') {
+      startBackgroundIndexBuild({ force: false })
+      return index
+    }
+    index.rebuild({ force: false })
+  }
   return index
 }
 
+// 提示词清单缓存：这条 manifest **每个回合都会被装配一次**，而 stats() 要把整个知识目录
+// 遍历一遍（9.5k 文件，实测 ~33ms/次），topImportNames() 还会再扫一次 imports。
+// 内容只在导入/同步/重建时才变 → 缓存 5 分钟，并在那些动作里显式失效（invalidateKnowledgeIndex）。
+const MANIFEST_TTL_MS = 5 * 60 * 1000
+const manifestCache = { text: '', at: 0 }
+
+function buildManifestText() {
+  const s = stats()
+  const parts = []
+  if (s.patt > 0) parts.push(`随包 PayloadsAllTheThings payload 库 ${s.patt} 篇（commit ${PATT_SNAPSHOT}，MIT，离线）`)
+  if (s.user > 0) parts.push(`个人/团队知识 ${s.user} 篇`)
+  const edbRows = loadEdbIndex().length
+  if (edbRows > 0) parts.push(`Exploit-DB 元数据索引 ${edbRows} 条（离线；命中形如 [EDB-12345]，PoC 原文按需读 exploitdb/<path>）`)
+  if (s.imports > 0) {
+    const names = topImportNames()
+    parts.push(
+      `导入知识源 ${s.imports} 篇` +
+        (names.length ? `（来源：${names.slice(0, 8).join('、')}${names.length > 8 ? ' 等' : ''}）` : ''),
+    )
+  }
+  const packState = packsStatus()
+  if (packState.total > 0) parts.push(`推荐知识包 ${packState.installed}/${packState.total} 已同步`)
+  const indexState = knowledgeIndexStatus()
+  if (indexState.docs > 0) parts.push(`混合检索索引 ${indexState.docs} 文档 / ${indexState.chunks} chunks`)
+  if (parts.length === 0) return ''
+  return `<dsh-knowledge-hub>知识库：${parts.join('，')}。按需用 knowledge_search → knowledge_read；不要整库读取。</dsh-knowledge-hub>`
+}
+
+/**
+ * 知识库提示词清单（带缓存）。
+ * 为什么要缓存：它在**每个回合的装配路径**上，而内容（知识源篇数、索引规模）只在
+ * 导入/同步/重建时变——旧实现每回合都全量遍历知识目录，实测 ~33ms/回合的纯浪费。
+ */
+export function knowledgeManifest(now = Date.now()) {
+  // 用 at>0 当"已算过"的判据（不能用 text!==''：知识库为空时清单本来就是空串，
+  // 那样会退化成每次重算，缓存等于没做）。
+  if (manifestCache.at > 0 && now - manifestCache.at < MANIFEST_TTL_MS) return manifestCache.text
+  manifestCache.text = buildManifestText()
+  manifestCache.at = now
+  return manifestCache.text
+}
+
 function invalidateKnowledgeIndex() {
+  manifestCache.text = ''
+  manifestCache.at = 0
   if (knowledgeIndex) knowledgeIndex.invalidate()
 }
 
@@ -241,6 +410,10 @@ function knowledgeIndexStatus() {
 function autoSyncKnowledgePacks(force = false) {
   if (process.env.DSH_KNOWLEDGE_AUTOSYNC === '0') {
     return Promise.resolve({ skipped: true, reason: 'DSH_KNOWLEDGE_AUTOSYNC=0' })
+  }
+  const mode = getSyncMode()
+  if (mode !== 'auto') {
+    return Promise.resolve({ skipped: true, reason: `知识同步模式：${mode}` })
   }
   if (autoSyncPromise) return autoSyncPromise
   autoSyncPromise = (async () => {
@@ -280,6 +453,36 @@ function safeResolve(base, rel) {
   const target = path.resolve(base, ...rel.split('/').filter((s) => s !== '' && s !== '.'))
   if (target !== base && !target.startsWith(base + path.sep)) return null
   return target
+}
+
+/** 覆盖写用户文件前保留的份数上限。 */
+const BACKUP_KEEP = 5
+
+/**
+ * 覆盖写之前先留一份旧内容，返回备份路径（文件原本不存在时返回空串）。
+ *
+ * 为什么：`write` 直接 `writeFileSync` 到用户层/导入层 —— 用户改自己写的知识条目
+ * 时，保存一下就永久覆盖上一版，没有任何回退手段。
+ * （同一类问题 2026-09-19 已在 webshell-mgr 上真实踩过一次数据丢失。）
+ * 备份放同层 `.backups/`：点开头，listEntries / packRoots 都会跳过，
+ * 不会出现在目录树或检索里；每个文件最多留 BACKUP_KEEP 份。
+ */
+function backupExistingFile(base, target) {
+  if (!fs.existsSync(target)) return ''
+  const backupDir = path.join(base, '.backups')
+  try {
+    fs.mkdirSync(backupDir, { recursive: true })
+    const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 17) + '-' + Math.random().toString(36).slice(2, 8)
+    const dest = path.join(backupDir, `${path.basename(target)}.${stamp}.bak`)
+    fs.copyFileSync(target, dest)
+    const mine = fs.readdirSync(backupDir).filter((f) => f.startsWith(path.basename(target) + '.')).sort()
+    for (const old of mine.slice(0, Math.max(0, mine.length - BACKUP_KEEP))) {
+      try { fs.rmSync(path.join(backupDir, old), { recursive: true, force: true }) } catch { /* 清理旧备份失败不影响本次写入 */ }
+    }
+    return dest
+  } catch {
+    return '' // 备份失败不阻断写入；调用方据返回值如实告知"没有备份"
+  }
 }
 
 /** Base directory of a writable layer for a payload. Returns null for bundle or bad input. */
@@ -331,6 +534,7 @@ function listEntries(root, dir) {
   for (const it of items.sort((a, b) => (a.name < b.name ? -1 : 1))) {
     const rel = dir ? `${dir}/${it.name}` : it.name
     if (it.isDirectory()) {
+      if (it.name.startsWith('.') || /\.(?:diverged|recover)-/.test(it.name)) continue
       // fileCount = recursive count of searchable text files inside (for the
       // category badge in the UI). Bundled PATT chapters make this worthwhile.
       let fileCount = 0
@@ -519,15 +723,17 @@ function searchEdbLayer(query) {
   if (rows.length === 0) return []
   const terms = expandTerms(query)
   const q = String(query || '').toLowerCase().trim()
-  const qNum = q.replace(/[^\d]/g, '')
-  const qCve = q.replace(/cve[-_ ]?/i, 'cve-')
+  // Numeric EDB ids are exact only when the whole query is an id. A year in
+  // "2026 World Cup" must not become EDB-2026 and receive an exact-match boost.
+  const qNum = /^(?:edb[-_ ]?)?\d{3,6}$/i.test(q) ? q.replace(/[^\d]/g, '') : ''
+  const qCve = /cve[-_ ]?\d/i.test(q) ? q.replace(/cve[-_ ]?/i, 'cve-') : ''
   const hits = []
   for (const r of rows) {
     if (hits.length >= 8) break
     const idExact = qNum && r.id === qNum
     const inDesc = r.desc && r.desc.toLowerCase().includes(q)
     const inType = r.type && (q === r.type.toLowerCase() || (q.length > 1 && r.type.toLowerCase().includes(q)))
-    const cveHit = r.codes.some((c) => qCve.startsWith(c) || c.startsWith(qCve) || c === qCve)
+    const cveHit = qCve !== '' && r.codes.some((c) => qCve.startsWith(c) || c.startsWith(qCve) || c === qCve)
     const termHit = terms.some((t) => t.length >= 2 && (r.desc.toLowerCase().includes(t) || (r.platform || '').toLowerCase().includes(t) || (r.author || '').toLowerCase().includes(t)))
     if (idExact || inDesc || inType || cveHit || termHit) {
       const cveTxt = r.codes.length ? ' ' + r.codes[0] : ''
@@ -588,12 +794,17 @@ function searchLegacy(query, mode, limit = 60) {
  *   · alias expansion as a low-cost recall pass
  *   · Exploit-DB exact/field hits merged deterministically
  */
-function searchAll(query, mode, limit = 60) {
+function searchAll(query, mode, limit = 60, source = '') {
   if (!query || !query.trim()) return []
   const max = Math.max(1, Number(limit) || 60)
+  const sourceFilter = SEARCH_SOURCES.has(source) ? source : ''
+  // 带来源过滤时先多取候选，再按来源裁到调用方上限；否则单一来源的词
+  // 会被其它来源的更高分命中挤出前 N，过滤后看起来像“没有结果”。
+  const scanMax = sourceFilter ? Math.max(max * 8, 80) : max
   const merged = new Map()
   const keyOf = (hit) => `${hit.source}\u0000${hit.mode || ''}\u0000${hit.path}\u0000${hit.line || 0}`
   const add = (hit, bonus = 0) => {
+    if (sourceFilter && hit.source !== sourceFilter) return
     const copy = { ...hit, score: Number(hit.score || 0) + bonus }
     const key = keyOf(copy)
     const previous = merged.get(key)
@@ -603,28 +814,44 @@ function searchAll(query, mode, limit = 60) {
   let textHits = []
   try {
     const index = ensureKnowledgeIndex()
-    textHits = index.search(query, { mode, limit: max })
+    textHits = index.search(query, { mode, limit: scanMax })
     for (const hit of textHits) add(hit)
-    if (merged.size < max) {
+    // 别名碎片扩展只在候选不足时跑（省检索次数）：语义上的跨语种召回由下面的
+    // 术语替换整句检索负责，碎片扩展留着兜底。
+    if (merged.size < scanMax) {
       for (const alias of expandTerms(query).slice(1, 5)) {
-        for (const hit of index.search(alias, { mode, limit: Math.max(4, Math.ceil(max / 2)) })) {
+        for (const hit of index.search(alias, { mode, limit: Math.max(4, Math.ceil(scanMax / 2)) })) {
           add(hit, -1.5)
         }
       }
     }
+    // 术语替换（中文概念 → 英文说法）再搜一遍：这是"混合语种"场景真正的召回来源，
+    // 实测「Sigma 检测规则 powershell 编码命令」只有走这条路才能召回
+    // sigma-rules/...powershell_base64_encoded_*.yml。
+    const translated = translateQuery(query)
+    if (translated !== String(query || '').trim()) {
+      for (const hit of index.search(translated, { mode, limit: Math.max(6, Math.ceil(scanMax / 2)) })) {
+        add(hit, -1.5)
+      }
+    }
   } catch (error) {
     console.error('[dsh-knowledge-hub] FTS index unavailable, using scanner: %s', error && error.message ? error.message : String(error))
-    for (const hit of searchLegacy(query, mode, max)) add(hit)
+    for (const hit of searchLegacy(query, mode, scanMax)) add(hit)
   }
 
   const edbHits = searchEdbLayer(query)
   for (const hit of edbHits) {
-    const exact = /(?:edb[-_ ]?\d+|\d{4,})/i.test(query) || /cve[-_ ]?\d{4}[-_ ]?\d+/i.test(query)
+    const normalizedQuery = String(query || '').trim()
+    const exact = /^(?:edb[-_ ]?)?\d{3,6}$/i.test(normalizedQuery) || /^cve[-_ ]?\d{4}[-_ ]?\d+$/i.test(normalizedQuery)
     add(hit, exact ? 1000 : 12)
   }
-  return [...merged.values()]
+  // 覆盖度 rerank（只算总分，不丢候选）：同一个候选集里，命中查询概念多的排前面。
+  const concepts = queryConcepts(query)
+  const ranked = [...merged.values()]
+    .map((hit) => ({ ...hit, score: Number(hit.score || 0) + coverageBonusOf(hit, concepts) }))
     .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))
     .slice(0, max)
+  return annotateCoverage(ranked, query)
 }
 
 // ── stats ───────────────────────────────────────────────────────────────────
@@ -643,7 +870,7 @@ function countByExt(root, exts) {
     for (const it of items) {
       const name = it.name.toLowerCase()
       if (it.isDirectory()) {
-        if (name !== '.git' && name !== '.svn' && name !== '.index' && name !== 'node_modules') {
+        if (name !== '.git' && name !== '.svn' && name !== '.index' && name !== 'node_modules' && !/\.(?:diverged|recover)-/.test(name)) {
           walk(dir ? `${dir}/${it.name}` : it.name)
         }
       }
@@ -795,7 +1022,15 @@ function topImportNames() {
 
 async function dispatch(endpoint, payload) {
   const ok = (value) => ({ ok: true, value })
-  const fail = (error) => ({ ok: false, error })
+  // 失败必须回**结构化**错误：宿主连接层只认 `{ok:false, error:{code,message,details}}`，
+  // 回字符串会被 parseConnectionResponse 判成 `invalid server-response result` 并
+  // **reject 掉 Promise** —— 客户端 `.then` 永远不执行，界面就卡在"保存中…"+ 空白，
+  // 连一句错误都不显示。实测：点开 Exploit-DB 命中（只有元数据、没有 PoC 正文）时，
+  // read 返回「文件不存在」把整块详情区打成白板。
+  const fail = (error) => ({
+    ok: false,
+    error: { code: 'knowledge-hub', message: String(error && error.message ? error.message : error), details: {} },
+  })
   const p = payload || {}
 
   switch (endpoint) {
@@ -817,6 +1052,11 @@ async function dispatch(endpoint, payload) {
         autoInstall: pack.autoInstall,
       }))
       return ok(status)
+    }
+
+    case 'packs-mode': {
+      const mode = setSyncMode(p.mode)
+      return ok({ mode })
     }
 
     case 'packs-sync': {
@@ -948,9 +1188,11 @@ async function dispatch(endpoint, payload) {
       if (typeof content !== 'string') return fail('缺少 content')
       try {
         fs.mkdirSync(path.dirname(target), { recursive: true })
+        // 覆盖已有文件前先备份：这是用户改自己写的条目，保存一下就永久覆盖上一版。
+        const backup = backupExistingFile(base, target)
         fs.writeFileSync(target, content, 'utf8')
         invalidateKnowledgeIndex()
-        return ok({ path: rel })
+        return ok({ path: rel, backup })
       } catch (e) {
         return fail(`写入失败：${e && e.message ? e.message : String(e)}`)
       }
@@ -963,20 +1205,35 @@ async function dispatch(endpoint, payload) {
       const target = safeResolve(base, rel || '')
       if (!target || target === base) return fail('路径越界')
       try {
-        const st = fs.statSync(target)
-        if (st.isDirectory()) fs.rmSync(target, { recursive: true, force: false })
-        else fs.unlinkSync(target)
+        fs.statSync(target)
+        // 删除前先移进同层 `.trash/`：这条路径删的是**用户自己写的知识条目/导入包**，
+        // 直接 rm 就永久没了（2026-09-19 已在 webshell-mgr 上真实踩过一次覆盖丢数据）。
+        // 同卷 rename 是原子的、几乎零成本，且可人工找回。
+        // `.trash` 以点开头，listEntries / packRoots 都会跳过，不会出现在树或检索里。
+        const trashDir = path.join(base, '.trash')
+        fs.mkdirSync(trashDir, { recursive: true })
+        const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 17) + '-' + Math.random().toString(36).slice(2, 8)
+        const dest = path.join(trashDir, `${path.basename(target)}.${stamp}`)
+        fs.renameSync(target, dest)
+        // 回收站封顶：只留最近 50 条，避免删多了无限涨
+        try {
+          const kept = fs.readdirSync(trashDir).sort()
+          for (const old of kept.slice(0, Math.max(0, kept.length - 50))) {
+            fs.rmSync(path.join(trashDir, old), { recursive: true, force: true })
+          }
+        } catch { /* 清理旧回收项失败不影响本次删除 */ }
         invalidateKnowledgeIndex()
-        return ok({ removed: rel })
+        return ok({ removed: rel, trash: dest })
       } catch (e) {
         return fail(`删除失败：${e && e.message ? e.message : String(e)}`)
       }
     }
 
     case 'search': {
-      const { query, mode } = p
+      const { query, mode, source = '', limit = 20 } = p
       const m = MODE_IDS.includes(mode) ? mode : 'pentest'
-      return ok({ hits: searchAll(query || '', m, 20), index: knowledgeIndexStatus() })
+      const n = Math.max(1, Math.min(100, Number(limit) || 20))
+      return ok({ hits: searchAll(query || '', m, n, String(source || '')), index: knowledgeIndexStatus() })
     }
 
     case 'import_git': {
@@ -1037,7 +1294,11 @@ export function apply(ctx, config = {}) {
         try {
           return await dispatch(endpoint, payload)
         } catch (error) {
-          return { ok: false, error: error instanceof Error ? error.message : String(error) }
+          // 同上：连接层要结构化错误，抛异常这条路径也得给同样的形状。
+          return {
+            ok: false,
+            error: { code: 'knowledge-hub', message: error instanceof Error ? error.message : String(error), details: {} },
+          }
         }
       },
       { authority: 'loopback' },
@@ -1059,6 +1320,7 @@ export function apply(ctx, config = {}) {
         parameters: {
           query: { type: 'string', required: true, description: '关键词、CVE/EDB-ID 或自然语言问题' },
           mode: { type: 'string', enum: MODE_IDS, description: '预设模式（缺省 pentest）' },
+          source: { type: 'string', enum: ['bundle', 'patt', 'user', 'import'], description: '限定来源层（缺省全部）' },
           limit: { type: 'number', description: '返回条数（默认 8，最大 20）' },
         },
         output: {
@@ -1075,7 +1337,7 @@ export function apply(ctx, config = {}) {
                     ? '\n' + v.value.hits.map((h) => {
                         const pack = h.packId ? ` pack=${h.packId}` : ''
                         const title = h.title ? `${h.title} · ` : ''
-                        return `[${h.source}${pack}] ${h.path}:${h.line} chunk=${h.chunkId}\n${title}${h.preview}`
+                        return `${h.lowConfidence ? '[低置信] ' : ''}[${h.source}${pack}] ${h.path}:${h.line} chunk=${h.chunkId}\n${title}${h.preview}`
                       }).join('\n---\n')
                     : '')
                 : `检索失败：${v.error || ''}`,
@@ -1085,7 +1347,8 @@ export function apply(ctx, config = {}) {
         async execute(args) {
           const mode = MODE_IDS.includes(args && args.mode) ? args.mode : 'pentest'
           const limit = Math.min(20, Math.max(1, Number((args && args.limit) || 8)))
-          const hits = searchAll(String((args && args.query) || ''), mode, limit)
+          const source = SEARCH_SOURCES.has(args && args.source) ? args.source : ''
+          const hits = searchAll(String((args && args.query) || ''), mode, limit, source)
           return { ok: true, value: { hits, index: knowledgeIndexStatus() } }
         },
       }),
@@ -1111,7 +1374,12 @@ export function apply(ctx, config = {}) {
             properties: { ok: { type: 'boolean', required: true } },
           },
           render: (_a, v) => [
-            { type: 'text', text: v.ok ? `[${v.value.source}] ${v.value.path} 行 ${v.value.from}-${v.value.to}\n${v.value.text}` : `读取失败：${v.error || ''}` },
+            {
+              type: 'text',
+              text: v.ok
+                ? `[${v.value.source}] ${v.value.path} 行 ${v.value.from}-${v.value.to}\n文件：${v.value.absPath}\n${v.value.text}`
+                : `读取失败：${v.error || ''}`,
+            },
           ],
         },
         async execute(args) {
@@ -1143,7 +1411,18 @@ export function apply(ctx, config = {}) {
             const from = Math.max(1, offset || 1)
             const limit = Math.min(240, Math.max(1, Number((args && args.limit) || 80)))
             const slice = lines.slice(from - 1, from - 1 + limit)
-            return { ok: true, value: { source, path: rel, from, to: from - 1 + slice.length, text: slice.join('\n') } }
+            return {
+              ok: true,
+              value: {
+                source,
+                path: rel,
+                root,
+                absPath: target,
+                from,
+                to: from - 1 + slice.length,
+                text: slice.join('\n'),
+              },
+            }
           } catch (e) {
             return { ok: false, error: `读取失败：${e && e.message ? e.message : String(e)}` }
           }
@@ -1177,7 +1456,7 @@ export function apply(ctx, config = {}) {
             const top = listEntries(root, '')
             const dirs = top.dirs.map((d) => d.name).join(', ')
             const files = top.files.map((f) => f.name).join(', ')
-            lines.push(`- ${label}：分类目录 [${dirs || '无'}] 文件 [${files || '无'}]`)
+            lines.push(`- ${label}（root=${root}）：分类目录 [${dirs || '无'}] 文件 [${files || '无'}]`)
           }
           lines.push(`模式：${mode}（${MODE_LABELS[mode]}）`)
           if (area === 'all' || area === 'packs') {
@@ -1211,31 +1490,12 @@ export function apply(ctx, config = {}) {
     ctx.systemPrompt.context({
       name: 'knowledge-hub',
       order: 560,
-      text: () => {
-        const s = stats()
-        const parts = []
-        if (s.patt > 0) parts.push(`随包 PayloadsAllTheThings payload 库 ${s.patt} 篇（commit ${PATT_SNAPSHOT}，MIT，离线）`)
-        if (s.user > 0) parts.push(`个人/团队知识 ${s.user} 篇`)
-        const edbRows = loadEdbIndex().length
-        if (edbRows > 0) parts.push(`Exploit-DB 元数据索引 ${edbRows} 条（离线；命中形如 [EDB-12345]，PoC 原文按需读 exploitdb/<path>）`)
-        if (s.imports > 0) {
-          const names = topImportNames()
-          parts.push(
-            `导入知识源 ${s.imports} 篇` +
-              (names.length ? `（来源：${names.slice(0, 8).join('、')}${names.length > 8 ? ' 等' : ''}）` : ''),
-          )
-        }
-        const packState = packsStatus()
-        if (packState.total > 0) parts.push(`推荐知识包 ${packState.installed}/${packState.total} 已同步`)
-        const indexState = knowledgeIndexStatus()
-        if (indexState.docs > 0) parts.push(`混合检索索引 ${indexState.docs} 文档 / ${indexState.chunks} chunks`)
-        if (parts.length === 0) return ''
-        return `<dsh-knowledge-hub>知识库：${parts.join('，')}。按需用 knowledge_search → knowledge_read；不要整库读取。</dsh-knowledge-hub>`
-      },
+      // 走缓存版本：这条文本每个回合都会被装配一次，全量遍历知识目录的代价不能放在热路径上。
+      text: () => knowledgeManifest(),
     })
   } catch (error) {
     console.error('[dsh-knowledge-hub] systemPrompt unavailable: %s', error && error.message ? error.message : String(error))
   }
 }
 
-export { dispatch, stats, searchAll, ensureKnowledgeIndex, autoSyncKnowledgePacks, closeKnowledgeIndex }
+export { dispatch, stats, searchAll, ensureKnowledgeIndex, autoSyncKnowledgePacks, closeKnowledgeIndex, getSyncMode, setSyncMode }

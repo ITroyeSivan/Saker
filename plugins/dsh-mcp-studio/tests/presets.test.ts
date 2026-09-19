@@ -13,13 +13,32 @@ test('presets: ids unique and json parses to staged rows', () => {
   }
 })
 
-test('presets: chrome-devtools and kali import disabled (manual connect)', () => {
-  for (const id of ['chrome-devtools', 'kali']) {
+test('presets: browser, chrome-devtools and kali import disabled (manual connect)', () => {
+  for (const id of ['playwright', 'chrome-devtools', 'kali']) {
     const preset = SERVER_PRESETS.find(row => row.id === id)
     assert.ok(preset, `preset ${id} exists`)
     const parsed = parseMcpJson(preset.json)
     assert.equal(parsed.servers[0].enabled, false, `${id} must import disabled`)
   }
+})
+
+test('presets: playwright is pinned, headless, isolated and omits images', () => {
+  const preset = SERVER_PRESETS.find(row => row.id === 'playwright')
+  assert.ok(preset, 'preset playwright exists')
+  const parsed = parseMcpJson(preset.json)
+  const row = parsed.servers[0]
+  assert.equal(row.transport, 'stdio')
+  assert.equal(row.command, 'npx')
+  assert.deepEqual(row.argsLine.split(/\s+/), [
+    '-y',
+    '@playwright/mcp@0.0.80',
+    '--browser',
+    'chrome',
+    '--headless',
+    '--isolated',
+    '--image-responses',
+    'omit',
+  ])
 })
 
 test('presets: kali is streamable-http with placeholder url', () => {

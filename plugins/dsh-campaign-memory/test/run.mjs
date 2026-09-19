@@ -4,9 +4,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { openStore, writeMemory, searchMemories, topForInjection, listMemories, getMemory, removeMemory, statsMemories, purgeExpired, kindLabel, MAX_ROWS_PER_WORKSPACE, setIdeaStatus, listIdeas } from "../lib/store.js";
-import { buildMemoryBlock, dispatch, isTrustedRequest, MODE_IDS, checkCsrf, isRootSession, distillWorkspace, closeStore, apply } from "../lib/index.js";
-import { readLedger, distillCandidates, renderCandidates, MAX_CANDIDATES, STATE_FILE, OUT_FILE } from "../lib/distill.js";
+import { DatabaseSync } from "node:sqlite";
+import { openStore, writeMemory, searchMemories, topForInjection, listMemories, getMemory, removeMemory, statsMemories, purgeExpired, kindLabel, MAX_ROWS_PER_WORKSPACE, setIdeaStatus, listIdeas, feedbackMemory } from "../lib/store.js";
+import { buildMemoryBlock, dispatch, isTrustedRequest, MODE_IDS, checkCsrf, isRootSession, distillWorkspace, closeStore, apply, INJECT_BUDGET } from "../lib/index.js";
+import { readLedger, distillCandidates, renderCandidates, readCandidateCount, MAX_CANDIDATES, STATE_FILE, OUT_FILE } from "../lib/distill.js";
 
 let pass = 0, fail = 0;
 const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); } else { fail++; console.log(`FAIL ${label}`); } };
@@ -68,6 +69,29 @@ const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); 
 	st.close();
 }
 
+// 3b. 使用后反馈：helpful 提权、misleading 降权、obsolete 退役但不物理删除
+{
+	const st = openStore(":memory:");
+	const good = writeMemory(st, { mode: "pentest", kind: "tactic", title: "有效打法", content: "a" });
+	feedbackMemory(st, { id: good.id, verdict: "helpful", note: "第二次复用成功" });
+	const good2 = feedbackMemory(st, { id: good.id, verdict: "helpful", note: "再次成功" });
+	ok("helpful 累加反馈分", good2.feedbackScore === 2);
+	const bad = writeMemory(st, { mode: "pentest", kind: "tactic", title: "错误打法", content: "b" });
+	const bad2 = feedbackMemory(st, { id: bad.id, verdict: "misleading", note: "环境不同导致误判" });
+	ok("misleading 降权", bad2.feedbackScore === -2);
+	const obsolete = writeMemory(st, { mode: "pentest", kind: "fingerprint", title: "已失效指纹", content: "c" });
+	feedbackMemory(st, { id: obsolete.id, verdict: "obsolete", note: "版本已更新" });
+	ok("obsolete 退出搜索与注入", searchMemories(st, { mode: "pentest", query: "已失效" }).length === 0 && topForInjection(st, "pentest", "", 10).every((r) => r.id !== obsolete.id));
+	ok("obsolete 仍可按 id 读取（退役不是删除）", getMemory(st, obsolete.id, { account: false })?.id === obsolete.id);
+	ok("反馈分参与热度排序", searchMemories(st, { mode: "pentest", query: "打法" })[0].id === good.id);
+	const stat = statsMemories(st, "pentest");
+	ok("stats 反馈治理计数", stat.feedback.helpful === 1 && stat.feedback.misleading === 1 && stat.feedback.obsolete === 1);
+	let threw = false;
+	try { feedbackMemory(st, { id: good.id, verdict: "nope" }); } catch { threw = true; }
+	ok("非法反馈 verdict 拒绝", threw);
+	st.close();
+}
+
 // 4. 召回注入：工作区隔离（注入只带本工作区=新工作区干净开局）、不记账、预算截断
 {
 	const st = openStore(":memory:");
@@ -89,6 +113,19 @@ const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); 
 	const nMatch = / n="(\d+)">/.exec(fb2);
 	ok("预算截断硬上限 ≤700（修复 723 超限）", fb2.length <= 700 && fb2.endsWith("</dsh-campaign-memory>"));
 	ok("截断先减记忆行：指引行保留、首行保留、n 同步实留行数", fb2.includes("campaign_memory_search") && fb2.includes("超预算行0") && !fb2.includes("超预算行9") && nMatch !== null && Number(nMatch[1]) < 10);
+	// 候选提示行：收尾蒸馏只落候选不落库；没有这行，真实会话里记忆库一直是空的（本机实测 0 条真实记忆）
+	ok("无候选且无记忆→零 token（仍然空串）", buildMemoryBlock("pentest", "client-c", [], 0) === "");
+	const pend = buildMemoryBlock("pentest", "client-c", [], 3);
+	ok("有未入库候选→给出可操作提示且标记闭合", pend.includes("3 条未入库记忆候选") && pend.includes("memory-candidates.md") && pend.endsWith("</dsh-campaign-memory>"));
+	ok("候选提示受同一预算约束", pend.length <= INJECT_BUDGET && INJECT_BUDGET === 700);
+	ok("非法候选数按 0 处理（不产出假提示）", buildMemoryBlock("pentest", "client-c", [], -2) === "" && buildMemoryBlock("pentest", "client-c", [], "abc") === "");
+	const cdir = fs.mkdtempSync(path.join(os.tmpdir(), "cm-cand-"));
+	ok("无候选文件→0", readCandidateCount(cdir) === 0 && readCandidateCount("") === 0);
+	fs.writeFileSync(path.join(cdir, OUT_FILE), "# 会话收尾·记忆候选\n\n- 候选：4 条\n", "utf8");
+	ok("读候选条数", readCandidateCount(cdir) === 4);
+	fs.writeFileSync(path.join(cdir, OUT_FILE), "# 会话收尾·记忆候选\n\n- 候选：2 条\n", "utf8");
+	ok("同尺寸改写后按最新内容重算（无缓存陈旧）", readCandidateCount(cdir) === 2);
+	fs.rmSync(cdir, { recursive: true, force: true });
 	ok("安全模式名单齐（pentest + code-audit + ctf-solver）", MODE_IDS.length === 3 && MODE_IDS.includes("pentest") && MODE_IDS.includes("code-audit") && MODE_IDS.includes("ctf-solver"));
 	st.close();
 }
@@ -200,6 +237,33 @@ const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); 
 	ok("移动目录=新 key 干净开局；旧记忆跨工作区检索找回", topForInjection(st, "pentest", "client-a", 3, "client-a@33333333").length === 0 && searchMemories(st, { mode: "pentest", query: "打法A" }).length === 1);
 	ok("旧语义兼容：无键调用只匹配无键行", topForInjection(st, "pentest", "client-a", 3).length === 1 && topForInjection(st, "pentest", "client-a", 3)[0].title === "旧库行");
 	st.close();
+}
+
+// 9b. 旧库迁移：没有 feedback_* 列的存量 memory.db 打开后补列、保留数据、反馈可用
+{
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cm-migrate-"));
+	const dbPath = path.join(dir, "old.db");
+	const raw = new DatabaseSync(dbPath);
+	raw.exec(`
+		CREATE TABLE memories (
+			id TEXT PRIMARY KEY, mode TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL,
+			content TEXT NOT NULL, tags TEXT NOT NULL DEFAULT '', target_kind TEXT NOT NULL DEFAULT '',
+			workspace TEXT NOT NULL DEFAULT '', workspace_key TEXT NOT NULL DEFAULT '',
+			usage_count INTEGER NOT NULL DEFAULT 0, last_used_at TEXT DEFAULT '',
+			source_session TEXT NOT NULL DEFAULT '', expires_at TEXT,
+			idea_status TEXT NOT NULL DEFAULT '', idea_basis TEXT NOT NULL DEFAULT '', idea_asset TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+		);
+		INSERT INTO memories (id, mode, kind, title, content, created_at, updated_at)
+		VALUES ('cm-old', 'pentest', 'tactic', '旧库记忆', '旧正文', '2026-01-01 00:00:00', '2026-01-01 00:00:00');
+	`);
+	raw.close();
+	const st = openStore(dbPath);
+	const row = getMemory(st, "cm-old", { account: false });
+	ok("旧库打开后保留原数据", row?.title === "旧库记忆" && row?.content === "旧正文" && row?.feedbackScore === 0);
+	ok("旧库迁移后可写反馈", feedbackMemory(st, { id: "cm-old", verdict: "helpful" }).feedbackScore === 1);
+	st.close();
+	fs.rmSync(dir, { recursive: true, force: true });
 }
 
 // 10. 注入行 160 字符 / 多目标提示行 / 工作区总量上限冷淘汰
@@ -329,12 +393,13 @@ const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); 
 	fs.writeFileSync(path.join(hdir, STATE_FILE), JSON.stringify(ledgerRaw), "utf8");
 	const handlers = {};
 	const logs = [];
+	let promptCtx = null;
 	let presetNow = "pentest";
 	await apply({
 		on: (ev, fn) => { handlers[ev] = fn; },
 		effect: (fn) => { fn(); },
 		tools: { register: () => {} },
-		systemPrompt: { context: () => {} },
+		systemPrompt: { context: (def) => { promptCtx = def; } },
 		webServer: { register: () => () => {} },
 		webRuntime: { trustedHosts: [] },
 		agentPresets: { composedPreset: () => presetNow },
@@ -352,6 +417,10 @@ const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); 
 	fs.rmSync(hookOut, { force: true });
 	handlers["agent/disposed"]({ agent: agentOf({ cwd: hdir, agentPreset: "pentest" }) });
 	ok("落盘前先读库判重（existing 生效→清单标「已有相似记忆」）", fs.existsSync(hookOut) && fs.readFileSync(hookOut, "utf8").includes("已有相似记忆"));
+	// 装配期闭环：库里没有本工作区记忆，但候选清单在 → 必须出现一行提示，否则候选永远不会被确认入库
+	const wired = promptCtx?.text?.({ agent: agentOf({ cwd: hdir, agentPreset: "pentest" }) }) ?? "";
+	ok("装配期提示未入库候选（候选→落库闭环）", wired.includes("未入库记忆候选") && wired.includes("memory-candidates.md"));
+	ok("装配期提示块受预算约束", wired.length > 0 && wired.length <= INJECT_BUDGET);
 	ok("收尾日志留痕（未入库可追溯）", logs.some((m) => m.includes("收尾蒸馏") && m.includes("未入库")));
 	// 不该触发的情形
 	fs.rmSync(hookOut, { force: true });

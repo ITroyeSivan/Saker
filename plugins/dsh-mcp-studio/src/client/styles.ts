@@ -71,6 +71,7 @@ const CSS_TEXT = String.raw`
 .dsh-mcs-card.is-open .dsh-mcs-chevron{transform:rotate(90deg)}
 .dsh-mcs-iconbtn{flex:none;display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--dsw-alias-label-tertiary);font-size:15px;line-height:1;cursor:pointer}
 .dsh-mcs-iconbtn:hover{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 10%,transparent);color:var(--dsw-alias-state-error-primary)}
+.dsh-mcs-iconbtn--danger{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 16%,transparent);border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 45%,transparent);color:var(--dsw-alias-state-error-primary)}
 .dsh-mcs-carderr{margin:-4px 16px 12px;border-radius:0 0 10px 10px;padding:8px 12px;border-left:3px solid var(--dsw-alias-state-error-primary);border-radius:6px;background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 7%,transparent);color:var(--dsw-alias-state-error-primary);font:11px/16px ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}
 
 /* ---- expanded body: form + tool browser ---- */
