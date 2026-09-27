@@ -1,55 +1,28 @@
 # dsh-tool-scope
 
-按模式收窄全局工具可见性 —— 把各插件**已经声明的模式门禁**前移到「可见性层」。
+按会话模式收窄发给模型的工具清单。插件使用宿主的 `agent.ctx.tools.restrict({ deny })`，在请求构造前隐藏不适用的工具定义。
 
-## 为什么需要它
+## Pentest 工具面
 
-一轮模型请求里 **工具定义占 67.8%**（实测：101 个工具 / 111.5K 字节，请求体共 164K）。
-其中宿主内置只有 29 个，**插件贡献 72 个**。而这里面有一批工具，在**当前模式下本来就调不动**：
+Pentest 的目标是快速侦察、核对适用 Nday 或验证一个原创漏洞假设，并在取得一条可复现 RCE 证据后停止。默认隐藏：
 
-| 插件 | 它自己声明的门禁 | 非适用模式下的后果 |
-|---|---|---|
-| `dsh-webshell-mgr` | `ALLOWED_MODES = ["pentest"]`（lib/index.js:598） | 调用**硬拒绝**：`webshell 工具面仅限渗透测试模式调用` |
-| `dsh-ctf-observer` | `MODE_ID = "ctf-solver"`（lib/index.js:42） | 工具准入失败（"只在 ctf-solver 模式生效"） |
-| `dsh-redteam-results` / `dsh-campaign-memory` / `dsh-trace-vault` / `dsh-knowledge-hub` | `MODE_IDS = ["pentest","code-audit","ctf-solver"]` | 注入与入库均不生效 |
+- 子代理、工作流、任务矩阵和资产编组入口；
+- WebShell、内存马、命中后利用计划、内网与横向工具；
+- Nday 语料整理和批量交接工具；
+- 战役记忆与轨迹查询工具。
 
-也就是说：**这些工具的声明在非适用模式下纯占上下文，一丝用处都没有**。
-模型看得到、调不动，还替它们付 token。
+默认保留轻量指纹、`nday_catalog`、`nday_match`、`zday_pattern`、`oob_probe`、RCE 证据登记和知识检索。Nmap、目录/内容扫描、Nuclei、Afrog、SQLMap 与爬取工具通过 `active-scan` 包按需加载；单目标 Nday 不需要加载它。Pentest 中 `tool_pack` 入口保持可见，以便按需加载；批量匹配只用于用户明确提供的授权目标。
 
-## 它做什么
+## 其他模式
 
-会话创建时读当前模式，用**宿主原生的 per-agent 工具过滤**
-（`agent.ctx.tools.restrict({ deny })`，见 `packages/core/tools/src/index.ts:1061`）
-把当前模式永远用不到的工具从可见性里收掉 —— 模型看不到 = 不进请求体。
+规则 `webshell`、`ctf`、`security` 按对应插件的模式门禁隐藏模型在当前模式下不能调用的工具。`pentest-rce-focus` 只应用于 Pentest。工具名按实时清单匹配，避免向宿主传递未知名称。
 
-思路来自 **BreachWeave 的 `pi-mcp-adapter`**（"别把全部工具声明塞进上下文"），
-但落地形态更轻：不造代理层、不加新工具、不改变任何调用语义，
-直接复用宿主已有的可见性过滤能力。
-
-此外提供 `tool_pack` 按需入口：只把 **WebShell 管理**这个低频大类默认收起，
-进入相应阶段时由模型用 `tool_pack(action=load, pack=webshell)` 加载。工具包只改可见性，
-不改变任何工具的行为或权限；基础侦察、记录、报告工具始终常驻。
-
-## 实测收益（每个会话每轮）
-
-| 会话模式 | 隐藏工具 | 省下 |
-|---|---|---|
-| 渗透测试 | `ctf_*`（4 个） | ~3K |
-| **代码审计** | `webshell_*` + `ctf_*`（17 个） | **~13K** |
-| CTF 解题 | `webshell_*`（13 个） | ~10K |
-| 标准（宿主默认预设） | webshell + ctf + security 组全部命中项 | 视实际加载插件数 |
-
-> 数字取自真实请求体（`docs/reports/02-体检与评估/evidence/真实请求体样本-164K.json`）。
-
-## 纪律
-
-- **只减不增**：只用 `deny`，从不用 `allow`（`allow` 会把未列出的工具全部隐藏，语义危险）。
-- **不发明规则**：规则表只收录「插件自己已经声明的门禁」，每条都标注源码依据；
-  门禁改了这里必须跟着改 —— `test/run.mjs` 里有**源码契约锁**，漏改会亮红。
-- **失败可见**：`restrict` 抛错只 `logger.warn` 并**放行**（宁可多带工具，也不要把工具面改成半截）。
-- **可关**：`enable: false` 整体关闭；`rules: { webshell: false }` 逐条关闭。
-- **工具包可关**：`packs: { webshell: false, ad: false }` 可让指定包始终常驻。
-- **幂等**：同一 agent 只挂一次；`agent/disposed` 时释放过滤器。
+| 模式 | 主要过滤 |
+|---|---|
+| Pentest | CTF、WebShell、派单/工作流、矩阵、记忆/轨迹、后渗透、内网和语料维护入口；主动扫描器默认收起 |
+| Code Audit | CTF、WebShell、当前模式不可用的工具包入口 |
+| CTF Solver | WebShell、当前模式不可用的工具包入口 |
+| 其他/默认 | 按各规则白名单过滤；未列入规则的宿主工具保持可见 |
 
 ## 配置
 
@@ -58,19 +31,24 @@
     - id: dsh-tool-scope
       name: '@dsh-external/dsh-tool-scope'
       config:
-        enable: true      # 总开关
-        log: true         # 启动与每次收窄打一行 info
-        rules:            # 逐条开关（缺省 = 启用）
+        enable: true
+        log: true
+        rules:
           webshell: true
           ctf: true
           security: true
-        packs:            # 低频工具包；false = 不收，始终可见
-          webshell: true
+          pentest-rce-focus: true
+          toolPack: true
 ```
 
-## 不做什么
+`enable: false` 可关闭过滤；逐条规则设为 `false` 可恢复对应工具的可见性。`restrict()` 失败时会记录警告并保留原工具清单。
 
-- 默认只收起上表列出的低频包；未进入 `packs.js` 的无门禁工具原样保留，
-  避免替产品擅自砍掉核心扫描器与阶段门禁。
-- 不改任何工具的**行为**，只改「模型能不能看见它」。
-- 不做 MCP 工具的收窄（那是 `dsh-mcp-studio` 的 `exposure` / `proxyThreshold` 职责）。
+## 边界
+
+该插件改变模型能看到的工具声明，不替代目标授权、执行端权限或审批策略。Pentest 提示词也要求只测试明确授权的目标、只收集与单条 RCE 路径有关的信息，并在 RCE 证实后停止。
+
+## 测试
+
+```bash
+node --import ../../scripts/test-stub-register.mjs test/run.mjs
+```

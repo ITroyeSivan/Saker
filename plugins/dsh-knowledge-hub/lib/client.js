@@ -646,7 +646,13 @@ function PackCard(props) {
     rpc(props.connection, 'packs-sync', { force: true }).then(function (r) {
       setBusy('');
       if (isOk(r)) {
-        setNotice({ ok: r.value.failed === 0, text: '同步完成：' + r.value.ok + ' 成功 / ' + r.value.failed + ' 失败' });
+        var catalog = r.value.catalog || {};
+        var catalogText = catalog.updated
+          ? '；来源清单已更新到 ' + (catalog.release || ('r' + catalog.revision))
+          : catalog.checked
+            ? '；来源清单已检查'
+            : '';
+        setNotice({ ok: r.value.failed === 0, text: '更新完成：' + r.value.ok + ' 成功 / ' + r.value.failed + ' 失败' + catalogText });
         status(); props.onChanged();
       } else setNotice({ ok: false, text: errText(r) });
     }).catch(function (e) { setBusy(''); setNotice({ ok: false, text: String(e && e.message || e) }); });
@@ -709,13 +715,14 @@ function PackCard(props) {
     React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' } },
       React.createElement('span', { style: { fontWeight: 700, color: ready === total && total ? '#1a7f37' : '#b45309' } }, '知识包 ' + ready + '/' + total),
       React.createElement('span', { style: CSS.hint }, '同步模式：' + modeLabel + (syncMode === 'auto' ? '（' + (st.autoSyncIntervalDays || 7) + ' 天一次）' : '') + '；按需加载，不常驻上下文'),
+      React.createElement('span', { style: CSS.hint }, '来源清单：' + (st.release || '内置') + (st.catalogSource === 'remote' ? '（远程）' : '（内置）')),
       React.createElement('button', {
         type: 'button', disabled: !!busy,
         onClick: function () { setShowAdmin(!showAdmin); },
         style: btn(false, { padding: '4px 10px', fontSize: 12 }),
       }, showAdmin ? '收起设置' : '同步设置'),
       React.createElement('div', { style: { flex: 1 } }),
-      React.createElement('button', { type: 'button', disabled: !!busy || syncMode === 'frozen', onClick: syncAll, style: btn(false, { padding: '4px 12px', fontSize: 12 }) }, busy === 'sync' ? '同步中…' : '同步全部'),
+      React.createElement('button', { type: 'button', disabled: !!busy || syncMode === 'frozen', onClick: syncAll, style: btn(false, { padding: '4px 12px', fontSize: 12 }) }, busy === 'sync' ? '更新中…' : '一键更新'),
       React.createElement('button', { type: 'button', disabled: !!busy, onClick: rebuild, style: btn(false, { padding: '4px 12px', fontSize: 12 }) }, busy === 'index' ? '重建中…' : '重建索引'),
       React.createElement('button', { type: 'button', onClick: function () { setExpanded(!expanded); }, style: btn(false, { padding: '4px 12px', fontSize: 12 }) }, expanded ? '收起列表' : '查看列表')),
     showAdmin ? React.createElement('div', { style: { display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 5, paddingTop: 5, borderTop: '1px dashed var(--dsw-alias-border-l1,#e4e4e7)' } },

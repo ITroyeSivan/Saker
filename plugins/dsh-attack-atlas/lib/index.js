@@ -962,6 +962,19 @@ export function isBoundedDiscoverySession(session) {
 	return false;
 }
 
+/**
+ * 覆盖提醒是否**注入会话**。默认关。
+ *
+ * 为什么默认关（2026-09-24 用户反馈「attackatlas 老是发消息浪费 token」）：
+ * 每条提醒都是一条 role=user 的消息，会被追加进模型上下文并再滚一轮——
+ * 一次作业里按主类各发一条，token 成本与聊天区噪声都很可观。
+ *
+ * 安全前提：提醒不是覆盖收口的唯一防线。`stage_gate` 的阶段门与
+ * `redteam_coverage_list` 仍然对未终态格子把关，自动点亮（真正的产物）也完全保留。
+ * 需要旧行为时设 `SAKER_ATLAS_NUDGE=1`（或测试里传 `deps.nudge`）。
+ */
+const ATLAS_NUDGE_IN_SESSION = process.env.SAKER_ATLAS_NUDGE === "1";
+
 function nudgeUndetermined(ctx, sessionId, mode, taxonomy, doneKeys, markedCats, deps = {}) {
 	const out = [];
 	let agent = null;
@@ -982,7 +995,7 @@ function nudgeUndetermined(ctx, sessionId, mode, taxonomy, doneKeys, markedCats,
 		const message = {
 			id: `atlas-nudge-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
 			role: "user",
-			content: [{ type: "text", text: `[AttackAtlas·覆盖提醒] finding 已自动点亮「${cat.label}」内关联格子。该主类仍有 ${undetermined.length} 格未终态：${names}——收口时逐格终态三选一（${trioWords(taxonomy)}）${MODE_CLOSE_HINT[mode] ?? ""}，或用 redteam_coverage_sync 整表批量回写（key/终态均可写中文标签）。` }],
+			content: [{ type: "text", text: `[AttackAtlas·覆盖提醒] finding 已自动点亮「${cat.label}」内关联格子。该主类仍有 ${undetermined.length} 格没有结论：${names}——收尾时逐格从三个结论中选一个（${trioWords(taxonomy)}）${MODE_CLOSE_HINT[mode] ?? ""}，或用 redteam_coverage_sync 整表批量回写（key/结论均可写中文标签）。` }],
 			source: { kind: "user" }
 		};
 		// 注入安全：由 finding 登记工具路径调用（工具执行期），不在 Session.append 临界区里。
@@ -1039,7 +1052,10 @@ export async function autoLightFromFinding(ctx, st, sessionId, findingArgs, deps
 	const bounded = deps.bounded === true || (deps.bounded !== false && (() => {
 		try { return isBoundedDiscoverySession(resolveAgents(ctx)?.get?.(sessionId)?.session); } catch { return false; }
 	})());
-	const nudged = !bounded && markedCats.size ? nudgeUndetermined(ctx, sessionId, mode, taxonomy, done, [...markedCats], deps) : [];
+	const nudgeEnabled = deps.nudge ?? ATLAS_NUDGE_IN_SESSION;
+	const nudged = nudgeEnabled && !bounded && markedCats.size
+		? nudgeUndetermined(ctx, sessionId, mode, taxonomy, done, [...markedCats], deps)
+		: [];
 	return { marked, nudged };
 }
 
@@ -1158,7 +1174,7 @@ function apply(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "redteam_coverage_list",
-		description: "读取本会话攻击面图谱的全部覆盖终态（格子+阶段），复核员抽查与收口核对用。",
+		description: "读取本会话攻击面图谱的全部覆盖结论（格子+阶段），复核员抽查与收尾核对用。",
 		parameters: {},
 		output: {
 			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },

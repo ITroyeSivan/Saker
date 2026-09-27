@@ -256,7 +256,10 @@ if (pruned.length) {
   console.log(`pruned ${pruned.length} dangling dep(s): ${pruned.join(', ')}`)
 }
 
-// 1. root bundle first (presets + preset-root registration)
+// The root bundle publishes presets that may expose tools added by feature
+// packages. Keep the existing root active until all feature packages succeed;
+// otherwise a failed plugin upgrade leaves a new preset pointing at an old
+// plugin and the host rejects new sessions with `Unknown exposedTools`.
 let ok = 0
 let fail = 0
 const rootTgz = join(root, `dsh-saker-${rootPkg.version}.tgz`)
@@ -264,10 +267,9 @@ if (!existsSync(rootTgz)) {
   console.error(`root tgz missing: ${rootTgz}\nrun \`node scripts/pack-all.mjs\` first`)
   process.exit(1)
 }
-if (addWithRetry('root dsh-saker', rootPkg.name, fileSpec(rootTgz), rootPkg.version)) ok++
-else fail++
 
-// 2. feature plugins
+// 1. Feature plugins first. A failed upgrade must not publish their new tool
+//    names through the root preset.
 for (const { name, dir, pkg: p } of pluginDirs) {
   const tgz = join(dir, `dsh-external-${name}-${p.version}.tgz`)
   if (!existsSync(tgz)) {
@@ -278,6 +280,15 @@ for (const { name, dir, pkg: p } of pluginDirs) {
   if (addWithRetry(name, p.name, fileSpec(tgz), p.version)) ok++
   else fail++
 }
+
+if (fail) {
+  console.log(`\ninstalled plugins ok=${ok} fail=${fail}; root bundle was not updated`)
+  process.exit(1)
+}
+
+// 2. Update preset/tool exposure after every feature package succeeded.
+if (addWithRetry('root dsh-saker', rootPkg.name, fileSpec(rootTgz), rootPkg.version)) ok++
+else fail++
 
 console.log(`\ninstalled ok=${ok} fail=${fail}`)
 if (fail) process.exit(1)

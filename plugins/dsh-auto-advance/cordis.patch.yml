@@ -8,6 +8,6 @@
     - id: dsh-auto-advance
       name: '@dsh-external/dsh-auto-advance'
       config:
-        enable: true
+        enable: false
         maxAutoTurns: 5
         cooldownMs: 30000

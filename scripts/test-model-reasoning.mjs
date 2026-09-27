@@ -1,5 +1,4 @@
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
@@ -8,14 +7,15 @@ import { pathToFileURL } from 'node:url'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const SCRIPT = join(ROOT, 'scripts', 'configure-model-reasoning.mjs')
-const HOST_SRC = process.env.DSH_SRC || resolve(ROOT, '..', '_ref', 'dsh-src-0.1.6-alpha.1')
+const HOST_SRC = process.env.DSH_SRC || resolve(ROOT, '..', '_ref', 'dsh-src-0.1.7-rc.2')
+const TEMP_ROOT = resolve(ROOT, '..', '_ref', 'tmp')
 const yamlPkg = join(HOST_SRC, 'node_modules', 'js-yaml', 'package.json')
 if (!existsSync(yamlPkg)) {
   console.log('skip model-reasoning（缺少 js-yaml，设置 DSH_SRC 后重跑）')
   process.exit(0)
 }
 const yaml = createRequire(pathToFileURL(yamlPkg).href)('js-yaml')
-const HOME = mkdtempSync(join(tmpdir(), 'saker-model-reasoning-'))
+const HOME = mkdtempSync(join(TEMP_ROOT, 'saker-model-reasoning-'))
 const settings = join(HOME, 'settings.yaml')
 
 let pass = 0

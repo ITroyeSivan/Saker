@@ -6,6 +6,8 @@ import os from "node:os";
 import path from "node:path";
 import { parseSemgrepJson, buildArgs, findRefsDir, appendReconcile, runSemgrep, runSemgrepProcess, RULE_LAYERS, hasBin, configuredSemgrepBin, resolveSemgrepBin } from "../lib/index.js";
 
+const pathRuleId = "E..WorkBuddy.WebSec.dsh._ref.dsh-home-test.profiles.web.node_modules.dsh-saker.preset.code-audit.refs.lang.java-audit.semgrep-rules.java-sqli-statement-execute";
+
 let pass = 0, fail = 0;
 const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); } else { fail++; console.log(`FAIL ${label}`); } };
 
@@ -21,7 +23,9 @@ const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); 
 	});
 	const p = parseSemgrepJson(fixture);
 	ok("解析：total 3 / 去重 2 / 分级计数", p.ok && p.total === 3 && p.unique === 2 && p.bySeverity.ERROR === 2 && p.bySeverity.WARNING === 1);
-	ok("解析：Top 规则摘要与对账指引文案", p.summaryText.includes("java.lang.security.audit.sqli×2") && p.summaryText.includes("命中≠漏洞"));
+	ok("解析：Top 规则摘要与对账指引文案", p.summaryText.includes("sqli×2") && p.summaryText.includes("命中≠漏洞"));
+	const longRule = parseSemgrepJson(JSON.stringify({ results: [{ check_id: pathRuleId, path: "src/Main.java", start: { line: 1 }, extra: { severity: "ERROR" } }] }));
+	ok("解析：摘要与对账规则名均为短名，结构化结果保留完整 ID", longRule.summaryText.includes("java-sqli-statement-execute×1") && !longRule.summaryText.includes("WorkBuddy") && longRule.hits[0].rule === "java-sqli-statement-execute" && longRule.hits[0].ruleId === pathRuleId);
 	const capped = parseSemgrepJson(JSON.stringify({ results: Array.from({ length: 500 }, (_, i) => ({ check_id: "r" + i, path: "a.java", start: { line: i }, extra: { severity: "ERROR", message: "m" } })) }), 50);
 	ok("解析：展示截断（500 命中展示 50，unique 全计）", capped.hits.length === 50 && capped.unique === 500);
 	ok("解析：非 JSON 拒绝", parseSemgrepJson("not json").ok === false);
@@ -67,13 +71,15 @@ const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); 
 	const refs = path.join(ws, "refs");
 	fs.mkdirSync(target, { recursive: true });
 	fs.mkdirSync(path.join(refs, "lang", "java-audit", "semgrep-rules"), { recursive: true });
-	const semgrepOut = JSON.stringify({ results: [{ check_id: "r.a", path: "A.java", start: { line: 1 }, extra: { severity: "ERROR", message: "m" } }], errors: [] });
+	const semgrepOut = JSON.stringify({ results: [{ check_id: pathRuleId, path: "A.java", start: { line: 1 }, extra: { severity: "ERROR", message: "m" } }], errors: [] });
 	const r = await runSemgrep({
 		workspace: ws, target, layer: "builtin-java",
 		spawnFn: (bin, args) => ({ status: 0, stdout: semgrepOut, args }),
 		fsMod: fs, refsCandidates: [refs], hasBinFn: () => true
 	});
 	ok("运行：产物 JSON 落盘 + 证据行 + 对账双写", r.ok && r.total === 1 && r.reconciled === 1 && fs.existsSync(path.join(ws, "artifacts", "scans")) && fs.readFileSync(path.join(ws, "evidence-index.md"), "utf8").includes("semgrep scan --json"));
+	const csv = fs.readFileSync(path.join(ws, "scan-reconcile.csv"), "utf8");
+	ok("运行：CSV 对账使用短规则名，不泄漏绝对路径 ID", csv.includes("java-sqli-statement-execute") && !csv.includes("E..WorkBuddy"));
 	ok("运行：证据编号自增格式", /^E\d+$/.test(r.evidenceId));
 	const r2 = await runSemgrep({ workspace: ws, target, layer: "custom", rulesPath: "/no/such.yml", spawnFn: () => ({ status: 0, stdout: "{}" }), fsMod: fs, refsCandidates: [refs], hasBinFn: () => true });
 	ok("运行：custom 规则路径不存在拒绝", r2.ok === false && r2.error.includes("规则路径不存在"));

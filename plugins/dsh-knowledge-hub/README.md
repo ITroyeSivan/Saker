@@ -5,7 +5,9 @@ Saker 的知识库中心：随包 refs、用户积累、自动同步知识包与
 ## 解决的问题
 
 - 随包手册（`preset/*/refs`）只读随根包分发，用户无法落笔——本插件新增可写的**用户层** `DSH_HOME/refs/`，同名文件覆盖包内（层叠，用户优先）。
-- 外部完整资产只在手册里留链接——本插件提供**导入层** `DSH_HOME/refs/imports/`，内置 20 个知识包并自动做 Git 稀疏同步。第三方内容不进 Saker 包。
+- 外部完整资产只在手册里留链接——本插件提供**导入层** `DSH_HOME/refs/imports/`，内置 23 个知识包并自动做 Git 稀疏同步。第三方内容不进 Saker 包。
+  其中 **Awesome-POC / Nday-Exploit-Plan / PeiQi WIKI** 是护网场景的 Nday/POC 语料源：
+  稀疏同步后实测只有 ~5.5MB（源仓库 390–880MB），覆盖泛微 51 / 致远 94 / 用友 44 / 金蝶 14 篇可检索文档。
 - 模型找知识靠"猜目录"——本插件提供 `knowledge_search` 混合检索，先命中 chunk，再用 `knowledge_read` 精读。
 - 知识量上来后子串扫描会漏、会慢——本插件用 SQLite FTS5 + BM25，中文 bigram 召回，标题/路径/许可证/metadata 参与重排。
 - Exploit-DB 的元数据体积大、更新频繁，不适合随包——本插件对它做**字段化索引**：约定目录 `imports/exploitdb/`，识别到 `files_exploits.csv`（16 列：id/file/description/date_published/author/type/platform/port/.../codes/tags）即建索引，兼容旧布局 `exploits.csv` 兜底。
@@ -13,7 +15,7 @@ Saker 的知识库中心：随包 refs、用户积累、自动同步知识包与
 ## 安装
 
 ```powershell
-dsh plugin --profile web add "file:./plugins/dsh-knowledge-hub/dsh-external-dsh-knowledge-hub-0.3.18.tgz"
+dsh plugin --profile web add "file:./plugins/dsh-knowledge-hub/dsh-external-dsh-knowledge-hub-0.3.19.tgz"
 ```
 
 设置页出现「知识库」tab。
@@ -28,6 +30,7 @@ dsh plugin --profile web add "file:./plugins/dsh-knowledge-hub/dsh-external-dsh-
 - 阅读体验：打开文章后占满内容区；包内文档默认 Markdown 预览，可一键切源码，不再挤在窄列里看原始文本。
 - Git 导入：URL + 名称 → 克隆到 `imports/<name>`。
 - 知识包：`packs/knowledge-packs.json` 定义来源、许可证、分支、稀疏路径、适用模式和优先级；支持 `DSH_HOME/refs/packs/*.json` 用户覆盖或扩展。
+- 来源清单：插件内置一份可版本化的知识源清单；设置页「一键更新」会先刷新远程清单，再同步内容与重建索引，因此新增来源不必先升级插件。远程失败时自动退回上一份清单。
 - 自动同步：启动后后台同步推荐包，默认 7 天刷新；`DSH_KNOWLEDGE_AUTOSYNC=0` 可关闭。
 - 后台索引：首次大索引由独立 Node 进程完成，不阻塞宿主；未就绪时搜索回退到旧扫描器。
 - 混合检索：FTS5 + BM25 + 中文 bigram + 路径/标题/包权重；搜索结果返回 `chunkId`，可精确读取命中附近内容。
@@ -43,6 +46,18 @@ dsh plugin --profile web add "file:./plugins/dsh-knowledge-hub/dsh-external-dsh-
 - `local-only`：CC BY-NC、无明确许可证或来源许可待核，只做用户本地同步，不随 Saker 包分发。
 
 同步器只拉稀疏文本子集，例如 HackTricks 只拉 `src/**/*.md`，Sigma 只拉规则 YAML；大图片、靶场二进制和无关源码不进入知识库。
+
+### 「一键更新」到底更新什么
+
+它做三件事：刷新来源清单 → `git pull` 清单里的来源 → 重建检索索引。
+
+它**不会**自动发现整个互联网，也不会把任意 POC 散文自动认证成可用探针。原因是公开仓库的
+目录结构、条目状态、路径与判据质量都不统一，部分站点还需要登录或验证码。可行的边界是：
+
+- 有稳定 Git 来源的知识：自动更新。
+- 新来源：先从公开清单或 `DSH_HOME/refs/packs/*.json` 加入来源清单，下一次更新自动纳入。
+- 只有文档、没有机器可判定探针的条目：先 `knowledge_search` 检索并人工/模型提取，再通过
+  `nday_learn` 落入用户层。
 
 ## 安全
 

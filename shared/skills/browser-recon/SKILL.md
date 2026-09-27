@@ -11,7 +11,7 @@ description: 浏览器/网页交互作战技能：JS 抓取、SPA 渲染、登�
 ## 通道前提（浏览器运行时不由本技能提供）
 
 本技能是**操作指令文本**，本身不含浏览器运行时。真实浏览器自动化优先使用宿主
-`0.1.6-alpha.1` 提供的能力：
+`0.1.7-rc.2` 提供的能力：
 
 - 若 profile 已启用实验性 Browser Use，优先使用宿主 `mcp__playwright-mcp__*` /
   `mcp__chrome-devtools-mcp__*` 工具或 Stagehand 的 `stagehand_*` 工具。

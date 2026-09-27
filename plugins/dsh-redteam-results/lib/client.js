@@ -139,7 +139,7 @@ var STATUS_OPTIONS_OF = {
 	"pentest": ["pending", "suspect", "verified", "false-positive", "fixed"],
 	"code-audit": ["pending", "code-reviewed", "suspect", "verified", "false-positive", "fixed"]
 };
-var LEDGER_STATUS_LABEL = { pending: "进行中", verified: "已收口", "false-positive": "挂起", fixed: "已路由" };
+var LEDGER_STATUS_LABEL = { pending: "进行中", verified: "已验证", "false-positive": "挂起", fixed: "已路由" };
 var CTF_STATUS_LABEL = { pending: "未解", stuck: "卡点", verified: "已解·flag 验证", "false-positive": "放弃/排除", fixed: "已复盘" };
 var TIMELINE_STATUS_LABEL = { pending: "待复核", "code-reviewed": "复核通过", verified: "已证实", "false-positive": "排除", fixed: "已处置" };
 var CLOUDPATH_STATUS_LABEL = { pending: "待验证", verified: "已证实", "false-positive": "排除", fixed: "已修复" };
@@ -206,7 +206,7 @@ function mdReport(f, mode) {
 			"- " + M.kindLabel + "：" + (f.type || "未分类"),
 			"- " + M.locLabel + "：" + (f.target || "（未填写）"),
 			"- 状态：" + ((mode === "ctf-solver" ? CTF_STATUS_LABEL : LEDGER_STATUS_LABEL)[f.status] || f.status) + (mode === "ctf-solver" ? " ｜ 模块：" + (f.type || "-") : " ｜ 优先级：" + (SEVERITY_LABEL[f.severity] || f.severity)) + " ｜ 证据等级：" + (EVIDENCE_LABEL[f.evidenceLevel] || f.evidenceLevel),
-			"- 登记时间：" + fmtTime(f.createdAt) + (f.verifiedAt ? " ｜ 收口时间：" + fmtTime(f.verifiedAt) : ""),
+			"- 登记时间：" + fmtTime(f.createdAt) + (f.verifiedAt ? " ｜ 验证时间：" + fmtTime(f.verifiedAt) : ""),
 			"",
 			"## " + M.descLabel,
 			"",
@@ -493,7 +493,7 @@ function mdOverview(meta, stats, rows, mode) {
 		lines = lines.concat(chrono.map(function (f, i) {
 			return (i + 1) + ". [" + (f.timelineAt || "unknown") + "] " + (f.type || "未分类") + " · " + f.title + "（" + (f.target || "无主机") + "，严重度 " + (SEVERITY_LABEL[f.severity] || f.severity) + "）";
 		}));
-		lines.push("", "## 处置建议", "", "按时间线逐节点复核取证过程与证据引用，还原入口点→执行→持久化→横向→数据外传的完整攻击链；未证实（待复核）节点优先补证据，已排除/已处置节点标注收口。", "");
+		lines.push("", "## 处置建议", "", "按时间线逐节点复核取证过程与证据引用，还原入口点→执行→持久化→横向→数据外传的完整攻击链；未证实（待复核）节点优先补证据，已排除/已处置节点标明结论。", "");
 		return lines.join("\n");
 	}
 	if (MODE_META[mode] && MODE_META[mode].archetype === "cloudpath") {
@@ -519,7 +519,7 @@ function mdOverview(meta, stats, rows, mode) {
 		lines2 = lines2.concat(sorted2.map(function (f, i) {
 			return (i + 1) + ". [" + (SEVERITY_LABEL[f.severity] || f.severity) + "] " + f.title + "（" + (f.type || "未分类") + "，资源 " + (f.resource || f.target || "无") + "）" + (f.summary ? " — " + f.summary : "");
 		}));
-		lines2.push("", "## 收口建议", "", "逐路径复核四要素证据（入口/身份/权限/资源）与影响证明，未验证路径优先补证据；已排除/已修复路径标注收口。", "");
+		lines2.push("", "## 复核建议", "", "逐路径复核四要素证据（入口/身份/权限/资源）与影响证明，未验证路径优先补证据；已排除/已修复路径标明结论。", "");
 		return lines2.join("\n");
 	}
 	var label = MODE_META[mode] ? MODE_META[mode].label : mode;
@@ -1239,7 +1239,7 @@ function Detail(props) {
 				mode === "ctf-solver" ? null : React.createElement("span", null, "优先级", React.createElement("b", null, SEVERITY_LABEL[f.severity] || f.severity)),
 				React.createElement("span", null, "证据等级", React.createElement("b", null, EVIDENCE_LABEL[f.evidenceLevel] || f.evidenceLevel)),
 				React.createElement("span", null, "登记时间", React.createElement("b", null, fmtTime(f.createdAt))),
-				f.verifiedAt ? React.createElement("span", null, "收口时间", React.createElement("b", null, fmtTime(f.verifiedAt))) : null),
+				f.verifiedAt ? React.createElement("span", null, "验证时间", React.createElement("b", null, fmtTime(f.verifiedAt))) : null),
 			f.description || f.summary ? Block({ title: meta.descLabel }, f.description || f.summary) : null,
 			f.chain ? Block({ title: meta.chainLabel }, f.chain) : null,
 			f.poc ? Block({ title: meta.pocTitle }, f.poc) : null,
@@ -2094,7 +2094,9 @@ function ResultsView(props) {
 var REDTEAM_MANAGER_UI_NAMESPACE = "redteam-manager-ui";
 
 function injectVisibleConversationView(ctx, field, register) {
-	var settings = ctx.settingsScope.bind({ namespace: REDTEAM_MANAGER_UI_NAMESPACE });
+	var settings = ctx.configForms && ctx.configForms.get
+		? ctx.configForms.get(REDTEAM_MANAGER_UI_NAMESPACE)
+		: ctx.settingsScope.bind({ namespace: REDTEAM_MANAGER_UI_NAMESPACE });
 	ctx.slots.inject("conversation.view", function () {
 		var disposeView;
 		function isVisible() {
@@ -2137,5 +2139,5 @@ function apply(ctx) {
 	});
 }
 
-module.exports = { name: "dsh-redteam-results-client", inject: ["slots", "settingsScope"], apply: apply };
+module.exports = { name: "dsh-redteam-results-client", inject: ["slots", "configForms"], apply: apply };
 return module.exports; } });

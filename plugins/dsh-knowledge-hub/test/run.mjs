@@ -14,6 +14,7 @@
 // 用法: node --import ../../scripts/test-stub-register.mjs test/run.mjs
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -26,7 +27,7 @@ process.env.DSH_HOME = HOME;
 process.env.SAKER_DISABLE_BUNDLE = "1";
 
 const { dispatch, stats, searchAll, ensureKnowledgeIndex, closeKnowledgeIndex, apply, autoSyncKnowledgePacks, getSyncMode, setSyncMode, translateQuery, queryConcepts, coverageBonusOf } = await import("../lib/index.js");
-const { syncPack } = await import("../lib/packs.js");
+const { syncPack, refreshPackCatalog, catalogCachePathForDebug, loadCatalog, packsStatus } = await import("../lib/packs.js");
 
 let pass = 0, fail = 0;
 const ok = (label, cond, extra) => {
@@ -353,6 +354,87 @@ write(path.join(IMPORTS, "team-notes", "win", "ad.md"), "# 域渗透\nKerberoast
 		readValue.ok && typeof readValue.value.absPath === "string" && fs.existsSync(readValue.value.absPath)
 		&& readText.includes(readValue.value.absPath),
 		JSON.stringify({ root: readValue.value.root, absPath: readValue.value.absPath }));
+}
+
+// ── 12b. 统一出站策略：冻结档必须在 git 之前拦下；本地路径不算出站 ──────────
+// ── 12a. 来源清单本身可远程更新：一键更新不再受插件版本锁死 ────────────────
+{
+	const remotePack = (overrides = {}) => ({
+		id: "remote-only-pack",
+		title: "Remote only",
+		description: "fixture",
+		repo: "https://example.invalid/remote.git",
+		branch: "main",
+		license: "MIT",
+		licenseUrl: "",
+		distribution: "bundle-safe",
+		modes: ["pentest"],
+		domains: ["fixture"],
+		tags: ["fixture"],
+		sparse: ["**/*.md"],
+		priority: 99,
+		autoInstall: false,
+		...overrides,
+	});
+	const remoteCatalog = (revision, packs) => JSON.stringify({
+		version: 1,
+		revision,
+		release: `fixture-r${revision}`,
+		catalogUrl: "https://example.invalid/knowledge-packs.json",
+		autoSyncIntervalDays: 7,
+		packs,
+	});
+	const server = http.createServer((req, res) => {
+		res.setHeader("content-type", "application/json");
+		if (req.url === "/bad") {
+			res.end("{not-json");
+			return;
+		}
+		if (req.url === "/old") {
+			res.end(remoteCatalog(1, [remotePack()]));
+			return;
+		}
+		res.end(remoteCatalog(999, [remotePack()]));
+	});
+	const port = await new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server.address().port)));
+	const url = `http://127.0.0.1:${port}/new`;
+	const allow = async () => ({ decision: "allow", reason: "test" });
+	const cache = catalogCachePathForDebug();
+	try {
+		fs.rmSync(path.dirname(cache), { recursive: true, force: true });
+
+		const bad = await refreshPackCatalog({ url: `http://127.0.0.1:${port}/bad`, force: true, gate: allow });
+		ok("坏 JSON 清单不会被接受", bad.ok === false && /不是合法 JSON/.test(bad.error), JSON.stringify(bad));
+		ok("坏 JSON 不产生远程缓存", !fs.existsSync(cache));
+
+		const old = await refreshPackCatalog({ url: `http://127.0.0.1:${port}/old`, force: true, gate: allow });
+		ok("旧 revision 不覆盖内置清单", old.ok === true && old.updated === false && old.reason === "remote-not-newer", JSON.stringify(old));
+
+		const next = await refreshPackCatalog({ url, force: true, gate: allow });
+		ok("新 revision 的远程清单被接受", next.ok === true && next.updated === true && next.revision === 999, JSON.stringify(next));
+		ok("远程清单缓存已落盘", fs.existsSync(cache));
+		let catalog = loadCatalog();
+		ok("loadCatalog 合并远程新增来源", catalog.packs.some((pack) => pack.id === "remote-only-pack"));
+		ok("packs-status 能区分远程来源", packsStatus().catalogSource === "remote" && packsStatus().revision === 999);
+
+		write(path.join(REFS, "packs", "override.json"), JSON.stringify({
+			version: 1,
+			revision: 1,
+			release: "user",
+			packs: [remotePack({ title: "User override wins", priority: 100 })],
+		}));
+		catalog = loadCatalog();
+		ok("用户覆盖仍然高于远程清单",
+			catalog.packs.find((pack) => pack.id === "remote-only-pack")?.title === "User override wins");
+
+		const olderAgain = await refreshPackCatalog({ url: `http://127.0.0.1:${port}/old`, force: true, gate: allow });
+		ok("已接受更高 revision 后，旧清单不能回退覆盖",
+			olderAgain.ok === true && olderAgain.updated === false && fs.existsSync(cache), JSON.stringify(olderAgain));
+	} finally {
+		await new Promise((resolve) => server.close(resolve));
+		fs.rmSync(path.join(REFS, "packs"), { recursive: true, force: true });
+		fs.rmSync(path.dirname(cache), { recursive: true, force: true });
+	}
 }
 
 // ── 12b. 统一出站策略：冻结档必须在 git 之前拦下；本地路径不算出站 ──────────

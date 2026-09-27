@@ -341,7 +341,9 @@ function HunterView() {
 var REDTEAM_MANAGER_UI_NAMESPACE = "redteam-manager-ui";
 
 function injectVisibleConversationView(ctx, field, register) {
-	var settings = ctx.settingsScope.bind({ namespace: REDTEAM_MANAGER_UI_NAMESPACE });
+	var settings = ctx.configForms && ctx.configForms.get
+		? ctx.configForms.get(REDTEAM_MANAGER_UI_NAMESPACE)
+		: ctx.settingsScope.bind({ namespace: REDTEAM_MANAGER_UI_NAMESPACE });
 	ctx.slots.inject("conversation.view", function () {
 		var disposeView;
 		function isVisible() {
@@ -384,5 +386,5 @@ function apply(ctx) {
 	});
 }
 
-module.exports = { name: "dsh-hunter-client", inject: ["slots", "settingsScope"], apply: apply };
+module.exports = { name: "dsh-hunter-client", inject: ["slots", "configForms"], apply: apply };
 return module.exports; } });

@@ -42,7 +42,7 @@ description: 代码审计模式作战手册：审计前置识别、Fortify 规�
 - **动态审计（dynamic）**：**只有**用户提供的本地可用复现环境**真实证明漏洞生效**，才标
   动态·验证成功（auditMode=dynamic + 状态可进已验证）。
 - **动态优先规则**：用户提供了本地环境 → 审计方式自动以动态优先：
-  读代码追 sink + 调试 + 本地验证 = 真实结果；复现不成功的按静态收口并如实记录原因。
+  读代码追 sink + 调试 + 本地验证 = 真实结果；复现不成功的按静态分析结论收尾，并如实记录原因。
 
 **开工问询（任务下达后的第一步，先于 Triage）**：用户未指明审计形态时，用 ask_user 弹出三选：
 
@@ -62,7 +62,7 @@ shared/refs/finding-fields.md）；成果页列表/详情/导出报告/统计分
 > 元原则与前两模式同：通道成本随流程递增；通道缺失按「工具使用策略·通道完整阶梯」降级
 > （已挂 → 自配 → 问装 → 脚本 → 诚实降级）；本模式分叉轴=**验证等级 × 产物形态**
 > （静态 code-reviewed / 动态 verified；源码 / 反编译 / 小程序解包）——已内建于形态判定
-> 与状态机，不需要额外姿态判定。跨阶段复用查附录 C-2。
+> 与状态流转，不需要额外姿态判定。跨阶段复用查附录 C-2。
 
 | 阶段 | 默认通道 | 降级链 |
 |---|---|---|
@@ -90,9 +90,9 @@ shared/refs/finding-fields.md）；成果页列表/详情/导出报告/统计分
   `refs/lang/` 对应语言手册 + 公开漏洞库检索兜底，并登记「未收录框架」到规则降级记录。
 - **经验召回**：开工读工作区 `lessons.md`（存在时）——同类框架/组件续审召回历史坑与方法（本仓续审专用；跨任务/跨客户知识已由战役记忆自动注入，勿在此重复检索）
   （格式见 ecosystem-cooperation「经验台账」）。
-- **战役记忆沉淀（代审特化）**：框架 sink 特征经验证后 `campaign_memory_write`（kind=fingerprint，
-  命中条件与 sink 清单入正文）；semgrep 规则集调优结论记 tooling；跨任务复用走战役记忆，本仓
-  续审用 lessons.md——两轨不重叠。
+- **经验沉淀（代审特化）**：框架 sink 特征经验证后落工作区台账（evidence-index.md 认知节 +
+  fact_key，kind=fingerprint，命中条件与 sink 清单入正文）；semgrep 规则集调优结论记 tooling。
+  跨任务复用走台账/记忆库（campaign-memory 显式启用时才有），本仓续审用 lessons.md——两轨不重叠。
 - 完全不认识的代码/框架/系统：才走 0→1 全量审计，且先向用户确认范围与深度。
 
 ## 静态审计标准
@@ -111,6 +111,7 @@ shared/refs/finding-fields.md）；成果页列表/详情/导出报告/统计分
 - 按语言建立危险函数清单（greppable sinks）：命令执行、SQL、反序列化、
   任意文件读写、SSRF、XXE、模板注入、路径穿越等。
 - 审计顺序：外部输入入口 → 传播路径 → sink；先扫 sink 反查输入，再逐条确认数据流。
+- **路径穿越/任意文件访问**：按目标平台对完整 sink 表达式归一化；前缀已拼接时，用户片段前导 `/` 不会自动替换前缀。只有能给出确实越界的最小输入，才报告任意文件访问。
 - 平均用力是审计大忌：把时间花在外部输入可达的 sink 上。
 - **同型命中横扫（放大器纪律）**：任一 sink 命中确证后，立即三层横扫并清单化——
   ① 同函数/同方法的**全部调用点**反查（命中一处 ≠ 只报一处）；
@@ -232,7 +233,7 @@ shared/refs/finding-fields.md）；成果页列表/详情/导出报告/统计分
 
 1. 发现（扫描/人工）→ 2. 交叉复核（独立子代理复核调用链与结论）→
 3. 确证（静态→待人工验证；动态→自动验证）→ 4. 报告 → 5. 修复 → 6. 复测（原 poc 复验）→ 闭环记录。
-- 状态机：疑似 → 待人工验证 → 已验证 / 已排除（误报）→ 已修复 → 已复测。
+- 状态流转：疑似 → 待人工验证 → 已验证 / 已排除（误报）→ 已修复 → 已复测。
 
 **双链分档纪律（按 finding 等级配确证成本）**：
 - **critical/high**：完整双链（审计工人链 + 追踪员独立重追）+ 复核员确证——现有全流程不变；
@@ -251,7 +252,7 @@ shared/refs/finding-fields.md）；成果页列表/详情/导出报告/统计分
 双链不一致时登记 `suspect`（疑似未定论），不得用 `verified` 掩盖缺口；
 成果页登记的 poc 字段同步必含该 EXP（脚本路径+用法 或 直接可复现内容）。
 
-**一键实测配套（poc 顶部指纹节，hunter 实测按钮使用）**：登记 finding 时在 poc 字段
+**一键实测配套（poc 顶部指纹节，供测绘/狩猎通道按特征反查资产）**：登记 finding 时在 poc 字段
 顶部附加两行可选约定节（有则实测可自动执行，无则实测按钮提示补指纹）：
 
 ```
@@ -260,8 +261,8 @@ L1验证:GET /toLogin 期望:任务调度中心
 ```
 
 - 指纹节=目标框架的可观察特征（title/body/header 特征优先，framework/version 兜底），
-  供 hunter 以特征方式搜索互联网对应框架资产并做一致性校验。
-- L1验证节=EXP 的最小影响验证请求（只读路径/whoami 级回显），仅对「hunter 狩猎」页
+  供测绘通道以特征方式搜索互联网对应框架资产并做一致性校验（测绘类 MCP 若显式启用，或走 FOFA/鹰图/Quake API 脚本）。
+- L1验证节=EXP 的最小影响验证请求（只读路径/whoami 级回显），仅对已在狩猎/测绘通道里
   标记授权的资产执行；未授权资产只做 L0（存活+指纹一致）判定。
 - 实测按钮（成果页 code-audit finding，「验证」前）：静态审计=完整验证流水线（搜索
   50 条→存活探测→指纹一致性→L1（授权资产）→任一成立即停+回写）；动态审计（EXP
@@ -269,7 +270,7 @@ L1验证:GET /toLogin 期望:任务调度中心
   （单一特征→框架名兜底）从互联网侧续搜；仍零命中才收 no-assets 并给下一步建议
   （人工扩大特征词/提供授权资产/本地靶场）。
 - 未授权资产需要 POC 验证时**不做死路拒绝**，给三条出路（实测结论与通知同步给出）：
-  ①hunter 页「标记授权」后重试 L1 快验；②交接渗透测试模式执行完整 POC——先向用户
+  ①在已启用的狩猎/测绘通道里对该资产标记授权后重试 L1 快验；②交接渗透测试模式执行完整 POC——先向用户
   确认该资产测试授权，按渗透纪律探测复测+对照三件套留证，命中后按渗透模式登记成果
   并回标审计 finding；③本地同版本靶场验证。
 
@@ -326,7 +327,7 @@ error/warning/note（按 severity 映射）、`locations[].physicalLocation`=
 
 ## 工具手册
 
-- **过程检索（trace-vault，自动留痕）**：`trace_search(query)` 按关键词子串检索历史工具调用的参数与响应文本（报错原文/拦截响应/回显/响应头/某工具当时的调用参数），`trace_get(id)` 取全文，`trace_recent` 看最近调用与出局统计（blocked 聚集=换路径/降速信号）——上下文被压缩或轮次久远后找回「曾经出现过」的过程观察，不依赖记忆；留痕自动进行，无需手动登记。
+- **过程检索（trace-vault，自动留痕）**：`trace_search(query)` 按关键词子串检索历史工具调用的参数与响应文本（报错原文/拦截响应/回显/响应头/某工具当时的调用参数），`trace_get(id)` 取全文，`trace_recent` 看最近调用与出局统计（受阻记录集中出现=换路径/降速信号）——上下文被压缩或轮次久远后找回「曾经出现过」的过程观察，不依赖记忆；留痕自动进行，无需手动登记。
 
 ### 工具使用策略（总纲）
 
@@ -348,7 +349,7 @@ error/warning/note（按 severity 映射）、`locations[].physicalLocation`=
      工作区 tools/；反编译 jar 类单文件落 tools/ 即用）；成功登记 installed-by-agent 列；
   ④ **脚本兜底**——python3 → shell → ps1，落 scripts/ 登记后**先自测再用**；
   ⑤ **诚实降级**——不可替能力（如 .NET 反编译全缺且用户不配合）登记覆盖度台账、收窄
-     结论，不虚构；**收口卸载阀门**——报告产出后按 installed-by-agent 清单 ask 是否完全
+     结论，不虚构；**收尾卸载阀门**——报告产出后按 installed-by-agent 清单 ask 是否完全
      卸载（只卸 agent 装的），不批准则保留结束。
 - 期望工具集：核心 = 附录 A（扫描/供应链主链），补充 = 附录 B（语言专项扩展）；
   缺失不阻断开工，走通道完整阶梯。
@@ -554,7 +555,7 @@ trivy config --config-policy ./policy --namespaces user <dir>
 ## 子代理编排
 
 > 设计立场：代码审计**不是攻击链，是 MAP-REDUCE + TRACE**——按模块扇出审计、
-> 按调用链收口。审计空间的「资产」= 入口与 sink 面，先有面映射才准深审（盲审禁令的落地）。
+> 按调用链收尾。审计空间的「资产」= 入口与 sink 面，先有面映射才准深审（盲审禁令的落地）。
 > 依据：RepoAudit（仓库级全调用链 LLM 多智能体审计）、AutoSafeCoder（静态+动态双代理）、
 > refs/lang/java-audit/java-route-mapper.md（入口还原）与 refs/lang/php-audit/php-sink-reference.md（sink 大表）。
 
@@ -562,7 +563,7 @@ trivy config --config-policy ./policy --namespaces user <dir>
 
 | 角色 | 载体 | 输入 → 输出 | 要点 |
 |---|---|---|---|
-| 总控（主会话） | — | 代码库 → 深度分级决策 / 面映射把关 / 三路派工 / 收口 | 用户未选深度时按三级默认提议 |
+| 总控（主会话） | — | 代码库 → 深度分级决策 / 面映射把关 / 三路派工 / 收尾 | 用户未选深度时按三级默认提议 |
 | **前置识别员** | 单个 spawn | 代码库 → 框架/依赖识别 + 已知漏洞核对 + 深度建议 | 通用框架先核已知漏洞（禁 0→1 盲审）；产出决定后续矩阵规模 |
 | **面映射员** | 单个 spawn | 源码 → 入口清单（route-mapper 法）+ sink 面（sink 大表反查） | 产物落盘 `surface-map.md`（含入口/sink/深度分级三标记），**Gate A1 的核心**，结构校验走 stage_gate A1 |
 | 审计工人扇出 | workflow（per 模块/per 语言） | 模块 + 该模块可达 sink 清单 → 候选 finding | sink 优先、只带该语言手册+sink 表（信息裁剪）；平均用力是大忌 |
@@ -578,7 +579,7 @@ trivy config --config-policy ./policy --namespaces user <dir>
 - **任务口径（用户指定优先）**：用户显式指定测试范围（如「测 SQL 注入和 XSS」）时，指定项为最高优先级——只执行指定项并逐项回写点亮（图谱终态），未指定项不补测不欠账，转全流程须用户明示；用户未指定具体项（仅给目标/全量委托）时，按本模式全流程矩阵推进。
 
 - 「AttackAtlas」标签页按本手册结构展示——五分区（审计前置/RCE 主线/覆盖矩阵轴/场景审计卡/确证与交付）× 15 战术列 × 六阶段带（形态 Triage→静态→动态验证→确证闭环→覆盖对账→复核报告）× 五对象形态（后端应用/移动端/小程序/LLM Agent/供应链配置）。
-- **覆盖矩阵的 UI 面**：audit-coverage-matrix.md 每格（sink 类型/业务逻辑行/RCE 类）落终态时同步调 `redteam_coverage_mark`（已审有 finding=tested-found、已审无 finding=tested-clear、N-A 附原因=na、未完成附预算=budget-stop）；扫描对账终态同规则；阶段推进调 `redteam_coverage_stage`（s1…s6）。审计对象（应用/模块组/样本）调 `redteam_atlas_target` 登记，多对象逐对象 target 参数回写。key/阶段均可直接写中文标签（自动归一，写错报错会列合法候选）；整表收口可用 `redteam_coverage_sync` 一次批量回写（rows 数组或矩阵文件 path）；`redteam_finding_register` 登记成功后关联格自动点亮 tested-found（人工终态优先，自动不覆盖）。阶段门 stage_gate 判定 PASS 后，对应阶段及其此前阶段自动回写 done（级联点亮）；无门阶段可手动 redteam_coverage_stage 推进补记。
+- **覆盖矩阵的 UI 面**：audit-coverage-matrix.md 每格（sink 类型/业务逻辑行/RCE 类）有结论时同步调 `redteam_coverage_mark`（已审有 finding=tested-found、已审无 finding=tested-clear、N-A 附原因=na、未完成附预算=budget-stop）；扫描对账同规则；阶段推进调 `redteam_coverage_stage`（s1…s6）。审计对象（应用/模块组/样本）调 `redteam_atlas_target` 登记，多对象逐对象 target 参数回写。key/阶段均可直接写中文标签（自动转换，写错会列出可用值）；整表完成可用 `redteam_coverage_sync` 一次批量回写（rows 数组或矩阵文件 path）；`redteam_finding_register` 登记成功后关联格自动点亮 tested-found（人工结论优先，自动不覆盖）。阶段检查 stage_gate 判定 PASS 后，对应阶段及其此前阶段自动回写 done（级联点亮）；无门阶段可手动 redteam_coverage_stage 推进补记。
 
 ### 审计覆盖规则（防「只审几个模块」）
 
@@ -590,7 +591,7 @@ trivy config --config-policy ./policy --namespaces user <dir>
   终态三选一**：`已审（有/无 finding）`、`N-A（附原因：该模块无此 sink 面/测试代码/
   第三方库且 SCA 线覆盖）`、`未完成（附预算原因）`。覆盖矩阵 = audit-coverage-matrix.md，
   随报告交付（对齐 refs/methodology/coverage.md 覆盖率纪律）。
-- **业务逻辑维度行（sink 轴之外每模块另过三行）**：①状态变更——状态机前置条件/跳步/回退
+- **业务逻辑维度行（sink 轴之外每模块另过三行）**：①状态变更——状态流转前置条件/跳步/回退
   （订单、审批、改绑、退款流转）；②并发——双花/超卖/重复领取（检查共享资源的原子性与锁）；
   ③客户端可控值——金额/数量/角色/折扣/回调 URL 等「应服务端决定」的值是否信任了前端传入。
   这三行不是 sink（无危险函数可 grep），靠读业务流判定；终态三选一同 sink 格
@@ -615,7 +616,7 @@ trivy config --config-policy ./policy --namespaces user <dir>
 
 > **结构校验走运行时门禁工具**：开工门禁清单优先看 route-boost 信封（已含门禁与 canonical 文件名）；信封缺失或不确定时再调 `gates_list`（mode=code-audit）读门禁清单与 canonical 文件名；产物齐后调 `stage_gate(mode, stage, workspace[, file])` 做结构校验（判定自动落 `<workspace>/gate-log.md`）。**校验物与标记以下表为准，不要去找插件源码文件。** 结构 PASS ≠ 全过——manual 项（语义）由复核员判定。
 
-> **覆盖度台账（operation-state 扩展，与门禁同源）**：`operation_goal` 登记目标契约后先 `operation_constraints` 登记用户约束（deny/allow 每行一条，带匹配词的 deny 命中 bash/fetch 即确定性拦；约束每轮进信封防压缩丢失）再 `operation_scope` 登记范围分母——每行一项（资产/路由/模块/账号/题目等目标实际要求覆盖的单元；「id: 标签」可固定 id；**最小范围原则：只登记目标明确点到或派生必需的面，绝不擅自放大**）；每测完一项即 `operation_progress tested=<id> evidence=<evidence 编号/矩阵行/输出文件>` 记分子（幂等，重复标记刷新证据）。scope 登记后本模式报告门自动开启算术对账：报告须含「覆盖：M/N」声明行且与台账实测一致——部分覆盖照实声明可过，虚报/漏报拦门。开新方向（派单/追线/阶段切换）先 `operation_intent` 登记带锚（anchor=boot 开局豁免 / criterion 准则 / scope 范围 / finding 本会话成果 / chain 链路节点 + id）——方向只能锚在已确立的证据上；收口 `operation_progress intent_done/intent_blocked/intent_dropped`（blocked/dropped 附原因）；未收口意图拦报告落盘。
+> **覆盖记录（operation-state 扩展，与门禁同源）**：用 `operation_goal` 登记任务目标和完成标准后，先用 `operation_constraints` 登记用户约束（deny/allow 每行一条，带匹配词的 deny 命中 bash/fetch 即拦；约束每轮都会带进上下文，防压缩丢失），再用 `operation_scope` 登记本次覆盖范围——每行一个目标单元（资产/路由/模块/账号/题目；「id: 标签」可固定 id；**只登记目标明确点到或确实必需的面，绝不擅自扩大**）；每测完一项用 `operation_progress tested=<id> evidence=<evidence 编号/矩阵行/输出文件>` 记录，重复记录会刷新证据。范围登记后，报告会按「覆盖：已测/总数」核对——没测完可以照实声明，虚报或漏报会被拦。开新方向（派单/追线/阶段切换）前用 `operation_intent` 登记依据（anchor=boot 开局 / criterion 完成标准 / scope 范围 / finding 本次发现 / chain 攻击链节点 + id）：方向必须有已确认的证据作依据；结束时用 `operation_progress intent_done/intent_blocked/intent_dropped`（受阻或放弃要写原因）；未结束的方向会拦住报告落盘。
 >
 > | 门 | 结构校验物（canonical 名 + 必含标记） |
 > |---|---|---|

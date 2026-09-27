@@ -338,7 +338,7 @@ function hintStyle() { return { fontSize: 12, color: 'var(--dsw-alias-label-tert
 
 function ConfigForm(props) {
   var v = props.value || {};
-  var tools = v.tools || {}, services = v.services || {}, dnslog = v.dnslog || {}, apiKeys = v.apiKeys || {};
+  var tools = v.tools || {}, services = v.services || {}, dnslog = v.dnslog || {}, memshell = v.memshell || {}, apiKeys = v.apiKeys || {};
   var [busy, setBusy] = useState(false);
   var [msg, setMsg] = useState('');
   var [mountStatus, setMountStatus] = useState({ burp: null, yakit: null });
@@ -403,6 +403,7 @@ function ConfigForm(props) {
       { op: 'set', path: ['tools'], value: libTools },
       { op: 'set', path: ['services'], value: v.services },
       { op: 'set', path: ['dnslog'], value: v.dnslog },
+      { op: 'set', path: ['memshell'], value: v.memshell || {} },
     ];
     if (v.hiddenTools && v.hiddenTools.length > 0) ops.push({ op: 'set', path: ['hiddenTools'], value: v.hiddenTools });
     else ops.push({ op: 'set', path: ['hiddenTools'], value: [] });
@@ -432,8 +433,22 @@ function ConfigForm(props) {
     React.createElement(Group, { title: 'DNSLog 平台' },
       React.createElement('label', { style: labelStyle() }, '平台地址'),
       React.createElement(Input, { value: dnslog.url || '', placeholder: 'http://ceye.io', onChange: function (val) { setPath(['dnslog', 'url'], val); } }),
+      React.createElement('label', { style: labelStyle() }, '接收域名（带外确认必需，如 abc123.ceye.io）'),
+      React.createElement(Input, { value: dnslog.domain || '', placeholder: 'abc123.ceye.io', onChange: function (val) { setPath(['dnslog', 'domain'], val); } }),
       React.createElement('label', { style: labelStyle() }, 'Token（保存后仅显示 ***）'),
       React.createElement(Input, { type: 'password', value: dnslog.token || '', placeholder: dnslog.token === '***' ? '已设置，留空保持不变' : 'dnslog token', onChange: function (val) { setPath(['dnslog', 'token'], val); } })),
+    React.createElement(Group, { title: '内存马后端（只允许自建，禁止公共 party.mem.mk）' },
+      React.createElement('label', { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 8 } },
+        React.createElement('input', { type: 'checkbox', checked: !!memshell.enabled, onChange: function (e) { setPath(['memshell', 'enabled'], e.target.checked); } }),
+        '启用自建 memshell backend'),
+      React.createElement('label', { style: labelStyle() }, '后端地址'),
+      React.createElement(Input, { value: memshell.backendUrl || '', placeholder: 'http://127.0.0.1:8080', onChange: function (val) { setPath(['memshell', 'backendUrl'], val); } }),
+      React.createElement('label', { style: labelStyle() }, 'Token（可选；保存后仅显示 ***）'),
+      React.createElement(Input, { type: 'password', value: memshell.token || '', placeholder: memshell.token === '***' ? '已设置，留空保持不变' : 'backend token', onChange: function (val) { setPath(['memshell', 'token'], val); } }),
+      React.createElement('label', { style: labelStyle() }, 'CLI 路径（可选，仅登记，不自动执行）'),
+      React.createElement(Input, { value: memshell.cliPath || '', placeholder: 'memshell-party-cli', onChange: function (val) { setPath(['memshell', 'cliPath'], val); } }),
+      React.createElement('label', { style: labelStyle() }, 'MCP Server 名（可选，用于 MCP 调用链）'),
+      React.createElement(Input, { value: memshell.mcpServer || '', placeholder: 'memshell-party', onChange: function (val) { setPath(['memshell', 'mcpServer'], val); } })),
     React.createElement('div', { style: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', margin: '0 0 14px', padding: '8px 10px', borderRadius: 6, background: 'var(--dsw-alias-bg-layer-2,#f6f6f7)' } },
       'DeepSeek API 密钥请到「平台设置 → 模型/服务」中维护，本页不再重复设置。'),
     React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },

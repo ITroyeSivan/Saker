@@ -43,6 +43,8 @@ const GATES = {
 				{ kind: "file", file: "assets.md" },
 				{ kind: "markers", file: "assets.md", markers: ["WAF", "速率"] },
 				{ kind: "table", file: "assets.md", minRows: 2, minCells: 2 },
+				{ kind: "file", file: "asset-inventory.json" },
+				{ kind: "markers", file: "asset-inventory.json", markers: ["saker.asset-inventory/1", "assets"] },
 				{ kind: "file", file: "evidence-index.md" },
 				{ kind: "markers", file: "evidence-index.md", markers: ["tool-plane", "MCP"] },
 				{ kind: "table", file: "evidence-index.md", minRows: 1, minCells: 2 }
@@ -241,7 +243,7 @@ const GATES = {
 			manual: ["链上断点如实标注「未知」；节点证据编号可追溯由复核员判定"]
 		},
 		"I3": {
-			title: "失陷定性收口",
+			title: "失陷定性结论",
 			checks: [
 				{ kind: "file", file: "compromise-verdict.md" },
 				{ kind: "markers", file: "compromise-verdict.md", markers: ["定性", "证据"] },
@@ -299,7 +301,7 @@ const GATES = {
 			manual: ["超范围项标「未执行」零虚构；授权内持久化已登记手动排除步骤"]
 		},
 		"C4": {
-			title: "权限链收口",
+			title: "权限链结论",
 			checks: [
 				{ kind: "file", file: "privilege-chains.md" },
 				{ kind: "markers", file: "privilege-chains.md", markers: ["起点", "权限", "终点", "证据"] },
@@ -349,7 +351,7 @@ const GATES = {
 			manual: ["每行线索已梳理、模块判定合理由总控判定"]
 		},
 		flag: {
-			title: "flag 台账收口",
+			title: "flag 台账结论",
 			checks: [
 				{ kind: "file", file: "flag-ledger.md" },
 				{ kind: "markers", file: "flag-ledger.md", markers: ["flag", "验证", "状态"] },
@@ -481,6 +483,53 @@ export function runGate(fsm, { mode, stage, workspace, file }) {
 	};
 }
 
+/**
+ * One structural check → one actionable requirement line.
+ *
+ * Why this exists (2026-09-25, real model session on a local fixture): `gates_list`
+ * used to expose only the file NAMES, so a model that dutifully called it before
+ * `stage_gate` still could not know that `evidence-index.md` must contain the literal
+ * markers `tool-plane` and `MCP`. It found out by failing the gate, then spent ~9 tool
+ * calls grepping the host source and the installed package to reverse-engineer the word
+ * "markers". `stage_gate`'s failure detail already names the missing markers; the
+ * discovery API now names them too, so the first attempt can be the passing one.
+ * `file` checks are omitted here — the `files` field already lists those.
+ * @param check - one entry of a gate's `checks` array.
+ * @returns a one-line requirement, or undefined for checks the other fields already cover.
+ */
+export function checkRequirement(check) {
+	const where = check.file === "$file" ? "file 参数指向的文件" : check.file;
+	switch (check.kind) {
+		case "markers": return `${where} 需含标记：${(check.markers ?? []).join("、")}`;
+		case "table": return `${where} 需 ≥${check.minRows} 行表格，每行 ≥${check.minCells} 个非空单元格`;
+		case "hexHash": return `${where} 需含 64 位十六进制 sha256`;
+		case "provenance": return `${check.dir ?? "artifacts"}/ 下需 ≥1 个 <子目录>/provenance.md 且含 64 位十六进制 sha256`;
+		default: return undefined;
+	}
+}
+
+/**
+ * Resolve a tool's `workspace` argument to an absolute path, with **relative paths
+ * resolved against the SESSION workspace**.
+ *
+ * Why (2026-09-25, real model session): the schemas say "relative to cwd", but
+ * `path.resolve(args.workspace)` resolves against the HOST PROCESS cwd — the dsh source
+ * checkout / install directory, not the model's working directory. The model really did
+ * send `workspace: "."`; had its preconditions been met, `operation-state.json` would
+ * have been written into the dsh source tree: outside the session workspace, and invisible
+ * to both the workbench and the report gate that read that same file. Absolute paths are
+ * unchanged; only the base for relative values moves to where the model actually is.
+ * @param workspace - the raw tool argument.
+ * @param exec - tool exec context (carries the session cwd).
+ * @returns an absolute path.
+ */
+function resolveWorkspaceArg(workspace, exec) {
+	if (typeof workspace !== "string" || workspace === "") return path.resolve(".");
+	if (path.isAbsolute(workspace)) return path.resolve(workspace);
+	const sessionCwd = exec?.agent?.session?.header?.cwd;
+	return sessionCwd ? path.resolve(sessionCwd, workspace) : path.resolve(workspace);
+}
+
 /** Schema summary for gates_list. */
 export function listGates(mode) {
 	if (mode && !GATES[mode]) throw new Error(`unknown mode ${mode}; valid: ${Object.keys(GATES).join(", ")}`);
@@ -491,6 +540,8 @@ export function listGates(mode) {
 			title: g.title,
 			files: [...new Set(g.checks.filter((c) => c.file && c.file !== "$file").map((c) => c.file))],
 			requiresFile: !!g.requiresFile,
+			// 结构性要求（标记字面量 / 表格行列下限 / 哈希 / provenance）——只给文件名等于让模型撞门禁后再猜。
+			requirements: g.checks.map(checkRequirement).filter(Boolean),
 			manual: g.manual
 		}]))
 	]));
@@ -603,11 +654,11 @@ function syncOperationState(workspace, verdict) {
 const cleanLine = (s, max) => String(s ?? "").trim().slice(0, max);
 const parseIds = (s) => String(s ?? "").split(/[,，;\s]+/).map((x) => x.trim()).filter(Boolean);
 
-/** 登记目标契约：criteria 为多行文本，每行一条成功准则（可判定表述）。 */
+/** 登记任务目标和完成标准：criteria 为多行文本，每行一条可判断是否完成的标准。 */
 function setGoal(workspace, goal, criteriaText) {
 	const lines = String(criteriaText ?? "").split(/\r?\n/).map((l) => cleanLine(l, 200)).filter(Boolean);
 	if (!cleanLine(goal, 500)) throw new Error("goal required（目标一句话）");
-	if (lines.length === 0) throw new Error("criteria required（至少一条成功准则，每行一条）");
+	if (lines.length === 0) throw new Error("criteria required（至少一条完成标准，每行一条）");
 	if (lines.length > 20) throw new Error("criteria 最多 20 条");
 	const st = mutateStateLocked(fs, workspace, (cur) => {
 		cur.goal = cleanLine(goal, 500);
@@ -634,7 +685,7 @@ function updateProgress(workspace, { met = "", failed = "", reopened = "", pendi
 			else c.status = status;
 		}
 	}
-	if (unknown.length) throw new Error(`未知准则 id：${unknown.join(", ")}（有效：${[...byId.keys()].join(", ") || "无"}）`);
+	if (unknown.length) throw new Error(`未知完成标准 id：${unknown.join(", ")}（有效：${[...byId.keys()].join(", ") || "无"}）`);
 	// 意图收口：done=有产出收口 / blocked=受阻终态 / dropped=放弃（blocked/dropped 须在 note 说明原因）
 	const intents = normalizeIntents(cur);
 	if (intents.length > 0 || intent_done || intent_blocked || intent_dropped) {
@@ -654,8 +705,8 @@ function updateProgress(workspace, { met = "", failed = "", reopened = "", pendi
 				}
 			}
 		}
-		if (unknownIntents.length) throw new Error(`未知意图 id：${unknownIntents.join(", ")}（有效：${[...byIntent.keys()].join(", ") || "无"}）`);
-		if ((intent_blocked || intent_dropped) && !note) throw new Error("blocked/dropped 收口须在 note 说明原因（受阻依据/放弃理由——终态可追溯）");
+		if (unknownIntents.length) throw new Error(`未知工作方向 id：${unknownIntents.join(", ")}（有效：${[...byIntent.keys()].join(", ") || "无"}）`);
+		if ((intent_blocked || intent_dropped) && !note) throw new Error("受阻或放弃时必须在 note 说明原因（便于后续追溯）");
 		cur.intents = intents;
 	}
 	if (pending !== "") cur.pending = pending.split(/\r?\n/).map((l) => cleanLine(l, 200)).filter(Boolean);
@@ -842,13 +893,13 @@ function taskSummary(st) {
  *  当前会话的成果库/链路库（意图登记会话=发现登记会话），boot=开局/顶层全新方向豁免。 */
 export function validateAnchor(st, { kind, ref }, resolvers = {}, sessionId = "", mode = "") {
 	const k = ANCHOR_KINDS.includes(kind) ? kind : "";
-	if (!k) return `anchor_kind 非法：${kind}（合法：${ANCHOR_KINDS.join(" / ")}——boot=开局豁免、criterion=准则 id、scope=范围 id、finding=成果 id、chain=链路节点 id）`;
+	if (!k) return `anchor_kind 非法：${kind}（合法：${ANCHOR_KINDS.join(" / ")}——boot=开局、criterion=完成标准 id、scope=范围 id、finding=成果 id、chain=攻击链节点 id）`;
 	if (k === "boot") return "";
 	const r = String(ref ?? "").trim();
-	if (!r) return `anchor_ref 必填（${k} 锚必须带具体 id；顶层全新方向才用 boot 豁免）`;
+	if (!r) return `anchor_ref 必填（${k} 依据必须带具体 id；全新的顶层方向才用 boot）`;
 	if (k === "criterion") {
 		const ids = new Set((Array.isArray(st?.criteria) ? st.criteria : []).map((c) => c?.id).filter(Boolean));
-		return ids.has(r) ? "" : `准则 id 不存在：${r}（有效：${[...ids].join(", ") || "无——先 operation_goal 登记"}）`;
+		return ids.has(r) ? "" : `完成标准 id 不存在：${r}（有效：${[...ids].join(", ") || "无——先 operation_goal 登记"}）`;
 	}
 	if (k === "scope") {
 		const ids = new Set(normalizeScope(st).map((s) => s.id));
@@ -880,7 +931,21 @@ export function validateAnchor(st, { kind, ref }, resolvers = {}, sessionId = ""
 }
 
 /** 登记意图（方向带锚）。返回 {total, open}；校验失败 throw。 */
-export function registerIntent(workspace, { summary, anchorKind, anchorRef, note = "", sessionId = "", mode = "", owner = "", maxAttempts = 1 }, resolvers = {}) {
+export function registerIntent(workspace, {
+	summary,
+	anchorKind,
+	anchorRef,
+	note = "",
+	sessionId = "",
+	mode = "",
+	owner = "",
+	maxAttempts = 1,
+	stage = "",
+	bucketId = "",
+	targetIds = [],
+	reuseScore = 0,
+	parentTaskId = "",
+}, resolvers = {}) {
 	const s = cleanLine(summary, 200);
 	if (!s) throw new Error("summary required（一句话方向，≤200 字符）");
 	const bad = validateAnchor(readOperationState(fs, workspace), { kind: anchorKind, ref: anchorRef }, resolvers, sessionId, mode);
@@ -900,6 +965,13 @@ export function registerIntent(workspace, { summary, anchorKind, anchorRef, note
 			mode: cleanLine(mode, 40),
 			created_at: now,
 		};
+		if (cleanLine(stage, 20)) item.stage = cleanLine(stage, 20);
+		if (cleanLine(bucketId, 120)) item.bucketId = cleanLine(bucketId, 120);
+		if (Array.isArray(targetIds) && targetIds.length > 0) {
+			item.targetIds = [...new Set(targetIds.map((value) => cleanLine(value, 80)).filter(Boolean))].slice(0, 500);
+		}
+		if (Number.isFinite(Number(reuseScore)) && Number(reuseScore) !== 0) item.reuseScore = Number(reuseScore);
+		if (cleanLine(parentTaskId, 80)) item.parentTaskId = cleanLine(parentTaskId, 80);
 		const hasTask = cleanLine(owner, 80) || Number(maxAttempts) > 1;
 		if (hasTask) {
 			item.task = {
@@ -944,8 +1016,8 @@ export function taskTransition(workspace, { id, action, owner = "", progress, re
 		recoverStaleTasks(cur);
 		const intents = normalizeIntents(cur);
 		const intent = intents.find((item) => item.id === taskId);
-		if (!intent) throw new Error(`未知意图 id：${taskId}`);
-		if (!intent.task) throw new Error(`意图 ${taskId} 未登记任务执行层`);
+		if (!intent) throw new Error(`未知工作方向 id：${taskId}`);
+		if (!intent.task) throw new Error(`工作方向 ${taskId} 没有登记执行状态`);
 		const current = taskOf(intent);
 		const now = new Date().toISOString();
 		const next = { ...current, updatedAt: now };
@@ -1049,7 +1121,7 @@ export function taskClaim(workspace, { owner = "" } = {}) {
 				return !cleanLine(intent.task.owner, 80) || ownerMatches(intent.task.owner, new Set([claimant]));
 			})
 			.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || String(a.id).localeCompare(String(b.id)));
-		if (candidates.length === 0) throw new Error("没有可领取的 queued 任务");
+		if (candidates.length === 0) throw new Error("没有可领取的排队任务");
 		const intent = candidates[0];
 		const current = taskOf(intent);
 		if (current.attempts >= current.maxAttempts) throw new Error(`任务 ${intent.id} 尝试次数已达上限 ${current.maxAttempts}`);
@@ -1328,13 +1400,13 @@ export function conclusionVerdict(st) {
 	let reason;
 	if (canConclude) {
 		reason = criteria.length === 0
-			? "目标契约无准则（异常但可收尾）——直接收尾"
-			: `全部收口：准则 ${criteria.length}/${criteria.length}（met 或 failed 均有结论），意图 ${intents.length} 条无未收口`;
+			? "任务目标没有完成标准（数据异常但可以结束）——直接结束"
+			: `可以结束：${criteria.length}/${criteria.length} 条完成标准都有结论（完成或确认做不到），${intents.length} 条工作方向均已结束`;
 	} else {
 		const parts = [];
-		if (openCriteria.length) parts.push(`${openCriteria.length} 条准则无结论（${openCriteria.map((c) => c.id).join(",")}）——operation_progress 收口为 met 或 failed`);
-		if (openIntents.length) parts.push(`${openIntents.length} 条意图未收口（${openIntents.map((i) => i.id).join(",")}）——operation_progress intent_done/intent_blocked/intent_dropped`);
-		reason = "不可收尾：" + parts.join("；");
+		if (openCriteria.length) parts.push(`${openCriteria.length} 条完成标准还没有结论（${openCriteria.map((c) => c.id).join(",")}）——用 operation_progress 更新为完成或确认做不到`);
+		if (openIntents.length) parts.push(`${openIntents.length} 条工作方向还没有结束（${openIntents.map((i) => i.id).join(",")}）——用 operation_progress intent_done/intent_blocked/intent_dropped 结束`);
+		reason = "还不能结束：" + parts.join("；");
 	}
 	return {
 		canConclude,
@@ -1382,63 +1454,63 @@ function theResolvers() {
 export const DECOMPOSITION = {
 	pentest: {
 		theory: "作战流程×资产×漏洞类矩阵：被动收集→入口面盘点→验证",
-		criteriaGuide: "准则按「每入口资产一条终态 + 漏洞类覆盖格全终态」拆，覆盖矩阵格不落空",
+		criteriaGuide: "完成标准按「每个入口资产都有结论 + 每类漏洞都标明测过或没测」拆，覆盖矩阵不留空",
 		scopeSemantics: "分母=入口资产面（主机/站点/API/客户端），每行一项资产单元",
 		constraintHints: "速率纪律/资金类只读重放/破坏操作禁执行/授权边界",
 		example: "①demo 站 Web 面每漏洞类格有终态 ②10.0.0.5 服务面终态 ③高危发现附 PoC 复现"
 	},
 	"code-audit": {
 		theory: "对象形态→triage→模块×sink 矩阵→双链（全量扫描链+深度审计链）",
-		criteriaGuide: "准则按「每模块终态 + sink 类覆盖 + 扫描命中对账守恒（扫描器报告数=终态数）」拆",
+		criteriaGuide: "完成标准按「每个模块有结论 + 每类 sink 有覆盖结论 + 扫描命中逐条核对」拆",
 		scopeSemantics: "分母=模块/路由/文件全集，每行一个审计单元",
 		constraintHints: "审计对象只读/semgrep 禁网/不修被审代码",
 		example: "①全部 12 条路由每条给终态 ②sink 五类各有覆盖结论 ③扫描命中 100% 对账"
 	},
 	"binary-analysis": {
 		theory: "样本登记→家族指纹分诊→假设台账循环→多视角→IOC",
-		criteriaGuide: "准则按「每样本每分析维度终态 + 假设台账全收口（未决不得写成事实）」拆",
+		criteriaGuide: "完成标准按「每个样本的每个分析方向都有结论 + 每条假设都有结论（没结论不得写成事实）」拆",
 		scopeSemantics: "分母=样本集×分析维度，每行一个样本或一个维度面",
 		constraintHints: "干净 VM 铁律/样本外传登记/活体处置 SOP",
 		example: "①样本 A 静态+动态两维度终态 ②假设台账全部 confirmed/dismissed ③IOC 输出可机读"
 	},
 	"attack-defense": {
 		theory: "五阶段编排（侦察→突破→横向→持久化→报告），每阶段只基于上一阶段已验证结果",
-		criteriaGuide: "准则按「每阶段产物过门 + 链级分布（L1-L5）+ 战果登记」拆",
+		criteriaGuide: "完成标准按「每阶段产物通过检查 + 链路等级分布（L1-L5）+ 战果登记」拆",
 		scopeSemantics: "分母=授权网段/凭据面/高价值线，每行一个作战面",
 		constraintHints: "监测姿态分叉（§0.5 姿态卡）/破坏性步骤默认关/痕迹双轨",
 		example: "①外网拿到初始访问 ②横向覆盖授权网段 80% ③链级分布呈报"
 	},
 	"av-evasion": {
 		theory: "配对实验：载荷↔判定引擎矩阵，四类载荷标准时序",
-		criteriaGuide: "准则按「每载荷类×引擎终态（过检/被检出附指纹）」拆——配对完整是硬约束",
+		criteriaGuide: "完成标准按「每类载荷在每个引擎上都有结论（过检或被检出附指纹）」拆——配对完整是硬要求",
 		scopeSemantics: "分母=载荷类×引擎矩阵（登记制，不自动派生）",
 		constraintHints: "授权立场/产物限实验室目录/清痕顺序纪律",
 		example: "①CS 载荷过 360 全家桶（附指纹）②四类载荷各至少一引擎终态"
 	},
 	"incident-response": {
 		theory: "证据保全→时间线重建→定性→处置建议→报告（I1-I5 五门）",
-		criteriaGuide: "准则按「时间线节点收口 + 五维定损 + IOC 富化」拆",
+		criteriaGuide: "完成标准按「时间线每个节点有结论 + 五维定损 + IOC 补全」拆",
 		scopeSemantics: "分母=主机/时间窗/案件范围，每行一台主机或一个调查面",
 		constraintHints: "只读优先/证据四级/先固定后分析",
 		example: "①入口点定位附证据 ②完整时间线（含横向路径）③影响范围五维定损"
 	},
 	"cloud-security": {
 		theory: "资产测绘→攻击路径四要素（身份→权限→资源→影响）→场景卡",
-		criteriaGuide: "准则按「每条攻击路径验证 + 权限链收口 + 场景卡终态」拆",
+		criteriaGuide: "完成标准按「每条攻击路径都验证 + 权限链有结论 + 场景卡完整」拆",
 		scopeSemantics: "分母=账号/区域/服务面，每行一个云资源或信任面",
 		constraintHints: "只读 API 优先/写操作过门/环境还原义务",
-		example: "①目标账号权限链收口 ②至少一条路径打通到影响 ③环境还原登记"
+		example: "①目标账号权限链有结论 ②至少一条路径打通到影响 ③环境还原登记"
 	},
 	"ctf-solver": {
 		theory: "题面登记→模块路由→board/solve 两门→flag 台账",
-		criteriaGuide: "准则按「每题终态（已解附平台验证/卡点附原因）」拆",
+		criteriaGuide: "完成标准按「每题都有结论（已解附平台验证，未解附卡点）」拆",
 		scopeSemantics: "分母=题目集（含分值权重），每行一题（登记制，不自动派生）",
 		constraintHints: "flag 真实性=平台回显/不猜不撞/爆破限速最后手段",
 		example: "①全部题目终态三选一（已解/卡点/放弃附因）②flag 全部平台验证"
 	},
 	redteam: {
-		theory: "任务分类路由→轻重判→任务书（依据锚+模式理论摘要）；总控不设自身准则——消费专业模式 gate-pass 产物",
-		criteriaGuide: "（总控不拆准则——路由到专业模式后由其按自身理论登记）",
+		theory: "任务分类路由→轻重判→任务书（依据+模式说明）；总控不设自己的完成标准——直接采用专业模式通过检查的产物",
+		criteriaGuide: "（总控不拆完成标准——分流到专业模式后由该模式登记）",
 		scopeSemantics: "（总控不设分母——由接手模式登记）",
 		constraintHints: "三边界：不越权 gate 判定/只消费 gate-pass 产物/读盘可见性",
 		example: "任务书带依据锚与建议模式的理论摘要行，接手模式照此开工三登记"
@@ -1668,8 +1740,8 @@ function apply(ctx) {
 			},
 			render: (_args, value) => [{ type: "text", text: `stage_gate ${value.mode}/${value.stage}: ${value.pass ? "PASS" : "FAIL"}${value.missing.length ? ` — missing: ${value.missing.join(" ; ")}` : ""}${value.manual.length ? ` — manual review still required: ${value.manual.join(" ; ")}` : ""}` }]
 		},
-		execute(args) {
-			const workspace = path.resolve(args.workspace);
+		execute(args, exec) {
+			const workspace = resolveWorkspaceArg(args.workspace, exec);
 			const verdict = runGate(fs, { ...args, workspace });
 			try { appendGateLog(workspace, verdict); } catch { /* audit-write failure never flips the verdict */ }
 			try { syncOperationState(workspace, verdict); } catch { /* state-sync failure never flips the verdict */ }
@@ -1678,19 +1750,19 @@ function apply(ctx) {
 	}));
 	ctx.tools.register(defineTool({
 		name: "operation_goal",
-		description: "把任务目标登记为可判定契约：一句话目标 + 每条独立可验证的成功准则。任务开始、首次 stage_gate 前登记；准则经 operation_progress 逐条收口。",
+		description: "登记任务目标和完成标准：一句话目标 + 每条可独立核对的完成标准。任务开始时、首次 stage_gate 前登记；状态用 operation_progress 更新。",
 		parameters: {
 			workspace: { type: "string", required: true, description: "Task workspace root (absolute, or relative to cwd)" },
 			goal: { type: "string", required: true, description: "目标一句话（≤500 字符）" },
-			criteria: { type: "string", required: true, description: "成功准则，每行一条（可判定表述，如「getshell 证据：whoami 输出与 evidence 编号」「全量 12 条路由均给出终态」），≤20 条" }
+			criteria: { type: "string", required: true, description: "完成标准，每行一条（能直接判断做到没做到，如「getshell 证据：whoami 输出与 evidence 编号」「12 条路由全部有结论」），≤20 条" }
 		},
 		output: {
 			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
-			render: (_args, v) => [{ type: "text", text: v.ok ? `${v.mode ? `【${v.mode} 拆分理论】${v.theory}——准则结构：${v.criteriaGuide}（例：${v.example}）。` : ""}目标契约已登记：${v.total} 条准则（${v.ids.join(", ")}）。逐条 met 用 operation_progress；全部 met + 报告门通过后才可写 reports/。${v.scopeDraft?.length ? `下一步（开工三登记）：operation_constraints 登记用户约束（deny/allow）；operation_scope 登记范围分母${v.scopeSemantics ? `（${v.scopeSemantics}）` : ""}——草稿已从目标提取：${v.scopeDraft.join("、")}（确认或改，保守派生只取精确形态不放大）。` : "下一步：operation_constraints 登记用户约束、operation_scope 登记范围分母（登记即激活对账/推进/门禁）。"}` : `登记失败：${v.error}` }]
+			render: (_args, v) => [{ type: "text", text: v.ok ? `${v.mode ? `【${v.mode} 工作拆分】${v.theory}——完成标准结构：${v.criteriaGuide}（例：${v.example}）。` : ""}目标已登记：${v.total} 条完成标准（${v.ids.join(", ")}）。用 operation_progress 逐条更新；全部完成且报告检查通过后才可写 reports/。${v.scopeDraft?.length ? `下一步（开工前先登记三件事）：operation_constraints 登记用户约束（deny/allow）；operation_scope 登记覆盖范围${v.scopeSemantics ? `（${v.scopeSemantics}）` : ""}——草稿已从目标提取：${v.scopeDraft.join("、")}（确认或修改；只收明确目标，不擅自扩大）。` : "下一步：operation_constraints 登记用户约束、operation_scope 登记覆盖范围（登记后自动对账并检查报告）。"}` : `登记失败：${v.error}` }]
 		},
 		execute(args, exec) {
 			try {
-				const workspace = path.resolve(args.workspace);
+				const workspace = resolveWorkspaceArg(args.workspace, exec);
 				const st = setGoal(workspace, args.goal, args.criteria);
 				const mode = modeOfExec(ctx, exec);
 				const prevScope = Array.isArray(readOperationState(fs, workspace)?.scope) && readOperationState(fs, workspace).scope.length > 0;
@@ -1716,7 +1788,7 @@ function apply(ctx) {
 		execute(args, exec) {
 			try {
 				const mode = modeOfExec(ctx, exec);
-				return Promise.resolve({ ok: true, ...setConstraints(path.resolve(args.workspace), args.items), mode, constraintHints: mode ? DECOMPOSITION[mode]?.constraintHints : undefined });
+				return Promise.resolve({ ok: true, ...setConstraints(resolveWorkspaceArg(args.workspace, exec), args.items), mode, constraintHints: mode ? DECOMPOSITION[mode]?.constraintHints : undefined });
 			} catch (e) {
 				return Promise.resolve({ ok: false, error: e?.message ?? String(e) });
 			}
@@ -1724,12 +1796,12 @@ function apply(ctx) {
 	}));
 	ctx.tools.register(defineTool({
 		name: "operation_progress",
-		description: "收口/重开目标准则并维护待办。met 项应附证据引用；返回剩余准则，all-met 表示目标契约满足。",
+		description: "记录完成标准的结果、重开已完成的标准并维护待办。met 项应附证据；返回剩余标准，all-met 表示目标已完成。",
 		parameters: {
 			workspace: { type: "string", required: true, description: "Task workspace root" },
-			met: { type: "string", description: "已达成准则 id（逗号/空格分隔，如 g1 g3）" },
-			failed: { type: "string", description: "证伪准则 id（该准则按失败收口）" },
-			reopened: { type: "string", description: "重开准则 id（回 open）" },
+			met: { type: "string", description: "已达到的完成标准 id（逗号/空格分隔，如 g1 g3）" },
+			failed: { type: "string", description: "验证后确认做不到的完成标准 id" },
+			reopened: { type: "string", description: "重新打开的完成标准 id（回到待处理）" },
 			tested: { type: "string", description: "标记已测的 scope id（逗号/空格分隔；须先 operation_scope 登记）" },
 			evidence: { type: "string", description: "tested 的证据指位（必填：evidence 编号/覆盖矩阵行/输出文件路径）" },
 			pending: { type: "string", description: "待办动作清单（整表替换，每行一条；空串=清空）" },
@@ -1737,11 +1809,11 @@ function apply(ctx) {
 		},
 		output: {
 			schema: { type: "object", additionalProperties: true, properties: { verdict: { type: "string", required: true } } },
-			render: (_args, v) => [{ type: "text", text: `operation 进度：已收口 ${(v.met ?? 0) + (v.failed ?? 0)}/${v.total}（met ${v.met ?? 0}${v.failed ? ` / failed ${v.failed}` : ""}）${v.openIds?.length ? `，未收口 ${v.openIds.join(", ")}` : ""}${v.pending?.length ? `，待办 ${v.pending.length} 项` : ""}——${v.verdict === "all-met" ? "准则均已给出结论（met/failed），可按报告门继续" : "收口后才可产出 reports/"}` }]
+			render: (_args, v) => [{ type: "text", text: `任务进度：${(v.met ?? 0) + (v.failed ?? 0)}/${v.total} 条完成标准已有结论（完成 ${v.met ?? 0}${v.failed ? ` / 确认做不到 ${v.failed}` : ""}）${v.openIds?.length ? `，未完成 ${v.openIds.join(", ")}` : ""}${v.pending?.length ? `，待办 ${v.pending.length} 项` : ""}——${v.verdict === "all-met" ? "所有完成标准都有结论，可继续完成报告检查" : "所有完成标准有结论后才可产出 reports/"}` }]
 		},
-		execute(args) {
+		execute(args, exec) {
 			try {
-				const workspace = path.resolve(args.workspace);
+				const workspace = resolveWorkspaceArg(args.workspace, exec);
 				const summary = updateProgress(workspace, args);
 				if (args.tested) summary.coverage = markTested(workspace, args.tested, args.evidence);
 				return Promise.resolve(summary);
@@ -1752,19 +1824,19 @@ function apply(ctx) {
 	}));
 	ctx.tools.register(defineTool({
 		name: "operation_scope",
-		description: "登记覆盖分母：每行一个范围项，支持自动 id 或 `id: label`。只登记目标明确要求或派生必需的面，不擅自放大；报告门按 M/N 对账。",
+		description: "登记本次要覆盖的范围：每行一个目标单元，支持自动 id 或 `id: label`。只登记目标明确要求或确实必需的面，不擅自扩大；报告按已测/总数核对。",
 		parameters: {
 			workspace: { type: "string", required: true, description: "Task workspace root" },
 			items: { type: "string", required: true, description: "范围项，每行一条（标签 或 id: 标签），≤200 项——如「10.0.0.5 Web 前台\n10.0.0.6 API 网关\napi-docs 路由全集」" }
 		},
 		output: {
 			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
-			render: (_args, v) => [{ type: "text", text: v.ok ? `${v.scopeSemantics ? `【${v.mode} 分母语义】${v.scopeSemantics}。` : ""}范围台账已登记：${v.scope} 项（已测 ${v.tested}${v.untested ? `，未测 ${v.untestedIds.slice(0, 10).join(", ")}${v.untested > 10 ? " 等" : ""}` : ""}）。已测标记：operation_progress tested=<ids> evidence=<指位>；报告门将按台账对账「覆盖：${v.tested}/${v.scope}」。` : `登记失败：${v.error}` }]
+			render: (_args, v) => [{ type: "text", text: v.ok ? `${v.scopeSemantics ? `【${v.mode} 范围说明】${v.scopeSemantics}。` : ""}覆盖范围已登记：${v.scope} 项（已测 ${v.tested}${v.untested ? `，未测 ${v.untestedIds.slice(0, 10).join(", ")}${v.untested > 10 ? " 等" : ""}` : ""}）。测完一项后用 operation_progress tested=<ids> evidence=<证据位置> 记录；报告会按「覆盖：${v.tested}/${v.scope}」核对。` : `登记失败：${v.error}` }]
 		},
 		execute(args, exec) {
 			try {
 				const mode = modeOfExec(ctx, exec);
-				return Promise.resolve({ ok: true, ...setScope(path.resolve(args.workspace), args.items), mode, scopeSemantics: mode ? DECOMPOSITION[mode]?.scopeSemantics : undefined });
+				return Promise.resolve({ ok: true, ...setScope(resolveWorkspaceArg(args.workspace, exec), args.items), mode, scopeSemantics: mode ? DECOMPOSITION[mode]?.scopeSemantics : undefined });
 			} catch (e) {
 				return Promise.resolve({ ok: false, error: e?.message ?? String(e) });
 			}
@@ -1772,19 +1844,24 @@ function apply(ctx) {
 	}));
 	ctx.tools.register(defineTool({
 		name: "operation_intent",
-		description: "登记新方向及强制证据锚点：boot / criterion / scope / finding / chain。收口走 operation_progress，blocked/dropped 须写原因；未收口会拦报告。",
+		description: "登记一条工作方向及其依据（开局 / 完成标准 / 覆盖范围 / 本次发现 / 攻击链）。可带 stage / bucket_id / target_ids / reuse_score / parent_task_id，让项目工作台按作业进度和父子任务展示。结束时用 operation_progress；受阻或放弃必须写原因，未结束的方向会拦住报告。",
 		parameters: {
 			workspace: { type: "string", required: true, description: "Task workspace root" },
 			summary: { type: "string", required: true, description: "一句话方向（做什么、追什么线索）≤200 字符" },
 			anchor_kind: { type: "string", required: true, enum: ANCHOR_KINDS, description: "锚点类型（boot=开局豁免，其余须带 anchor_ref）" },
 			anchor_ref: { type: "string", description: "锚点 id（boot 省略；criterion/scope/finding/chain 必填）" },
 			note: { type: "string", description: "备注（派单对象/预期产出等 ≤300 字符）" },
-			owner: { type: "string", description: "任务执行者（可选；填了就建立执行状态）" },
-			max_attempts: { type: "number", description: "最大尝试次数（1-20，默认 1）" }
+			owner: { type: "string", description: "负责人（可选；填了就建立执行状态）" },
+			max_attempts: { type: "number", description: "最大尝试次数（1-20，默认 1）" },
+			stage: { type: "string", description: "进度阶段（内部值，如 S4/S5）" },
+			bucket_id: { type: "string", description: "资产组 id（与 fingerprint-buckets.json 对齐）" },
+			target_ids: { type: "string", description: "覆盖资产 id，逗号/换行分隔" },
+			reuse_score: { type: "number", description: "优先分（同一条漏洞可复用的程度）" },
+			parent_task_id: { type: "string", description: "父任务 id（用于两级子代理任务图）" }
 		},
 		output: {
 			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
-			render: (_args, v) => [{ type: "text", text: v.ok ? `意图已登记：${v.id}（锚=${v.anchor}）。收口：operation_progress intent_done/intent_blocked/intent_dropped（blocked/dropped 附原因）；未收口意图拦报告。当前 ${v.open}/${v.total} 未收口。` : `登记失败：${v.error}` }]
+			render: (_args, v) => [{ type: "text", text: v.ok ? `方向已登记：${v.id}（依据=${v.anchor}）。结束时用 operation_progress intent_done / intent_blocked / intent_dropped（受阻或放弃要写原因）；未结束的方向会拦住报告。当前 ${v.open}/${v.total} 条未结束。` : `登记失败：${v.error}` }]
 		},
 		// 曾经写成 `(async () => { … })()` 的 fire-and-forget：外层没有 return，
 		// execute 返回 undefined → 宿主 `validateJsonSchemaValue(output.schema, undefined)` 判违反
@@ -1799,7 +1876,22 @@ function apply(ctx) {
 				let mode = "";
 				try { mode = String(ctx.agentPresets?.composedPreset?.(agent?.ctx) ?? ""); } catch { /* 组合未就绪 */ }
 				const resolvers = await theResolvers();
-				const s = registerIntent(path.resolve(args.workspace), { summary: args.summary, anchorKind: args.anchor_kind, anchorRef: args.anchor_ref, note: args.note, owner: args.owner, maxAttempts: args.max_attempts, sessionId, mode }, resolvers);
+				const targetIds = String(args.target_ids || "").split(/[\s,;]+/).map((value) => value.trim()).filter(Boolean);
+				const s = registerIntent(resolveWorkspaceArg(args.workspace, exec), {
+					summary: args.summary,
+					anchorKind: args.anchor_kind,
+					anchorRef: args.anchor_ref,
+					note: args.note,
+					owner: args.owner,
+					maxAttempts: args.max_attempts,
+					stage: args.stage,
+					bucketId: args.bucket_id,
+					targetIds,
+					reuseScore: args.reuse_score,
+					parentTaskId: args.parent_task_id,
+					sessionId,
+					mode,
+				}, resolvers);
 				return { ok: true, id: `i${s.total}`, anchor: `${args.anchor_kind}${args.anchor_ref ? ":" + args.anchor_ref : ""}`, open: s.open, total: s.total };
 			} catch (e) {
 				return { ok: false, error: e?.message ?? String(e) };
@@ -1808,12 +1900,12 @@ function apply(ctx) {
 	}));
 	ctx.tools.register(defineTool({
 		name: "operation_task",
-		description: "推进 intent 的执行状态：start/heartbeat/progress/succeed/fail/cancel/retry/interrupt。仅对登记了 task 的意图有效。",
+		description: "推进一个工作方向的执行状态：start/heartbeat/progress/succeed/fail/cancel/retry/interrupt。只对登记了执行状态的方向有效。",
 		parameters: {
 			workspace: { type: "string", required: true, description: "Task workspace root" },
-		id: { type: "string", description: "intent id（如 i1；action=claim 时省略）" },
-		action: { type: "string", required: true, enum: ["claim", "start", "heartbeat", "progress", "succeed", "fail", "cancel", "retry", "interrupt", "update"], description: "claim=原子领取下一个 queued 任务；其余动作传 id" },
-			owner: { type: "string", description: "执行者" },
+		id: { type: "string", description: "方向 id（如 i1；action=claim 时省略）" },
+		action: { type: "string", required: true, enum: ["claim", "start", "heartbeat", "progress", "succeed", "fail", "cancel", "retry", "interrupt", "update"], description: "claim=领取下一条排队任务；其余动作传 id" },
+			owner: { type: "string", description: "负责人" },
 			progress: { type: "number", description: "进度 0-100" },
 			result: { type: "string", description: "结果摘要" },
 			error: { type: "string", description: "失败/中断原因" },
@@ -1824,10 +1916,11 @@ function apply(ctx) {
 			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
 			render: (_args, v) => [{ type: "text", text: v.ok ? `任务 ${v.id}：${v.task.state} ${v.task.progress}% attempts ${v.task.attempts}/${v.task.maxAttempts}${v.task.error ? `｜${v.task.error}` : ""}` : `任务操作失败：${v.error}` }]
 		},
-		execute(args) {
+		execute(args, exec) {
 			try {
-				if (args.action === "claim") return Promise.resolve({ ok: true, ...taskClaim(path.resolve(args.workspace), args) });
-				return Promise.resolve({ ok: true, ...taskTransition(path.resolve(args.workspace), args) });
+				const workspace = resolveWorkspaceArg(args.workspace, exec);
+				if (args.action === "claim") return Promise.resolve({ ok: true, ...taskClaim(workspace, args) });
+				return Promise.resolve({ ok: true, ...taskTransition(workspace, args) });
 			} catch (e) {
 				return Promise.resolve({ ok: false, error: e?.message ?? String(e) });
 			}
@@ -1835,7 +1928,7 @@ function apply(ctx) {
 	}));
 	ctx.tools.register(defineTool({
 		name: "operation_conclude",
-		description: "申请结束任务，结束条件由系统判定。存在 open 准则或意图会被驳回并返回清单；全部收口后直接结束本轮。failed 是有效终态。",
+		description: "申请结束任务，是否允许由系统判定。存在未完成的完成标准或方向会被驳回并返回清单；全部结束后直接结束本轮。验证后确认做不到也是有效结论。",
 		parameters: {
 			workspace: { type: "string", required: true, description: "Task workspace root" }
 		},
@@ -1849,7 +1942,7 @@ function apply(ctx) {
 		},
 		async execute(args, exec) {
 			try {
-				const workspace = path.resolve(String(args.workspace));
+				const workspace = resolveWorkspaceArg(args.workspace, exec);
 				const st = readOperationState(fs, workspace);
 				const verdict = conclusionVerdict(st);
 				if (verdict.canConclude) {
@@ -1872,7 +1965,7 @@ function apply(ctx) {
 	}));
 	ctx.tools.register(defineTool({
 		name: "gates_list",
-		description: "列出各模式的门禁、规范文件名、file 参数要求和人工复核项。工作区创建后或调用 stage_gate 前先读。",
+		description: "列出各模式的门禁：规范文件名、每个文件必须出现的标记字面量、表格行列下限、file 参数要求和人工复核项。工作区创建后或调用 stage_gate 前先读——照 requirements 写就能一次过门。",
 		parameters: {
 			mode: { type: "string", enum: Object.keys(GATES), description: "Omit to list every mode" }
 		},

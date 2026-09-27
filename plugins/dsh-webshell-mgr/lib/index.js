@@ -20,6 +20,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import os from "node:os";
 import z from "@deepseek-ai/schemastery";
+import { onVolatileUpdate, plainConfig, readSettingsSection } from "dsh-saker/settings-compat";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { openStore, saveConn, listConns, getConn, deleteConn, recordProbe, getState, setState, listDbProfiles, saveDbProfile, deleteDbProfile, recordGeneration, listGenerations, logOp, listOps } from "./store.js";
 import { protocolMeta, detectProtocol, probeConnection } from "./protocol/registry.js";
@@ -28,6 +29,8 @@ import { GEN_KINDS, makeAndSave, importFromFile, GEN_DIR } from "./generators.js
 import { listPlugins, getPlugin, runPlugin, checkRunnable } from "./plugins-registry.js";
 import { readFileSync, mkdirSync, writeFileSync, existsSync, unlinkSync as fsUnlink, readdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
+
+const volatile = (schema) => typeof schema?.volatile === "function" ? schema.volatile() : schema;
 
 const name = "dsh-webshell-mgr";
 const inject = ["tools", "webServer", "webRuntime", "agentPresets"];
@@ -61,9 +64,7 @@ function dirOf(p) {
 function secConfigRoots(settings) {
 	const out = [];
 	try {
-		const s = settings;
-		if (!s || typeof s.get !== "function") return out;
-		const sec = s.get("sec-config") || {};
+		const sec = readSettingsSection(settings, "sec-config", {});
 		const push = (v) => {
 			const str = String(v || "").trim().replace(/[\\/]+$/, "");
 			if (str) out.push(str);
@@ -77,9 +78,7 @@ function secConfigRoots(settings) {
 function secConfigToolDirs(settings) {
 	const out = [];
 	try {
-		const s = settings;
-		if (!s || typeof s.get !== "function") return out;
-		const sec = s.get("sec-config") || {};
+		const sec = readSettingsSection(settings, "sec-config", {});
 		if (sec.tools && typeof sec.tools === "object") Object.values(sec.tools).forEach((v) => out.push(dirOf(v)));
 		if (Array.isArray(sec.entries)) sec.entries.forEach((e) => out.push(dirOf(e && e.path)));
 	} catch { /* ignore */ }
@@ -104,9 +103,10 @@ function wsGenCandidates(settings) {
 	return out;
 }
 let WS_CFG = { genDir: "", templates: {}, selfShells: [] };
-const WS_SCHEMA = z.object({
+export const Config = volatile(z.object({
 	genDir: z.string().default(""),
-});
+}));
+const WS_SCHEMA = Config;
 function loadWsCfg() {
 	try {
 		const j = JSON.parse(readFileSync(WS_SETTINGS_FILE, "utf8"));
@@ -1042,20 +1042,29 @@ function registerTools(ctx) {
 }
 
 /** 设置层（host ctx.inject 后调用；勿进 export inject，原因见常量区注释）。 */
-function registerSettingsLayer(ctx, web) {
+function registerSettingsLayer(ctx, web, config) {
 	const settings = web?.settings ?? ctx.settings;
 	const systemPrompt = web?.systemPrompt ?? ctx.systemPrompt;
 	const connection = web?.connection ?? ctx.connection;
+	const liveConfig = () => plainConfig(config, {});
 	// 绑定 settings 句柄：genBase() 据此从 sec-config 工具根目录派生 WebShell 候选目录
 	WS_SETTINGS = settings ?? null;
 	// 启动时读自有 settings.json；settings 服务仅尽力同步（非持久化主路径，避免 mutate 挂起）
 	loadWsCfg();
+	const configuredDir = String(liveConfig().genDir ?? "").trim();
+	if (configuredDir) WS_CFG.genDir = configuredDir;
 	try {
-		const scope = settings.register("webshell-mgr", WS_SCHEMA, { base: { genDir: WS_CFG.genDir || "" } });
-		const sync = () => { try { WS_CFG.genDir = scope.get?.().genDir ?? WS_CFG.genDir; } catch { /* ignore */ } };
-		sync();
-		try { scope.watch?.(sync); } catch { /* optional host watcher */ }
-		try { settings.on?.("set", sync); } catch { /* ignore */ }
+		if (typeof config?.get !== "function") {
+			const scope = settings.register("webshell-mgr", WS_SCHEMA, { base: { genDir: WS_CFG.genDir || "" } });
+			const sync = () => { try { WS_CFG.genDir = scope.get?.().genDir ?? WS_CFG.genDir; } catch { /* ignore */ } };
+			sync();
+			try { scope.watch?.(sync); } catch { /* optional host watcher */ }
+		} else {
+			onVolatileUpdate(ctx, () => {
+				const next = String(liveConfig().genDir ?? "").trim();
+				if (next) WS_CFG.genDir = next;
+			});
+		}
 	} catch (e) {
 		ctx.logger?.warn?.("dsh-webshell-mgr: settings register failed: %s", e && e.message ? e.message : String(e));
 	}
@@ -1217,7 +1226,7 @@ function registerSettingsLayer(ctx, web) {
 	}
 }
 
-function apply(ctx) {
+function apply(ctx, config) {
 	const trustedHosts = () => {
 		try { return ctx.webRuntime?.trustedHosts ?? []; } catch { return []; }
 	};
@@ -1251,7 +1260,7 @@ function apply(ctx) {
 	}), "dsh-webshell-mgr: web route");
 	try {
 		ctx.inject?.(["settings", "connection", "systemPrompt"], (web) => {
-			try { registerSettingsLayer(ctx, web); }
+			try { registerSettingsLayer(ctx, web, config); }
 			catch (e) { ctx.logger?.warn?.("dsh-webshell-mgr: settings layer failed: %s", e && e.message ? e.message : String(e)); }
 		});
 	} catch (e) {

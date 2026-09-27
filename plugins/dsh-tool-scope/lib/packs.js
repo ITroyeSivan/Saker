@@ -6,6 +6,14 @@
 
 export const PACKS = [
   {
+    id: 'active-scan',
+    label: '主动扫描器',
+    prefixes: ['nmap_portscan', 'dirsearch_dirs', 'ffuf_fuzz', 'nuclei_scan', 'afrog_scan', 'sqlmap_inject', 'katana_crawl', 'gau_urls'],
+    modes: ['pentest'],
+    defaultVisible: false,
+    hint: 'Nmap、目录/内容发现、Nuclei、Afrog、SQLMap 与爬取；按单个假设加载，不默认全扫',
+  },
+  {
     id: 'webshell',
     label: 'WebShell 管理',
     prefixes: ['webshell_'],

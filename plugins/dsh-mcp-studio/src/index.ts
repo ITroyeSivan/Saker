@@ -1,5 +1,6 @@
 /** Host plugin: owns the `mcp-studio` settings namespace, mounts one mcp-client per enabled row (hot-swap on edit, dispose on remove), and serves live status aggregated from the tool registry over the plugin's loopback channel. */
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/cordis-plugin-loader'
 import z from '@deepseek-ai/schemastery'
 // Type-only import: pulls in dsh-session's Context event augmentation
 // (`session/event` etc.) so ctx.on() accepts session lifecycle events.
@@ -12,8 +13,10 @@ import {
   toMcpClientConfig,
   validateSection,
   type ServerEntry,
+  type StudioConfig,
   type StudioSection,
 } from './types.ts'
+export { Config } from './types.ts'
 import {
   createExecutionRing,
   createStatusHandler,
@@ -63,8 +66,37 @@ function signatureOf(server: ServerEntry): string {
   return JSON.stringify(toMcpClientConfig(server))
 }
 
-export async function apply(ctx: Context, config: StudioSection): Promise<void> {
-  let current = (): StudioSection => config
+export async function apply(ctx: Context, config: StudioConfig): Promise<void> {
+  let configuredServers = (): readonly ServerEntry[] => {
+    const value = config.servers
+    const resolved = value !== null && typeof value === 'object' && 'get' in value && typeof value.get === 'function'
+      ? value.get()
+      : value
+    return Array.isArray(resolved) ? resolved : []
+  }
+  const legacySettings = ctx.settings as unknown as {
+    get?: (ns: string) => unknown
+    register?: (
+      ns: string,
+      schema: typeof Config,
+      options: { base: StudioConfig; validate: typeof validateSection },
+    ) => { get: () => StudioSection }
+  }
+  if (typeof legacySettings?.get === 'function' && typeof legacySettings.register === 'function') {
+    try {
+      const scope = legacySettings.register(STUDIO_SETTINGS_NAMESPACE, Config, {
+        base: config,
+        validate: validateSection,
+      })
+      configuredServers = () => {
+        const value = scope.get()
+        return Array.isArray(value?.servers) ? value.servers : []
+      }
+    } catch (error) {
+      ctx.logger.warn('mcp-studio: settings provider unavailable, keeping patch baseline: %s', String(error))
+    }
+  }
+  const current = (): StudioSection => ({ servers: [...configuredServers()] as ServerEntry[] })
   let alive = true
   const mounts = new Map<string, Mount>()
   /** Mount-lifecycle notes, enriched by the registry view on every status read. */
@@ -327,21 +359,12 @@ export async function apply(ctx: Context, config: StudioSection): Promise<void> 
     proxy.closeAll()
   }, 'mcp-studio: lifecycle')
 
-  // dsh 0.1.2: installSettingsSection was removed; register the namespace on
-  // the ctx.settings provider instead. The scope supplies resolved values on
-  // top of the composition base, mirroring the old setSource/onChange contract.
-  try {
-    const scope = ctx.settings.register(STUDIO_SETTINGS_NAMESPACE, Config as z<StudioSection>, {
-      base: config,
-      validate: validateSection,
-    })
-    current = () => scope.get()
-    scope.watch(() => {
-      reconcile()
-    })
-  } catch (error) {
-    ctx.logger.warn('mcp-studio: settings provider unavailable, keeping patch baseline: %s', String(error))
-  }
+  // dsh 0.1.7 persists edits into the profile patch and commits only declared
+  // volatile fields without remounting this plugin. Reconcile on that commit.
+  ctx.on('loader/volatile-update', () => {
+    reconcile()
+  })
+  reconcile()
 
   /** Tool-call monitoring over session events, folded into an execution ring served by the status RPC. */
   const executions: ExecutionRing = createExecutionRing(200)

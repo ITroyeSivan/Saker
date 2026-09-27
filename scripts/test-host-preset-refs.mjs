@@ -1,7 +1,7 @@
 // Host preset reference gate: every plugin named by an agent preset must exist in the
 // host source tree selected for compatibility testing.
 //
-// The break this prevents: dsh 0.1.6-alpha.1 removed `dsh-workflow-worker-thread`, but a
+// The break this prevents: dsh 0.1.7-rc.2 may remove or rename a host package, but a
 // stale profile link kept the old package loadable while the preset named a provider the
 // new host no longer shipped. Unit tests and normal startup looked healthy; a session
 // failed only when the preset tried to mount. This gate fails at that exact boundary.
@@ -56,8 +56,11 @@ const refs = new Set()
 const files = []
 for (const preset of readdirSync(join(ROOT, 'preset'), { withFileTypes: true })) {
   if (!preset.isDirectory()) continue
-  const file = join(ROOT, 'preset', preset.name, 'agent.cordis.yml')
-  if (!existsSync(file) || !statSync(file).isFile()) continue
+  const dir = join(ROOT, 'preset', preset.name)
+  const file = ['agent.cordis.yml', 'agent.patch.yml']
+    .map(name => join(dir, name))
+    .find(candidate => existsSync(candidate) && statSync(candidate).isFile())
+  if (file === undefined || !existsSync(file) || !statSync(file).isFile()) continue
   files.push(file)
   const source = readFileSync(file, 'utf8')
   for (const match of source.matchAll(/name:\s*'(@deepseek-ai\/[^']+)'/g)) refs.add(packageNameOf(match[1]))

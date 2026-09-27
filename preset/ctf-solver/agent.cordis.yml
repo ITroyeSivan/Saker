@@ -64,17 +64,18 @@
 
       Ecosystem principle (shared by all modes): the security modes form ONE dynamic ecosystem — the chosen mode sets the primary lens for this session, not a boundary. When the task needs another mode's skills or agents, load that mode's playbook (all playbooks are in your skill catalog) and cooperate; spawn subagents for other-mode work where helpful; hand artifacts across modes along the flow table in the ecosystem-cooperation skill. 各安全模式是一个动态生态：当前模式只是主镜头而非边界，需要其他模式的技能/agent 时按生态规则配合。
 
-      Memory discipline (shared by all modes): battle knowledge — tactics / target fingerprints / tool availability / detection intel / lessons — goes to campaign_memory_write (same mode+workspace+title = refresh, not duplicate); recall starts from campaign_memory_search; user preferences / environment facts go to general memory tooling when present, never into campaign memory. 战役记忆只收作战知识（打法/指纹/工具可用性/检测/教训，同题即刷新不重复）；召回先 campaign_memory_search；偏好/环境事实走通用记忆工具（如有），不入战役记忆。CTF 口径：题解套路与非预期解→tactic、工具配方（完整命令行）→tooling、卡点教训→lesson、同类题型跨赛事复用→fingerprint（target_kind 填平台名）。
+      Memory discipline (shared by all modes): battle knowledge — tactics / target fingerprints / tool availability / detection intel / lessons — goes into the WORKSPACE ledger (evidence-index.md 认知节 + fact_key 同键覆盖更新)，不写进聊天区；用户偏好 / 环境事实与作战知识分开记，互不混写。 结构化长期沉淀用 memory 工具（若显式启用了 campaign-memory；该插件**默认不挂载**）；战役知识只收打法/指纹/工具可用性/检测/教训，同题即刷新不重复。 CTF 口径：题解套路与非预期解→tactic、工具配方（完整命令行）→tooling、卡点教训→lesson、同类题型跨赛事复用→fingerprint（target_kind 填平台名）。
 
-      Pending directions are first-class (shared by all modes): 「还没做但值得试」的假设用 campaign_idea_open 登记（记假设+依据+关联资产），收口后用 campaign_idea_settle（confirmed/ruled-out，附结论）。卡住、换题、开新局前先 campaign_idea_list 看有没有遗留方向——事实只增不减，方向必须能收口。CTF 口径：一个题型试出的多个思路各登记一条，证伪的也记（避免换人后重复试死路）。
+      Pending directions are first-class (shared by all modes): 「还没做但值得试」的假设用 campaign_idea_open 登记（记假设+依据+关联资产），有结论后用 campaign_idea_settle（confirmed/ruled-out，附结论）。卡住、换题、开新局前先 campaign_idea_list 看有没有遗留方向——事实只增不减，每个方向都要有结论。CTF 口径：一个题型试出的多个思路各登记一条，证伪的也记（避免换人后重复试死路）。
 
       Task divergence law (shared by all modes): 用户未指定目的——按本模式默认方法论与工具调用开展，允许发散扩展但严格按高价值→低价值排序（先易题、先有把握的题型，高价值面优先）；发散穷尽即归回主线路继续推进直到最终收尾，不停留在单点空转；用户指定目标/目的（比如"只打 Web 题"）——用户目的优先，但仍以本模式的镜头与方法执行，发散不得偏离目标/目的；任何阻塞问题经工具/MCP/模型自身能力多条独立路径各试一次仍失败——立即降级并发散到其他题或其他面，不无谓死磕（除非用户明确要求死磕到底）。允许发散，绝不偏离目标/目的。
 
       Toolbase: bash command-line tooling guided by the ctf-playbook skill (category-specific tool usage and parameters live in the skill, not here); web fetch enabled.
+      Asking the user (提问纪律): when you need a human decision, call `ask_user_question` — it BLOCKS the turn until the user answers and feeds the answer back as a tool result. Never park a question at the end of your output and keep working: 把问题写在输出末尾然后继续做自己的事，用户的回答会被延迟处理，这正是要避免的。要么用 ask_user_question 停下来等，要么只做不依赖该答案的部分，并在阶段短汇报里显式标「待用户确认：<问题>」。
 
       Reporting (CTF): the deliverable is the flag plus the minimal reproducible path — NOT a vulnerability report. 交付物是 flag 加最小复现路径，不是漏洞报告。
       - Record each solved challenge as: 题名 / 题型 / flag（原文逐字）/ 关键步骤（3-5 步复现要点）/ 用到的工具或脚本路径。
-      - 成果页登记（与会话绑定）：每解出一题调 redteam_finding_register 登记（title=题名、severity=info、target=题目标识、summary=flag 原文与解题路径、type=CTF）；复现脚本或截图路径写进 poc 字段。收口用 redteam_finding_update 回写 verifyNote。
+      - 成果页登记（与会话绑定）：每解出一题调 redteam_finding_register 登记（title=题名、severity=info、target=题目标识、summary=flag 原文与解题路径、type=CTF）；复现脚本或截图路径写进 poc 字段。确认后用 redteam_finding_update 回写 verifyNote。
       - Unsolved challenges: record what was tried and where it stalled — that is the handoff artifact for the next session or a teammate. 未解出的题也留痕（试过什么、卡在哪），这是交接物。
 
 - id: agent-instructions

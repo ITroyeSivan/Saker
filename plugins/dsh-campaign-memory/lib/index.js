@@ -384,7 +384,7 @@ function apply(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "campaign_memory_list",
-		description: "列出本模式有效记忆，按热度排序；收口复盘与治理用。",
+		description: "列出本模式有效记忆，按热度排序；任务收尾复盘和记忆治理用。",
 		parameters: { kind: { type: "string", enum: MEMORY_KINDS, description: "限定类别（可选）" }, limit: { type: "number", description: "返回条数（默认 50，上限 200）" } },
 		output: {
 			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
@@ -424,7 +424,7 @@ function apply(ctx) {
 	//#region 方向层工具（Idea：还没做但值得做的假设——与"已发生的事实"分开维护）
 	ctx.tools.register(defineTool({
 		name: "campaign_idea_open",
-		description: "登记待验证方向（事实用 campaign_memory_write；本工具记下一步该往哪打）。同模式同工作区同题写入即刷新，收口走 campaign_idea_settle。",
+		description: "登记待验证方向（事实用 campaign_memory_write；本工具记录下一步该往哪打）。同模式同工作区同题写入即刷新，有结论后用 campaign_idea_settle。",
 		parameters: {
 			title: { type: "string", required: true, description: "方向一句话（如：api.example.com 的 /admin 未授权访问未验证）" },
 			content: { type: "string", required: true, description: "方向正文：假设是什么、打算怎么验、预期结果" },
@@ -458,7 +458,7 @@ function apply(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "campaign_idea_settle",
-		description: "收口方向：confirmed=已验证成立，ruled-out=验证后排除。note 记录依据并追加到正文；没试过不要排除。",
+		description: "给方向下结论：confirmed=已验证成立，ruled-out=验证后排除。note 记录依据并追加到正文；没试过不要排除。",
 		parameters: {
 			id: { type: "string", required: true, description: "方向 id（cm- 开头，来自 campaign_idea_open/list）" },
 			status: { type: "string", required: true, enum: ["confirmed", "ruled-out"], description: "confirmed=已验证成立 / ruled-out=已排除" },
@@ -466,7 +466,7 @@ function apply(ctx) {
 		},
 		output: {
 			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
-			render: (_a, v) => [{ type: "text", text: v.ok ? `方向已收口：${v.id} → ${v.idea_status}` : `收口失败：${v.error}` }]
+			render: (_a, v) => [{ type: "text", text: v.ok ? `方向已有结论：${v.id} → ${v.idea_status}` : `记录失败：${v.error}` }]
 		},
 		execute(args, exec) {
 			const session = sessionOf(ctx, exec);
@@ -482,17 +482,17 @@ function apply(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "campaign_idea_list",
-		description: "列出未收口方向；开新局、换目标或卡住时先看。includeSettled=true 可复盘已收口项。",
+		description: "列出还没有结论的方向；开新局、换目标或卡住时先看。includeSettled=true 可复盘已有结论的方向。",
 		parameters: {
-			status: { type: "string", enum: IDEA_STATUSES, description: "只看某个状态（省略=只看 open 未收口）" },
-			includeSettled: { type: "boolean", description: "包含已收口的方向（复盘用）" },
+			status: { type: "string", enum: IDEA_STATUSES, description: "只看某个状态（省略=只看 open 未结束）" },
+			includeSettled: { type: "boolean", description: "包含已有结论的方向（复盘用）" },
 			limit: { type: "number", description: "返回条数（默认 30，上限 200）" }
 		},
 		output: {
 			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
 			render: (_a, v) => {
 				if (!v.ok) return [{ type: "text", text: `查询失败：${v.error}` }];
-				if (!v.ideas.length) return [{ type: "text", text: "当前没有未收口的方向——侦察时若发现「没测但可疑」的点，用 campaign_idea_open 登记。" }];
+				if (!v.ideas.length) return [{ type: "text", text: "当前没有未结束的方向——侦察时若发现「没测但可疑」的点，用 campaign_idea_open 登记。" }];
 				return [{ type: "text", text: v.ideas.map((i) => `[${i.ideaStatus}${i.ideaAsset ? "｜" + i.ideaAsset : ""}] ${i.title}（${i.id}）——${String(i.content).split("\\n")[0].slice(0, 120)}`).join("\n") }];
 			}
 		},

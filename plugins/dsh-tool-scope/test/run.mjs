@@ -1,6 +1,7 @@
-// dsh-tool-scope 测试：① 规则计算逻辑 ② **规则表与各插件实际门禁的源码契约锁**。
+// dsh-tool-scope 测试：规则计算、插件门禁契约和 Pentest RCE 工具面边界。
 //
-// 为什么需要契约锁：本插件的规则表是「插件既有门禁的镜像」。如果哪天某个插件放开了门禁
+// 为什么需要契约锁：通用规则表镜像插件既有门禁；Pentest 规则单独锁住产品交付边界。
+// 如果哪天某个插件放开了门禁
 // （例如 webshell 支持 code-audit 了），而这里没跟着改，就会出现**静默功能损失** ——
 // 工具被隐藏、模型看不到、用户也不知道为什么。这类不一致必须由测试抓出来，
 // 而不是等用户在实战里发现「工具怎么没了」。
@@ -30,18 +31,29 @@ const readPlugin = (name, file = 'lib/index.js') => {
     'redteam_finding_register', 'campaign_memory_write', 'gates_list',                     // security（3）
     'trace_recent', 'knowledge_search',                                                    // security（2）→ 共 5
     'nmap_portscan', 'sqlmap_inject',              // 无门禁的插件工具（不该被动）
+    'redteam_atlas_target', 'redteam_coverage_mark', 'operation_goal',
+    'subagent', 'subagent_fork', 'workflow', 'attack_plan', 'attack_gate',
+    'netexec_scan', 'crackmapexec_scan', 'impacket_suite',
+    'access_confirm', 'memshell_cli', 'nday_catalog', 'nday_match', 'nday_coverage',
+    'nday_triage', 'nday_learn', 'nday_draft', 'nday_handoff', 'zday_pattern', 'oob_probe',
     'tool_pack',                                      // 按需工具包入口
   ]
   const W = 5  // known 里 webshell_* 个数
   const C = 4  // ctf_* 个数
-  const S = 5  // security 组个数（redteam/campaign/gates/trace/knowledge）
+  const S = 7  // security 组个数（redteam/campaign/gates/trace/knowledge）
   const P = 1  // 工具包入口
 
-  // pentest：webshell 与 security 放行，**ctf 隐藏**（CTF 工具在渗透模式调不动）
+  // Pentest：保留侦察/漏洞路径/证据工具；收起 CTF、后渗透与通用流程工具。
   const pt = computeDeny('pentest', known, RULES)
-  ok('pentest 隐藏 ctf_*（4 个）', pt.length === C && pt.includes('ctf_steer'))
-  ok('pentest 不隐藏 webshell_*', !pt.includes('webshell_exec'))
-  ok('pentest 不隐藏 security 组', !pt.includes('redteam_finding_register') && !pt.includes('knowledge_search'))
+  ok('pentest 隐藏 ctf_*（4 个）', pt.includes('ctf_steer') && C === 4)
+  ok(`pentest 示例工具面收起数为 ${C + 20}`, pt.length === C + 20)
+  ok('pentest 隐藏 webshell、保留按需工具包入口', pt.includes('webshell_exec') && !pt.includes('tool_pack'))
+  ok('pentest 隐藏派单、矩阵、后渗透和内网工具',
+    ['operation_goal', 'subagent', 'subagent_fork', 'workflow', 'attack_gate', 'redteam_atlas_target', 'redteam_coverage_mark', 'netexec_scan', 'crackmapexec_scan', 'impacket_suite', 'access_confirm', 'memshell_cli', 'nday_triage', 'campaign_memory_write', 'trace_recent'].every((n) => pt.includes(n))
+    && !['attack_plan', 'nday_coverage', 'nday_learn', 'nday_draft', 'nday_handoff'].some((n) => pt.includes(n)))
+  ok('pentest 保留 RCE 路径、证据记录与核心侦察工具',
+    ['nmap_portscan', 'sqlmap_inject', 'nday_catalog', 'nday_match', 'nday_coverage', 'nday_learn', 'nday_draft', 'nday_handoff', 'attack_plan', 'zday_pattern', 'oob_probe', 'redteam_finding_register', 'knowledge_search'].every((n) => !pt.includes(n)))
+  ok('pentest 保留证据登记和 Nday 知识检索', !pt.includes('redteam_finding_register') && !pt.includes('knowledge_search'))
 
   // code-audit：webshell + ctf 隐藏；security 放行
   const ca = computeDeny('code-audit', known, RULES)
@@ -52,7 +64,8 @@ const readPlugin = (name, file = 'lib/index.js') => {
     && !ca.includes('trace_recent') && !ca.includes('knowledge_search'))
   ok('code-audit 不隐藏无门禁工具（扫描器）', !ca.includes('nmap_portscan') && !ca.includes('sqlmap_inject'))
   ok('code-audit 不隐藏宿主内置工具', !ca.includes('read') && !ca.includes('pwsh'))
-  ok(`code-audit 隐藏数 = webshell ${W} + ctf ${C}`, ca.length === W + C)
+  ok('code-audit 隐藏无适用模式的工具包入口', ca.includes('tool_pack'))
+  ok(`code-audit 隐藏数 = webshell ${W} + ctf ${C} + 工具包入口 ${P}`, ca.length === W + C + P)
 
   // ctf-solver：webshell + security 隐藏；ctf 放行
   const ctf = computeDeny('ctf-solver', known, RULES)
@@ -60,16 +73,17 @@ const readPlugin = (name, file = 'lib/index.js') => {
   ok('ctf-solver 隐藏 webshell_*', ctf.includes('webshell_exec'))
   // ⚠ 这里**不**隐藏 security 组：四个插件的 MODE_IDS 都含 ctf-solver（CTF 也要登记成果/留痕）
   ok('ctf-solver 不隐藏 security 组（MODE_IDS 含 ctf-solver）', !ctf.includes('knowledge_search'))
-  ok(`ctf-solver 隐藏数 = webshell ${W}`, ctf.length === W)
+  ok('ctf-solver 隐藏无适用模式的工具包入口', ctf.includes('tool_pack'))
+  ok(`ctf-solver 隐藏数 = webshell ${W} + 工具包入口 ${P}`, ctf.length === W + P)
 
   // 标准模式（宿主默认预设，id 为空）：三组全隐藏
   const std = computeDeny('', known, RULES)
-  ok(`默认模式（空 id）隐藏三组全部（${W + C + S + P}）`, std.length === W + C + S + P)
+  ok(`默认模式（空 id）隐藏三组与 Pentest 专用工具（${std.length}）`, ['webshell_exec', 'ctf_steer', 'knowledge_search', 'operation_goal', 'tool_pack', 'netexec_scan'].every((n) => std.includes(n)))
   ok('默认模式仍不隐藏宿主内置与无门禁工具', !std.includes('read') && !std.includes('nmap_portscan'))
 
   // 未知模式（未来新增的 preset）：同样按「不在白名单即隐藏」处理
   const unknown = computeDeny('some-future-mode', known, RULES)
-  ok(`未知模式同标准模式（${W + C + S + P}）`, unknown.length === W + C + S + P)
+  ok('未知模式同样收起受门禁限制的工具', ['webshell_exec', 'ctf_steer', 'knowledge_search', 'operation_goal', 'tool_pack', 'netexec_scan'].every((n) => unknown.includes(n)))
 
   // 空清单：绝不抛错、返回空
   ok('空工具清单返回空数组', computeDeny('code-audit', [], RULES).length === 0)
@@ -87,7 +101,8 @@ const readPlugin = (name, file = 'lib/index.js') => {
   const off = enabledRules({ webshell: false })
   ok('可按 id 关掉单条规则', off.length === RULES.length - 1 && !off.some((r) => r.id === 'webshell'))
   const known = ['webshell_exec', 'ctf_state']
-  ok('关掉 webshell 规则后不再隐藏它', !computeDeny('', known, off).includes('webshell_exec'))
+  ok('Pentest 的产品边界独立于旧 webshell 模式门禁', computeDeny('pentest', known, off).includes('webshell_exec'))
+  ok('默认/未知模式仍由白名单规则收起 webshell', computeDeny('', known, off).includes('webshell_exec'))
   ok('其余规则不受影响', computeDeny('', known, off).includes('ctf_state'))
   ok('显式 true 视为启用', enabledRules({ webshell: true }).length === RULES.length)
 }
@@ -102,17 +117,20 @@ const readPlugin = (name, file = 'lib/index.js') => {
 
 // ── 3b. 按需工具包 ─────────────────────────────────────────────────────────
 {
-  const known = ['webshell_connect', 'webshell_exec', 'impacket_suite', 'netexec_scan', 'crackmapexec_scan', 'nmap_portscan', 'tool_pack']
+  const known = ['webshell_connect', 'webshell_exec', 'impacket_suite', 'netexec_scan', 'crackmapexec_scan', 'nmap_portscan', 'dirsearch_dirs', 'ffuf_fuzz', 'nuclei_scan', 'afrog_scan', 'sqlmap_inject', 'katana_crawl', 'gau_urls', 'whatweb_fingerprint', 'wafw00f_detect', 'tool_pack']
   const pt = deferredPackTools('pentest', known, PACKS)
-  ok('pentest 默认收起 webshell 全局工具', pt.length === 2 && pt.includes('webshell_exec'))
-  ok('preset 平面注册的 AD 工具不进入 restrict 包（宿主限制只覆盖全局工具）', !pt.includes('impacket_suite') && !pt.includes('netexec_scan'))
-  ok('pentest 不收核心扫描器与工具包入口', !pt.includes('nmap_portscan') && !pt.includes('tool_pack'))
+  ok('pentest 默认收起 webshell 全局工具', pt.includes('webshell_connect') && pt.includes('webshell_exec'))
+  ok('pentest 默认收起耗时扫描器与爬取工具', ['nmap_portscan', 'dirsearch_dirs', 'ffuf_fuzz', 'nuclei_scan', 'afrog_scan', 'sqlmap_inject', 'katana_crawl', 'gau_urls'].every((n) => pt.includes(n)))
+  ok('快指纹辅助工具仍常驻', !pt.includes('whatweb_fingerprint') && !pt.includes('wafw00f_detect'))
+  ok('AD 工具不属于 webshell 延迟包（由 Pentest 主线规则单独收起）', !pt.includes('impacket_suite') && !pt.includes('netexec_scan'))
+  ok('pentest 不收工具包入口', !pt.includes('tool_pack'))
   const ca = deferredPackTools('code-audit', known, PACKS)
   ok('code-audit 不额外收起（基础规则已隐藏 webshell）', ca.length === 0)
-  ok('packsForMode 只返回模式可用包', packsForMode('pentest', PACKS).length === 1 && packsForMode('code-audit', PACKS).length === 0)
+  ok('packsForMode 只返回模式可用包', packsForMode('pentest', PACKS).length === 2 && packsForMode('code-audit', PACKS).length === 0)
   ok('enabledPacks 可按 id 关闭', enabledPacks({ webshell: false }).length === PACKS.length - 1)
   ok('findPack 严格按 id 匹配', findPack('webshell', PACKS)?.id === 'webshell' && findPack('nope', PACKS) === null)
-  ok('webshell 包只命中 webshell_*', JSON.stringify(packTools(known, PACKS[0])) === JSON.stringify(['webshell_connect', 'webshell_exec']))
+  ok('webshell 包只命中 webshell_*', JSON.stringify(packTools(known, findPack('webshell', PACKS))) === JSON.stringify(['webshell_connect', 'webshell_exec']))
+  ok('active-scan 包不包含快指纹工具', JSON.stringify(packTools(known, findPack('active-scan', PACKS))) === JSON.stringify(['afrog_scan', 'dirsearch_dirs', 'ffuf_fuzz', 'gau_urls', 'katana_crawl', 'nmap_portscan', 'nuclei_scan', 'sqlmap_inject']))
 }
 
 // ── 4. 源码契约锁：规则表必须与各插件的实际门禁一致 ──────────────────────────
@@ -156,23 +174,38 @@ const readPlugin = (name, file = 'lib/index.js') => {
   // 4.4 DEFAULT_MODES 必须与上面三件套一致（防止两处定义漂移）
   ok('DEFAULT_MODES 与 security 规则的 modes 一致',
     JSON.stringify(DEFAULT_MODES) === JSON.stringify(securityRule.modes))
+
+  // 4.5 Pentest 的工具边界必须跟随主线提示，且只影响该模式的能力声明。
+  const focus = RULES.find((r) => r.id === 'pentest-rce-focus')
+  const pentestPrompt = readFileSync(new URL('../preset/pentest/agent.patch.yml', PLUGINS), 'utf8')
+  ok('Pentest RCE 工具规则存在并排除该模式', !!focus && !focus.modes.includes('pentest'))
+  ok('Pentest 提示明确命中 RCE 后停止且禁止派生会话', /reproducible RCE[\s\S]{0,500}stop/i.test(pentestPrompt) && /Do not spawn subagents, workflows, or side chats/i.test(pentestPrompt))
+  ok('Pentest 规则收起派单、记忆轨迹、内网、后渗透和非主线 Nday 工具', ['webshell_', 'netexec_', 'crackmapexec_', 'impacket_', 'subagent', 'workflow', 'campaign_', 'trace_', 'access_confirm', 'memshell_cli', 'nday_handoff'].every((p) => focus.prefixes.includes(p)))
+  ok('Pentest 主线规则不屏蔽按需工具包入口', !focus.prefixes.includes('tool_pack') && !computeDeny('pentest', ['tool_pack'], RULES).includes('tool_pack'))
+  const toolPackRule = RULES.find((r) => r.id === 'toolPack')
+  ok('工具包入口只对实际声明工具包的模式开放', JSON.stringify(toolPackRule.modes) === JSON.stringify([...new Set(PACKS.flatMap((p) => p.modes))]))
 }
 
-// ── 5. 工具包真实装配：默认收起、加载可见、卸载再收起、销毁释放 ─────────────
+// ── 5. 工具包真实装配：Pentest 基础 RCE 规则无法被包加载覆盖 ────────────────
 {
   const known = [
-    'read', 'nmap_portscan', 'ctf_state',
+    'read', 'nmap_portscan', 'dirsearch_dirs', 'ffuf_fuzz', 'nuclei_scan', 'afrog_scan', 'sqlmap_inject', 'katana_crawl', 'gau_urls', 'whatweb_fingerprint', 'ctf_state',
     'webshell_connect', 'webshell_exec', 'webshell_file',
     'impacket_suite', 'netexec_scan', 'crackmapexec_scan',
     'tool_pack',
   ]
   const handlers = {}
   const registered = []
-  const activeDeny = new Set()
+  const denyLayers = new Map()
+  const deferredScanners = ['nmap_portscan', 'dirsearch_dirs', 'ffuf_fuzz', 'nuclei_scan', 'afrog_scan', 'sqlmap_inject', 'katana_crawl', 'gau_urls']
+  let scannerToolsReady = false
+  let nextLayerId = 0
+  const isDenied = (name) => [...denyLayers.values()].some((set) => set.has(name))
   const disposeCalls = []
   const fakeCtx = {
     tools: {
-      schemas: () => known.map((name) => ({ name })),
+      // Global schemas omit preset-injected scanner tools; the Agent view contains them.
+      schemas: () => known.filter((name) => !deferredScanners.includes(name)).map((name) => ({ name })),
       register: (tool) => registered.push(tool),
     },
     logger: { info: () => {}, warn: () => {} },
@@ -184,34 +217,46 @@ const readPlugin = (name, file = 'lib/index.js') => {
     id: 'agent-pack-test',
     ctx: {
       tools: {
+        schemas: () => known.filter((name) => !isDenied(name) && (scannerToolsReady || !deferredScanners.includes(name))).map((name) => ({ name })),
         restrict: (filter) => {
-          for (const name of filter.deny) activeDeny.add(name)
-          const deny = [...filter.deny]
+          const layerId = ++nextLayerId
+          const deny = new Set(filter.deny)
+          denyLayers.set(layerId, deny)
           return () => {
-            for (const name of deny) activeDeny.delete(name)
-            disposeCalls.push(deny)
+            denyLayers.delete(layerId)
+            disposeCalls.push([...deny])
           }
         },
       },
     },
   }
   handlers['agent/created']({ agent })
-  ok('装配后默认收起 webshell', activeDeny.has('webshell_exec'))
-  ok('装配不影响 preset 平面 AD 工具', !activeDeny.has('impacket_suite'))
-  ok('装配后核心扫描器仍可见', !activeDeny.has('nmap_portscan'))
+  ok('agent/created 可先于预设扫描器装配', !deferredScanners.some(isDenied))
+  scannerToolsReady = true
+  handlers['agent/inbox/inserted']({ agent })
+  ok('装配后 webshell、内网与派单不可见，工具包入口可见', ['webshell_exec', 'impacket_suite', 'netexec_scan', 'crackmapexec_scan'].every(isDenied) && !isDenied('tool_pack'))
+  ok('Agent 工具视图中的耗时扫描器默认隐藏、快指纹仍可见', deferredScanners.every(isDenied)
+    && !isDenied('whatweb_fingerprint'))
 
   const toolPack = registered.find((tool) => tool.name === 'tool_pack')
   ok('tool_pack 已注册', !!toolPack)
   const list = await toolPack.execute({ action: 'list' }, { agent })
-  ok('list 显示 webshell 默认收起', list.ok && list.packs.find((p) => p.id === 'webshell')?.loaded === false)
+  ok('list 通过 Agent 视图识别 8 个扫描器并显示默认收起', list.ok && list.packs.find((p) => p.id === 'active-scan')?.loaded === false && list.packs.find((p) => p.id === 'active-scan')?.tools === 8)
+  const scansLoaded = await toolPack.execute({ action: 'load', pack: 'active-scan' }, { agent })
+  ok('常规模式可按需加载主动扫描器包', scansLoaded.ok && !isDenied('nmap_portscan') && !isDenied('nuclei_scan'))
+  handlers['agent/inbox/inserted']({ agent })
+  ok('后续消息保留已加载的工具包', !isDenied('nmap_portscan') && !isDenied('nuclei_scan'))
+  ok('扫描包不会解除 WebShell 主线限制', isDenied('webshell_exec'))
+  const scansUnloaded = await toolPack.execute({ action: 'unload', pack: 'active-scan' }, { agent })
+  ok('主动扫描器包可卸载并恢复默认隐藏', scansUnloaded.ok && isDenied('nmap_portscan') && isDenied('nuclei_scan'))
   const loaded = await toolPack.execute({ action: 'load', pack: 'webshell' }, { agent })
-  ok('load webshell 后工具恢复可见', loaded.ok && !activeDeny.has('webshell_exec'))
+  ok('加载包不能绕过 Pentest 的 webshell 禁止规则', loaded.ok && isDenied('webshell_exec'))
   const loadedAgain = await toolPack.execute({ action: 'load', pack: 'webshell' }, { agent })
-  ok('重复 load 幂等', loadedAgain.ok && activeDeny.has('webshell_exec') === false)
+  ok('重复 load 也不能恢复 webshell 工具', loadedAgain.ok && isDenied('webshell_exec'))
   const unloaded = await toolPack.execute({ action: 'unload', pack: 'webshell' }, { agent })
-  ok('unload webshell 后重新收起', unloaded.ok && activeDeny.has('webshell_exec'))
+  ok('unload 后 webshell 仍不可见', unloaded.ok && isDenied('webshell_exec'))
   handlers['agent/disposed']({ agent })
-  ok('agent 销毁时释放基础过滤与工具包过滤', disposeCalls.length >= 2 && !activeDeny.has('webshell_exec') && !activeDeny.has('ctf_state'))
+  ok('agent 销毁时释放基础过滤与工具包过滤', disposeCalls.length >= 3 && denyLayers.size === 0)
 }
 
 // ── 6. 反向锚：断言「实现不越界」─────────────────────────────────────────────

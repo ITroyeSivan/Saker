@@ -5,8 +5,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { openStore as atlasOpen, addChainNode as atlasAddNode, listChain as atlasListChain } from "@dsh-external/dsh-attack-atlas/store";
-import { openStore, registerFinding, updateFinding, removeFinding, getFinding, allFindings, listFindings, listFindingsAll, computeStats, computeStatsAll, modeCounts, modeCountsAll, groupByTarget, groupByTargetAll, setMeta, getMeta, ledgerOverviewAll, secondReviewError, secondReviewVerdict, SECOND_RATINGS, RATING_SCALE } from "../lib/store.js";
-import { verifyMessage, isTrustedRequest, dispatch, checkCsrf, releaseChainRefs, registerFindingWithLink, autoLinkFinding, reconcileChain, renderChainReconcile } from "../lib/index.js";
+import { openStore, registerFinding, updateFinding, removeFinding, getFinding, allFindings, listFindings, listFindingsAll, computeStats, computeStatsAll, modeCounts, modeCountsAll, groupByTarget, groupByTargetAll, setMeta, getMeta, ledgerOverviewAll, secondReviewError, secondReviewVerdict, SECOND_RATINGS, RATING_SCALE, REGISTER_STATUSES, MODE_STATUSES } from "../lib/store.js";
+import { verifyMessage, isTrustedRequest, dispatch, checkCsrf, releaseChainRefs, registerFindingWithLink, autoLinkFinding, reconcileChain, renderChainReconcile, apply } from "../lib/index.js";
 
 // 二次复核成对参数：verified 是各模式通用的「验证类终态」，首次流转须在同一次调用里
 // 同时给出独立二次评级与足量依据——上游用例原先只流转状态，此处统一以 ...RV 补齐。
@@ -82,6 +82,52 @@ ok("register 越权值：severity/evidenceLevel 回落，status 显式拒绝 + �
 	assert.equal(r.severity, "medium");
 	assert.equal(r.status, "pending");
 	assert.equal(r.title.length, 200);
+});
+
+// 登记枚举必须与实现一致（schema 不得列出永远登不上的值）。
+// 回归背景（2026-09-25 真机会话）：register 的 status 枚举透传了完整词表（含 verified），
+// 而 registerFinding 对 verified **无条件**拒绝——模型照 schema 选它必被拒，属「schema 说谎」。
+ok("登记枚举与实现一致：verified 不在登记词表里，列出的每个值都真能登记", () => {
+	assert.ok(!REGISTER_STATUSES.includes("verified"), "verified 不得出现在登记枚举");
+	assert.ok(REGISTER_STATUSES.includes("pending"), "pending 必须在登记枚举里");
+	assert.throws(
+		() => registerFinding(openStore(":memory:"), SID, "pentest", { title: "x", status: "verified" }),
+		/verified 不可在登记时直接写入/,
+		"登记时写 verified 必须被拒（终态须经 update/mark 流转）",
+	);
+	// 枚举里每个值都必须在**至少一个模式**下真能登记成功——否则就是 schema 说谎
+	const st = openStore(":memory:");
+	const accepted = new Set();
+	for (const [mode, list] of Object.entries(MODE_STATUSES)) {
+		for (const s of list) {
+			if (!REGISTER_STATUSES.includes(s)) continue;
+			try { registerFinding(st, SID, mode, { title: `${mode}-${s}`, status: s }); accepted.add(s); }
+			catch { /* 该模式不接受这个值 → 由别的模式证明它可达 */ }
+		}
+	}
+	const unreachable = REGISTER_STATUSES.filter((s) => !accepted.has(s));
+	assert.deepEqual(unreachable, [], `登记枚举里存在永远登不上的状态：${unreachable.join("/")}`);
+	st.close();
+});
+
+// 上面那条查的是 store 常量；真正出错的那一层是**工具 schema**——它必须用同一个词表。
+// 用仓里已有的 fake-ctx 惯例把注册到的工具抓下来直接读 schema。
+ok("登记工具 schema 的 status 枚举 = 登记词表；update 仍保留 verified", () => {
+	const registered = [];
+	apply({
+		tools: { register: (tool) => registered.push(tool) },
+		effect: (fn) => { try { return fn(); } catch { return undefined; } },
+		webServer: { register: () => () => {} },
+		webRuntime: { trustedHosts: [] },
+		agentPresets: {},
+	});
+	const reg = registered.find((t) => t?.name === "redteam_finding_register");
+	assert.ok(reg, "必须注册 redteam_finding_register");
+	const regEnum = reg.parameters.status.enum;
+	assert.ok(!regEnum.includes("verified"), `schema 不得列出 verified（实际：${regEnum.join("/")}）`);
+	assert.deepEqual([...regEnum].sort(), [...REGISTER_STATUSES].sort(), "schema 枚举必须与 REGISTER_STATUSES 一致");
+	const upd = registered.find((t) => t?.name === "redteam_finding_update");
+	assert.ok(upd?.parameters?.status?.enum?.includes("verified"), "update 必须保留 verified（流转终态）");
 });
 
 ok("finding 疑似态：pentest/code-audit 可流转 suspect，其他模式显式拒绝", () => {

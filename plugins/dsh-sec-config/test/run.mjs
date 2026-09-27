@@ -330,9 +330,16 @@ const ok = (label, cond) => {
   scheduleSync(settings, { burpUrl: 'http://127.0.0.1:9876' }, null, {
     firstDelayMs: 1, maxDelayMs: 2, factor: 1.5, summarizeAt: 8,
   })
-  await new Promise((resolve) => setTimeout(resolve, 200))
+  // 这段重试间隔只有 1–2ms，用**固定 200ms 墙钟**去等 13 次是脆的：
+  // 机器负载高时 13 次 tick 可能还没跑完 → 断言假红（2026-09-25 在 release-gate 里实测到过一次）。
+  // 改成有上限的轮询：等够 13 次为止（最多 2s），再多等 50ms 确认「成功后不再重试」。
+  const retryDeadline = Date.now() + 2000
+  while (updates < 13 && Date.now() < retryDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  await new Promise((resolve) => setTimeout(resolve, 50))
   ok('命名空间迟到时不会永久放弃（旧实现在第 8 次就停了）', updates > 8)
-  ok('一直重试到第 13 次成功为止', updates === 13)
+  ok('一直重试到第 13 次成功为止（成功后不再重试）', updates === 13)
 }
 
 // 5. 工具区消息配色 —— msgStyle(ok) 本就支持错误色，渲染处必须读显式标记。
@@ -523,6 +530,7 @@ const ok = (label, cond) => {
     !readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8').includes('**初始地址**'))
   const clientSrc = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
   ok('模型代理面板显示最近出站与脱敏类型', clientSrc.includes('最近出站：') && clientSrc.includes('stats.events') && clientSrc.includes('redactedKinds'))
+  ok('安全配置含自建 memshell 后端入口', clientSrc.includes('内存马后端') && clientSrc.includes("path: ['memshell']") && clientSrc.includes('party.mem.mk'))
 }
 
 // 16b. 统一出站策略：模型上游算 infra 出站，冻结档必须拦在 fetch 之前

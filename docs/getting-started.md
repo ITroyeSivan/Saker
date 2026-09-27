@@ -10,11 +10,25 @@
 - Node.js `>=22.5`。MCP Studio要求 `^22.19.0 || >=24.0.0`。
 - 使用扫描器、Semgrep、Burp、Yakit、Claude Code或Codex时，需要自行安装并配置对应程序。
 
-> 当前完整验证环境为 DeepSeek Harness **`0.1.6-alpha.1-0a15e36`** 内部 Web 版本；
-> `0.1.5-rc.1` 保留兼容。公开 npm 线以 `npm view @deepseek-ai/dsh dist-tags` 为准。
+> 当前完整验证环境为 DeepSeek Harness **`0.1.7-rc.1-c36a83f`** 内部 Web 版本；
+> `0.1.6-alpha.1` 保留兼容。公开 npm 线以 `npm view @deepseek-ai/dsh dist-tags` 为准。
 
-**关于 `0.1.6-alpha.1`**：已在真实宿主上完成适配并实跑验证；本次迁移了 PTC workflow provider，
-并修复了 MCP proxy/hybrid 子进程退出后的死通道重开。下一节保留 0.1.5 破坏性变更的历史说明。
+**关于 `0.1.7-rc.2`**：Saker 0.4.58 基于当前 preset/config 兼容层适配。Agent preset 改为
+声明式配置；`preset-root` 在 0.1.7 调用 `agentPresets.register()`，在 0.1.6
+继续走 `resolvedRoots`，因此同一条 bundle patch 在两代宿主都可启动。settings
+改为当前 profile 的 Cordis volatile Config，并对 0.1.6 缺失的
+`Schema.volatile()` 做能力探测降级；客户端配置读取迁移到 `ctx.configForms`；
+Session 日志按 V4 兼容。下一节保留旧宿主破坏性变更的历史说明。
+
+升级旧 profile 时，如果宿主使用的 pnpm 主版本与旧 `node_modules` 不一致，
+`dsh plugin add` 会拒绝复用旧虚拟 store。此时请使用新版 dsh 对应的 pnpm 在
+隔离 profile 中重建依赖，或从干净 profile 重新安装。不要直接删除或重建真实
+`~/.dsh`，也不要在其 `node_modules` 实际指向真实 home 的测试目录上执行升级。
+
+在 Windows 的 `E:\工作\WorkBuddy\WebSec\dsh` 工作区，0.1.7 默认
+`workspace-write` 可能因 `SetNamedSecurityInfoW Win32 5` 无法建立 ACL 沙箱。
+现场上线前必须先用一个小任务验证 shell 能否执行；失败时应修复宿主 ACL 授权，
+或经人工确认临时使用 `danger-full-access`，不要静默绕过审批。
 
 需要特别说明的是——**这一版存在静态 API 差分看不出来的破坏性变更**，本项目最初的差分结论（「影响仅一处」）是**错的**，已被实跑推翻：
 
@@ -67,18 +81,18 @@ dsh web
 每个目录都是独立的dsh bundle。先安装根模式包，再按需要添加插件：
 
 ```powershell
-dsh plugin --profile web add "file:C:/packages/dsh-saker-0.3.9.tgz"
-dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-sec-config-1.3.23.tgz"
-dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-knowledge-hub-0.3.18.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-saker-0.4.58.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-sec-config-1.3.27.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-knowledge-hub-0.3.19.tgz"
 dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-skill-browse-1.1.10.tgz"
-dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-stage-gate-1.7.2.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-stage-gate-1.9.6.tgz"
 ```
 
 三个模式共用同一套扫描插件（靶场/CTF 场景也走同一批工具）。使用完整模式能力时一并安装：
 
 ```powershell
-dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-scanner-tools-1.0.16.tgz"
-dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-semgrep-audit-1.0.7.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-scanner-tools-1.1.9.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-semgrep-audit-1.0.11.tgz"
 ```
 
 </details>
@@ -123,7 +137,7 @@ dsh plugin --profile web remove dsh-saker
 
 【2. 打包与安装】
 - node scripts/pack-all.mjs
-  断言：1 个根模式包 + 23 个插件包全部生成，无失败项。
+  断言：1 个根模式包 + 24 个插件包全部生成，无失败项。
 - node scripts/install-all.mjs
   断言：输出里没有 cannot find / ERR_MODULE_NOT_FOUND / 安装异常。
   必须真的跑 install，不能只跑 pack —— 打包通过不等于装得上（出过 pack 全绿但安装崩 ReferenceError）。
@@ -136,7 +150,7 @@ dsh plugin --profile web remove dsh-saker
   /dsh-attack-atlas  /dsh-campaign-memory  /dsh-hunter  /dsh-redteam-results
   /dsh-session-pulse  /dsh-webshell-mgr  /dsh-webshell-mgr-rpc  /dsh-mcp-studio
 - 设置页分区逐个打开：「安全配置」「webshell 管理」「MCP Studio」「refusal-guard」都不得停在永久「加载中…」。
-- 新建会话能选到 pentest / code-audit / ctf-solver 三个 preset。
+- 新建会话默认展示 pentest / code-audit，并保留宿主 standard。在渗透测试的新会话输入 / 可选 pentest-regular、pentest-nday（默认）或 pentest-0day；Nday 默认快速发现，常规全量扫描需明确设深度与时间预算，0day 一次验证一个假设。选中后可追加范围、时限、允许/禁用工具与停止条件。
 
 【4. 出错时的排查入口（按顺序，不要瞎试）】
 - dsh 起不来：先看端口是否被占（换 --port）；NODE_OPTIONS 置空；删 ~/.dsh/.credentials.yaml.lock 再起。

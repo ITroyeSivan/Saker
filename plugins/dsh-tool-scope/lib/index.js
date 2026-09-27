@@ -11,7 +11,7 @@
 // 但落地形态更轻：不造代理层、不加新工具，直接复用宿主的可见性过滤。
 //
 // 【纪律】
-//   · 只收「插件已声明的门禁」，规则表在 lib/rules.js，每条都带源码依据；
+//   · 通用规则镜像插件已有门禁；Pentest 额外按 RCE 交付边界收起不需要的能力；
 //   · **只减不增**：从不 enable 任何东西，只在必要模式下 deny；
 //   · 失败**必须可见**：restrict 抛错只 warn 并放行（宁可多带工具，不可悄悄改坏工具面）；
 //   · 可关：config.enable 与逐规则开关，随时退回原状。
@@ -72,6 +72,21 @@ export function apply(ctx, config = {}) {
     }
   }
 
+  // 工具包要看当前 Agent 的完整可见面。Pentest 扫描器由 preset 注入，
+  // 不一定出现在插件上下文的全局 schemas() 里；全局清单仍用于原有模式规则。
+  const visibleTools = (agent) => {
+    try {
+      const schemas = agent?.ctx?.tools?.schemas?.()
+      if (Array.isArray(schemas)) return schemas.map((s) => s.name)
+      return knownTools()
+    } catch (error) {
+      const msg = `读取 Agent 工具清单失败，工具包不可用: ${String(error?.message ?? error)}`
+      ctx.logger?.warn?.('dsh-tool-scope: %s', msg)
+      console.error('[tool-scope] ' + msg)
+      return []
+    }
+  }
+
   const stateOf = (agent) => {
     if (!agent?.id) return null
     const current = states.get(agent.id)
@@ -88,16 +103,38 @@ export function apply(ctx, config = {}) {
     return true
   }
 
+  const refreshPacks = (agent, state) => {
+    const current = visibleTools(agent)
+    state.toolNames = [...new Set([...state.toolNames, ...current])]
+    for (const pack of packsForMode(state.mode, packs)) {
+      if (state.loadedPacks.has(pack.id)) continue
+      try {
+        if (installPack(agent, state, state.toolNames, pack)) {
+          say(`模式 ${state.mode || '(默认)'} 收起工具包 ${pack.id}（${packTools(state.toolNames, pack).length} 个）`)
+        }
+      } catch (error) {
+        const msg = `工具包 ${pack.id} 收起失败（该包保持可见）: ${String(error?.message ?? error)}`
+        ctx.logger?.warn?.('dsh-tool-scope: %s', msg)
+        console.error('[tool-scope] ' + msg)
+      }
+    }
+  }
+
   const bind = (agent) => {
     if (!enable || !agent?.id || !agent?.ctx) return
-    if (states.has(agent.id)) return states.get(agent.id) // 幂等：同 agent 只挂一次
+    if (states.has(agent.id)) {
+      // agent/created may precede preset tool injection; refresh after inbox insertion.
+      refreshPacks(agent, states.get(agent.id))
+      return states.get(agent.id)
+    }
 
     const known = knownTools()
     if (!known.length) return
 
     const mode = modeOf(agent)
     const deny = computeDeny(mode, known, rules)
-    const state = { baseDispose: null, packDisposers: new Map(), mode }
+    const agentTools = visibleTools(agent)
+    const state = { baseDispose: null, packDisposers: new Map(), loadedPacks: new Set(), mode, toolNames: agentTools }
     states.set(agent.id, state)
 
     if (deny.length) {
@@ -120,18 +157,8 @@ export function apply(ctx, config = {}) {
       }
     }
 
-    const packDeny = deferredPackTools(mode, known, packs)
-    for (const pack of packsForMode(mode, packs)) {
-      try {
-        if (installPack(agent, state, known, pack)) {
-          say(`模式 ${mode || '(默认)'} 收起工具包 ${pack.id}（${packTools(known, pack).length} 个）`)
-        }
-      } catch (error) {
-        const msg = `工具包 ${pack.id} 收起失败（该包保持可见）: ${String(error?.message ?? error)}`
-        ctx.logger?.warn?.('dsh-tool-scope: %s', msg)
-        console.error('[tool-scope] ' + msg)
-      }
-    }
+    const packDeny = deferredPackTools(mode, agentTools, packs)
+    refreshPacks(agent, state)
     if (!deny.length && !packDeny.length) say(`模式 ${mode || '(默认)'} 无需要收窄的工具`)
     return state
   }
@@ -139,10 +166,10 @@ export function apply(ctx, config = {}) {
   if (enable && packs.length) {
     ctx.tools.register(defineTool({
       name: 'tool_pack',
-      description: '按需加载低频工具包。action=list 查看；load/unload 切换；pack 取值 webshell（WebShell 管理）。进入 WebShell 阶段前 load。',
+      description: '按需加载工具包。action=list 查看；load/unload 切换。pack=active-scan 仅在明确假设需要时开放单项扫描工具；pack=webshell 用于 WebShell 管理。',
       parameters: {
         action: { type: 'string', enum: ['list', 'load', 'unload'], required: true, description: 'list/load/unload' },
-        pack: { type: 'string', description: 'webshell' },
+        pack: { type: 'string', description: 'active-scan 或 webshell' },
       },
       output: {
         schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
@@ -161,13 +188,13 @@ export function apply(ctx, config = {}) {
           return Promise.resolve({
             ok: true,
             packs: packs.map((pack) => {
-              const names = packTools(knownTools(), pack)
+              const names = packTools(state.toolNames, pack)
               const availableNow = available.some((p) => p.id === pack.id) && names.length > 0
               return {
                 id: pack.id,
                 label: pack.label,
                 available: availableNow,
-                loaded: availableNow && !state.packDisposers.has(pack.id),
+                loaded: availableNow && state.loadedPacks.has(pack.id),
                 tools: names.length,
                 hint: pack.hint,
               }
@@ -175,7 +202,7 @@ export function apply(ctx, config = {}) {
           })
         }
         const pack = findPack(args.pack, available)
-        const known = knownTools()
+        const known = state.toolNames
         if (!pack || !packTools(known, pack).length) return Promise.resolve({ ok: false, error: `当前模式无此工具包：${args.pack ?? '(empty)'}` })
         if (args.action === 'load') {
           const entry = state.packDisposers.get(pack.id)
@@ -183,9 +210,11 @@ export function apply(ctx, config = {}) {
             try { entry.dispose() } catch { /* already released by agent teardown */ }
             state.packDisposers.delete(pack.id)
           }
+          state.loadedPacks.add(pack.id)
           return Promise.resolve({ ok: true, pack: pack.id, loaded: true })
         }
         if (args.action === 'unload') {
+          state.loadedPacks.delete(pack.id)
           if (!state.packDisposers.has(pack.id)) {
             try { installPack(agent, state, known, pack) } catch (error) {
               return Promise.resolve({ ok: false, error: `工具包收起失败：${error?.message ?? String(error)}` })

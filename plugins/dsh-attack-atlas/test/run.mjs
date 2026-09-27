@@ -787,7 +787,7 @@ await ok("methodRunMessage：主类展开/子项知识锚/失配降级/备注/�
 	assert.ok(msg.includes("知识手册：refs/components/cloud-postexploitation.md"));
 	assert.ok(msg.includes("重点：先扫前端与仓库"));
 	assert.ok(msg.includes("主类「注入」整组开测｜key: injection"));
-	assert.ok(msg.includes("已不存在，按标签意图执行"));
+	assert.ok(msg.includes("已不存在，按标签含义执行"));
 	assert.ok(msg.includes("第 1 层（起点）"));
 	assert.ok(msg.includes("第 2 层"));
 	assert.ok(!msg.includes("循环段"));
@@ -1033,7 +1033,7 @@ await ok("能力库：自定义主类/子类 CRUD+级联删；并入方法论（
 	assert.equal(rm.cascaded, 1);
 	assert.equal((await dispatch(null, st, "caps.list", { mode: "pentest" })).caps.length, 1);
 	await dispatch(fakeCtx, st, "methods.run", { id: s.id, sessionId: SID, mode: "pentest" });
-	assert.ok(sent[1].content[0].text.includes("已不存在，按标签意图执行"), "能力删除后方法论步骤降级");
+	assert.ok(sent[1].content[0].text.includes("已不存在，按标签含义执行"), "能力删除后方法论步骤降级");
 	// 导入导出往返 + 悬挂检查 + 重复去重
 	const ex = await dispatch(null, st, "caps.export", { mode: "pentest" });
 	assert.equal(ex.capabilities.length, 1);
@@ -1264,7 +1264,9 @@ await ok("autoLight：type/CWE 线索点亮 + finding ref 回填 + 不覆盖已�
 await ok("autoLight·P3 覆盖提醒：每主类一次限流、文案带剩余格与 sync 指引", async () => {
 	const st = openStore(":memory:");
 	const nudges = [];
-	const deps = { mode: "code-audit", findFindingId: async () => "", followup: (m) => nudges.push(m) };
+	// 覆盖提醒现在是**显式开启**的行为（默认不往会话里发消息，见 lib/index.js 的说明）。
+	// 这里显式打开，验证开启后的限流与文案仍然正确。
+	const deps = { mode: "code-audit", findFindingId: async () => "", followup: (m) => nudges.push(m), nudge: true };
 	await autoLightFromFinding(null, st, "nudge-1", { title: "F1", type: "任意文件上传" }, deps);
 	assert.equal(nudges.length, 1, "首亮即提醒一次");
 	assert.match(nudges[0].content[0].text, /AttackAtlas·覆盖提醒/);
@@ -1277,6 +1279,18 @@ await ok("autoLight·P3 覆盖提醒：每主类一次限流、文案带剩余�
 	// 模式语态：三选一词表进提醒 + 本模式收口纪律子句
 	assert.match(nudges[1].content[0].text, /已审·有 finding \/ 已审·无 finding/);
 	assert.match(nudges[1].content[0].text, /已审结论附 sink 指位与复现链/);
+	st.close();
+});
+
+await ok("autoLight·覆盖提醒默认静音（不往会话注入消息）", async () => {
+	const st = openStore(":memory:");
+	const nudges = [];
+	const deps = { mode: "code-audit", findFindingId: async () => "", followup: (m) => nudges.push(m) };
+	const r = await autoLightFromFinding(null, st, "nudge-off", { title: "F1", type: "任意文件上传" }, deps);
+	assert.equal(nudges.length, 0, "默认不注入任何消息");
+	assert.equal(r.nudged.length, 0, "返回值里也不带提醒");
+	// 但自动点亮（真正的产物）必须保留——静音的是提醒，不是覆盖记录。
+	assert.equal(r.marked.length >= 1, true, "自动点亮仍然发生");
 	st.close();
 });
 
@@ -1303,11 +1317,11 @@ await ok("覆盖提醒模式语态：IR 词表+先保全纪律，pentest 词表+
 	const st = openStore(":memory:");
 	const irItem = TAXONOMIES["incident-response"].categories[0].items[0].label;
 	const irNudges = [];
-	await autoLightFromFinding(null, st, "nudge-ir", { title: "F1", type: irItem }, { mode: "incident-response", findFindingId: async () => "", followup: (m) => irNudges.push(m) });
+	await autoLightFromFinding(null, st, "nudge-ir", { title: "F1", type: irItem }, { mode: "incident-response", findFindingId: async () => "", followup: (m) => irNudges.push(m), nudge: true });
 	assert.ok(irNudges.length >= 1, "IR 首亮即提醒");
 	assert.ok(irNudges[0].content[0].text.includes("查实·有证据") && irNudges[0].content[0].text.includes("先保全证据（附证据指位与时间线位置）"), "IR 词表+保全纪律");
 	const ptNudges = [];
-	await autoLightFromFinding(null, st, "nudge-pt", { title: "F1", type: "任意文件上传" }, { mode: "pentest", findFindingId: async () => "", followup: (m) => ptNudges.push(m) });
+	await autoLightFromFinding(null, st, "nudge-pt", { title: "F1", type: "任意文件上传" }, { mode: "pentest", findFindingId: async () => "", followup: (m) => ptNudges.push(m), nudge: true });
 	assert.ok(ptNudges.length >= 1 && ptNudges[0].content[0].text.includes("已验·有发现"), "pentest 词表");
 	assert.ok(!/——已审结论|——查实项|——判定结果/.test(ptNudges[0].content[0].text), "pentest 无五模式附加纪律句");
 	st.close();

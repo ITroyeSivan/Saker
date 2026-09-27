@@ -3,5 +3,7 @@
 # 宿主平面（UI 常驻全模式，工具执行时按五模式门禁）：会话标签页「webshell 管理」
 # （conversation.view slot，位于 hunter 狩猎右侧）+ /dsh-webshell-mgr RPC + 独立 SQLite。
 - insert:
-    - id: dsh-webshell-mgr
+    - id: webshell-mgr
       name: '@dsh-external/dsh-webshell-mgr'
+      config:
+        genDir: ''

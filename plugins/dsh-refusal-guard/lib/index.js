@@ -34,6 +34,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import z from "@deepseek-ai/schemastery";
+import { onVolatileUpdate, plainConfig } from "dsh-saker/settings-compat";
+
+const volatile = (schema) => typeof schema?.volatile === "function" ? schema.volatile() : schema;
 
 const name = "dsh-refusal-guard";
 
@@ -257,13 +260,13 @@ export function buildAuditRow(time, presetId, level, detected, lastRequest) {
 	return `| ${time} | ${presetId} | ${level} | ${action} | ${excerptOf(detected, 120)} | ${excerptOf(lastRequest, 120)} |`;
 }
 
-const Config = z.object({
+const Config = volatile(z.object({
 	maxChars: z.natural().default(700),
 	excerptChars: z.natural().default(300),
 	escalate: z.boolean().default(true),
 	retry: z.boolean().default(true),
 	auditLog: z.boolean().default(true)
-});
+}));
 
 async function apply(ctx, config) {
 	// Settings overlay: the cordis.patch entry is the base layer, the
@@ -271,15 +274,16 @@ async function apply(ctx, config) {
 	// means the composed entry keeps working exactly as patched.
 	// dsh 0.1.2: installSettingsSection was removed — register the namespace
 	// on ctx.settings instead (base = patch value, scope.get() = resolved).
-	let configSource = () => config;
+	let configSource = () => plainConfig(config, {});
 	try {
-		if (ctx.settings?.register) {
+		if (typeof config?.get !== "function" && ctx.settings?.register) {
 			const scope = ctx.settings.register("dsh-refusal-guard", Config, { base: config });
 			configSource = () => scope.get();
 		}
 	} catch (error) {
 		ctx.logger?.warn?.("dsh-refusal-guard: settings provider unavailable, keeping patch baseline: %s", String(error));
 	}
+	onVolatileUpdate(ctx, () => configSource());
 
 	const guards = new Map(); // agent id → guard state
 	// session→agent mapping: remember which agent each session belongs to as

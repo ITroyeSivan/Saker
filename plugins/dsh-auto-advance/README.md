@@ -1,25 +1,25 @@
 # dsh-auto-advance 自动推进器
 
-安全模式（pentest / code-audit / ctf-solver）的事件驱动闭环最后一环：执行体返回 → 台账有未收口方向 → followup 推进提醒。
+安全模式（pentest / code-audit）的可选自动推进器：执行体返回 → 有未结束的工作方向 → followup 推进提醒。默认关闭；启用后会把提醒作为 user 消息插入会话，并消耗一轮模型请求。
 
 ## 做什么
 
 subagent 类工具（原生 `subagent`/`subagent_fork` + `subagent_claude_code`/`subagent_codex` 等
-`subagent` 前缀工具）的 result 到达时，若工作区 operation-state 意图台账存在 open 意图，
+`subagent` 前缀工具）的结果到达时，若 operation-state 里存在未结束的工作方向，
 注入一条推进提醒：
 
-- 先 `operation_progress` 收口本次执行对应的意图（`intent_done` 附产出指位 /
-  `intent_blocked` 附原因）；
+- 先用 `operation_progress` 结束本次执行对应的工作方向（`intent_done` 附产出位置 /
+  `intent_blocked` 写明原因）；
 - 再依锚 `operation_intent` 派下一步，或无下一步时静默收尾（不硬造方向）；
-- 派单 prompt 里写了 `i1/i2` 时点名对应意图（以 prompt 提及为准）。
+- 派单 prompt 里写了 `i1/i2` 时点名对应的工作方向（以 prompt 提及为准）。
 
 ## 三护栏（自主不失控）
 
 | 护栏 | 语义 |
 | --- | --- |
 | 轮数上限 | 连续自动推进 `maxAutoTurns`（默认 5）轮封顶；真人消息重置计数 |
-| opt-in | 仅意图台账存在且有 open 意图时激活（登记即激活，与 scope 同纪律） |
-| 自描述注入 | 提醒自带台账态势（收口什么/还剩什么/第几轮/人工随时接管），可审计 |
+| opt-in | 只有存在未结束的工作方向时激活（登记即激活，与 scope 同规则） |
+| 自描述注入 | 提醒自带当前状态（结束什么/还剩什么/第几轮/人工随时接管），可审计 |
 
 另有冷却窗 `cooldownMs`（默认 30s）：并行执行体齐返回并作一次推进，不刷屏。
 
@@ -43,4 +43,4 @@ subagent 类工具（原生 `subagent`/`subagent_fork` + `subagent_claude_code`/
 
 ## 测试
 
-`node test/run.mjs`——决策纯函数全分支/装配接线/三护栏/真人重置/意图点名。
+`node test/run.mjs`——决策纯函数全分支/装配接线/三护栏/真人重置/工作方向点名。

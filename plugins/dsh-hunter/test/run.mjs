@@ -1,10 +1,16 @@
 // dsh-hunter 离线单测：DSL 解析与平台转换 / 去重合并 / 指纹节解析 / L0 指纹匹配 /
 // L1 授权验证 / 流水线（mock 搜索与探测）/ 放宽寻源阶梯 / 配置视图与存储。
 import assert from "node:assert";
-import { parseDsl, buildQueries, mergeAssets, fofaGuard, LIMITS } from "../lib/adapters.js";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { parseDsl, buildQueries, mergeAssets, fofaGuard, LIMITS, searchFofaPage } from "../lib/adapters.js";
 import { parseFingerprint, fingerprintQuery, fingerprintLadder, searchWithRelax, fingerprintMatches, verifyPipeline } from "../lib/verify.js";
 import { openHunterStore, configView, getKey } from "../lib/store.js";
-import { isTrustedRequest, checkCsrf, buildFindingPatch } from "../lib/index.js";
+
+const TEST_HOME = mkdtempSync(join(tmpdir(), "hunter-test-home-"));
+process.env.DSH_HOME = TEST_HOME;
+const { isTrustedRequest, checkCsrf, buildFindingPatch, apply, closeSharedStore } = await import("../lib/index.js");
 
 let pass = 0, fail = 0;
 // 异步用例必须等待完成后再计数，否则断言未执行就被进程退出（假绿）。
@@ -159,6 +165,43 @@ await ok("流水线：授权资产 L1 通过 → l1-passed 且立即停", async 
 	assert.equal(r.detail.l1Passed, 1);
 	assert.ok(r.detail.stoppedEarly);
 	await new Promise((r2) => server.close(r2));
+});
+await ok("FOFA 高级产品/版本/哈希字段可用，非 FOFA 平台不退化成宽查询", () => {
+	const q = buildQueries('product.version:"7.0.4.9" icon_hash:"-692947551"', "dsl");
+	assert.ok(q.fofa.includes('product.version="7.0.4.9"') && q.fofa.includes('icon_hash="-692947551"'));
+	assert.equal(q.hunter, "");
+	assert.equal(q.quake, "");
+});
+await ok("FOFA 官方 fid/category 字段可用，错误别名拒绝且不向其他平台降级", () => {
+	const q = buildQueries('fid:"iaytNA57019/kADk8Nev7g==" category:"服务"', "dsl");
+	assert.ok(q.fofa.includes('fid="iaytNA57019/kADk8Nev7g=="') && q.fofa.includes('category="服务"'));
+	assert.equal(q.hunter, "");
+	assert.equal(q.quake, "");
+	assert.throws(() => parseDsl('product_category:"服务"'), /未知字段/);
+});
+await ok("FOFA banner/JARM/证书/TLS/状态码指纹可用且不被其他平台静默降级", () => {
+	const q = buildQueries('banner:"TongWeb" jarm:"abc123" cert.issuer.org:"TongTech" tls.ja3s:"deadbeef" status_code:200', "dsl");
+	assert.ok(q.fofa.includes('banner="TongWeb"') && q.fofa.includes('jarm="abc123"'));
+	assert.ok(q.fofa.includes('cert.issuer.org="TongTech"') && q.fofa.includes('tls.ja3s="deadbeef"'));
+	assert.ok(q.fofa.includes('status_code="200"'));
+	assert.equal(q.hunter, "");
+	assert.equal(q.quake, "");
+});
+await ok("FOFA 默认字段集不要求专业版 lastupdatetime", async () => {
+	const oldFetch = globalThis.fetch;
+	let requestedUrl = "";
+	globalThis.fetch = async (url) => {
+		requestedUrl = String(url);
+		return { ok: true, status: 200, text: async () => JSON.stringify({ error: false, results: [] }) };
+	};
+	try {
+		await searchFofaPage("test-key", 'app="Tomcat"', 10);
+		const fields = new URL(requestedUrl).searchParams.get("fields");
+		assert.equal(fields, "host,title,ip,domain,port,protocol,server");
+		assert.ok(!fields.includes("lastupdatetime"));
+	} finally {
+		globalThis.fetch = oldFetch;
+	}
 });
 
 await ok("实测回写：L1 通过必须带二次评级与足量依据", () => {
@@ -315,6 +358,183 @@ await ok("CSRF 头校验：匹配放行/缺失或错值拒", () => {
 
 	rmSync(dir, { recursive: true, force: true });
 }
+
+// ── 8. 资产搜索模型工具：接入统一资产账本 ─────────────────────────────────────
+{
+	const tools = new Map();
+	apply({
+		effect(fn) { fn(); return () => {}; },
+		webServer: { register() {} },
+		webRuntime: { trustedHosts: [] },
+		tools: { register(def) { tools.set(def.name, def); } },
+	});
+
+	await ok("asset_search 注册为模型工具", () => {
+		assert.ok(tools.has("asset_search"));
+	});
+
+	await ok("asset_search_batch 数组项用宿主支持的字段级必填并保留 Nday 映射", () => {
+		const itemSchema = tools.get("asset_search_batch").parameters.queries.items;
+		assert.equal(itemSchema.required, undefined);
+		assert.equal(itemSchema.properties.id.required, true);
+		assert.equal(itemSchema.properties.query.required, true);
+		assert.equal(itemSchema.properties.basis.type, "string");
+		assert.equal(itemSchema.properties.entryIds.items.type, "string");
+	});
+
+	await ok("asset search 工具描述要求显式授权子域通配符", () => {
+		assert.match(tools.get("asset_search").parameters.scope.description, /bare domain.*(?:exact|only itself).*\*\.example\.com/i);
+		assert.match(tools.get("asset_search_batch").parameters.scope.description, /bare domain.*(?:exact|itself).*\*\.example\.com/i);
+	});
+
+	await ok("asset_search 未配置平台时明确降级，不返回空成功", async () => {
+		const out = await tools.get("asset_search").execute({
+			query: 'domain:"example.com"',
+			scope: "example.com",
+			workspace: TEST_HOME,
+		});
+		assert.equal(out.ok, false);
+		assert.equal(out.degraded, true);
+		assert.ok(out.next.join(" ").includes("subfinder_enum"));
+	});
+
+	await ok("asset_search 所有配置平台失败时不伪报零资产成功", async () => {
+		const st = openHunterStore(join(TEST_HOME, "hunter", "hunter.db"));
+		st.setKey.run("fofa", "test-key", new Date().toISOString());
+		st.close();
+		const oldFetch = globalThis.fetch;
+		globalThis.fetch = async () => ({
+			ok: true, status: 200,
+			text: async () => JSON.stringify({ error: true, errmsg: "invalid key" }),
+		});
+		try {
+			const out = await tools.get("asset_search").execute({
+				query: 'app:"Tomcat"', scope: "example.com", workspace: TEST_HOME,
+			});
+			assert.equal(out.ok, false);
+			assert.match(out.error, /所有已配置平台搜索失败/);
+			assert.match(out.error, /fofa=.*invalid key/);
+		} finally {
+			globalThis.fetch = oldFetch;
+		}
+	});
+
+	await ok("asset_search 按 scope 过滤并写入资产账本", async () => {
+		const st = openHunterStore(join(TEST_HOME, "hunter", "hunter.db"));
+		st.setKey.run("fofa", "test-key", new Date().toISOString());
+		st.close();
+		const oldFetch = globalThis.fetch;
+		const requestedUrls = [];
+		const workspace = mkdtempSync(join(tmpdir(), "hunter-assets-"));
+		try {
+			globalThis.fetch = async (url) => {
+				requestedUrls.push(String(url));
+				return {
+					ok: true,
+					status: 200,
+					text: async () => JSON.stringify({
+						error: false,
+						size: 3,
+						results: [
+							["https://oa.example.com", "Portal", "203.0.113.10", "example.com", "443", "https", "nginx"],
+							["https://evil.example.net", "Other", "198.51.100.9", "example.net", "443", "https", "nginx"],
+							["https://shared.example.net", "Shared", "203.0.113.77", "example.net", "443", "https", "nginx"],
+						],
+					}),
+				};
+			};
+			const out = await tools.get("asset_search").execute({
+				query: 'domain:"example.com"',
+				scope: "*.example.com",
+				workspace,
+			});
+			assert.equal(out.ok, true, JSON.stringify(out));
+			assert.equal(out.inScope, 1);
+			assert.equal(out.outOfScope, 2);
+			assert.equal(out.inventoryTotal, 1);
+			const inventory = JSON.parse(readFileSync(join(workspace, "asset-inventory.json"), "utf8"));
+			assert.equal(inventory.assets.length, 1);
+			assert.equal(inventory.assets[0].host, "oa.example.com");
+			assert.ok(inventory.assets[0].sources.includes("fofa"));
+			assert.ok(existsSync(join(workspace, "assets.md")));
+			assert.ok(readFileSync(join(workspace, "evidence-index.md"), "utf8").includes("asset_search"));
+			assert.ok(out.rawFile.startsWith("artifacts/recon/"));
+			assert.ok(existsSync(join(workspace, out.rawFile)));
+			const raw = readFileSync(join(workspace, out.rawFile), "utf8");
+			assert.ok(!raw.includes("evil.example.net") && !raw.includes("198.51.100.9") && !raw.includes("shared.example.net"));
+			assert.ok(requestedUrls.length === 1);
+			const fofaQuery = new URL(requestedUrls[0]).searchParams.get("qbase64");
+			const decodedQuery = Buffer.from(fofaQuery, "base64").toString("utf8");
+			assert.ok(decodedQuery.includes('domain="example.com"'), decodedQuery);
+			assert.ok(out.assets[0].target.includes("oa.example.com"));
+
+			const cidrOut = await tools.get("asset_search").execute({
+				query: 'app:"Tomcat"', scope: "203.0.113.0/24", workspace,
+			});
+			assert.equal(cidrOut.ok, true, JSON.stringify(cidrOut));
+			assert.equal(cidrOut.assets.length, 2);
+			assert.ok(cidrOut.assets.every((asset) => asset.target.includes("203.0.113.")));
+			assert.ok(cidrOut.assets.every((asset) => /^\d{1,3}(?:\.\d{1,3}){3}$/.test(asset.host)));
+			const cidrRaw = readFileSync(join(workspace, cidrOut.rawFile), "utf8");
+			assert.ok(!cidrRaw.includes("shared.example.net") && !cidrRaw.includes("oa.example.com"));
+			assert.equal(requestedUrls.length, 2);
+			const cidrQuery = Buffer.from(new URL(requestedUrls[1]).searchParams.get("qbase64"), "base64").toString("utf8");
+			assert.ok(cidrQuery.includes('ip="203.0.113.0/24"'), cidrQuery);
+		} finally {
+			globalThis.fetch = oldFetch;
+			rmSync(workspace, { recursive: true, force: true });
+		}
+	});
+
+	await ok("asset_search_batch 在 FOFA 查询中约束整组授权域名并保留逐查询候选映射", async () => {
+		const st = openHunterStore(join(TEST_HOME, "hunter", "hunter.db"));
+		st.setKey.run("fofa", "test-key", new Date().toISOString());
+		st.close();
+		const oldFetch = globalThis.fetch;
+		const requestedQueries = [];
+		const workspace = mkdtempSync(join(process.env.TEMP || process.env.TMP || process.cwd(), "hunter-batch-"));
+		try {
+			globalThis.fetch = async (url) => {
+				const parsed = new URL(String(url));
+				requestedQueries.push(Buffer.from(parsed.searchParams.get("qbase64"), "base64").toString("utf8"));
+				const rows = requestedQueries.length === 1
+					? [
+						["https://oa.example.com", "Portal", "203.0.113.10", "example.com", "443", "https", "nginx"],
+						["https://evil.example.net", "Other", "198.51.100.9", "example.net", "443", "https", "nginx"],
+					]
+					: [["https://portal.corp.example.net", "Portal 2", "203.0.113.11", "corp.example.net", "443", "https", "nginx"]];
+				return { ok: true, status: 200, text: async () => JSON.stringify({ error: false, size: rows.length, results: rows }) };
+			};
+			const out = await tools.get("asset_search_batch").execute({
+				queries: [
+					{ id: "q-portal", query: 'title:"Portal"', basis: "catalog-fingerprint", entryIds: ["nday-portal-rce"] },
+					{ id: "q-version", query: 'product.version:"7.0.4.9"' },
+				],
+				scope: "*.example.com,*.corp.example.net", workspace, platform: "fofa", size: 10,
+			});
+			assert.equal(out.ok, true, JSON.stringify(out));
+			assert.equal(out.queryResults.length, 2);
+			assert.equal(out.queryResults[0].assets.length, 1);
+			assert.equal(out.queryResults[0].outOfScopeCount, 1);
+			assert.equal(out.queryResults[0].basis, "catalog-fingerprint");
+			assert.deepEqual(out.queryResults[0].entryIds, ["nday-portal-rce"]);
+			assert.equal(out.queryResults[1].assets.length, 1);
+			assert.equal(out.queryResults[1].assets[0].host, "portal.corp.example.net");
+			assert.equal(requestedQueries.length, 2);
+			assert.ok(requestedQueries.every((query) => query.includes('domain="example.com"') && query.includes('domain="corp.example.net"')));
+			assert.ok(requestedQueries[1].includes('product.version="7.0.4.9"'));
+			const saved = JSON.parse(readFileSync(join(workspace, out.rawFile), "utf8"));
+			assert.equal(saved.queryResults[0].assets.length, 1);
+			assert.equal(saved.queryResults[0].assets[0].host, "oa.example.com");
+		} finally {
+			globalThis.fetch = oldFetch;
+			rmSync(workspace, { recursive: true, force: true });
+		}
+	});
+}
+
+closeSharedStore();
+rmSync(TEST_HOME, { recursive: true, force: true });
 
 console.log(fail === 0 ? `\nall ${pass} tests passed` : `\n${fail} FAILED, ${pass} passed`);
 process.exit(fail ? 1 : 0);

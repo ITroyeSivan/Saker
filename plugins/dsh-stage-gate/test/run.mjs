@@ -2,7 +2,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import url from "node:url";
-import { runGate, listGates, tableRows, setGoal, updateProgress, setScope, markTested, coverageCheck, syncOperationState, registerIntent, intentSummary, taskTransition, validateAnchor, setConstraints, constraintSummary, deriveScopeDraft, DECOMPOSITION, conclusionVerdict, apply, isSubagentTool, summarizeToolResult, subagentOwnerAlias, startSubagentTask, finishSubagentTask, taskToolAliases, readOperationState as ros } from "../lib/index.js";
+import vm from "node:vm";
+import { runGate, listGates, checkRequirement, GATES, tableRows, setGoal, updateProgress, setScope, markTested, coverageCheck, syncOperationState, registerIntent, intentSummary, taskTransition, validateAnchor, setConstraints, constraintSummary, deriveScopeDraft, DECOMPOSITION, conclusionVerdict, apply, isSubagentTool, summarizeToolResult, subagentOwnerAlias, startSubagentTask, finishSubagentTask, taskToolAliases, readOperationState as ros } from "../lib/index.js";
 import { projectSnapshot } from "../lib/project-snapshot.mjs";
 import { CSRF_TOKEN, ROUTE_PATH, checkCsrf, dispatchProject, isTrustedRequest } from "../lib/project-channel.mjs";
 
@@ -13,6 +14,36 @@ function expect(name, cond, detail) {
 	else { failed++; console.log(`FAIL ${name} ${detail ?? ""}`); }
 }
 
+// Load the client module in an isolated shell to test the browser-title
+// projection without starting the DSH UI runtime.
+let stageGateClient = null;
+const reactStub = { createElement: () => null, useEffect: () => {}, useState: () => [null, () => {}] };
+const clientSource = fs.readFileSync(path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), "../lib/client.js"), "utf8");
+vm.runInNewContext(clientSource, {
+	window: { __ModuleLoader__: { load: ({ factory }) => {
+		stageGateClient = factory((id) => { if (id === "react") return reactStub; throw new Error(`unexpected client dependency: ${id}`); });
+	} } },
+	document: { title: "DSH" },
+});
+expect("browser title labels active stage", stageGateClient?.progressTitleLabel({
+	running: true, snapshot: { flow: { current: "S1" }, flowLabel: "快速摸底" },
+}) === "进行中 · S1 快速摸底");
+expect("browser title labels request failures", stageGateClient?.progressTitleLabel({ error: "401 Invalid API key" }) === "失败");
+expect("browser title keeps durable turn failures ahead of user-wait state", stageGateClient?.progressTitleLabel({ failedTurn: true, pending: true }) === "失败");
+expect("browser title labels failed gate", stageGateClient?.progressTitleLabel({ snapshot: { artifacts: { gateLine: "| pentest/P1 | FAIL | 缺证据 |" } } }) === "失败");
+expect("browser title labels user wait", stageGateClient?.progressTitleLabel({ pending: true, snapshot: { goalRegistered: true } }) === "等待用户");
+expect("browser title labels completed deliverable", stageGateClient?.progressTitleLabel({
+	snapshot: { goalRegistered: true, counts: { openCriteria: 0, openIntents: 0 }, artifacts: { reports: [{ name: "report.md" }] } },
+}) === "有结果");
+expect("browser title stays neutral without an operation ledger", stageGateClient?.progressTitleLabel({ snapshot: { goalRegistered: false } }) === "");
+expect("browser title checks the latest durable turn end", stageGateClient?.lastTurnFailed({ eventSource: { getSnapshot: () => ({ entries: [
+	{ type: "event", event: { type: "turn/end", data: { reason: { kind: "error" } } } },
+	{ type: "event", event: { type: "turn/end", data: { reason: { kind: "completed" } } } },
+] }) } }) === false);
+expect("browser title restores failure from durable turn history", stageGateClient?.lastTurnFailed({ eventSource: { getSnapshot: () => ({ entries: [
+	{ type: "event", event: { type: "turn/end", data: { reason: { kind: "error" } } } },
+] }) } }) === true);
+
 // tableRows: separator excluded, cells counted
 const t = tableRows("| a | b |\n|---|---|\n| c |  |\nplain");
 expect("tableRows counts 2 rows", t.length === 2, JSON.stringify(t));
@@ -21,7 +52,7 @@ expect("tableRows counts non-empty cells", t[1].nonEmpty === 1, JSON.stringify(t
 // 表格门失败信息必须自带可执行修法：列数要求 + 行号 + 实际格数
 // （回归背景：ctf-solver/board 只报「未填满行」，模型被迫去翻 node_modules 源码反推需求）
 {
-	const tmp = fs.mkdtempSync(path.join(path.dirname(F), "tbl-msg-"));
+	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tbl-msg-"));
 	fs.writeFileSync(path.join(tmp, "challenge-board.md"), "| 题名 | 内容 |\n|---|---|\n| warmup | base64 编码 |\n");
 	fs.writeFileSync(path.join(tmp, "evidence-index.md"), "## tool-plane\nMCP\n\n| 平面 | 结果 |\n|---|---|\n| CLI | ok |\n");
 	const v = runGate(fs, { mode: "ctf-solver", stage: "board", workspace: tmp });
@@ -51,7 +82,7 @@ expect("pentest/P1 fails on missing workspace", v.pass === false);
 
 // pentest P1 fail when evidence-index lacks tool-plane/MCP markers
 {
-	const tmp = fs.mkdtempSync(path.join(path.dirname(F), "p1-nomcp-"));
+	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "p1-nomcp-"));
 	for (const name of fs.readdirSync(F)) {
 		if (fs.statSync(path.join(F, name)).isFile()) fs.copyFileSync(path.join(F, name), path.join(tmp, name));
 	}
@@ -124,7 +155,7 @@ v = runGate(fs, { mode: "attack-defense", stage: "persistence", workspace: F });
 expect("ad/persistence fails without registry", v.pass === false);
 
 // attack-defense report: 操作痕迹台账门禁（缺→不过；全→过）
-const adws = fs.mkdtempSync(path.join(path.dirname(F), "ad-report-"));
+const adws = fs.mkdtempSync(path.join(os.tmpdir(), "ad-report-"));
 const adreport = path.join(adws, "report.md");
 fs.writeFileSync(adreport, "# 报告\n漏洞名称…ATT&CK…detection gap…持久化清单…路径台账…阶段终态…\n");
 v = runGate(fs, { mode: "attack-defense", stage: "report", workspace: adws, file: adreport });
@@ -208,6 +239,44 @@ expect("unknown gate throws listing valid stages", threw);
 const list = listGates();
 expect("gates_list covers 8 modes", Object.keys(list).length === 8);
 expect("gates_list single mode", Object.keys(listGates("pentest")).length === 1);
+
+// gates_list 必须把**结构要求**暴露出来，而不是只给文件名。
+// 回归背景（2026-09-25 真机会话）：模型照文档先调了 gates_list，仍不知道
+// evidence-index.md 要出现字面量 tool-plane / MCP；直到 stage_gate 判 FAIL 才看见，
+// 然后花了 ~9 次工具调用去翻宿主源码与已装包反推 "markers" 是什么。
+// 判据：requirements 必须由 checks 派生（改门禁定义就跟着变），且覆盖标记与表格下限。
+{
+	const p1 = listGates("pentest").pentest.P1;
+	const joined = p1.requirements.join(" | ");
+	expect("gates_list 暴露标记字面量要求",
+		joined.includes("evidence-index.md 需含标记：tool-plane、MCP"), joined);
+	expect("gates_list 暴露表格行列下限",
+		joined.includes("assets.md 需 ≥2 行表格，每行 ≥2 个非空单元格"), joined);
+	// 每个非 file 检查恰好一条要求；纯 file 检查不重复成 requirement
+	const structural = GATES.pentest.P1.checks.filter((c) => c.kind !== "file").length;
+	expect("requirements 与非 file 检查一一对应",
+		p1.requirements.length === structural, `${p1.requirements.length} vs ${structural}`);
+	expect("file 检查不重复成 requirement",
+		!joined.includes("assets.md 需存在") && !p1.requirements.some((r) => r.endsWith("需存在")), joined);
+	// requiresFile 的门禁要讲清 $file 指的是谁
+	const p2 = listGates("pentest").pentest.P2;
+	expect("$file 检查写成「file 参数指向的文件」",
+		p2.requirements.some((r) => r.startsWith("file 参数指向的文件 需含标记")), JSON.stringify(p2.requirements));
+	// 全模式：凡有结构性检查的门禁都必须翻译完整（防止新增门禁时漏接线）
+	const gaps = [];
+	for (const [m, stages] of Object.entries(listGates())) {
+		for (const [s, g] of Object.entries(stages)) {
+			const n = GATES[m][s].checks.filter((c) => c.kind !== "file").length;
+			if (n > 0 && g.requirements.length !== n) gaps.push(`${m}/${s}`);
+		}
+	}
+	expect("所有模式的结构性检查都翻译成 requirement", gaps.length === 0, gaps.join(", "));
+	// 单测 checkRequirement 自身：provenance 的目录默认值与 hexHash 文案
+	expect("checkRequirement: provenance 用传入目录",
+		checkRequirement({ kind: "provenance", dir: "artifacts" }).includes("artifacts/"), String(checkRequirement({ kind: "provenance", dir: "artifacts" })));
+	expect("checkRequirement: file 检查不产出要求",
+		checkRequirement({ kind: "file", file: "assets.md" }) === undefined);
+}
 
 // cleanup tmp files (gate-log handled below)
 fs.rmSync(report, { force: true });
@@ -325,7 +394,7 @@ import os from "node:os";
 
 // ── 意图台账（v1.2.0）：锚点校验 / 登记 / 收口 / 跨库解析器降级 ─────────────
 {
-	const tmp = fs.mkdtempSync(path.join(path.dirname(F), "intent-"));
+	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "intent-"));
 	const ws = tmp;
 	setGoal(ws, "目标", "g1 准则");
 	setScope(ws, "10.0.0.5 Web 前台\ndb: 数据库面");
@@ -431,18 +500,35 @@ import os from "node:os";
 	const goal = registered.find((x) => x?.name === "operation_goal");
 	const scope = registered.find((x) => x?.name === "operation_scope");
 	const cons = registered.find((x) => x?.name === "operation_constraints");
-	const tmp = fs.mkdtempSync(path.join(path.dirname(F), "dec-"));
+	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dec-"));
 	const g1 = await goal.execute({ workspace: tmp, goal: "测 https://a.example.com", criteria: "g1 x" }, { agent: { ctx: { preset: "pentest" }, session: { id: "s1", header: {} } } });
 	const goalText = goal.output.render(null, g1)[0].text;
-	expect("goal render 含 pentest 理论", goalText.includes("pentest 拆分理论") && goalText.includes("作战流程×资产×漏洞类矩阵") && goalText.includes("准则按"));
+	expect("goal render 含 pentest 拆分方式", goalText.includes("pentest 工作拆分") && goalText.includes("作战流程×资产×漏洞类矩阵") && goalText.includes("完成标准按"));
 	const g2 = await goal.execute({ workspace: tmp, goal: "审计 x 服务", criteria: "g1 x" }, { agent: { ctx: { preset: "code-audit" }, session: { id: "s1", header: {} } } });
 	expect("goal render 含 audit 理论", goal.output.render(null, g2)[0].text.includes("模块×sink"));
 	const g3 = await goal.execute({ workspace: tmp, goal: "x", criteria: "g1 x" }, { agent: { ctx: { preset: "plain" }, session: { id: "s1", header: {} } } });
 	expect("未知模式不带理论段", !goal.output.render(null, g3)[0].text.includes("拆分理论"));
 	const s1 = await scope.execute({ workspace: tmp, items: "a\nb" }, { agent: { ctx: { preset: "cloud-security" }, session: { id: "s1", header: {} } } });
-	expect("scope render 含分母语义", scope.output.render(null, s1)[0].text.includes("cloud-security 分母语义") && scope.output.render(null, s1)[0].text.includes("账号/区域/服务面"));
+	expect("scope render 含范围说明", scope.output.render(null, s1)[0].text.includes("cloud-security 范围说明") && scope.output.render(null, s1)[0].text.includes("账号/区域/服务面"));
 	const c1 = await cons.execute({ workspace: tmp, items: "deny: x" }, { agent: { ctx: { preset: "ctf-solver" }, session: { id: "s1", header: {} } } });
 	expect("constraints render 含约束面提示", cons.output.render(null, c1)[0].text.includes("ctf-solver 约束面提示") && cons.output.render(null, c1)[0].text.includes("不猜不撞"));
+
+	// ── 工具 workspace 参数：相对路径按**会话工作区**解析（2026-09-25 真机回归）────
+	// 模型真的传过 workspace="."。旧实现 `path.resolve(".")` 解析到**宿主进程 cwd**
+	// （dsh 源码检出目录），于是 operation-state.json 会落到会话工作区之外——
+	// 工作台、报告门、写边界全都看不到它。
+	const relWs = fs.mkdtempSync(path.join(os.tmpdir(), "wsrel-"));
+	const hostCwdState = path.join(process.cwd(), "operation-state.json");
+	fs.rmSync(hostCwdState, { force: true });
+	const execRel = { agent: { ctx: { preset: "pentest" }, session: { id: "s-rel", header: { cwd: relWs } } } };
+	const gRel = await goal.execute({ workspace: ".", goal: "相对 workspace 解析", criteria: "一条" }, execRel);
+	expect("相对 workspace 落到会话工作区", fs.existsSync(path.join(relWs, "operation-state.json")), JSON.stringify(gRel).slice(0, 120));
+	expect("相对 workspace 不落到宿主 cwd", !fs.existsSync(hostCwdState));
+	const absWs = fs.mkdtempSync(path.join(os.tmpdir(), "wsabs-"));
+	await goal.execute({ workspace: absWs, goal: "绝对 workspace 行为不变", criteria: "一条" }, execRel);
+	expect("绝对 workspace 行为不变", fs.existsSync(path.join(absWs, "operation-state.json")));
+	fs.rmSync(relWs, { recursive: true, force: true });
+	fs.rmSync(absWs, { recursive: true, force: true });
 
 	// ── operation_intent：execute **必须返回可序列化对象**（实跑抓到的真 bug）────────
 	// 曾经写成 `execute(args, exec) { (async () => { … return {…} })() }` 的 fire-and-forget：
@@ -469,7 +555,7 @@ import os from "node:os";
 
 // ── 约束层 + scope 保守派生（v1.3.0）─────────────────────────────────────
 {
-	const tmp = fs.mkdtempSync(path.join(path.dirname(F), "cons-"));
+	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cons-"));
 	const ws = tmp;
 	setGoal(ws, "对 demo 站授权渗透", "g1 准则");
 	// 约束登记：格式/匹配词/非法行/重登记替换
@@ -495,7 +581,7 @@ import os from "node:os";
 	expect("空输入空草稿", deriveScopeDraft("").length === 0);
 	expect("无点串不提取", deriveScopeDraft("看看 abc 和 def").length === 0);
 	// operation_goal 集成：返回 scopeDraft；已有 scope 不再派生
-	const fresh = fs.mkdtempSync(path.join(path.dirname(F), "draft-"));
+	const fresh = fs.mkdtempSync(path.join(os.tmpdir(), "draft-"));
 	const g1 = setGoal(fresh, "测 https://a.example.com", "g1 x");
 	const parsed = ros(fs, fresh);
 	fs.rmSync(fresh, { recursive: true, force: true });
@@ -606,7 +692,7 @@ import os from "node:os";
 	}
 	// 9. 空准则但有台账 → 放行（异常但可收尾，reason 说明）
 	v = conclusionVerdict(mk([], []));
-	expect("conclusion: 无准则放行且 reason 说明", v.canConclude === true && /无准则/.test(v.reason), v.reason);
+	expect("conclusion: 无完成标准放行且 reason 说明", v.canConclude === true && /没有完成标准/.test(v.reason), v.reason);
 
 	// 10. **行为级**：真调 operation_conclude，断言「系统放行才 concludeTurn」。
 	// 为什么要真调而不是 grep 源码：源码里有 `exec?.concludeTurn?.()` 这行文本，
@@ -663,7 +749,7 @@ import os from "node:os";
 
 // ── 子代理结果回收（P1-9）：生命周期 start/end 把成败与摘要写回台账任务 ────────
 {
-	const ws = fs.mkdtempSync(path.join(path.dirname(F), "recycle-"));
+	const ws = fs.mkdtempSync(path.join(os.tmpdir(), "recycle-"));
 	try {
 		setGoal(ws, "子代理回收探针", "子代理复核完成");
 		expect("isSubagentTool 认原生与产品行",
@@ -714,7 +800,7 @@ import os from "node:os";
 			startSubagentTask(ws, { sessionId: "s9", provider: "" }) === null);
 		expect("已收口任务不会被二次收口", finishSubagentTask(ws, { sessionId: "s1", provider: "claude-code", stopReason: "completed" }) === null);
 
-		const emptyWs = fs.mkdtempSync(path.join(path.dirname(F), "recycle-empty-"));
+		const emptyWs = fs.mkdtempSync(path.join(os.tmpdir(), "recycle-empty-"));
 		try {
 			expect("无台账不抛错",
 				startSubagentTask(emptyWs, { sessionId: "s1", provider: "" }) === null
@@ -729,7 +815,7 @@ import os from "node:os";
 
 // ── 项目工作台（只读快照 + web 通道栅栏）────────────────────────────────────
 {
-	const ws = fs.mkdtempSync(path.join(path.dirname(F), "workbench-"));
+	const ws = fs.mkdtempSync(path.join(os.tmpdir(), "workbench-"));
 	try {
 		fs.writeFileSync(path.join(ws, "operation-state.json"), JSON.stringify({
 			goal: "项目工作台探针",
@@ -738,8 +824,8 @@ import os from "node:os";
 				{ id: "g2", text: "待收口项", status: "open" },
 			],
 			intents: [
-				{ id: "i1", summary: "已收口方向", status: "done", task: { state: "succeeded", owner: "nmap", attempts: 1, maxAttempts: 1, result: "open 22/80" } },
-				{ id: "i2", summary: "中断方向", status: "open", task: { state: "interrupted", owner: "worker", attempts: 1, maxAttempts: 2, error: "heartbeat expired" } },
+				{ id: "i1", summary: "已收口方向", status: "done", stage: "S5", bucketId: "bucket-demo", targetIds: ["a1", "a2"], reuseScore: 6, task: { state: "succeeded", owner: "nmap", attempts: 1, maxAttempts: 1, result: "open 22/80" } },
+				{ id: "i2", summary: "中断方向", status: "open", parentTaskId: "i1", bucketId: "bucket-demo", task: { state: "interrupted", owner: "worker", attempts: 1, maxAttempts: 2, error: "heartbeat expired" } },
 				{
 					id: "i3",
 					summary: "有冲突的方向",
@@ -759,17 +845,37 @@ import os from "node:os";
 		fs.writeFileSync(path.join(ws, "evidence-index.md"), "| E1 | a | b | c | d |\n| E2 | a | b | c | d |\n", "utf8");
 		fs.writeFileSync(path.join(ws, "scan-reconcile.md"), "| scanner | hit | 待处置 |\n", "utf8");
 		fs.mkdirSync(path.join(ws, "reports"), { recursive: true });
-		fs.writeFileSync(path.join(ws, "reports", "01-漏洞.md"), "# r\n", "utf8");
+		fs.writeFileSync(path.join(ws, "reports", "01-漏洞.md"), "# 测试报告\n\n漏洞/问题 地址：http://a.example\n", "utf8");
 		fs.writeFileSync(path.join(ws, "reports", "exp.py"), "print('x')\n", "utf8");
 		fs.writeFileSync(path.join(ws, "reports", "ignore.zip"), "x", "utf8");
+		fs.writeFileSync(path.join(ws, "asset-inventory.json"), JSON.stringify({
+			schema: "saker.asset-inventory/1",
+			updatedAt: new Date().toISOString(),
+			assets: [
+				{ id: "a1", target: "http://a.example", tech: ["demo"] },
+				{ id: "a2", target: "http://b.example", tech: ["demo"] },
+			],
+		}), "utf8");
+		fs.writeFileSync(path.join(ws, "fingerprint-buckets.json"), JSON.stringify({
+			schema: "saker.attack-plan/1",
+			buckets: [{ bucketId: "bucket-demo", entryId: "demo-rce", product: "Demo", assetIds: ["a1", "a2"], representativeAssetId: "a1", reuseScore: 6, status: "queued", owner: "subagent-demo" }],
+		}), "utf8");
+		fs.writeFileSync(path.join(ws, "attack-progress.json"), JSON.stringify({
+			schema: "saker.attack-progress/1",
+			buckets: { "bucket-demo": { representativeAssetId: "a1", outcome: "confirmed", evidence: "req-1 / resp-1" } },
+		}), "utf8");
 
 		const snap = projectSnapshot(ws);
 		expect("工作台快照：目标/台账标记正确", snap.hasLedger === true && snap.goal === "项目工作台探针" && snap.name === path.basename(ws));
 		expect("工作台快照：准则统计（met/total/open）", snap.criteria.total === 2 && snap.criteria.met === 1 && snap.criteria.open === 1);
 		expect("工作台快照：意图与任务计数", snap.intents.total === 3 && snap.intents.open === 2 && snap.tasks.length === 3);
+		expect("工作台快照：两级子任务树正确挂到父任务",
+			snap.taskTree.length === 2
+			&& snap.taskTree.some((task) => task.id === "i1" && task.children.some((child) => child.id === "i2")),
+			JSON.stringify(snap.taskTree));
 		expect("工作台快照：冲突任务进计数与 attention",
 			snap.counts.conflicts === 1
-			&& snap.attention.some((a) => a.kind === "任务结果冲突" && a.text.includes("子代理随后报失败")));
+			&& snap.attention.some((a) => a.kind === "任务结果不一致" && a.text.includes("子代理随后报失败")));
 		expect("工作台快照：中断任务进 attention",
 			snap.attention.some((a) => a.kind === "中断任务" && a.text.includes("heartbeat expired")));
 		expect("工作台快照：产物索引（证据行/待处置/门禁/报告）",
@@ -778,15 +884,41 @@ import os from "node:os";
 			&& snap.artifacts.reports.length === 2
 			&& snap.artifacts.reports.some((r) => r.name === "01-漏洞.md")
 			&& !snap.artifacts.reports.some((r) => r.name === "ignore.zip"));
+		expect("工作台快照：报告按目标分组并带绝对路径",
+			snap.artifacts.reportGroups.some((group) => group.target === "http://a.example"
+				&& group.files.some((file) => file.relPath === "reports/01-漏洞.md" && file.absPath.startsWith(ws))),
+			JSON.stringify(snap.artifacts.reportGroups));
 		expect("工作台快照：门禁 FAIL 进 attention",
-			snap.attention.some((a) => a.kind === "阶段门禁" && /FAIL/.test(a.text)));
+			snap.attention.some((a) => a.kind === "阶段检查" && /FAIL/.test(a.text)));
+		expect("工作台快照：S0-S6 流程与资产/桶计数可见",
+			snap.flow.stages.length === 7 && snap.flow.assets === 2 && snap.flow.buckets.length === 1
+			&& snap.flow.buckets[0].status === "interrupted" && snap.flow.current === "S5"
+			&& snap.tasks.find((task) => task.id === "i1").bucketId === "bucket-demo",
+			JSON.stringify(snap.flow));
+		expect("S6 明确止于 RCE 证据与报告",
+			snap.flow.stages.find((stage) => stage.id === "S6")?.label === "RCE 证据与报告（停止）",
+			JSON.stringify(snap.flow.stages));
+		expect("工作台快照：作业地图把资产组和关联任务连起来",
+			snap.graph.groupCount === 1 && snap.graph.groups[0].id === "bucket-demo"
+			&& snap.graph.groups[0].tasks.some((task) => task.id === "i1")
+			&& snap.graph.groups[0].tasks.some((task) => task.id === "i2")
+			&& snap.graph.groups[0].representativeAssetId === "a1"
+			&& snap.graph.groups[0].spreadAllowed === true,
+			JSON.stringify(snap.graph));
+		{
+			const clientSource = fs.readFileSync(path.join(F, "..", "..", "lib", "client.js"), "utf8");
+			const banned = ["归一化", "指纹分桶", "攻击流程图", "复用分", "未收口", "收口", "意图", "准则"];
+			const found = banned.filter((term) => clientSource.includes(term));
+			expect("工作台界面不回退到 AI 化术语", found.length === 0, found.join(","));
+			expect("工作台界面包含作业地图卡片", clientSource.includes("作业地图") && clientSource.includes("graphCard"));
+		}
 		expect("工作台快照：已登记目标时不报「目标契约」缺失",
-			snap.goalRegistered === true && !snap.attention.some((a) => a.kind === "目标契约"));
+			snap.goalRegistered === true && !snap.attention.some((a) => a.kind === "目标未登记"));
 
 		// 回归背景：真实端到端跑完发现模型可以跳过 operation_goal，
 		// 此时台账存在但 goal 为空 —— 工作台原来显示「0/0 准则已全部收口」，
 		// 把"根本没立标准"显示成了"全部做完"。现在必须显式区分。
-		const noGoal = fs.mkdtempSync(path.join(path.dirname(F), "workbench-nogoal-"));
+		const noGoal = fs.mkdtempSync(path.join(os.tmpdir(), "workbench-nogoal-"));
 		try {
 			fs.writeFileSync(path.join(noGoal, "operation-state.json"), JSON.stringify({
 				version: 1, mode: "pentest", goal: "", criteria: [], intents: [], gates: {},
@@ -795,17 +927,17 @@ import os from "node:os";
 			expect("工作台快照：台账在但没登记目标 -> goalRegistered=false",
 				snapNoGoal.hasLedger === true && snapNoGoal.goalRegistered === false);
 			expect("工作台快照：没登记目标进 attention（不能显示成健康 0/0）",
-				snapNoGoal.attention.some((a) => a.kind === "目标契约" && /0\/0/.test(a.text)));
+				snapNoGoal.attention.some((a) => a.kind === "目标未登记" && /0\/0/.test(a.text)));
 		} finally {
 			fs.rmSync(noGoal, { recursive: true, force: true });
 		}
 
-		const bare = fs.mkdtempSync(path.join(path.dirname(F), "workbench-bare-"));
+		const bare = fs.mkdtempSync(path.join(os.tmpdir(), "workbench-bare-"));
 		try {
 			const empty = projectSnapshot(bare);
 			expect("无台账工作区：结构完整且不抛错",
 				empty.hasLedger === false && empty.criteria.total === 0 && empty.tasks.length === 0
-				&& empty.attention.some((a) => a.kind === "阶段门禁"));
+				&& empty.attention.some((a) => a.kind === "阶段检查"));
 		} finally {
 			fs.rmSync(bare, { recursive: true, force: true });
 		}
@@ -844,7 +976,7 @@ import os from "node:os";
 
 // ── 任务结果冲突（P1-9 冲突处理）：终态只记冲突、绝不覆盖，同结果幂等 ──────────
 {
-	const ws = fs.mkdtempSync(path.join(path.dirname(F), "conflict-"));
+	const ws = fs.mkdtempSync(path.join(os.tmpdir(), "conflict-"));
 	try {
 		setGoal(ws, "冲突探针", "复核完成");
 		registerIntent(ws, { summary: "冲突复核", anchorKind: "criterion", anchorRef: "g1", owner: "subagent", sessionId: "s1", maxAttempts: 3 });
@@ -893,7 +1025,7 @@ import os from "node:os";
 // 所以 apply 里必须挂 agent/created → 用 agent.ctx.on 注册，把 agent 闭包进去；
 // 直接写 ctx.on("subagent/start", (info, parent) => …) 会永远拿到 undefined。
 {
-	const ws = fs.mkdtempSync(path.join(path.dirname(F), "recycle-wire-"));
+	const ws = fs.mkdtempSync(path.join(os.tmpdir(), "recycle-wire-"));
 	try {
 		setGoal(ws, "接线探针", "复核完成");
 		const handlers = {};

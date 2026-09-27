@@ -15,10 +15,21 @@ const STUB = [
   '',
 ].join('\n')
 const STUB_URL = 'data:text/javascript,' + encodeURIComponent(STUB)
+const HTTP_PROXY_STUB = [
+  'export const proxyEnvironmentForChild = env => ({ ...env })',
+  'export default { proxyEnvironmentForChild }',
+  '',
+].join('\n')
+const HTTP_PROXY_STUB_URL = 'data:text/javascript,' + encodeURIComponent(HTTP_PROXY_STUB)
 
 export function resolve(specifier, context, nextResolve) {
   if (specifier === '@deepseek-ai/dsh-tools') {
     return { url: STUB_URL, format: 'module', shortCircuit: true }
+  }
+  // The published 0.1.7 package set omits this peer even though dsh-subprocess
+  // imports it at module load. The real host supplies it from its install.
+  if (specifier === '@deepseek-ai/dsh-http-proxy') {
+    return { url: HTTP_PROXY_STUB_URL, format: 'module', shortCircuit: true }
   }
   return nextResolve(specifier, context)
 }

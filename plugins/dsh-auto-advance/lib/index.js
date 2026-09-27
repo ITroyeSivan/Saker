@@ -27,11 +27,11 @@ const inject = ["agentPresets"];
 export const MODE_IDS = ["pentest", "code-audit", "ctf-solver"];
 
 const Config = z.object({
-	enable: z.boolean().default(true),
+	enable: z.boolean().default(false),
 	maxAutoTurns: z.natural().default(5),
 	cooldownMs: z.natural().default(30000),
-	kickoff: z.boolean().default(true),
-	advanceOnTurnEnd: z.boolean().default(true)
+	kickoff: z.boolean().default(false),
+	advanceOnTurnEnd: z.boolean().default(false)
 });
 
 /** 执行体工具面：subagent 家族（原生 subagent/subagent_fork + 产品 CLI 派生工具）。 */
@@ -97,7 +97,7 @@ export function decideAdvance({ toolName, trigger = "executor", ledger, usedTurn
 		: `执行体已返回（${toolName}）。`;
 	return {
 		nudge: true,
-		text: `[auto-advance] ${header}台账：意图 ${ledger.openIds.length}/${ledger.total} 未收口（${openList}${more}）——${hintLine}先 operation_progress 收口本次执行对应的意图（intent_done 附产出指位${voice.done ? `：${voice.done}` : ""} / intent_blocked 附原因），再依锚 operation_intent 派下一步${voice.next ? `（${voice.next}）` : ""}或收工（无下一步即静默收尾，不硬造方向）。本条为自动推进（第 ${usedTurns + 1}/${maxAutoTurns} 轮），人工输入随时接管。`
+		text: `[auto-advance] ${header}工作方向还有 ${ledger.openIds.length}/${ledger.total} 条未结束（${openList}${more}）——${hintLine}先 operation_progress intent_done 记录本次执行结果（附产出位置${voice.done ? `：${voice.done}` : ""}）或 intent_blocked 写明受阻原因，再按依据用 operation_intent 派下一步${voice.next ? `（${voice.next}）` : ""}或收工（没有下一步就结束，不硬造方向）。本条为自动推进（第 ${usedTurns + 1}/${maxAutoTurns} 轮），人工输入随时接管。`
 	};
 }
 
@@ -109,6 +109,21 @@ function textOf(message) {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
 	return content.filter((b) => b?.type === "text").map((b) => b.text).join(" ");
+}
+
+const TRIVIAL_KICKOFF_RE = /^(test|hi|hello|hey|ping|pong|你好|您好|测试|试试|测试一下|ok|okay|好的|收到|嗯|啊|哦|啊哈|👋|🙂|thx|thanks|ty)$/i;
+const SINGLE_REPLY_RE = /(^|[，。；;\s])(请|麻烦)?(只|仅|只需|只需要|只用)\s*(回复|回答|输出|返回|用一句话|一句话)/i;
+const NO_TOOL_RE = /(不要|别|请勿|无需|不需要|禁止)\s*(调用|使用|执行|运行|发起)\s*(任何)?\s*(工具|命令|tool)/i;
+const NO_TOOL_EN_RE = /\b(do not|don't|never|without)\s+(call|use|run|invoke)\s+(any\s+)?tools?\b|\bonly\s+(reply|respond|answer|output)\b/i;
+
+/** A conversational/no-op message must not re-arm an old operation state. */
+export function isNoopUserMessage(message) {
+	const text = textOf(message).trim();
+	if (!text) return false;
+	return TRIVIAL_KICKOFF_RE.test(text)
+		|| SINGLE_REPLY_RE.test(text)
+		|| NO_TOOL_RE.test(text)
+		|| NO_TOOL_EN_RE.test(text);
 }
 
 // 有界发现任务：用户把交付收敛到“至少一个/找到并验证漏洞”时，不应在轮次
@@ -127,7 +142,7 @@ export function isBoundedDiscoveryTask(message) {
 }
 
 async function apply(ctx, config) {
-	const cfg = { enable: true, maxAutoTurns: 5, cooldownMs: 30000, kickoff: true, advanceOnTurnEnd: true, ...config };
+	const cfg = { enable: false, maxAutoTurns: 5, cooldownMs: 30000, kickoff: false, advanceOnTurnEnd: false, ...config };
 	if (!cfg.enable) return;
 	let decompositionMap = null;
 	// 模式化拆分理论：兄弟插件 dsh-stage-gate 的 DECOMPOSITION（不可达降级通用文案）
@@ -158,34 +173,21 @@ async function apply(ctx, config) {
 		return null;
 	};
 
-	// 极短/常见试水消息不算深度任务——跳过开工提醒，避免用户敲一句"test"就被
-	// 灌入大段三登记。规则：trim 后 < 6 字符，或命中下方白名单（test/hi/中文招呼
-	// 等）。命中规则后仍按"每会话一次"纪律把 sid 标为已处理，不再补灌。
-	const TRIVIAL_KICKOFF_RE = /^(test|hi|hello|hey|ping|你好|您好|测试|试试|测试一下|ok|好的|收到|嗯|啊|哦|啊哈|👋|🙂|thx|thanks|ty)$/i;
-	// 用户明确只要一句回复或禁止工具时，不能再靠 followup 追加一轮——那会直接违背指令。
-	// 这两条必须在投递前判断；正文里的“可忽略”对模型约束不够强。
-	const SINGLE_REPLY_RE = /(^|[，。；;\s])(请|麻烦)?(只|仅|只需|只需要|只用)\s*(回复|回答|输出|返回|用一句话|一句话)/i;
-	const NO_TOOL_RE = /(不要|别|请勿|无需|不需要|禁止)\s*(调用|使用|执行|运行|发起)\s*(任何)?\s*(工具|命令|tool)/i;
-	const NO_TOOL_EN_RE = /\b(do not|don't|never|without)\s+(call|use|run|invoke)\s+(any\s+)?tools?\b|\bonly\s+(reply|respond|answer|output)\b/i;
 	const boundedTasks = new Set();
+	const lastHuman = new Map();
 	function shouldSkipKickoff(message) {
 		const text = textOf(message).trim();
 		if (!text) return true;
-		if (text.length < 6) return true;
-		return TRIVIAL_KICKOFF_RE.test(text)
-			|| SINGLE_REPLY_RE.test(text)
-			|| NO_TOOL_RE.test(text)
-			|| NO_TOOL_EN_RE.test(text)
-			|| isBoundedDiscoveryTask(message);
+		return isNoopUserMessage(message) || isBoundedDiscoveryTask(message);
 	}
 
-	/** 开工提醒文案：模式化（本模式拆分理论+准则结构+分母语义）优先，降级通用三登记。 */
+	/** 开工提醒文案：模式化（本模式拆分方式+完成标准+范围说明）优先，降级通用三登记。 */
 	const kickoffText = (mode) => {
 		const d = theoryOf(mode);
 		if (d) {
-			return `[auto-advance] 开工提醒（${mode}）：仅当这是需要持续推进的深度任务时才做开工三登记——① operation_goal（目标+可判定准则；本模式拆分理论：${d.theory}——准则结构：${d.criteriaGuide}）→ ② operation_constraints（用户口头约束 deny/allow 结构化，防压缩丢失+可拦${d.constraintHints ? `；本模式约束面：${d.constraintHints}` : ""}）→ ③ operation_scope（范围分母${d.scopeSemantics ? `：${d.scopeSemantics}` : ""}，报告门对账依据）。登记后对账/推进/门禁体系激活；如果这是简单问答、只要求一句回复或明确禁止工具，就忽略本提醒并立即结束，不得调用工具。`;
+			return `[auto-advance] 开工提醒（${mode}）：只有需要持续推进的深度任务才在开工前登记三件事——① operation_goal（任务目标 + 能直接判断是否完成的完成标准；本模式的工作拆分方式：${d.theory}——完成标准结构：${d.criteriaGuide}）→ ② operation_constraints（把用户口头约束整理成 deny/allow，防压缩丢失并可自动拦截${d.constraintHints ? `；本模式约束重点：${d.constraintHints}` : ""}）→ ③ operation_scope（本次覆盖范围${d.scopeSemantics ? `：${d.scopeSemantics}` : ""}，报告按它核对覆盖情况）。登记后自动对账、推进并检查报告；如果只是简单问答、只要求一句回复或明确禁止工具，就忽略本提醒并立即结束。`;
 		}
-		return "[auto-advance] 开工提醒：仅当这是需要持续推进的深度任务时才做开工三登记——operation_goal（目标+可判定准则）→ operation_constraints（用户口头约束 deny/allow 结构化，防压缩丢失+可拦）→ operation_scope（范围分母，报告门对账依据）。登记后对账/推进/门禁体系激活；如果这是简单问答、只要求一句回复或明确禁止工具，就忽略本提醒并立即结束，不得调用工具。";
+		return "[auto-advance] 开工提醒：只有需要持续推进的深度任务才在开工前登记三件事——operation_goal（任务目标 + 能直接判断是否完成的完成标准）→ operation_constraints（把用户口头约束整理成 deny/allow，防压缩丢失并可自动拦截）→ operation_scope（本次覆盖范围，报告按它核对）。登记后自动对账、推进并检查报告；如果只是简单问答、只要求一句回复或明确禁止工具，就忽略本提醒并立即结束。";
 	};
 
 	/**
@@ -256,6 +258,7 @@ async function apply(ctx, config) {
 		if (!isHumanUser(message) || myIds.has(message?.id)) return;
 		const sid = info?.agent?.session?.id ?? info?.agent?.id;
 		reset(sid);
+		if (sid) lastHuman.set(sid, message);
 		if (isBoundedDiscoveryTask(message)) boundedTasks.add(sid);
 		else boundedTasks.delete(sid);
 		// 开工提醒（第 0 轮推进）：专业模式会话首条人类消息后，工作区无台账则一次性提醒
@@ -283,6 +286,7 @@ async function apply(ctx, config) {
 		if (event?.type === "user/message" && isHumanUser(event.data) && !myIds.has(event.data?.id)) {
 			const sid = subject?.id ?? subject?.header?.id;
 			reset(sid);
+			if (sid) lastHuman.set(sid, event.data);
 			if (isBoundedDiscoveryTask(event.data)) boundedTasks.add(sid);
 			else boundedTasks.delete(sid);
 			return;
@@ -309,6 +313,7 @@ async function apply(ctx, config) {
 			turnProgressed.set(sid, false);
 			if (!cfg.advanceOnTurnEnd || progressed) return;
 			if (!isAdvanceableTurnEnd(event.data?.reason)) return;
+			if (isNoopUserMessage(lastHuman.get(sid))) return;
 			tryNudge(sid, { trigger: "turn-end" });
 			return;
 		}
@@ -322,6 +327,7 @@ async function apply(ctx, config) {
 		const argsRaw = inflightArgs.get(key) ?? "";
 		inflight.delete(key);
 		inflightArgs.delete(key);
+		if (isNoopUserMessage(lastHuman.get(sid))) return;
 		tryNudge(sid, { trigger: "executor", toolName, argsRaw });
 	});
 	// 载荷是 {agent}（见宿主 agent/src/index.ts emitDisposed：emit('agent/disposed', { agent })）。
@@ -336,6 +342,7 @@ async function apply(ctx, config) {
 		turnProgressed.delete(sid);
 		kickoffDone.delete(sid);
 		boundedTasks.delete(sid);
+		lastHuman.delete(sid);
 	});
 }
 

@@ -15,9 +15,13 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 const PLUGIN_ROOT = path.resolve(HERE, '..')
 const BUNDLED_CATALOG = path.join(PLUGIN_ROOT, 'packs', 'knowledge-packs.json')
 const STATE_FILE = 'knowledge-packs-state.json'
+const CATALOG_CACHE_FILE = 'knowledge-packs.remote.json'
+const CATALOG_STATE_FILE = 'knowledge-packs.remote-state.json'
 const DEFAULT_INTERVAL_DAYS = 7
 const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
 const SYNC_MODES = new Set(['auto', 'manual', 'frozen'])
+const MAX_CATALOG_BYTES = 2 * 1024 * 1024
+const DEFAULT_CATALOG_TIMEOUT_MS = 15000
 
 // 统一出站策略实现住在根包（`dsh-saker/egress`），这里只解析、不复制判定逻辑。
 // 解析不到（只装了插件没装根包的极端布局）时不拦，保持旧行为，并如实回报原因。
@@ -66,6 +70,18 @@ function importsRoot() {
 
 function userPackDir() {
   return path.join(refsRoot(), 'packs')
+}
+
+function catalogCacheDir() {
+  return path.join(refsRoot(), 'cache')
+}
+
+function catalogCachePath() {
+  return path.join(catalogCacheDir(), CATALOG_CACHE_FILE)
+}
+
+function catalogStatePath() {
+  return path.join(catalogCacheDir(), CATALOG_STATE_FILE)
 }
 
 function statePath() {
@@ -132,15 +148,57 @@ export function validateCatalog(raw, source = 'bundled') {
   }
   return {
     version: Number(raw.version) || 1,
+    revision: Math.max(1, Number(raw.revision) || 1),
     release: String(raw.release || '').trim(),
+    catalogUrl: String(raw.catalogUrl || '').trim(),
     autoSyncIntervalDays: Math.max(1, Number(raw.autoSyncIntervalDays) || DEFAULT_INTERVAL_DAYS),
     packs,
   }
 }
 
+function readCatalogFile(file, source) {
+  const raw = readJson(file)
+  return raw ? validateCatalog(raw, source) : null
+}
+
+function readCatalogState() {
+  const value = readJson(catalogStatePath())
+  if (!value || typeof value !== 'object') return {}
+  return {
+    lastCheckedAt: String(value.lastCheckedAt || ''),
+    lastUpdatedAt: String(value.lastUpdatedAt || ''),
+    release: String(value.release || ''),
+    revision: Number(value.revision) || 0,
+    url: String(value.url || ''),
+    error: String(value.error || ''),
+  }
+}
+
+function writeCatalogState(next) {
+  writeJsonAtomic(catalogStatePath(), {
+    version: 1,
+    lastCheckedAt: String(next.lastCheckedAt || ''),
+    lastUpdatedAt: String(next.lastUpdatedAt || ''),
+    release: String(next.release || ''),
+    revision: Number(next.revision) || 0,
+    url: String(next.url || ''),
+    error: String(next.error || ''),
+  })
+}
+
+function cachedRemoteCatalog(bundled) {
+  const remote = readCatalogFile(catalogCachePath(), 'remote-cache')
+  if (!remote) return null
+  return remote.revision > bundled.revision ? remote : null
+}
+
 export function loadCatalog(options = {}) {
-  const bundled = validateCatalog(readJson(BUNDLED_CATALOG) || { packs: [] }, 'bundled')
+  const bundled = readCatalogFile(BUNDLED_CATALOG, 'bundled') || validateCatalog({ packs: [] }, 'bundled')
   const byId = new Map(bundled.packs.map((pack) => [pack.id, pack]))
+  const remote = cachedRemoteCatalog(bundled)
+  if (remote) {
+    for (const pack of remote.packs) byId.set(pack.id, pack)
+  }
   const dir = userPackDir()
   if (fs.existsSync(dir)) {
     const files = fs.readdirSync(dir).filter((name) => name.endsWith('.json')).sort()
@@ -156,11 +214,139 @@ export function loadCatalog(options = {}) {
   }
   return {
     version: bundled.version,
-    release: bundled.release,
+    revision: remote?.revision || bundled.revision,
+    release: remote?.release || bundled.release,
+    catalogUrl: bundled.catalogUrl,
     autoSyncIntervalDays: bundled.autoSyncIntervalDays,
     packs: [...byId.values()].sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id)),
     catalogPath: BUNDLED_CATALOG,
     userPackDir: dir,
+    remote: remote
+      ? { active: true, revision: remote.revision, release: remote.release }
+      : { active: false, revision: 0, release: '' },
+    state: readCatalogState(),
+  }
+}
+
+async function fetchText(url, options = {}) {
+  const fetchImpl = options.fetchImpl || globalThis.fetch
+  if (typeof fetchImpl !== 'function') throw new Error('当前 Node 运行时不支持 fetch')
+  const controller = new AbortController()
+  const timeoutMs = Math.max(1000, Number(options.timeoutMs) || DEFAULT_CATALOG_TIMEOUT_MS)
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetchImpl(url, {
+      signal: controller.signal,
+      redirect: 'follow',
+      headers: { accept: 'application/json' },
+    })
+    if (!response || !response.ok) {
+      throw new Error(`HTTP ${response ? response.status : 'unknown'}`)
+    }
+    const text = await response.text()
+    if (Buffer.byteLength(text, 'utf8') > MAX_CATALOG_BYTES) {
+      throw new Error(`来源清单超过 ${MAX_CATALOG_BYTES} 字节上限`)
+    }
+    return text
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * Refresh the curated source registry itself.
+ *
+ * Pack content can update one by one, but without this step a newly added
+ * GitHub source would require shipping a new plugin build. The registry is
+ * therefore versioned and cached separately; a failed refresh always leaves
+ * the previous registry usable.
+ */
+export async function refreshPackCatalog(options = {}) {
+  const bundled = readCatalogFile(BUNDLED_CATALOG, 'bundled') || validateCatalog({ packs: [] }, 'bundled')
+  const previous = readCatalogState()
+  const intervalDays = Math.max(1, Number(bundled.autoSyncIntervalDays) || DEFAULT_INTERVAL_DAYS)
+  const staleAfterMs = intervalDays * 24 * 60 * 60 * 1000
+  const lastChecked = Date.parse(previous.lastCheckedAt || '')
+  const fresh = Number.isFinite(lastChecked) && Date.now() - lastChecked < staleAfterMs
+  if (!options.force && fresh) {
+    return {
+      ok: true,
+      checked: false,
+      updated: false,
+      reason: 'catalog-fresh',
+      release: previous.release,
+      revision: previous.revision,
+      lastCheckedAt: previous.lastCheckedAt,
+    }
+  }
+
+  const url = String(options.url || bundled.catalogUrl || '').trim()
+  const checkedAt = new Date().toISOString()
+  if (!/^https?:\/\//i.test(url)) {
+    const error = '来源清单未配置 http(s) catalogUrl'
+    writeCatalogState({ ...previous, lastCheckedAt: checkedAt, error })
+    return { ok: false, checked: true, updated: false, error, url }
+  }
+
+  try {
+    const gate = options.gate
+      ? await options.gate({ repo: url })
+      : await gateInfraEgress({ source: url, note: `knowledge-pack-catalog ${url}` })
+    if (gate && gate.decision === 'deny') {
+      const error = `统一出站策略拦截（${gate.reason} / mode=${gate.mode}）`
+      writeCatalogState({ ...previous, lastCheckedAt: checkedAt, url, error })
+      return { ok: false, checked: true, updated: false, blocked: true, error, url }
+    }
+
+    const text = await fetchText(url, options)
+    let raw
+    try {
+      raw = JSON.parse(text)
+    } catch (error) {
+      throw new Error(`来源清单不是合法 JSON：${String(error?.message || error)}`)
+    }
+    const remote = validateCatalog(raw, 'remote')
+    const activeRevision = Math.max(bundled.revision, Number(previous.revision) || 0)
+    if (remote.revision <= activeRevision) {
+      writeCatalogState({
+        lastCheckedAt: checkedAt,
+        lastUpdatedAt: previous.lastUpdatedAt || '',
+        release: previous.release || bundled.release,
+        revision: Math.max(activeRevision, previous.revision || 0),
+        url,
+        error: '',
+      })
+      return {
+        ok: true,
+        checked: true,
+        updated: false,
+        reason: 'remote-not-newer',
+        release: previous.release || bundled.release,
+        revision: activeRevision,
+      }
+    }
+
+    writeJsonAtomic(catalogCachePath(), raw)
+    writeCatalogState({
+      lastCheckedAt: checkedAt,
+      lastUpdatedAt: checkedAt,
+      release: remote.release,
+      revision: remote.revision,
+      url,
+      error: '',
+    })
+    return {
+      ok: true,
+      checked: true,
+      updated: true,
+      release: remote.release,
+      revision: remote.revision,
+      packs: remote.packs.length,
+    }
+  } catch (error) {
+    const message = String(error?.message || error)
+    writeCatalogState({ ...previous, lastCheckedAt: checkedAt, url, error: message })
+    return { ok: false, checked: true, updated: false, error: message, url }
   }
 }
 
@@ -479,6 +665,7 @@ async function runLimited(items, concurrency, worker) {
 export function packsStatus() {
   const catalog = loadCatalog()
   const state = readState()
+  const catalogState = readCatalogState()
   const packs = catalog.packs.map((pack) => {
     const dir = packDir(pack)
     const previous = state.packs[pack.id] || {}
@@ -506,6 +693,11 @@ export function packsStatus() {
   })
   return {
     release: catalog.release,
+    revision: catalog.revision,
+    catalogSource: catalog.remote.active ? 'remote' : 'bundled',
+    catalogUpdatedAt: catalogState.lastUpdatedAt || '',
+    catalogLastCheckedAt: catalogState.lastCheckedAt || '',
+    catalogError: catalogState.error || '',
     autoSyncIntervalDays: catalog.autoSyncIntervalDays,
     syncMode: state.syncMode,
     total: packs.length,
@@ -516,7 +708,7 @@ export function packsStatus() {
 }
 
 export async function syncPacks(options = {}) {
-  const catalog = loadCatalog()
+  let catalog = loadCatalog()
   const state = readState()
   if (state.syncMode === 'frozen' && !options.allowFrozen) {
     return {
@@ -529,6 +721,17 @@ export async function syncPacks(options = {}) {
       reason: '知识同步已冻结',
       results: [],
     }
+  }
+  let catalogRefresh = null
+  if (options.refreshCatalog) {
+    catalogRefresh = await refreshPackCatalog({
+      url: options.catalogUrl,
+      force: !!options.forceCatalog,
+      gate: options.gate,
+      fetchImpl: options.fetchImpl,
+      timeoutMs: options.catalogTimeoutMs,
+    })
+    if (catalogRefresh.updated) catalog = loadCatalog()
   }
   const requested = Array.isArray(options.ids) && options.ids.length
     ? new Set(options.ids.map((x) => safeId(x)))
@@ -559,6 +762,7 @@ export async function syncPacks(options = {}) {
     requested: selected.length,
     ok: results.filter((r) => r.ok).length,
     failed: results.filter((r) => !r.ok).length,
+    catalog: catalogRefresh,
     results,
   }
   // 顺手回收同步残骸（临时 clone / 旧仓库备份）。这不是"顺手加功能"：
@@ -599,4 +803,8 @@ export function statePathForDebug() {
 
 export function catalogPathForDebug() {
   return BUNDLED_CATALOG
+}
+
+export function catalogCachePathForDebug() {
+  return catalogCachePath()
 }

@@ -12,6 +12,17 @@ import { DatabaseSync } from "node:sqlite";
 
 const SEVERITIES = ["critical", "high", "medium", "low"];
 const STATUSES = ["pending", "code-reviewed", "suspect", "verified", "false-positive", "fixed"];
+/**
+ * 登记（registerFinding）能接受的状态——**工具 schema 必须用它，不能用完整词表**。
+ *
+ * 为什么单独一份（2026-09-25 真机会话实测）：`verified` 在登记时被**无条件**拒绝
+ * （它是「独立复核完成」的终态，须先登记 pending，再用 update/mark 同一次给出
+ * secondRating + secondRatingNote）；但登记工具的 `status` 枚举当时透传了完整 STATUSES，
+ * 于是 schema 里明摆着一个永远登不上的值——模型按 schema 选它必被拒，属于「schema 说谎」。
+ * `fixed` 保留在枚举里：它在 redteam 台账模式下登记即合法（fixed=已路由），
+ * 其余模式由实现按模式拒绝并给出可执行提示。
+ */
+const REGISTER_STATUSES = STATUSES.filter((s) => s !== "verified");
 /** 分模式状态子集：漏洞生命周期词表=发现型（渗透/代审/应急）；
  *  产物型模式用各自本体词——免杀=在验/过检/被检出、CTF=未解/卡点/已解、二进制=分析中/疑似/已定论。
  *  verified 语义通用（各模式的"验证类终态"），verifiedAt 落库逻辑不变。 */
@@ -619,4 +630,4 @@ export function setMeta(store, sessionId, { targetLabel = "", version = "", scop
 	return getMeta(store, sessionId);
 	}
 
-export { SEVERITIES, STATUSES, MODE_STATUSES, ALL_STATUSES, EVIDENCE_LEVELS, SOURCE_ORIGINS, MODES, statusesOf, SECOND_RATINGS, RATING_SCALE, SECOND_REVIEW_MIN_NOTE };
+export { SEVERITIES, STATUSES, REGISTER_STATUSES, MODE_STATUSES, ALL_STATUSES, EVIDENCE_LEVELS, SOURCE_ORIGINS, MODES, statusesOf, SECOND_RATINGS, RATING_SCALE, SECOND_REVIEW_MIN_NOTE };

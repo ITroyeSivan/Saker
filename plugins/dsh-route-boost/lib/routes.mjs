@@ -24,7 +24,8 @@ export const MODES = {
 			{ id: "verify", label: "漏洞验证/利用", gates: ["P1", "P2"], execution: true, channel: "目录枚举=ffuf/dirsearch（WAF 画像后定速率）；注入=低交互 sqlmap·高交互 burp/yakit 手工", keywords: ["漏洞", "验证", "利用", "注入", "sqli", "xss", "ssrf", "rce", "越权", "上传", "poc", "exp", "exploit", "bypass", "waf"] },
 			{ id: "report", label: "报告/覆盖收口", gates: ["P3"], keywords: ["报告", "总结", "汇总", "六字段", "覆盖", "复测"] }
 		],
-		boundary: "速率纪律（无WAF≤12/WAF≤20轮·每矩阵格）；命令执行验证仅 whoami/只读；删除操作严禁执行只提示；上传成功路径必入报告；资金类接口只生成重放计划待批准；不留后门、不横向出授权范围",
+		boundary: "仅验证授权范围内可通向 RCE 的路径；使用最小、无害、只读证据；确认可复现 RCE 后立即停止；不做 webshell/内存马、持久化、提权、凭据复用、横向或内网扫描；遵守目标限速",
+		review: "按产品版本、前置条件、原始请求/响应与可归因执行证据复核；本模式不要求子代理双签或全漏洞覆盖",
 		refs: [
 			{ keywords: ["api", "接口", "token", "jwt", "oauth"], dir: "api" },
 			{ keywords: ["小程序", "miniprogram", "微信"], dir: "miniprogram" },

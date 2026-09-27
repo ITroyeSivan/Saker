@@ -11,9 +11,8 @@
 // （per-agent allow/deny 过滤，见 packages/core/tools/src/index.ts:1061）把这些工具的
 // 可见性直接收掉。收益是确定的：模型看不到 = 不进请求体。
 //
-// 【纪律】本表**只收录「插件自己已经声明的门禁」**，不发明新规则 ——
-// 每条的 `source` 必须指向插件源码里的那行依据。规则与门禁同源，
-// 门禁改了这里必须跟着改（test/run.mjs 里有源码契约锁，改漏会亮红）。
+// 【纪律】既有插件门禁必须与源码保持一致；Pentest 另按产品交付边界收起后渗透、
+// 内网和流程管理工具。每条规则标明依据并由 test/run.mjs 锁住。
 
 /** 宿主内置的默认模式（Saker 三个 preset 之外的那个「标准」）。 */
 export const DEFAULT_MODES = ['pentest', 'code-audit', 'ctf-solver']
@@ -54,12 +53,28 @@ export const RULES = [
     note: '四个插件的模式清单均为 ["pentest","code-audit","ctf-solver"]；标准模式（宿主默认预设）下它们的注入与入库都不生效',
   },
   {
+    id: 'pentest-rce-focus',
+    label: 'Pentest RCE 主线工具面',
+    prefixes: [
+      'webshell_', 'operation_', 'subagent', 'workflow', 'attack_',
+      'redteam_atlas_', 'redteam_chain_', 'redteam_coverage_',
+      'campaign_', 'trace_',
+      'crackmapexec_', 'netexec_', 'impacket_',
+      'access_confirm', 'memshell_cli',
+      'nday_coverage', 'nday_triage', 'nday_learn', 'nday_draft', 'nday_handoff',
+    ],
+    exceptions: ['attack_plan', 'nday_coverage', 'nday_draft', 'nday_handoff', 'nday_learn'],
+    modes: ['code-audit', 'ctf-solver'],
+    source: 'preset/pentest/agent.patch.yml —— RCE 后停止；不做子代理派单、流程矩阵、后渗透或内网工作',
+    note: 'Pentest 仅保留快速侦察、Nday/常规/0day 路径、最小 RCE 验证与结果记录；按需工具包入口由独立规则控制',
+  },
+  {
     id: 'toolPack',
     label: '按需工具包入口',
     prefixes: ['tool_pack'],
-    modes: DEFAULT_MODES,
+    modes: ['pentest'],
     source: 'dsh-tool-scope/lib/packs.js —— 工具包是三个安全预设的运行期能力',
-    note: '标准模式下没有安全工具包，入口不暴露',
+    note: '当前仅 Pentest 声明 WebShell 工具包；其他模式下入口不暴露',
   },
 ]
 
@@ -80,6 +95,7 @@ export function computeDeny(mode, known, rules) {
   for (const rule of rules) {
     if (rule.modes.includes(mode)) continue // 该模式下可见
     for (const name of known) {
+      if (rule.exceptions?.includes(name)) continue
       if (rule.prefixes.some((p) => name.startsWith(p))) deny.add(name)
     }
   }

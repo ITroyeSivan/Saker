@@ -7,7 +7,7 @@
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const WORKSPACE = resolve(ROOT, "..");
@@ -25,6 +25,21 @@ const hasKnowledge = process.argv.includes("--knowledge");
 const hasObservability = process.argv.includes("--observability");
 const hasTaskBaseline = process.argv.includes("--task-baseline");
 const hasContext = process.argv.includes("--context");
+const hasWorkbench = process.argv.includes("--workbench");
+const hasToolSmoke = process.argv.includes("--tool-smoke");
+if (hasToolSmoke) {
+	// 工具面**行为**冒烟：24 插件 / 88 工具 / 每个预设 163 次真调用，验的是「注册了但真调会炸」
+	// 那一类隐患（TypeError、返回 undefined、输出契约不匹配）。
+	// 它比全量回归慢（约 1 分钟/预设），所以**默认不跑**，用 --tool-smoke 显式打开。
+	const loader = pathToFileURL(join(WORKSPACE, "_ref", "tools", "smoke-register-real.mjs")).href;
+	for (const preset of ["pentest", "code-audit", "ctf-solver"]) {
+		checks.push({
+			name: `工具面行为冒烟（${preset}）`,
+			cwd: WORKSPACE,
+			args: ["--import", loader, "_ref/tools/tool-smoke.mjs", "--preset", preset],
+		});
+	}
+}
 if (hasKnowledge) {
 	checks.push({
 		name: "知识检索 Top-1/Top-5 回归",
@@ -129,13 +144,24 @@ if (hasContext) {
 		args: ["scripts/report-metrics-trend.mjs", "--home", gateHome, "--limit", "5"],
 	});
 }
+if (hasWorkbench) {
+	// 真宿主 + 真数据跑项目工作台：S0–S6 阶段、资产组、代表资产、关联任务都要真的出现。
+	// 单测只覆盖快照函数，这一项覆盖「宿主里铺数据 → 快照 → UI 数据源」这条真实链路。
+	checks.push({
+		name: "项目工作台作业地图（真宿主）",
+		cwd: WORKSPACE,
+		args: ["_ref/tools/probe-project-workbench.mjs", "--once"],
+	});
+}
 
-// 防止“删掉一项后 19/19 也算通过”：按启用的 flag 推导应有门禁数。
+// 防止"删掉一项后 19/19 也算通过"：按启用的 flag 推导应有门禁数。
 const expectedChecks = 6
 	+ (hasKnowledge ? 1 : 0)
 	+ (hasObservability ? 4 : 0)
 	+ (hasTaskBaseline ? 3 : 0)
-	+ (hasContext ? 7 : 0);
+	+ (hasContext ? 7 : 0)
+	+ (hasWorkbench ? 1 : 0)
+	+ (hasToolSmoke ? 3 : 0);
 if (checks.length !== expectedChecks) {
 	console.error(`release-gate 结构错误：应执行 ${expectedChecks} 项，实际 ${checks.length} 项——有门禁被删或接线漏了。`);
 	process.exit(2);

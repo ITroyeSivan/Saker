@@ -1,0 +1,13 @@
+{
+  "schema": "saker.asset-inventory/1",
+  "updatedAt": "2026-09-24T00:00:00.000Z",
+  "assets": [
+    {
+      "id": "asset-fixture",
+      "target": "http://127.0.0.1:8081/x",
+      "host": "127.0.0.1",
+      "port": 8081,
+      "sources": ["fixture"]
+    }
+  ]
+}

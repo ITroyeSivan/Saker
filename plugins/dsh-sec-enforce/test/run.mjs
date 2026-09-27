@@ -3,7 +3,7 @@
 import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
-import { gateLogHasPass, isReportPath, isWritable, scanDangerous, scanRate, scanAsk, buildAskListener, buildGuard, REPORT_GATE, Config } from "../lib/index.js";
+import { gateLogHasPass, isReportPath, isWritable, isTaskBriefPath, resolveTargetPath, scanDangerous, scanRate, scanAsk, buildAskListener, buildGuard, REPORT_GATE, Config } from "../lib/index.js";
 
 let pass = 0, fail = 0;
 const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); } else { fail++; console.log(`FAIL ${label}`); } };
@@ -11,11 +11,14 @@ const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); 
 const WS = "/tmp/sec-enforce-ws";
 const fakeAgent = (mode, cwd = WS) => ({ id: "a1", ctx: { scope: mode }, session: { header: { cwd } } });
 
-function makeGuard(overrides = {}, gateLog = "") {
+function makeGuard(overrides = {}, gateLog = "", inventory = null, attackPlan = null, attackProgress = null) {
 	const logs = [];
 	const guard = buildGuard({
 		config: overrides,
 		readGateLog: () => gateLog,
+		readAssetInventory: () => inventory,
+		readAttackPlan: () => attackPlan,
+		readAttackProgress: () => attackProgress,
 		appendLog: (_ws, line) => logs.push(line),
 		resolveMode: (agent) => agent.ctx.scope
 	});
@@ -42,6 +45,24 @@ function makeGuard(overrides = {}, gateLog = "") {
 	ok("inside ws is writable", isWritable(path.join(WS, "a/b.md"), WS));
 	ok("outside ws is not writable", !isWritable("/etc/passwd", WS));
 	ok("allowDirs exempts a tools dir", isWritable("/opt/tools/x.bin", WS, ["/opt/tools"]));
+	// 相对路径必须以**会话工作区**为基准，而不是宿主进程的 cwd。
+	// 回归背景（2026-09-25 真机会话）：模型用相对路径写
+	// `artifacts/evidence/E3.md`，被判「写入目标在任务工作区之外」连拦三次，
+	// 最后只能改用绝对路径——守卫在教模型绕开自己的 bug。
+	ok("相对路径写入按工作区解析", isWritable("artifacts/evidence/E3.md", WS));
+	ok("相对路径 reports/ 按工作区解析", isReportPath("reports/01-sqli.md", WS));
+	ok("相对路径 task-briefs/ 按工作区解析", isTaskBriefPath("task-briefs/t1.md", WS));
+	ok("相对路径向上逃逸仍被拦", !isWritable("../outside.md", WS));
+	ok("相对路径逃逸出 allowDirs 仍被拦", !isWritable("../../etc/passwd", WS, ["/opt/tools"]));
+	ok("resolveTargetPath：相对路径基准是工作区",
+		resolveTargetPath("a.md", WS) === path.join(path.resolve(WS), "a.md"));
+	ok("resolveTargetPath：绝对路径原样解析",
+		resolveTargetPath(path.join(WS, "x.md"), WS) === path.join(path.resolve(WS), "x.md"));
+	// 差分断言：只要 cwd ≠ 工作区，旧实现（path.resolve(target)）就会得出相反结论。
+	if (path.resolve(process.cwd()) !== path.resolve(WS)) {
+		ok("相对路径判定与进程 cwd 无关（cwd 解析出的那个路径仍判为越界）",
+			isWritable("artifacts/x.md", WS) && !isWritable(path.resolve("artifacts/x.md"), WS));
+	}
 }
 
 // 3. dangerous ops (conservative set)
@@ -132,7 +153,40 @@ function makeGuard(overrides = {}, gateLog = "") {
 {
 	const { guard } = makeGuard({ dangerousOps: false, rateDiscipline: false, writeBoundary: false, reportGate: false });
 	ok("all guards off = no-op", guard({ name: "bash", arguments: { command: "systemctl restart nginx" }, agent: fakeAgent("pentest") }) === undefined);
-	ok("config defaults all-on", (() => { const c = Config({}); return c.reportGate && c.writeBoundary && c.dangerousOps && c.rateDiscipline; })());
+	ok("config defaults all-on", (() => { const c = Config({}); return c.reportGate && c.writeBoundary && c.dangerousOps && c.rateDiscipline && c.pipelineGate; })());
+}
+
+// 9b. 攻击流程门禁：pentest 未形成资产清单前不允许先派子代理
+{
+	const sub = (name = "subagent") => ({ name, arguments: {}, agent: fakeAgent("pentest") });
+	const missing = makeGuard().guard;
+	ok("无资产清单时 subagent 被拦", typeof missing(sub()) === "string" && missing(sub()).includes("asset-inventory.json"));
+	ok("无资产清单时 workflow 被拦", typeof missing(sub("workflow")) === "string");
+	ok("无资产清单时产品子代理也被拦", typeof missing(sub("subagent_codex")) === "string");
+	ok("资产清单门不误伤 bash", missing({ name: "bash", arguments: { command: "ls" }, agent: fakeAgent("pentest") }) === undefined);
+	ok("资产清单门不误伤模型侦察入口", missing({ name: "asset_search", arguments: {}, agent: fakeAgent("pentest") }) === undefined);
+	ok("非 pentest 模式不等资产清单", typeof missing(sub("subagent")) === "string" && missing({ name: "subagent", arguments: {}, agent: fakeAgent("code-audit") }) === undefined);
+	const withAssets = makeGuard({}, "", { assets: [{ id: "a1", target: "https://a.example" }] }).guard;
+	ok("有资产后允许派子代理", withAssets(sub()) === undefined);
+	const off = makeGuard({ pipelineGate: false }).guard;
+	ok("pipelineGate=false 可关闭", off(sub()) === undefined);
+}
+
+// 9c. 代表资产门：没有 confirmed 证据不能派“铺开整组”的子代理
+{
+	const plan = { buckets: [{ bucketId: "bucket-demo", representativeAssetId: "a1", assetIds: ["a1", "a2"] }] };
+	const inventory = { assets: [{ id: "a1" }, { id: "a2" }] };
+	const pending = makeGuard({}, "", inventory, plan, { buckets: {} }).guard;
+	const spread = { name: "subagent", arguments: { prompt: "铺开 bucket-demo 的全部资产，批量打" }, agent: fakeAgent("pentest") };
+	ok("未确认代表资产时铺开被拦", typeof pending(spread) === "string" && pending(spread).includes("代表资产门拦截"));
+	const verify = { name: "subagent", arguments: { prompt: "验证代表资产 a1，bucket-demo 只做单资产确认" }, agent: fakeAgent("pentest") };
+	ok("代表资产验证任务可派", pending(verify) === undefined);
+	const confirmed = makeGuard({}, "", inventory, plan, { buckets: { "bucket-demo": { outcome: "confirmed" } } }).guard;
+	ok("confirmed 后允许铺开", confirmed(spread) === undefined);
+	const off = makeGuard({ spreadGate: false }, "", inventory, plan, { buckets: {} }).guard;
+	ok("spreadGate=false 可关闭", off(spread) === undefined);
+	const otherMode = makeGuard({}, "", inventory, plan, { buckets: {} }).guard;
+	ok("非 pentest 不受代表资产门影响", otherMode({ ...spread, agent: fakeAgent("code-audit") }) === undefined);
 }
 
 // 10. real-filesystem smoke of apply()'s helpers (readGateLog/appendLog via buildGuard defaults path)
@@ -157,7 +211,7 @@ function makeGuard(overrides = {}, gateLog = "") {
 		resolveMode: (agent) => agent.ctx.scope
 	});
 	const w = { name: "write", arguments: { file_path: path.join(WS, "reports/01.md") }, agent: fakeAgent("pentest") };
-	ok("open criteria blocks report write despite gate pass", typeof mk(openState)(w) === "string" && mk(openState)(w).includes("目标契约"));
+	ok("open criteria blocks report write despite gate pass", typeof mk(openState)(w) === "string" && mk(openState)(w).includes("未完成的完成标准"));
 	ok("all-met criteria allows report write", mk(allMet)(w) === undefined);
 	ok("failed is a closed terminal and allows report write", mk(failedState)(w) === undefined);
 	ok("no operation state keeps old behavior", (() => { const g = buildGuard({ readGateLog: () => passLog, appendLog: () => {}, resolveMode: (a) => a.ctx.scope }); return g(w) === undefined; })());
@@ -201,6 +255,47 @@ function makeGuard(overrides = {}, gateLog = "") {
 	ok("非安全模式不触发 ask", alien.kind === "allow");
 	const notBash = await listener({ name: "fetch", arguments: { url: "http://t" }, agent: fakeAgent("pentest") }, async () => ({ kind: "allow" }));
 	ok("非 bash 工具不触发 ask", notBash.kind === "allow");
+	const memRun = { name: "memshell_cli", arguments: { action: "run", planId: "ms-1" }, agent: fakeAgent("pentest") };
+	const memAsk = await listener(memRun, async () => ({ kind: "allow" }));
+	ok("memshell run 走宿主人工审批", memAsk.kind === "ask" && memAsk.reason.includes("内存马 CLI"));
+	const memStatus = await listener({ ...memRun, arguments: { action: "status" } }, async () => ({ kind: "allow" }));
+	ok("memshell status 不触发审批", memStatus.kind === "allow");
+	const memAudit = await listener({ ...memRun, agent: fakeAgent("code-audit") }, async () => ({ kind: "allow" }));
+	ok("非 pentest 的 memshell run 不触发该审批", memAudit.kind === "allow");
+	const memWs = fs.mkdtempSync(path.join(os.tmpdir(), "ms-ask-"));
+	fs.mkdirSync(path.join(memWs, "artifacts", "memshell"), { recursive: true });
+	const planId = "ms-abcdef123456";
+	fs.writeFileSync(path.join(memWs, "artifacts", "memshell", `cli-plan-${planId}.json`), JSON.stringify({
+		commandLine: "memparty --api http://127.0.0.1:8080 gen --godzilla-pass <redacted>",
+		risk: "payload-generation",
+		payloadReview: { summary: "高风险 payload-generation 操作" },
+		approvalPhrase: "APPROVE-ms-abcdef123456",
+	}));
+	const detailed = await listener({
+		name: "memshell_cli",
+		arguments: { action: "run", planId },
+		agent: { ctx: { scope: "pentest" }, session: { header: { cwd: memWs } } },
+	}, async () => ({ kind: "allow" }));
+	ok("memshell 审批理由带计划与批准短语",
+		detailed.kind === "ask" && detailed.reason.includes("memparty --api") && detailed.reason.includes("APPROVE-ms-abcdef123456"));
+	const mcpDirect = {
+		name: "mcp__memshell-party__generate_memshell",
+		arguments: { server: "Tomcat", tool: "Godzilla" },
+		agent: { ctx: { scope: "pentest" }, session: { header: { cwd: memWs } } },
+	};
+	const mcpAsk = await listener(mcpDirect, async () => ({ kind: "allow" }));
+	ok("memparty MCP 直连走人工审批", mcpAsk.kind === "ask" && mcpAsk.reason.includes("MCP"));
+	const mcpPlanId = "mp-abcdef123456";
+	const mcpToken = "token1234567890";
+	fs.writeFileSync(path.join(memWs, "artifacts", "memshell", `mcp-plan-${mcpPlanId}.json`), JSON.stringify({
+		approvalToken: mcpToken,
+	}));
+	const mcpApproved = await listener({
+		...mcpDirect,
+		arguments: { ...mcpDirect.arguments, __sakerMemshellPlanId: mcpPlanId, __sakerMemshellApprovalToken: mcpToken },
+	}, async () => ({ kind: "allow" }));
+	ok("已批准计划的一次性 MCP 调用不二次打扰", mcpApproved.kind === "allow");
+	fs.rmSync(memWs, { recursive: true, force: true });
 	// askGate 关闭：透传
 	const off = buildAskListener({ config: { askGate: false }, appendLog: () => {}, resolveMode: (agent) => agent.ctx.scope });
 	ok("askGate=false 关闭", (await off(askExec, async () => ({ kind: "allow" }))).kind === "allow");
@@ -229,7 +324,7 @@ function makeGuard(overrides = {}, gateLog = "") {
 	const w = { name: "write", arguments: { file_path: path.join(WS, "reports/01.md"), content: "x" }, agent: fakeAgent("pentest") };
 	const g = mk(state);
 	const denied = g(w);
-	ok("open intent blocks report write", typeof denied === "string" && denied.includes("意图台账") && denied.includes("i1") && !denied.includes("i2"));
+	ok("open intent blocks report write", typeof denied === "string" && denied.includes("未结束的工作方向") && denied.includes("i1") && !denied.includes("i2"));
 	const closed = mk({ ...state, intents: [{ id: "i1", status: "blocked" }] })(w);
 	ok("closed intent allows report write", closed === undefined);
 	ok("no intents keeps old behavior", mk({ criteria: [{ id: "g1", status: "met" }] })(w) === undefined);

@@ -1,6 +1,6 @@
 # dsh-session-pulse (会话状态面板，默认停用)
 
-> dsh `0.1.6-alpha.1` 已提供 Turn Outline、Trajectory、Todo 面板和 Subagent 目录，
+> dsh `0.1.7-rc.2` 已提供 Turn Outline、Trajectory、Todo 面板和 Subagent 目录，
 > 本插件默认 `disabled: true`，避免重复渲染。它保留为旧宿主或专门兼容测试的备用实现；
 > 新会话不应依赖它提供导航、进度或子代理目录。
 

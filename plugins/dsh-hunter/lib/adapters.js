@@ -17,19 +17,34 @@ const LIMITS = {
 	quake: { pageSize: 100, creditPerRow: 1 }
 };
 
-const DSL_FIELDS = ["title", "body", "header", "app", "server", "port", "protocol", "domain", "ip", "cert", "icon_hash"];
+const DSL_FIELDS = [
+	"title", "body", "header", "app", "server", "port", "protocol", "domain", "ip", "cert", "icon_hash",
+	// FOFA 高级指纹字段。其他平台没有等价语法时由调用层拒绝该平台，不能退化成范围内全量查询。
+	"fid", "product", "product.version", "category", "header_hash", "banner_hash", "banner_fid",
+	"banner", "jarm", "base_protocol", "status_code",
+	"cert.issuer.org", "cert.issuer.cn", "cert.subject.org", "cert.subject.cn", "cert.domain", "cert.sn",
+	"tls.ja3s", "tls.version",
+];
+const FOFA_ONLY_FIELDS = new Set([
+	"icon_hash", "fid", "product", "product.version", "category", "header_hash", "banner_hash", "banner_fid",
+	"banner", "jarm", "base_protocol", "status_code",
+	"cert.issuer.org", "cert.issuer.cn", "cert.subject.org", "cert.subject.cn", "cert.domain", "cert.sn",
+	"tls.ja3s", "tls.version",
+]);
 
 /** 统一 DSL 解析：返回字段映射；非法输入抛错（查询语法安全）。 */
 export function parseDsl(input) {
 	const s = String(input ?? "").trim();
 	if (!s) throw new Error("查询为空");
 	const out = new Map();
-	const re = /([a-z_]+)\s*:\s*("([^"]*)"|(\S+))/g;
+	const re = /([a-z0-9_]+(?:\.[a-z0-9_]+)*)\s*:\s*("(?:\\.|[^"\\])*"|(\S+))/g;
 	let m, last = 0;
 	const matched = [];
 	while ((m = re.exec(s)) !== null) {
 		const field = m[1];
-		const value = m[3] !== undefined ? m[3] : m[4];
+		const value = m[2].startsWith('"')
+			? m[2].slice(1, -1).replace(/\\(["\\])/g, "$1")
+			: m[3];
 		if (!DSL_FIELDS.includes(field)) throw new Error(`未知字段 "${field}"；支持: ${DSL_FIELDS.join("/")}`);
 		if (!value) throw new Error(`字段 "${field}" 值为空`);
 		out.set(field, value);
@@ -46,17 +61,18 @@ export function parseDsl(input) {
 function toFofaQuery(fields) {
 	const parts = [];
 	for (const [k, v] of fields) {
-		if (k === "icon_hash") parts.push(`icon_hash="${v}"`);
-		else if (k === "cert") parts.push(`cert="${v}"`);
-		else parts.push(`${k}="${String(v).replace(/"/g, '\\"')}"`);
+	const value = String(v).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+		parts.push(`${k}="${value}"`);
 	}
 	return parts.join(" && ");
 }
 
 function toHunterQuery(fields) {
+	if ([...fields.keys()].some((key) => FOFA_ONLY_FIELDS.has(key))) return "";
 	const parts = [];
 	for (const [k, v] of fields) {
 		const sv = String(v).replace(/"/g, '\\"');
+		if (["product", "product.version", "category", "header_hash", "banner_hash", "banner_fid", "icon_hash", "fid"].includes(k)) continue;
 		if (k === "title") parts.push(`web.title="${sv}"`);
 		else if (k === "body") parts.push(`web.body="${sv}"`);
 		else if (k === "header") parts.push(`web.header="${sv}"`);
@@ -73,9 +89,11 @@ function toHunterQuery(fields) {
 }
 
 function toQuakeQuery(fields) {
+	if ([...fields.keys()].some((key) => FOFA_ONLY_FIELDS.has(key))) return "";
 	const parts = [];
 	for (const [k, v] of fields) {
 		const sv = String(v).replace(/"/g, '\\"');
+		if (["product", "product.version", "category", "header_hash", "banner_hash", "banner_fid", "fid"].includes(k)) continue;
 		if (k === "title") parts.push(`title:"${sv}"`);
 		else if (k === "body") parts.push(`body:"${sv}"`);
 		else if (k === "header") parts.push(`header:"${sv}"`);
@@ -124,7 +142,9 @@ async function fetchJson(url, opts = {}, timeoutMs = 15000) {
 export async function searchFofaPage(key, query, size, nextCursor) {
 	const url = "https://fofa.info/api/v1/search/next?key=" + encodeURIComponent(key)
 		+ "&size=" + Math.min(Number(size) || LIMITS.fofa.nextSize, LIMITS.fofa.nextSize)
-		+ "&fields=host,title,ip,domain,port,protocol,server,icp,country,os,lastupdatetime"
+		// Stay within fields documented for all API tiers. lastupdatetime is
+		// Professional-only and can reject otherwise valid Personal queries.
+		+ "&fields=host,title,ip,domain,port,protocol,server"
 		+ "&qbase64=" + encodeURIComponent(b64(query))
 		+ (nextCursor ? "&next=" + encodeURIComponent(nextCursor) : "");
 	const data = await fetchJson(url);

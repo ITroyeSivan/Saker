@@ -4,12 +4,134 @@ import os from "node:os";
 import path from "node:path";
 import url from "node:url";
 import { spawnSync } from "node:child_process";
-import { checkRegistered, configuredToolPaths, hasBin, registerableDefs, resolveToolBin, resolveToolInvocation, RATE_DEFAULTS, runScan, governPreview, spillOutput, breakerCheck, breakerRecord, runGoverned, persistScanRecords, ffufParse } from "../lib/index.js";
+import { checkRegistered, configuredToolPaths, hasBin, registerableDefs, resolveToolBin, resolveToolInvocation, RATE_DEFAULTS, buildNucleiArgs, buildHttpxArgs, summarizeHttpxResults, runScan, governPreview, spillOutput, breakerCheck, breakerRecord, runGoverned, persistScanRecords, ffufParse, apply } from "../lib/index.js";
 import { TOOL_DEFS, buildArgs, tiersLine } from "../lib/registry.js";
+import { parseAssetPayload } from "../lib/ingest.js";
 
 const F = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), "fixture");
 let failed = 0;
 const expect = (n, c, d) => { if (c) console.log(`ok   ${n}`); else { failed++; console.log(`FAIL ${n} ${d ?? ""}`); } };
+
+// Preset-local tool registrations do not pass through host global tool filters.
+{
+	const tools = new Map();
+	apply({ tools: { register(def) { tools.set(def.name, def); } } }, { exposedTools: ["httpx_probe", "asset_ingest"] });
+	expect("scanner allowlist covers direct and registry tools", JSON.stringify([...tools.keys()].sort()) === JSON.stringify(["asset_ingest", "httpx_probe"]), [...tools.keys()].join(","));
+	expect("httpx_probe discloses evidence-file side effects and metadata-only output",
+		tools.get("httpx_probe").description.includes("favicon=true")
+		&& tools.get("httpx_probe").description.includes("Writes JSON to artifacts/scans/")
+		&& tools.get("httpx_probe").description.includes("not page body")
+		&& tools.get("httpx_probe").parameters.favicon.type === "boolean", tools.get("httpx_probe").description);
+	expect("scanner allowlist excludes internal and brute-force tools", !["fscan_portscan", "masscan_portscan", "hydra_brute", "impacket_suite", "netexec_scan", "crackmapexec_scan"].some((n) => tools.has(n)));
+	let rejected = false;
+	try { apply({ tools: { register() {} } }, { exposedTools: ["httpx_prob"] }); } catch { rejected = true; }
+	expect("misspelled scanner allowlist entry fails fast", rejected);
+}
+
+// Deferred tools are registered on the active Agent scope only after an explicit pack load.
+{
+	const globalTools = new Map();
+	const handlers = new Map();
+	const activeScanNames = ["nmap_portscan", "dirsearch_dirs", "ffuf_fuzz", "nuclei_scan", "afrog_scan", "sqlmap_inject", "katana_crawl", "gau_urls"];
+	const exposedTools = ["httpx_probe", "asset_ingest", ...activeScanNames];
+	const configured = {};
+	for (const toolName of activeScanNames) {
+		const definition = Object.values(TOOL_DEFS).find((candidate) => candidate.name === toolName);
+		if (definition) {
+			configured[toolName] = process.execPath;
+			configured[definition.bin] = process.execPath;
+			for (const bin of definition.bins ?? []) configured[bin] = process.execPath;
+		}
+	}
+	apply({
+		tools: { register(definition) { globalTools.set(definition.name, definition); return () => globalTools.delete(definition.name); } },
+		settings: { get() { return { tools: configured }; } },
+		on(event, handler) { handlers.set(event, handler); },
+	}, { exposedTools, deferredTools: activeScanNames });
+	const pack = globalTools.get("tool_pack");
+	const agentTools = new Map();
+	const agent = {
+		id: "scanner-pack-agent",
+		ctx: { tools: { register(definition) {
+			if (agentTools.has(definition.name)) throw new Error(`duplicate ${definition.name}`);
+			agentTools.set(definition.name, definition);
+			return () => agentTools.delete(definition.name);
+		} } },
+	};
+	const before = await pack.execute({ action: "list" }, { agent });
+	expect("scanner schemas stay out of the base preset and list as deferred", !activeScanNames.some((name) => globalTools.has(name)) && before.ok && before.packs[0].loaded === false && before.packs[0].tools === activeScanNames.length);
+	const loaded = await pack.execute({ action: "load", pack: "active-scan" }, { agent });
+	expect("active-scan load registers exactly the deferred scanners on this Agent", loaded.ok && JSON.stringify([...agentTools.keys()].sort()) === JSON.stringify([...activeScanNames].sort()));
+	const loadedAgain = await pack.execute({ action: "load", pack: "active-scan" }, { agent });
+	expect("repeated load is idempotent", loadedAgain.ok && agentTools.size === activeScanNames.length);
+	const unloaded = await pack.execute({ action: "unload", pack: "active-scan" }, { agent });
+	expect("unload removes the scanner schemas from this Agent", unloaded.ok && agentTools.size === 0);
+	await pack.execute({ action: "load", pack: "active-scan" }, { agent });
+	handlers.get("agent/disposed")?.({ agent });
+	expect("agent disposal releases loaded scanner schemas", agentTools.size === 0);
+	let rejected = false;
+	try { apply({ tools: { register() {} } }, { exposedTools, deferredTools: ["httpx_probe"] }); } catch { rejected = true; }
+	expect("only the active-scan scanner allowlist may be deferred", rejected);
+}
+
+{
+	const firstPass = buildHttpxArgs("https://example.test");
+	const secondPass = buildHttpxArgs("https://example.test", { favicon: true });
+	expect("轻指纹首轮含标题、技术栈、状态与 Web Server", ["-title", "-tech-detect", "-status-code", "-web-server"].every((flag) => firstPass.includes(flag)));
+	expect("首轮不多发 favicon 请求，歧义时才增加一次 favicon 探针",
+		!firstPass.includes("-favicon") && secondPass.filter((flag) => flag === "-favicon").length === 1);
+	const summary = summarizeHttpxResults([
+		{ url: "https://oa.example.test", status_code: 200, title: "TongWeb", tech: ["TongWeb", "Java"], webserver: "TongWeb/7.0", favicon: "1494302000", body: "private body must not be shown" },
+		{ url: "https://tomcat.example.test", status_code: 200, title: "Apache Tomcat/8.5.99", tech: ["Apache HTTP Server"], webserver: "Apache, Tomcat/8.5.99" },
+		...Array.from({ length: 21 }, (_, i) => ({ url: `https://host-${i}.example.test`, status_code: 200 })),
+	]);
+	expect("模型回执包含产品指纹而不含页面正文", summary.includes("title=TongWeb") && summary.includes("tech-hints=TongWeb, Java") && summary.includes("server=TongWeb/7.0") && !summary.includes("private body"));
+	expect("互相矛盾的指纹字段保留为独立证据", summary.includes("title=Apache Tomcat/8.5.99") && summary.includes("tech-hints=Apache HTTP Server") && summary.includes("server=Apache, Tomcat/8.5.99"));
+	expect("大量目标的回执最多显示 20 行并说明其余证据在 JSON 中", (summary.match(/^- HTTP /gm) || []).length === 20 && summary.includes("另有 3 条只在完整 JSON 证据中"));
+}
+
+// ── 资产导入纯函数：JSON/CSV/文本三条路都归一，不依赖任何扫描器 ──
+{
+	const json = parseAssetPayload(JSON.stringify([
+		{ url: "https://oa.example.com", ip: "203.0.113.10", port: 443, title: "OA", tech: "weaver,ecology" },
+		{ host: "oa.example.com", ip: "203.0.113.10", port: "443", server: "nginx" },
+	]), { source: "tscanplus" });
+	expect("JSON 导入并去重为一条", json.assets.length === 1 && json.deduped === 1, JSON.stringify(json));
+	expect("JSON 字段归一（tech 拆分、source 保留）",
+		json.assets[0].tech.join(",") === "weaver,ecology" && json.assets[0].sources.includes("tscanplus"), JSON.stringify(json.assets[0]));
+	const csv = parseAssetPayload('host,ip,port,title,server\nhttps://c.example.com,198.51.100.2,8443,C,nginx\n', { source: "csv" });
+	expect("CSV 带引号/表头解析", csv.assets.length === 1 && csv.assets[0].port === 8443, JSON.stringify(csv));
+	const text = parseAssetPayload("Nmap scan report for nmap.example.com (198.51.100.3)\n443/tcp open https nginx\nhttp://web.example.com/admin\n", { source: "text" });
+	expect("nmap 文本与服务导入", text.assets.some((asset) => asset.host === "nmap.example.com" && asset.port === 443), JSON.stringify(text));
+	expect("裸 URL 导入", text.assets.some((asset) => asset.target === "http://web.example.com/admin"), JSON.stringify(text));
+}
+
+// ── asset_ingest 模型工具：scope 过滤 + 账本落盘 + 路径越界拒绝 ──
+{
+	const tools = new Map();
+	apply({ tools: { register(def) { tools.set(def.name, def); } } });
+	expect("asset_ingest 已注册", tools.has("asset_ingest"));
+	const ws = fs.mkdtempSync(path.join(os.tmpdir(), "asset-ingest-"));
+	try {
+		const out = await tools.get("asset_ingest").execute({
+			workspace: ws,
+			source: "tscanplus",
+			scope: "*.example.com",
+			text: JSON.stringify([
+				{ url: "https://oa.example.com", ip: "203.0.113.10", port: 443 },
+				{ url: "https://evil.example.net", ip: "198.51.100.9", port: 443 },
+			]),
+		});
+		expect("asset_ingest 按 scope 只写范围内资产", out.ok && out.summary.parsed === 2 && out.summary.inScope === 1, JSON.stringify(out));
+		const inventory = JSON.parse(fs.readFileSync(path.join(ws, "asset-inventory.json"), "utf8"));
+		expect("导入结果进入统一账本", inventory.assets.length === 1 && inventory.assets[0].host === "oa.example.com");
+		expect("导入写了 evidence-index", fs.readFileSync(path.join(ws, "evidence-index.md"), "utf8").includes("asset_ingest"));
+		const escape = await tools.get("asset_ingest").execute({ workspace: ws, file: "../outside.json" });
+		expect("asset_ingest 拒绝路径越界", escape.ok === false && String(escape.error).includes("越出"));
+	} finally {
+		fs.rmSync(ws, { recursive: true, force: true });
+	}
+}
 
 // checkRegistered
 let r = checkRegistered(fs, F, "http://127.0.0.1:8081/x");
@@ -21,6 +143,12 @@ expect("无 assets.md 拒绝并提示先过 Gate P1", !r.ok && r.hint.includes("
 
 // rate defaults sanity
 expect("保守默认值齐备", RATE_DEFAULTS.nuclei === 15 && RATE_DEFAULTS.httpx === 25 && RATE_DEFAULTS.ffuf === 50);
+{
+	const args = buildNucleiArgs("http://127.0.0.1:18100");
+	expect("Nuclei 广泛扫描默认排除会写目标的 intrusive 模板",
+		args.includes("-exclude-tags") && args[args.indexOf("-exclude-tags") + 1] === "intrusive"
+		&& args.includes("-severity") && args[args.indexOf("-severity") + 1] === "high,critical");
+}
 
 // nuclei 模板库：必须挑**真含模板**的目录，并且用 -t 显式指过去。
 // 背景（2026-09-19 实测）：旧代码只 existsSync 检查候选目录就放行，而本机

@@ -14,7 +14,7 @@ Saker/
 │   ├── skills/                   # 两个专业模式共享的协作与复核技能（6 个）
 │   ├── refs/                     # 共享参考资料
 │   └── scripts/                  # 工具面辅助脚本
-├── plugins/                      # 23 个独立功能插件
+├── plugins/                      # 24 个独立功能插件
 ├── scripts/                      # 全量打包（pack-all）与安装（install-all）
 ├── lib/preset-root.js            # 模式注册入口
 ├── cordis.patch.yml              # bundle 加载配置
@@ -52,7 +52,7 @@ plugins/dsh-<名字>/
 ## 打包与安装
 
 ```bash
-node scripts/pack-all.mjs        # 生成根模式包和 23 个插件包
+node scripts/pack-all.mjs        # 生成根模式包和 24 个插件包
 node scripts/install-all.mjs     # 装进 dsh 的 web profile
 ```
 
@@ -72,7 +72,7 @@ node scripts/install-all.mjs     # 装进 dsh 的 web profile
 
 ## 测试
 
-15 套插件测试，968 条断言。跑单个插件：
+当前完整回归包含 46 套测试（断言数以运行结果为准）。跑单个插件：
 
 ```bash
 cd plugins/<插件目录>
@@ -80,7 +80,7 @@ node --import ../../scripts/test-stub-register.mjs test/run.mjs
 ```
 
 `test-stub-register.mjs` 是统一测试桩，负责解析宿主的裸包名与 `@dsh-external/*` 子路径导出。
-**不套桩会直接 `ERR_MODULE_NOT_FOUND`**——早期 15 套里只有 4 套能跑，就是因为缺它。
+**不套桩会直接 `ERR_MODULE_NOT_FOUND`**——早期部分套件无法运行，就是因为缺它。
 
 跑全部：
 

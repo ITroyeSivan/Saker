@@ -418,7 +418,7 @@ function autoSyncKnowledgePacks(force = false) {
   if (autoSyncPromise) return autoSyncPromise
   autoSyncPromise = (async () => {
     try {
-      const summary = await syncPacks({ force, concurrency: 3 })
+      const summary = await syncPacks({ force, concurrency: 3, refreshCatalog: true, forceCatalog: false })
       lastSyncSummary = summary
       if (summary.ok > 0) {
         invalidateKnowledgeIndex()
@@ -917,10 +917,16 @@ function importGit(url, name) {
       resolve({ ok: false, error: `无法创建导入目录：${e && e.message ? e.message : String(e)}` })
       return
     }
-    const child = spawn('git', ['clone', '--depth', '1', '--', url, target], {
-      windowsHide: true,
-      stdio: ['ignore', 'ignore', 'pipe'],
-    })
+    let child
+    try {
+      child = spawn('git', ['clone', '--depth', '1', '--', url, target], {
+        windowsHide: true,
+        stdio: ['ignore', 'ignore', 'pipe'],
+      })
+    } catch (e) {
+      resolve({ ok: false, error: `git 不可用：${e && e.message ? e.message : String(e)}` })
+      return
+    }
     let err = ''
     child.stderr.on('data', (d) => {
       err = (err + String(d)).slice(-2000)
@@ -1051,6 +1057,7 @@ async function dispatch(endpoint, payload) {
         domains: pack.domains,
         autoInstall: pack.autoInstall,
       }))
+      status.catalogUrl = loadCatalog().catalogUrl
       return ok(status)
     }
 
@@ -1061,7 +1068,13 @@ async function dispatch(endpoint, payload) {
 
     case 'packs-sync': {
       const ids = Array.isArray(p.ids) ? p.ids.map(String) : []
-      const summary = await syncPacks({ ids, force: p.force !== false, concurrency: 3 })
+      const summary = await syncPacks({
+        ids,
+        force: p.force !== false,
+        concurrency: 3,
+        refreshCatalog: p.refreshCatalog !== false,
+        forceCatalog: p.forceCatalog !== false,
+      })
       lastSyncSummary = summary
       if (summary.ok > 0) {
         invalidateKnowledgeIndex()

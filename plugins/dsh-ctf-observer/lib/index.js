@@ -161,7 +161,7 @@ export function judge(st, opt = {}) {
 
 	// ④ 周期体检（每 N 轮一次）
 	if (st.round > 0 && st.round % REVIEW_EVERY_ROUNDS === 0) {
-		return matchFingerprint(st, `review:${st.round}`, `[observer] 第 ${st.round} 轮体检：当前没有检测到重复试错或错误堆积。保持节奏——若手上有未收口的方向，先确认哪条最接近 flag；若都卡住，按「3 条独立路径失败即换题」处置。`);
+		return matchFingerprint(st, `review:${st.round}`, `[observer] 第 ${st.round} 轮体检：当前没有检测到重复试错或错误堆积。保持节奏——若手上有未结束的方向，先确认哪条最接近 flag；若都卡住，按「3 条独立路径失败即换题」处置。`);
 	}
 
 	return { nudge: false };

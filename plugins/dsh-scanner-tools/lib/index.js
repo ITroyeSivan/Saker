@@ -18,10 +18,31 @@ import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { defineTool } from "@deepseek-ai/dsh-tools";
+import { readSettingsSection } from "dsh-saker/settings-compat";
+import { matchesScope, upsertAssets } from "dsh-saker/asset-inventory";
 import { TOOL_DEFS, buildArgs, tiersLine } from "./registry.js";
+import { parseAssetPayload } from "./ingest.js";
 
 function sessionIdOf(exec) {
 	return String(exec?.agent?.session?.id ?? exec?.agent?.id ?? "");
+}
+
+/**
+ * Resolve a tool's `workspace` argument to an absolute path, with **relative paths
+ * resolved against the SESSION workspace**.
+ *
+ * Why (2026-09-25, real model session): `path.resolve(args.workspace)` resolves a relative
+ * value against the HOST PROCESS cwd — the dsh source checkout / install directory, not the
+ * model's working directory. The model really did send `workspace: "."`; had it succeeded,
+ * scan artifacts and the asset ledger would have landed outside the session workspace, where
+ * the workbench, the report gate, and the write boundary all fail to see them.
+ * Absolute paths are unchanged.
+ */
+function resolveWorkspaceArg(workspace, exec) {
+	if (typeof workspace !== "string" || workspace === "") return path.resolve(".");
+	if (path.isAbsolute(workspace)) return path.resolve(workspace);
+	const sessionCwd = exec?.agent?.session?.header?.cwd;
+	return sessionCwd ? path.resolve(sessionCwd, workspace) : path.resolve(workspace);
 }
 
 /**
@@ -55,9 +76,20 @@ function stamp() {
 }
 
 const RATE_DEFAULTS = { nuclei: 15, httpx: 25, ffuf: 50 }; // 保守默认；显式覆盖会留痕
+
+export function buildHttpxArgs(targets, { favicon = false } = {}) {
+	const args = ["-u", targets, "-json", "-silent", "-title", "-tech-detect", "-status-code", "-web-server"];
+	if (favicon === true) args.push("-favicon");
+	return args;
+}
 const BIN_HINT = "三级兜底：本机未装该工具——先查已连接 MCP（如 kali MCP），仍无则按 pentest-playbook 安装请求流程征得用户批准后安装；本工具绝不自动安装。";
 const IS_WIN = process.platform === "win32";
 const WIN_PATHEXT = ".COM;.EXE;.BAT;.CMD";
+
+/** Broad Nuclei scans must not run templates that may write to or execute on targets. */
+export function buildNucleiArgs(target, severity = "high,critical") {
+	return ["-u", String(target), "-severity", String(severity), "-exclude-tags", "intrusive", "-jsonl", "-silent", "-nc"];
+}
 
 /** PATH 直扫 + Windows App Paths 兜底；不依赖宿主是否继承 PATHEXT。 */
 export function hasBin(bin) {
@@ -686,13 +718,33 @@ const nucleiParse = (raw) => {
 	return { __writeRaw: JSON.stringify(out, null, 2), __hits: hits, __summary: { total: out.length }, __summaryText: `nuclei 命中 ${out.length} 条（已写对账待处置）` };
 };
 
+export function summarizeHttpxResults(rows, limit = 20) {
+	const all = Array.isArray(rows) ? rows : [];
+	const shown = all.slice(0, Math.max(0, Math.min(20, Number(limit) || 20)));
+	const clean = (value, max = 120) => {
+		const text = (Array.isArray(value) ? value.join(", ") : String(value ?? "")).replace(/\s+/g, " ").trim();
+		return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+	};
+	const lines = shown.map((row) => {
+		const target = clean(row.url || row.input || row.host, 180) || "(unknown URL)";
+		const fields = [
+			["title", row.title], ["tech-hints", row.tech], ["server", row.webserver || row.server],
+			["favicon", row.favicon_hash ?? row.favicon],
+		].filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "")
+			.map(([key, value]) => `${key}=${clean(value)}`);
+		return `- HTTP ${clean(row.status_code ?? row.status ?? "?", 12)} ${target}${fields.length ? ` | ${fields.join(" | ")}` : ""}`;
+	});
+	const omitted = Math.max(0, all.length - shown.length);
+	return `存活 ${all.length}；指纹明细 ${shown.length} 条${omitted ? `（另有 ${omitted} 条只在完整 JSON 证据中）` : ""}${lines.length ? `\n${lines.join("\n")}` : ""}`;
+}
+
 const httpxParse = (raw) => {
 	const out = [];
 	for (const line of raw.split("\n")) {
 		if (!line.trim().startsWith("{")) continue;
 		try { out.push(JSON.parse(line)); } catch { /* 忽略 */ }
 	}
-	return { __writeRaw: JSON.stringify(out, null, 2), __hits: [], __summary: { alive: out.length }, __summaryText: `存活 ${out.length}；探测未登记资产属测绘行为，结果请回填资产基线（assets.md / cloud-assets.md）` };
+	return { __writeRaw: JSON.stringify(out, null, 2), __hits: [], __summary: { alive: out.length, fingerprintRows: Math.min(out.length, 20), omitted: Math.max(0, out.length - 20) }, __summaryText: `${summarizeHttpxResults(out)}\n探测未登记资产属测绘行为，结果请回填资产基线（assets.md / cloud-assets.md）` };
 };
 
 export const ffufParse = (_raw, proc = {}) => {
@@ -726,7 +778,7 @@ const inject = ["tools", "settings"];
 
 function liveConfiguredToolPaths(ctx) {
 	try {
-		return configuredToolPaths(ctx.settings.get("sec-config"));
+		return configuredToolPaths(readSettingsSection(ctx.settings, "sec-config"));
 	} catch {
 		return {};
 	}
@@ -734,22 +786,53 @@ function liveConfiguredToolPaths(ctx) {
 
 function liveConfiguredToolRoots(ctx) {
 	try {
-		const section = ctx.settings.get("sec-config");
+		const section = readSettingsSection(ctx.settings, "sec-config");
 		return Array.isArray(section?.roots) ? section.roots : [];
 	} catch {
 		return [];
 	}
 }
 
-function apply(ctx) {
+function apply(ctx, config = {}) {
+	const activeScanToolNames = [
+		"nmap_portscan", "dirsearch_dirs", "ffuf_fuzz", "nuclei_scan",
+		"afrog_scan", "sqlmap_inject", "katana_crawl", "gau_urls",
+	];
+	const allToolNames = new Set([
+		"nuclei_scan", "httpx_probe", "ffuf_fuzz", "asset_ingest",
+		...Object.values(TOOL_DEFS).map((def) => def.name),
+	]);
+	if (config?.exposedTools !== undefined && !Array.isArray(config.exposedTools)) {
+		throw new TypeError("exposedTools must be an array of scanner tool names");
+	}
+	const exposedTools = config?.exposedTools === undefined ? null : new Set(config.exposedTools);
+	const unknownTools = [...(exposedTools ?? [])].filter((toolName) => !allToolNames.has(toolName));
+	if (unknownTools.length > 0) throw new Error("Unknown exposedTools: " + unknownTools.join(", "));
+	if (config?.deferredTools !== undefined && !Array.isArray(config.deferredTools)) {
+		throw new TypeError("deferredTools must be an array of scanner tool names");
+	}
+	const deferredNames = new Set(config?.deferredTools ?? []);
+	const invalidDeferredTools = [...deferredNames].filter((toolName) =>
+		!activeScanToolNames.includes(toolName) || !allToolNames.has(toolName) || (exposedTools && !exposedTools.has(toolName))
+	);
+	if (invalidDeferredTools.length > 0) throw new Error("Invalid deferredTools: " + invalidDeferredTools.join(", "));
+	const deferredDefinitions = new Map();
+	const registerScannerTool = (tool) => {
+		if (exposedTools && !exposedTools.has(tool.name)) return;
+		if (deferredNames.has(tool.name)) {
+			deferredDefinitions.set(tool.name, tool);
+			return;
+		}
+		ctx.tools.register(tool);
+	};
 	// Optional tools are registered at plugin load, so their availability probe
 	// must consider the sec-config path map as well as PATH. The same live map
 	// is read again at execution time for all tools, which lets an operator fix
 	// a path without restarting the host.
 	const initialConfigured = liveConfiguredToolPaths(ctx);
-	ctx.tools.register(defineTool({
+	registerScannerTool(defineTool({
 		name: "nuclei_scan",
-		description: "Template-based vuln scan (local nuclei). Conservative rate by default (-rl 15); explicit `rate` override is audit-logged. Requires the target registered in the workspace assets.md (防盲打). Hits append to scan-reconcile.md as 待处置 (hit ≠ vuln — verify with 对照三件套 before reporting).",
+		description: "Template-based vuln scan (local nuclei). Broad scans default to high/critical and exclude `intrusive` templates, which may write files or execute commands on targets. Conservative rate by default (-rl 15); explicit `rate` override is audit-logged. Requires the target registered in workspace assets.md (防盲打). Hits append to scan-reconcile.md as 待处置 (hit ≠ vuln — verify before reporting).",
 		parameters: {
 			target: { type: "string", required: true, description: "Target URL/host (must be registered in assets.md)" },
 			workspace: { type: "string", required: true, description: "Task workspace root" },
@@ -759,33 +842,34 @@ function apply(ctx) {
 		output: { schema: { type: "object", additionalProperties: true }, render: (_a, v) => [{ type: "text", text: v.ok ? `nuclei: ${v.__summaryText ?? ""}${v.stdout ? " — " + v.stdout : ""}（证据 ${v.evidenceId}）` : `nuclei 拒绝/失败：${v.error}` }] },
 		async execute(args, exec) {
 			const severity = args.severity ?? "high,critical";
-			const args2 = ["-u", args.target, "-severity", severity, "-jsonl", "-silent", "-nc"];
-			const workspace = path.resolve(args.workspace);
+			const args2 = buildNucleiArgs(args.target, severity);
+			const workspace = resolveWorkspaceArg(args.workspace, exec);
 			const tracked = await runWithTaskTracking(workspace, "nuclei_scan", exec, () =>
 				runScan({ bin: "nuclei", args: args2, workspace, tool: "nuclei", rate: args.rate, defaultRate: RATE_DEFAULTS.nuclei, active: true, target: args.target, parse: nucleiParse, configured: liveConfiguredToolPaths(ctx), roots: liveConfiguredToolRoots(ctx) })
 			);
 			return withTaskId(tracked);
 		}
 	}));
-	ctx.tools.register(defineTool({
+	registerScannerTool(defineTool({
 		name: "httpx_probe",
-		description: "Alive/tech-fingerprint probe (local httpx). Light recon: unregistered targets allowed, but backfill assets.md with the results. Conservative rate by default (-rl 25).",
+		description: "Light HTTP fingerprint (title/technology hints/server; httpx -rl 25). Keep hints separate from explicit title/server strings. Optional favicon=true adds one GET to /favicon.ico when identity is ambiguous. Writes JSON to artifacts/scans/ and evidence-index.md; returns metadata, not page body.",
 		parameters: {
 			targets: { type: "string", required: true, description: "One URL/host, or comma-separated list" },
 			workspace: { type: "string", required: true, description: "Task workspace root" },
+			favicon: { type: "boolean", description: "Optional second fingerprint request to /favicon.ico; use only when title/server/technology hints do not identify the product" },
 			rate: { type: "integer", description: "requests/sec override (default 25; audit-logged)" }
 		},
 		output: { schema: { type: "object", additionalProperties: true }, render: (_a, v) => [{ type: "text", text: v.ok ? `httpx: ${v.stdout ?? ""}（证据 ${v.evidenceId}）` : `httpx 失败：${v.error}` }] },
 		async execute(args, exec) {
-			const args2 = ["-u", args.targets, "-json", "-silent", "-title", "-tech-detect", "-status-code"];
-			const workspace = path.resolve(args.workspace);
+			const args2 = buildHttpxArgs(args.targets, { favicon: args.favicon });
+			const workspace = resolveWorkspaceArg(args.workspace, exec);
 			const tracked = await runWithTaskTracking(workspace, "httpx_probe", exec, () =>
 				runScan({ bin: "httpx", args: args2, workspace, tool: "httpx", rate: args.rate, defaultRate: RATE_DEFAULTS.httpx, active: false, target: args.targets, parse: httpxParse, configured: liveConfiguredToolPaths(ctx), roots: liveConfiguredToolRoots(ctx) })
 			);
 			return withTaskId(tracked);
 		}
 	}));
-	ctx.tools.register(defineTool({
+	registerScannerTool(defineTool({
 		name: "ffuf_fuzz",
 		description: "Dir/param fuzz (local ffuf). Conservative rate by default (-rate 50). Requires target registered in assets.md (防盲打). Use mode=dir for path fuzzing, mode=param for parameter discovery.",
 		parameters: {
@@ -798,7 +882,7 @@ function apply(ctx) {
 		output: { schema: { type: "object", additionalProperties: true }, render: (_a, v) => [{ type: "text", text: v.ok ? `ffuf: ${v.stdout ?? ""}（证据 ${v.evidenceId}）` : `ffuf 拒绝/失败：${v.error}` }] },
 		async execute(args, exec) {
 			const wl = args.wordlist ?? "common.txt";
-			const workspace = path.resolve(args.workspace);
+			const workspace = resolveWorkspaceArg(args.workspace, exec);
 			const tracked = await runWithTaskTracking(workspace, "ffuf_fuzz", exec, () => {
 				if (!fs.existsSync(path.resolve(wl))) return { ok: false, error: `字典不存在：${wl}——请给 wordlist 参数（绝对路径或 SecLists）；本工具不代装字典。` };
 			const u = args.mode === "param" ? (args.url.includes("FUZZ=") ? args.url : args.url + (args.url.includes("?") ? "&" : "?") + "FUZZ=1") : args.url;
@@ -811,6 +895,78 @@ function apply(ctx) {
 			return withTaskId(tracked);
 		}
 	}));
+	registerScannerTool(defineTool({
+		name: "asset_ingest",
+		description: "Import an existing scanner export (TScanPlus/fscan/nmap/httpx JSON, JSONL, CSV or text) into the workspace asset-inventory.json and assets.md. This is the no-CLI integration path: it parses files the operator already produced and never claims the source tool is installed.",
+		parameters: {
+			workspace: { type: "string", required: true, description: "Task workspace root" },
+			file: { type: "string", description: "Workspace-relative export path (alternative to text)" },
+			text: { type: "string", description: "Raw export text (alternative to file)" },
+			source: { type: "string", description: "Source label, e.g. tscanplus / fscan / nmap / httpx" },
+			format: { type: "string", enum: ["auto", "json", "jsonl", "csv", "text"], description: "Input format (default auto)" },
+			scope: { type: "string", description: "Optional authorized scope filter; bare domains match exactly, *.domain includes explicitly authorized subdomains but not the apex. Only matching assets are written." },
+			authorized: { type: "boolean", description: "Mark imported assets as explicitly authorized in the inventory" },
+		},
+		output: {
+			schema: { type: "object", additionalProperties: true },
+			render: (_a, v) => [{ type: "text", text: v.ok ? v.text : `asset_ingest 失败：${v.error}` }],
+		},
+		async execute(args, exec) {
+			const hasFile = typeof args.file === "string" && args.file.trim() !== "";
+			const hasText = typeof args.text === "string" && args.text.trim() !== "";
+			if (hasFile === hasText) return { ok: false, error: "file 与 text 必须且只能提供一个" };
+			if (!String(args.workspace || "").trim()) return { ok: false, error: "workspace 不能为空" };
+			const workspace = resolveWorkspaceArg(args.workspace, exec);
+			let text = String(args.text || "");
+			let rawFile = "";
+			if (hasFile) {
+				const target = path.resolve(workspace, String(args.file));
+				if (target !== workspace && !target.startsWith(workspace + path.sep)) return { ok: false, error: "file 越出 workspace" };
+				let stat;
+				try { stat = fs.statSync(target); } catch (error) { return { ok: false, error: `无法读取导出文件：${String(error?.message || error)}` }; }
+				if (!stat.isFile()) return { ok: false, error: "file 不是文件" };
+				if (stat.size > 50 * 1024 * 1024) return { ok: false, error: "导出文件超过 50MB，请先按目标范围裁剪" };
+				text = fs.readFileSync(target, "utf8");
+				rawFile = path.relative(workspace, target).replace(/\\/g, "/");
+			}
+			let parsed;
+			try {
+				parsed = parseAssetPayload(text, { format: args.format || "auto", source: args.source || (hasFile ? path.basename(String(args.file)) : "import") });
+			} catch (error) {
+				return { ok: false, error: `解析失败（${args.format || "auto"}）：${String(error?.message || error)}` };
+			}
+			const scoped = args.scope
+				? parsed.assets.filter((asset) => matchesScope(asset, args.scope))
+				: parsed.assets;
+			const rows = scoped.map((asset) => ({
+				...asset,
+				authorized: args.authorized === true,
+				rawFiles: rawFile ? [rawFile] : [],
+			}));
+			if (rows.length === 0) {
+				return {
+					ok: false,
+					error: `解析到 ${parsed.assets.length} 条资产，但授权范围过滤后为 0；检查 scope 或导出内容`,
+					summary: { format: parsed.format, parsed: parsed.assets.length, inScope: 0 },
+				};
+			}
+			const written = upsertAssets(workspace, rows, { source: args.source || "asset_ingest" });
+			appendEvidence(workspace, `asset-import-${stamp()}`, `asset_ingest ${args.source || "import"} ${rawFile || "text"}`, rawFile || "asset-inventory.json");
+			return {
+				ok: true,
+				summary: {
+					format: parsed.format,
+					parsed: parsed.assets.length,
+					inScope: scoped.length,
+					written: rows.length,
+					added: written.added,
+					merged: written.merged,
+				},
+				inventoryFile: path.relative(workspace, written.file).replace(/\\/g, "/"),
+				text: `asset_ingest：${parsed.format} 解析 ${parsed.assets.length} 条，范围内 ${scoped.length} 条；账本新增 ${written.added}、合并 ${written.merged}，累计 ${written.inventory.assets.length} 条。`,
+			};
+		},
+	}));
 	// 注册表工具统一注册：def 带全部工具面元数据（名称/摘要/参数 schema/阶梯/守卫），新增工具只改 registry.js
 	const configuredProbe = (candidate, def) => resolveToolBin(
 		candidate,
@@ -818,7 +974,7 @@ function apply(ctx) {
 		{ roots: liveConfiguredToolRoots(ctx) },
 	) !== null;
 	for (const def of registerableDefs(TOOL_DEFS, configuredProbe)) {
-		ctx.tools.register(defineTool({
+		registerScannerTool(defineTool({
 			name: def.name,
 			// 六段降级阶梯只在“本机缺工具”时才有决策价值；runGoverned 的缺装错误已原样返回 tiersLine，
 			// 常驻 schema 会为每个工具重复 ~500B（13 个合计 7.2K），纯属重复上下文。
@@ -829,13 +985,81 @@ function apply(ctx) {
 			}, def.params),
 			output: { schema: { type: "object", additionalProperties: true }, render: (_a, v) => [{ type: "text", text: v.ok ? `${v.summaryText}\n${v.preview}` : `${def.id} 拒绝/失败：${v.error}` }] },
 			async execute(args, exec) {
-				const workspace = path.resolve(args.workspace);
+				const workspace = resolveWorkspaceArg(args.workspace, exec);
 				const tracked = await runWithTaskTracking(workspace, def.name, exec, () =>
 					runGoverned({ def, params: args, workspace, configured: liveConfiguredToolPaths(ctx), roots: liveConfiguredToolRoots(ctx) })
 				);
 				return withTaskId(tracked);
 			}
 		}));
+	}
+	if (deferredDefinitions.size > 0) {
+		const loadedAgents = new Map();
+		const packName = "active-scan";
+		const packTool = defineTool({
+			name: "tool_pack",
+			description: "按需加载 Pentest 主动扫描器。仅在已有明确测试假设时使用 action=load；完成后用 action=unload。action=list 只查看状态，不运行扫描。",
+			parameters: {
+				action: { type: "string", enum: ["list", "load", "unload"], required: true, description: "list/load/unload" },
+				pack: { type: "string", description: "当前仅支持 active-scan" },
+			},
+			output: {
+				schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
+				render: (_args, value) => [{ type: "text", text: value.ok
+					? (value.packs ? `工具包：${value.packs.map((item) => `${item.id}=${item.loaded ? "已加载" : "收起"}(${item.tools})`).join("；")}` : `工具包 ${value.pack}：${value.loaded ? "已加载" : "已收起"}`)
+					: `工具包操作失败：${value.error}` }],
+			},
+			async execute(args, exec) {
+				const agent = exec?.agent;
+				const register = agent?.ctx?.tools?.register;
+				if (!agent?.id || typeof register !== "function") return { ok: false, error: "当前会话不支持按 Agent 加载工具" };
+				let state = loadedAgents.get(agent.id);
+				if (!state) {
+					state = { loaded: false, disposers: [] };
+					loadedAgents.set(agent.id, state);
+				}
+				if (args.action === "list") {
+					return { ok: true, packs: [{ id: packName, loaded: state.loaded, tools: deferredDefinitions.size }] };
+				}
+				if (args.pack !== packName) return { ok: false, error: `当前仅支持工具包 ${packName}` };
+				if (args.action === "load") {
+					if (state.loaded) return { ok: true, pack: packName, loaded: true };
+					const disposers = [];
+					try {
+						for (const toolName of activeScanToolNames) {
+							const definition = deferredDefinitions.get(toolName);
+							if (definition) disposers.push(register.call(agent.ctx.tools, definition));
+						}
+					} catch (error) {
+						for (const dispose of disposers.reverse()) {
+							try { dispose(); } catch { /* roll back partial registration */ }
+						}
+						return { ok: false, error: `主动扫描器加载未完成：${String(error?.message || error)}` };
+					}
+					state.disposers = disposers;
+					state.loaded = true;
+					return { ok: true, pack: packName, loaded: true };
+				}
+				if (args.action === "unload") {
+					for (const dispose of state.disposers.splice(0).reverse()) {
+						try { dispose(); } catch { /* agent may already be disposing */ }
+					}
+					state.loaded = false;
+					return { ok: true, pack: packName, loaded: false };
+				}
+				return { ok: false, error: `未知 action：${args.action}` };
+			},
+		});
+		ctx.tools.register(packTool);
+		ctx.on?.("agent/disposed", (payload) => {
+			const agent = payload?.agent ?? payload;
+			const state = loadedAgents.get(agent?.id);
+			if (!state) return;
+			for (const dispose of state.disposers.splice(0).reverse()) {
+				try { dispose(); } catch { /* agent scope is already being disposed */ }
+			}
+			loadedAgents.delete(agent.id);
+		});
 	}
 }
 

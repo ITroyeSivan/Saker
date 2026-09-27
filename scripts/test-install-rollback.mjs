@@ -94,6 +94,7 @@ const ok = (label, cond, extra) => {
 
   const ROOT_PKG_NAME = '@fixture/dsh-saker'
   const ROOT_VERSION = '0.0.1'
+  const OLD_ROOT_VERSION = '0.0.0'
   const PROBE_NAME = '@dsh-external/dsh-probe'
   const PROBE_VERSION = '2.0.0'
   const OLD_VERSION = '1.0.0'
@@ -117,6 +118,11 @@ const ok = (label, cond, extra) => {
   writeFileSync(join(target, 'package.json'), JSON.stringify({ name: PROBE_NAME, version: OLD_VERSION }))
   writeFileSync(join(target, 'marker.txt'), 'PRE-EXISTING')
 
+  const rootTarget = join(nm, ROOT_PKG_NAME)
+  mkdirSync(rootTarget, { recursive: true })
+  writeFileSync(join(rootTarget, 'package.json'), JSON.stringify({ name: ROOT_PKG_NAME, version: OLD_ROOT_VERSION }))
+  writeFileSync(join(rootTarget, 'marker.txt'), 'ROOT-PRE-EXISTING')
+
   const probeTgz = join(fixture, 'plugins', 'dsh-probe', `dsh-external-dsh-probe-${PROBE_VERSION}.tgz`)
   // Use a profile-relative file spec on purpose. pnpm resolves `file:` from the
   // profile directory; the installer used to resolve it from cwd, classify the
@@ -129,9 +135,24 @@ const ok = (label, cond, extra) => {
     dsh: { profile: { bundles: [PROBE_NAME] } },
   }, null, 2) + '\n')
 
-  // 假 CLI：永远失败（模拟 pnpm 装不上 / 网断 / store 冲突）
+  // 假 CLI：根包升级成功，随后插件升级失败。
+  // 这会证伪「根包先升、插件失败后仍留新旧不兼容组合」的顺序缺陷。
   const fakeCli = join(home, 'fake-failing-cli.mjs')
-  writeFileSync(fakeCli, 'process.stderr.write("simulated install failure\\n"); process.exit(1)\n')
+  writeFileSync(fakeCli, [
+    "import { mkdirSync, writeFileSync } from 'node:fs'",
+    "import { join } from 'node:path'",
+    "const spec = process.argv.at(-1) ?? ''",
+    "if (spec.includes(`dsh-saker-${process.env.TEST_ROOT_VERSION}.tgz`)) {",
+    "  const target = join(process.env.DSH_HOME, 'profiles', 'web', 'node_modules', ...process.env.TEST_ROOT_NAME.split('/'))",
+    "  mkdirSync(target, { recursive: true })",
+    "  writeFileSync(join(target, 'package.json'), JSON.stringify({ name: process.env.TEST_ROOT_NAME, version: process.env.TEST_ROOT_VERSION }))",
+    "  console.log('Done in 1ms')",
+    "  process.exit(0)",
+    "}",
+    "process.stderr.write('simulated plugin install failure\\n')",
+    "process.exit(1)",
+    '',
+  ].join('\n'))
 
   const r = spawnSync(process.execPath, [join(fixture, 'scripts', 'install-all.mjs')], {
     cwd: fixture,
@@ -146,12 +167,20 @@ const ok = (label, cond, extra) => {
       SAKER_RETRIES: '1',
       // DSH_CLI 传「node 假脚本」：install-all 的 tokenize 支持双引号对
       DSH_CLI: `${process.execPath} ${fakeCli}`,
+      TEST_ROOT_NAME: ROOT_PKG_NAME,
+      TEST_ROOT_VERSION: ROOT_VERSION,
       NODE_OPTIONS: '',
     },
   })
   const out = `${r.stdout || ''}${r.stderr || ''}`
 
   ok('端到端：install-all 以非零码结束（失败被上报）', r.status !== 0, `status=${r.status}`)
+  ok('端到端：插件升级失败时根包没有先切到新版本',
+    (() => { try { return JSON.parse(readFileSync(join(rootTarget, 'package.json'), 'utf8')).version === OLD_ROOT_VERSION } catch { return false } })(),
+    '新 preset 先于插件落地，会留下无法创建会话的版本组合')
+  ok('端到端：插件失败时旧根包内容仍在',
+    existsSync(join(rootTarget, 'marker.txt')) && readFileSync(join(rootTarget, 'marker.txt'), 'utf8') === 'ROOT-PRE-EXISTING')
+  ok('端到端：插件失败分支没有执行根包升级命令', !/OK\s+root dsh-saker/.test(out), out.split('\n').filter((line) => /root dsh-saker/.test(line)).join(' | '))
   ok('端到端：有效的 profile 相对 file: 依赖不会被误判为 dangling',
     !/pruned 1 dangling dep/.test(out), out.split('\n').filter((l) => /dangling|pruned/.test(l)).join(' | ').slice(0, 200))
   ok('端到端：确实走到了探针包的升级分支（假 CLI 对它报过 FAIL）',

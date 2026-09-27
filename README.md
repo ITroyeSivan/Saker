@@ -2,12 +2,12 @@
 
 # Saker
 
-**给 DeepSeek Harness 用的安全测试工作台：渗透测试、代码审计与 CTF 解题的流程、工具、留痕都可替换。**
+**给 DeepSeek Harness 用的安全测试工作台：授权渗透测试、代码审计与 CTF 解题的流程、工具、留痕都可替换。**
 
-模块化提示词 · 23 个独立插件 · 自定义工具链 · MCP 接入 · 安全知识库 · WebShell 管理
+模块化提示词 · 24 个独立插件 · 自定义工具链 · MCP 接入 · 安全知识库 · WebShell 管理
 
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek-Harness-111827?style=flat-square)](https://github.com/deepseek-ai/deepseek-harness)
-[![Saker](https://img.shields.io/badge/Saker-v0.3.9-4f46e5?style=flat-square)](https://github.com/ITroyeSivan/Saker)
+[![Saker](https://img.shields.io/badge/Saker-v0.4.58-4f46e5?style=flat-square)](https://github.com/ITroyeSivan/Saker)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.5-339933?style=flat-square&logo=node.js&logoColor=white)](./package.json)
 [![License](https://img.shields.io/badge/code-MIT-2563eb?style=flat-square)](./LICENSE)
 
@@ -17,20 +17,22 @@
 
 ## 这是什么
 
-Saker 是 DeepSeek Harness 上的一套安全测试模式包，外加 23 个独立插件。
-它不提供扫描器、模型或额度，负责的是「怎么测」这件事：测试流程、攻击面口径、工具接入、过程留痕、成果复核。
+Saker 是 DeepSeek Harness 上的一套安全测试模式包，外加 24 个独立插件。
+渗透测试以快速信息收集、匹配最新 Nday、必要时开展 0day 挖掘为主线，目标止于授权范围内可复现的 RCE；不把大范围扫描或后渗透作为默认步骤。
 
 跟常见的「AI 渗透测试插件」不同，那些本质是一段写死的提示词——流程、话术、输出格式、工具选择全固化在文本里，装上去是什么样，用起来就永远是什么样。
-Saker 把这些都做成能自己改的：26 个内置提示词能自由组合、自由修改，工具和 MCP 接哪个由你定，技能可以自己装，模式包（persona / playbook）也能整套换掉。
+Saker 把这些都做成能自己改的：内置提示词能自由组合、自由修改，工具和 MCP 接哪个由你定，技能可以自己装，模式包（persona / playbook）也能整套换掉。
 
 ## 特性
 
-- **三种专业模式** — 渗透测试、代码审计、CTF 解题，外加宿主自带的标准模式，在新会话页直接切
-- **提示词可编排** — 26 个内置提示词能勾选、改内容、存成组合，输入框「方法 ▾」一键切
+- **渗透测试三种子模式** — 常规测试、Nday 发现、0day 挖掘；按作业选择组合，CTF 不占默认入口
+- **提示词可编排** — 内置提示词能勾选、改内容、存成组合，输入框「方法 ▾」一键切
 - **技能可自定义** — 技能包能上传安装、能卸载，会话里按需引用
 - **工具可自定义** — 本机扫描器的路径和分类自己配，库里没有的工具也能加进来
 - **MCP 可接入** — stdio 和 streamable HTTP 两种接法，连上就能给模型用
-- **攻击面覆盖** — 每个资产测到哪一步都落库，没测的地方一眼看得见
+- **Nday 优先** — 按产品与版本识别候选公告，来源覆盖厂商、CVE、CNVD、CNNVD 与 AVD；命中后再查利用资料，不预先收集整库 PoC
+- **扫描按需加载** — Nmap、目录探测、Nuclei 等扫描工具由当前会话按需启用，不在每个新会话默认铺开
+- **攻击面覆盖** — 资产、指纹、测试进度与证据可落库复核
 - **WebShell 管理** — 16 种载荷生成、连接与文件/数据库操作，库按语言和绕过方式分类
 - **知识库自动扩展** — 20 个高质量知识包、SQLite FTS5 混合检索、PayloadsAllTheThings 与 Exploit-DB，离线可用
 - **成果与证据** — 每个发现都挂证据和复核状态，报告从台账生成，不是模型现场编
@@ -50,7 +52,7 @@ Saker 把这些都做成能自己改的：26 个内置提示词能自由组合�
 git clone https://github.com/ITroyeSivan/Saker.git
 cd Saker
 
-node scripts/pack-all.mjs        # 生成根模式包和 23 个插件包
+node scripts/pack-all.mjs        # 生成根模式包和 24 个插件包
 node scripts/install-all.mjs     # 装进 dsh 的 web profile
 dsh web                          # 重启宿主
 ```
@@ -60,21 +62,11 @@ dsh web                          # 重启宿主
 ### 确认装好了
 
 进入「设置」，依次点开安全配置 / MCP 工作台 / 知识库 / 技能 / 方法编排 / WebShell，六个面板都应正常加载。
-新建会话选择 `pentest` 模式，输入框上方会出现「方法 ▾」入口。
+新建渗透测试会话后，从「方法 ▾」选择常规、Nday 或 0day 组合；扫描工具需在任务需要时再加载。
 
 工具探测、MCP 地址、DNSLog 等首次配置见 [安装与首次配置](./docs/getting-started.md)。
 
-## 后续计划
-
-- [ ] 持续适配 DeepSeek Harness 最新版本（当前支持：`0.1.6-alpha.1`；`0.1.5-rc.1` 保留兼容）
-
-- [ ] 新增功能
-
-- [ ] 性能优化，兼顾高可自定义特性和模型效果
-
-- [ ] Bug修复
-
-  
+当前版本支持 DeepSeek Harness `0.1.7-rc.2`，`0.1.6-alpha.1` 保留兼容。发布范围和验证边界见[本版更新日志](./docs/release-v0.4.58.md)。
 
 | 你想做什么 | 看哪篇 |
 |---|---|
@@ -85,7 +77,7 @@ dsh web                          # 重启宿主
 | 判断能力该用 dsh 宿主还是 Saker | [宿主能力对照](./docs/host-capabilities.md) |
 | 改代码、打包、发版 | [开发与发布](./docs/development.md) |
 | 确认能用在哪、哪些结论要人复核 | [边界与执行约束](./docs/boundaries.md) |
-| 看这一版改了什么 | [发布说明](./docs/release-v0.3.9.md) |
+| 看这一版改了什么 | [发布说明](./docs/release-v0.4.58.md) |
 
 ## 边界与授权
 

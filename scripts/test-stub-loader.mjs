@@ -45,7 +45,7 @@ const STUBS = {
     "  f.__kind = kind;\n" +
     "  f.__def = undefined;\n" +
     "  f.default = function (v) { const n = node(kind, shape); n.__def = v; return n; };\n" +
-    "  for (const m of ['optional', 'required', 'description', 'transform', 'pipe']) f[m] = function () { return f; };\n" +
+    "  for (const m of ['optional', 'required', 'description', 'transform', 'pipe', 'volatile']) f[m] = function () { return f; };\n" +
     "  return f;\n" +
     "}\n" +
     "const z = {};\n" +
@@ -69,6 +69,13 @@ const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 export function resolve(specifier, context, nextResolve) {
   const url = URLS.get(specifier);
   if (url) return { url, format: "module", shortCircuit: true };
+
+  if (specifier === "dsh-saker/settings-compat") {
+    return { url: pathToFileURL(path.join(REPO_ROOT, "lib", "settings-compat.js")).href, shortCircuit: true };
+  }
+  if (specifier === "dsh-saker/asset-inventory") {
+    return { url: pathToFileURL(path.join(REPO_ROOT, "lib", "asset-inventory.mjs")).href, shortCircuit: true };
+  }
 
   // 含子路径导出（如 @dsh-external/dsh-redteam-results/store），不能只匹配裸包名。
   const m = /^@dsh-external\/(dsh-[a-z0-9-]+)(?:\/(.+))?$/.exec(specifier);

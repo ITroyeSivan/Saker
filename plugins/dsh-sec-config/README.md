@@ -11,7 +11,8 @@
 | 工具路径 | `sqlmap / nuclei / dirsearch / fscan / subfinder / httpx / katana / afrog / ffuf / jwt_tool / nmap` | 本机工具绝对路径或命令名 |
 | 服务端点 | `burpUrl / yakitUrl` | Burp / Yakit 地址；保存即桥接 MCP（见下） |
 | Burp 桥脚本 | `burpBridgeScript` | 可选：覆盖 stdio↔SSE 桥脚本路径（默认用包内副本） |
-| DNSLog | `url / token` | OOB 回调平台（如 ceye.io） |
+| DNSLog | `url / token / domain` | OOB 回调平台（如 ceye.io） |
+| 内存马后端 | `enabled / backendUrl / token / cliPath / mcpServer` | 只允许自建 memshell backend；公共 `party.mem.mk` 固定拒绝。CLI 与 MCP 都走计划、审批、审计链 |
 | API Keys | `deepseekKey` 等 | 平台密钥 |
 | 模型接入 | `model.mode / listenPort / upstream / sanitize / redaction` | 内置本机代理，把 dsh 接上 OpenCode Go 这类网关；默认做模型出站密钥脱敏（见下） |
 | 改密表单 | `masterKey / newPassword / confirm` | 变更平台登录密码（master key 签发制，随宿主补丁启用） |
@@ -22,7 +23,7 @@
 - **MCP 自动桥接**：`services.burpUrl / yakitUrl` 保存后自动同步为 mcp-studio 的一条 server——Yakit 走 `streamable-http`（自动补 `/mcp`），Burp 走 `stdio` 桥。模型下一轮即可见 `mcp__burp__*` / `mcp__yakit__*` 工具，无需去 MCP 工作台手工添加。前端在地址行显示挂载状态徽章（已挂载 N 工具 / 连接中 / 待启用 / 失败）与「立即挂载」按钮。
 - **提示词 manifest**：注册 `systemPrompt.context`（`sec-config-manifest`），每次提示词组装时渲染一份当前已配工具 / 服务端点 / DNSLog / 已挂载 MCP 工具面的清单。配置改动（UI 保存或直接改 yaml，均经 settings 热载）下一轮自动进模型上下文，无需重启；文本确定性，未变化零开销。
 - **Burp stdio 桥**：Burp 官方 MCP 扩展跑 legacy SSE（9876），mcp-studio 只支持 stdio / streamable-http，故随包附 `tools/burp-sse-bridge.mjs`（Node 标准库 stdio↔SSE 转发）。解析顺序：`services.burpBridgeScript` 覆盖 → 包内副本 → 空。免 Java、免提取 fat-jar 代理。
-- **secret 字段**（`dnslog.token` / `apiKeys.*`）：读取时 redact 为 `***`；空写/`***` 写被忽略（不清空已存值）。
+- **secret 字段**（`dnslog.token` / `memshell.token` / `apiKeys.*`）：读取时 redact 为 `***`；空写/`***` 写被忽略（不清空已存值）。
 
 ## 模型接入（第三方网关）
 

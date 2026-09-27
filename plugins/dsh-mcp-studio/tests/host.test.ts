@@ -9,7 +9,7 @@ import {
   inject as studioInject,
   name as studioName,
 } from '../src/index.ts'
-import type { StudioSection } from '../src/types.ts'
+import type { ServerEntry, StudioConfig, StudioSection } from '../src/types.ts'
 import type { RpcResult } from '../src/settings-rpc.ts'
 
 const FIXTURE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'mcp-test-server.mjs').replace(/\\/g, '/')
@@ -19,6 +19,16 @@ interface ScopeLike {
   watch(cb: () => void): () => void
   update(patch: object): Promise<void>
   replace(section: object): Promise<void>
+}
+
+class VolatileValue<T> {
+  constructor(private value: T) {}
+  get(): T {
+    return this.value
+  }
+  set(value: T): void {
+    this.value = value
+  }
 }
 
 class StubTools extends Service {
@@ -154,13 +164,13 @@ test('studio host: mounts per enabled row, hot-swaps on change, serves status RP
   const connection = new StubConnection(root)
   void connection
 
-  const section: StudioSection = { servers: [] }
+  const servers = new VolatileValue<readonly ServerEntry[]>([])
+  const section: StudioConfig = { servers }
   const fiber = root.plugin({ name: studioName, inject: studioInject, apply: studioApply }, section)
   // The watchdog holds a live interval; dispose it even when an assertion throws,
   // otherwise a failing test leaves the process alive and the runner never exits.
   t.after(() => fiber.dispose())
   await fiber
-  assert.ok(settings.describe().some(entry => entry.ns === 'mcp-studio'), 'namespace should register')
   assert.ok(connection.handler !== undefined, 'loopback RPC should register')
 
   const status = async (): Promise<{ servers: Array<{ name: string; state: string }>; summary: Record<string, number> }> => {
@@ -191,17 +201,20 @@ test('studio host: mounts per enabled row, hot-swaps on change, serves status RP
   assert.deepEqual(before.mountedIds, [])
 
   // A mounted row contributing no tools reads as unreachable, not error.
-  settings.commit('mcp-studio', { servers: [{
+  servers.set([{
     id: 's1', enabled: true, name: 'demo', transport: 'stdio', command: 'false',
     argsLine: '', env: {}, cwd: '', url: '', headers: {}, toolCallTimeoutMs: 60_000, failOnStartupError: false,
-  }] })
+    exposure: 'auto', proxyThreshold: 10, directTools: [],
+  }])
+  root.emit('loader/volatile-update', [['servers']])
   await new Promise(resolve => setTimeout(resolve, 30))
   let after = await status()
   assert.equal(after.servers[0]!.name, 'demo')
   assert.equal(after.summary.enabled, 1)
 
   // Disabling every server unmounts and clears state.
-  settings.commit('mcp-studio', { servers: [] })
+  servers.set([])
+  root.emit('loader/volatile-update', [['servers']])
   await new Promise(resolve => setTimeout(resolve, 30))
   after = await status()
   assert.deepEqual(after.summary, { total: 0, enabled: 0, connected: 0, tools: 0 })

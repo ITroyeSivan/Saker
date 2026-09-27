@@ -163,8 +163,8 @@ export function toolsStatus(presetId, now = Date.now(), configured) {
 }
 
 /**
- * 当前模式可引用的技能名集合（preset/<mode>/skills/* 与 shared/skills/* 的
- * 并集，去重保序）。`presetId` 缺省时退到 shared；返回的每个名字是 SKILL.md
+ * 当前模式可引用的技能名集合（该模式配置的 preset/<mode>/skills/* 与
+ * shared/skills/* 的并集，去重保序）。`presetId` 缺省时退到 shared；返回的每个名字是 SKILL.md
  * frontmatter 的 `name:` 字段（与 `@skill:<name>` 引用键一致）。在
  * envelope 的 `skills:` 行投递，让模型在 prompt 装配期就知道当前可用的
  * 技能指针。
@@ -190,6 +190,12 @@ function readSkillNamesFromDir(dir) {
 	return names;
 }
 
+const PRESET_SKILL_ROOTS = {
+	pentest: ["pentest", "code-audit"],
+	"code-audit": ["code-audit", "pentest"],
+	"ctf-solver": ["ctf-solver", "pentest", "code-audit"],
+};
+
 export function listSkillNames(presetId, now = Date.now()) {
 	const cacheKey = presetId || "shared";
 	const hit = skillNameCache.get(cacheKey);
@@ -201,17 +207,12 @@ export function listSkillNames(presetId, now = Date.now()) {
 			if (!seen.has(n)) { seen.add(n); names.push(n); }
 		}
 	};
-	// shared/skills 对所有模式可见；security 预设的 skill-filesystem customSkillDirs
-	// 会把「本模式 + 兄弟模式」的 skills 一并挂进会话目录——因此这里扫全部
-	// preset/*/skills（不仅 presetId 自己），与真实会话目录一致。
+	// Keep this list aligned with each preset's skill-filesystem customSkillDirs.
+	// Pentest and code-audit intentionally share those two skill directories;
+	// ctf-solver adds its own directory. Other presets do not inherit CTF prompts.
 	addAll(path.join(BUNDLE_ROOT, "shared", "skills"));
-	if (presetId) {
-		let entries;
-		try { entries = fs.readdirSync(path.join(BUNDLE_ROOT, "preset"), { withFileTypes: true }); } catch { entries = [] }
-		for (const p of entries) {
-			if (!p.isDirectory()) continue
-			addAll(path.join(BUNDLE_ROOT, "preset", p.name, "skills"));
-		}
+	for (const root of PRESET_SKILL_ROOTS[presetId] ?? []) {
+		addAll(path.join(BUNDLE_ROOT, "preset", root, "skills"));
 	}
 	skillNameCache.set(cacheKey, { at: now, names: names.slice() });
 	return names;

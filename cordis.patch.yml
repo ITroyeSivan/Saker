@@ -1,7 +1,8 @@
 # Saker 模式包 bundle patch：把 preset/ 下的 pentest / code-audit / ctf-solver 三种
-# 专业模式作为只读预设根注册进宿主。整个包自包含 —— 安装时随包携带 preset/ 与 shared/，
-# 不向 DSH_HOME 拷贝任何文件（更新 = 替换包，数据零残留）。
-
+# 专业模式作为只读预设根注册进宿主。dsh 0.1.7 由 preset-root 自行读取声明式
+# Agent preset 配置并调用 register()；0.1.6 继续走 legacy resolvedRoots。
 - insert:
     - id: saker-preset-root
       name: 'dsh-saker/preset-root'
+    - id: saker-skill-registry
+      name: 'dsh-saker/skill-registry'

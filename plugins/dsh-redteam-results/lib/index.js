@@ -22,7 +22,7 @@ import crypto from "node:crypto";
 import os from "node:os";
 import fs from "node:fs";
 import { defineTool } from "@deepseek-ai/dsh-tools";
-import { openStore, registerFinding, updateFinding, removeFinding, getFinding, allFindings, listFindings, listFindingsAll, groupByTarget, groupByTargetAll, computeStats, computeStatsAll, modeCounts, modeCountsAll, ledgerOverview, ledgerOverviewAll, getMeta, setMeta, SEVERITIES, STATUSES, MODE_STATUSES, ALL_STATUSES, EVIDENCE_LEVELS, SOURCE_ORIGINS, SECOND_RATINGS, secondReviewError, secondReviewVerdict, statusesOf } from "./store.js";
+import { openStore, registerFinding, updateFinding, removeFinding, getFinding, allFindings, listFindings, listFindingsAll, groupByTarget, groupByTargetAll, computeStats, computeStatsAll, modeCounts, modeCountsAll, ledgerOverview, ledgerOverviewAll, getMeta, setMeta, SEVERITIES, STATUSES, REGISTER_STATUSES, MODE_STATUSES, ALL_STATUSES, EVIDENCE_LEVELS, SOURCE_ORIGINS, SECOND_RATINGS, secondReviewError, secondReviewVerdict, statusesOf } from "./store.js";
 
 const name = "dsh-redteam-results";
 const inject = ["tools", "webServer", "webRuntime", "agentPresets"];
@@ -465,7 +465,7 @@ function apply(ctx) {
 			identity: { type: "string", description: "利用身份（云）" },
 			permission: { type: "string", description: "权限（云）" },
 			resource: { type: "string", description: "目标资源（云）" },
-			status: { type: "string", enum: STATUSES, description: "默认 pending；suspect=疑似未定论；终态规则见 finding-fields.md" },
+			status: { type: "string", enum: REGISTER_STATUSES, description: "默认 pending。登记只收发现态：verified 是独立复核终态、登记时必被拒——先登记 pending，再用 redteam_finding_update 同一次给 secondRating + ≥40 字 secondRatingNote 流转；fixed 仅 redteam 台账模式（已路由）可登记。完整规则见 finding-fields.md" },
 			evidenceLevel: { type: "string", enum: EVIDENCE_LEVELS, description: "impact / confirmed / partial / unknown；语义见 finding-fields.md" },
 			auditMode: { type: "string", enum: ["static", "dynamic"], description: "代码审计必填：static=静态，dynamic=动态复现成功" }
 		},

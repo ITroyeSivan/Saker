@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { isAdvanceTool, isProgressTool, isAdvanceableTurnEnd, readOpenIntents, intentHintOf, decideAdvance, isBoundedDiscoveryTask, MODE_IDS, MODE_VOICE, Config } from "../lib/index.js";
+import { isAdvanceTool, isProgressTool, isAdvanceableTurnEnd, readOpenIntents, intentHintOf, decideAdvance, isBoundedDiscoveryTask, isNoopUserMessage, MODE_IDS, MODE_VOICE, Config } from "../lib/index.js";
 
 let pass = 0, fail = 0;
 const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); } else { fail++; console.log(`FAIL ${label}`); } };
@@ -17,6 +17,12 @@ ok("完整评估任务不被误判为有界发现", isBoundedDiscoveryTask("请�
 ok("完整评估后立即收口仍按全量处理", isBoundedDiscoveryTask("请完成全量渗透测试、覆盖矩阵和最终报告，完成后立即收口") === false);
 ok("全量发现并验证所有漏洞不被发现词误判", isBoundedDiscoveryTask("请全面发现并验证所有漏洞后交付完整报告") === false);
 ok("明确至少一个时，即使提全面也按有界交付", isBoundedDiscoveryTask("先全面侦察，但至少给出一个可复现漏洞证据后收口") === true);
+ok("no-op：只回复 pong 不触发自动推进", isNoopUserMessage({ content: [{ type: "text", text: "只回复 pong" }] }) === true);
+ok("no-op：test/hi/收到 不触发", isNoopUserMessage({ content: "test" }) && isNoopUserMessage({ content: [{ type: "text", text: "hi" }] }) && isNoopUserMessage({ content: "收到" }));
+ok("no-op：禁用工具指令不触发", isNoopUserMessage({ content: "不要调用任何工具，只回复 ok" }));
+ok("非 no-op：继续任务仍能自动推进", isNoopUserMessage({ content: "继续" }) === false);
+ok("非 no-op：真实目标描述不触发", isNoopUserMessage({ content: "继续测试 example.com 的 Nday 桶" }) === false);
+ok("空消息不按 no-op 处理（交给其它守卫）", isNoopUserMessage({ content: "" }) === false);
 
 /** 推一格时钟：注入是**延后一拍**执行的（必须在 Session.append 发布临界区之外，
  *  见 lib/index.js 的说明），不推的话同步断言看到的是「还没投递」的旧状态。 */
@@ -44,7 +50,7 @@ ok("非执行体不命中", !isAdvanceTool("bash") && !isAdvanceTool("fetch") &&
 	d = decideAdvance({ ...BASE, toolName: "subagent", lastNudgeAt: 90000, now: 130000 });
 	ok("冷却窗外推进", d.nudge === true);
 	d = decideAdvance(BASE);
-	ok("常规推进", d.nudge === true && d.text.includes("[auto-advance]") && d.text.includes("3/3 未收口") && d.text.includes("i1,i2,i3"));
+	ok("常规推进", d.nudge === true && d.text.includes("[auto-advance]") && d.text.includes("3/3 条未结束") && d.text.includes("i1,i2,i3"));
 	ok("文案含收口指路与轮次", d.text.includes("intent_done") && d.text.includes("第 1/5 轮") && d.text.includes("人工输入随时接管"));
 	ok("文案含不硬造方向", d.text.includes("不硬造方向"));
 	d = decideAdvance({ ...BASE, hint: ["i1", "i2"] });
@@ -60,7 +66,7 @@ ok("非执行体不命中", !isAdvanceTool("bash") && !isAdvanceTool("fetch") &&
 	const au = decideAdvance({ ...BASE, voice: MODE_VOICE["code-audit"] });
 	ok("代审推进语态：产出=finding 复现链/下一步=sink 面", au.text.includes("双链命中对账") && au.text.includes("下一模块或 sink 面"));
 	const plain = decideAdvance(BASE);
-	ok("无 voice 退通用文案（向后兼容）", plain.text.includes("intent_done 附产出指位 / intent_blocked 附原因") && plain.text.includes("派下一步或收工"));
+	ok("无 voice 退通用文案（向后兼容）", plain.text.includes("intent_done 记录本次执行结果") && plain.text.includes("intent_blocked 写明受阻原因") && plain.text.includes("派下一步"));
 }
 
 // 2c. P1-1 轮次边界触发（纯函数面）
@@ -98,7 +104,15 @@ ok("非执行体不命中", !isAdvanceTool("bash") && !isAdvanceTool("fetch") &&
 	fs.rmSync(tmp, { recursive: true, force: true });
 }
 
-// 4. 装配接线：fake ctx 全链路（事件→followup）+ 三护栏 + 真人重置
+// 默认不接入事件，避免自动伪装 user 身份向会话插入消息。
+{
+	const mod = await import("../lib/index.js");
+	const handlers = {};
+	await mod.apply({ on: (event, fn) => { handlers[event] = fn; } }, {});
+	ok("默认关闭时不会订阅任何能插入消息的事件", Object.keys(handlers).length === 0);
+}
+
+// 4. 显式启用后的装配接线：fake ctx 全链路（事件→followup）+ 三护栏 + 真人重置
 {
 	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aa-wire-"));
 	fs.writeFileSync(path.join(tmp, "operation-state.json"), JSON.stringify({ criteria: [{ id: "g1", status: "met" }], intents: [{ id: "i1", summary: "追注入", status: "open" }] }));
@@ -116,7 +130,7 @@ ok("非执行体不命中", !isAdvanceTool("bash") && !isAdvanceTool("fetch") &&
 		agentPresets: { composedPreset: () => "pentest" }
 	};
 	let threw = null;
-	try { await mod.apply(fakeCtx, { cooldownMs: 200 }); } catch (e) { threw = e; }
+	try { await mod.apply(fakeCtx, { enable: true, cooldownMs: 200 }); } catch (e) { threw = e; }
 	ok("apply 不抛", threw === null);
 	ok("session/event 已接线", typeof handlers["session/event"] === "function");
 	const call = async (name, callId, args = "{}") => { handlers["session/event"]({ id: "sx" }, { type: "tool/call", data: { name, callId, arguments: args } }); await tick(); };
@@ -157,7 +171,8 @@ ok("非执行体不命中", !isAdvanceTool("bash") && !isAdvanceTool("fetch") &&
 	// 自注入不重置（伪造我的 id）
 	handlers["agent/inbox/inserted"]({ agent: { id: "a", session: { id: "sx" } }, message: { id: followups[1].id, source: { kind: "user" }, content: "自动" } });
 	await tick();
-	ok("config 默认值", Config({}).enable === true && Config({}).maxAutoTurns === 5 && Config({}).cooldownMs === 30000);
+	ok("config 默认关闭插入式推进", Config({}).enable === false && Config({}).kickoff === false && Config({}).advanceOnTurnEnd === false);
+	ok("config 默认值", Config({}).maxAutoTurns === 5 && Config({}).cooldownMs === 30000);
 	fs.rmSync(tmp, { recursive: true, force: true });
 }
 
@@ -173,10 +188,10 @@ ok("非执行体不命中", !isAdvanceTool("bash") && !isAdvanceTool("fetch") &&
 		get: () => ({ get: (id) => (id === "sk" ? fakeAgent : undefined) }),
 		agentPresets: { composedPreset: () => "pentest" }
 	};
-	await mod.apply(fakeCtx, {});
+	await mod.apply(fakeCtx, { enable: true, kickoff: true });
 	const human = async (id) => { handlers["agent/inbox/inserted"]({ agent: fakeAgent, message: { id, source: { kind: "user" }, content: "测一下这个站" } }); await tick(); };
 	await human("h1");
-	ok("无台账时注入开工提醒", followups.length === 1 && followups[0].content[0].text.includes("开工三登记") && followups[0].content[0].text.includes("operation_constraints"));
+	ok("无台账时注入开工提醒", followups.length === 1 && followups[0].content[0].text.includes("开工前登记三件事") && followups[0].content[0].text.includes("operation_constraints"));
 	await human("h2");
 	ok("每会话只提醒一次", followups.length === 1);
 	// 明确“只回复/不要调用工具”不能再追加一轮，避免直接违背用户指令。
@@ -187,7 +202,7 @@ ok("非执行体不命中", !isAdvanceTool("bash") && !isAdvanceTool("fetch") &&
 		get: () => ({ get: (id) => (id === "sk-no-tool" ? noToolAgent : undefined) }),
 		agentPresets: { composedPreset: () => "pentest" }
 	};
-	await mod.apply(noToolCtx, {});
+	await mod.apply(noToolCtx, { enable: true, kickoff: true });
 	handlers["agent/inbox/inserted"]({ agent: noToolAgent, message: { id: "h-no-tool", source: { kind: "user" }, content: "只回复 OK。不要调用任何工具。" } });
 	await tick();
 	ok("用户要求单句回复且禁工具时不注入 kickoff", noToolFollowups.length === 0);
@@ -198,7 +213,7 @@ ok("非执行体不命中", !isAdvanceTool("bash") && !isAdvanceTool("fetch") &&
 		get: () => ({ get: (id) => (id === "sk-en" ? englishAgent : undefined) }),
 		agentPresets: { composedPreset: () => "pentest" }
 	};
-	await mod.apply(englishCtx, {});
+	await mod.apply(englishCtx, { enable: true, kickoff: true });
 	handlers["agent/inbox/inserted"]({ agent: englishAgent, message: { id: "h-en", source: { kind: "user" }, content: "Only reply OK. Do not call any tools." } });
 	await tick();
 	ok("英文单句回复/禁工具同样跳过", englishFollowups.length === 0);
@@ -207,7 +222,7 @@ ok("非执行体不命中", !isAdvanceTool("bash") && !isAdvanceTool("fetch") &&
 	const fakeAgent2 = { ctx: {}, session: { id: "sk2", header: { cwd: tmp, agentPreset: "pentest" } }, followup: (m) => followups2.push(m) };
 	const fakeCtx2 = { on: (ev, fn) => { handlers[ev] = fn; }, get: () => ({ get: (id) => (id === "sk2" ? fakeAgent2 : undefined) }), agentPresets: { composedPreset: () => "pentest" } };
 	fs.writeFileSync(path.join(tmp, "operation-state.json"), JSON.stringify({ criteria: [{ id: "g1", status: "met" }] }));
-	await mod.apply(fakeCtx2, {});
+	await mod.apply(fakeCtx2, { enable: true, kickoff: true });
 	handlers["agent/inbox/inserted"]({ agent: fakeAgent2, message: { id: "h3", source: { kind: "user" }, content: "继续" } });
 	await tick();
 	ok("已有台账不提醒", followups2.length === 0);
@@ -217,7 +232,7 @@ ok("非执行体不命中", !isAdvanceTool("bash") && !isAdvanceTool("fetch") &&
 	const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), "aa-kick2-"));
 	const fakeAgent3 = { ctx: {}, session: { id: "sk3", header: { cwd: tmp2 } }, followup: (m) => followups3.push(m) };
 	fakeCtx3.get = () => ({ get: (id) => (id === "sk3" ? fakeAgent3 : undefined) });
-	await mod.apply(fakeCtx3, { kickoff: false });
+	await mod.apply(fakeCtx3, { enable: true, kickoff: false });
 	handlers["agent/inbox/inserted"]({ agent: fakeAgent3, message: { id: "h4", source: { kind: "user" }, content: "x" } });
 	await tick();
 	ok("kickoff=false 关闭", followups3.length === 0);
@@ -234,13 +249,13 @@ ok("非执行体不命中", !isAdvanceTool("bash") && !isAdvanceTool("fetch") &&
 		const followups = [];
 		const fakeAgent = { ctx: {}, session: { id: "sk-" + mode, header: { cwd: tmp, agentPreset: mode } }, followup: (m) => followups.push(m) };
 		const fakeCtx = { on: (ev, fn) => { handlers[ev] = fn; }, get: () => ({ get: (id) => (id === "sk-" + mode ? fakeAgent : undefined) }), agentPresets: { composedPreset: () => mode } };
-		await mod.apply(fakeCtx, {});
+		await mod.apply(fakeCtx, { enable: true, kickoff: true });
 		// 注意：内容不能太短——插件有"试水消息不打搅"规则（<6 字跳过 kickoff），
 		// 早期用例发 "x" 会被判为试水而静默跳过，导致断言假失败。
 		handlers["agent/inbox/inserted"]({ agent: fakeAgent, message: { id: "h-" + mode, source: { kind: "user" }, content: "对这个目标做一次完整的渗透测试" } });
 		await tick();
 		if (mode === "pentest") {
-			ok("kickoff 含 pentest 拆分理论", followups.length === 1 && followups[0].content[0].text.includes("作战流程×资产×漏洞类矩阵") && followups[0].content[0].text.includes("准则按"));
+			ok("kickoff 含 pentest 拆分方式", followups.length === 1 && followups[0].content[0].text.includes("作战流程×资产×漏洞类矩阵") && followups[0].content[0].text.includes("完成标准结构"));
 			ok("kickoff 含分母语义", followups[0].content[0].text.includes("入口资产面"));
 		}
 		if (mode === "code-audit") ok("kickoff 含 audit 理论", followups.length === 1 && followups[0].content[0].text.includes("模块×sink"));
@@ -261,7 +276,7 @@ ok("非执行体不命中", !isAdvanceTool("bash") && !isAdvanceTool("fetch") &&
 		get: () => ({ get: (id) => (id === "st" ? fakeAgent : undefined) }),
 		agentPresets: { composedPreset: () => "pentest" }
 	};
-	await mod.apply(fakeCtx, { cooldownMs: 0 }); // 本块专测触发面，冷却归零
+	await mod.apply(fakeCtx, { enable: true, cooldownMs: 0, advanceOnTurnEnd: true }); // 本块显式启用边界触发，冷却归零
 	const ev = async (type, data) => { handlers["session/event"]({ id: "st" }, { type, data }); await tick(); };
 	await ev("turn/start", { turn: 1 });
 	await ev("turn/end", { turn: 1, reason: { kind: "completed" } });
@@ -305,19 +320,19 @@ ok("非执行体不命中", !isAdvanceTool("bash") && !isAdvanceTool("fetch") &&
 	const f2 = [];
 	const agent2 = { ctx: {}, session: { id: "st2", header: { cwd: tmp, agentPreset: "pentest" } }, followup: (m) => f2.push(m) };
 	const ctx2 = { on: (ev2, fn) => { handlers[ev2] = fn; }, get: () => ({ get: (id) => (id === "st2" ? agent2 : undefined) }), agentPresets: { composedPreset: () => "pentest" } };
-	await mod.apply(ctx2, { cooldownMs: 0, advanceOnTurnEnd: false });
+	await mod.apply(ctx2, { enable: true, cooldownMs: 0, advanceOnTurnEnd: false });
 	handlers["session/event"]({ id: "st2" }, { type: "turn/start", data: {} });
 	await tick();
 	handlers["session/event"]({ id: "st2" }, { type: "turn/end", data: { reason: { kind: "completed" } } });
 	await tick();
 	ok("advanceOnTurnEnd=false 关闭轮次边界触发", f2.length === 0);
-	ok("Config 默认开启轮次边界触发", Config({}).advanceOnTurnEnd === true);
+	ok("Config 默认关闭轮次边界触发", Config({}).advanceOnTurnEnd === false);
 	// 无台账：轮次边界零干扰
 	const f3 = [];
 	const tmp3 = fs.mkdtempSync(path.join(os.tmpdir(), "aa-te3-"));
 	const agent3 = { ctx: {}, session: { id: "st3", header: { cwd: tmp3, agentPreset: "pentest" } }, followup: (m) => f3.push(m) };
 	const ctx3 = { on: (ev3, fn) => { handlers[ev3] = fn; }, get: () => ({ get: (id) => (id === "st3" ? agent3 : undefined) }), agentPresets: { composedPreset: () => "pentest" } };
-	await mod.apply(ctx3, { cooldownMs: 0, kickoff: false });
+	await mod.apply(ctx3, { enable: true, cooldownMs: 0, kickoff: false });
 	handlers["session/event"]({ id: "st3" }, { type: "turn/start", data: {} });
 	await tick();
 	handlers["session/event"]({ id: "st3" }, { type: "turn/end", data: { reason: { kind: "completed" } } });
@@ -325,6 +340,32 @@ ok("非执行体不命中", !isAdvanceTool("bash") && !isAdvanceTool("fetch") &&
 	ok("无台账会话轮次边界零干扰", f3.length === 0);
 	fs.rmSync(tmp, { recursive: true, force: true });
 	fs.rmSync(tmp3, { recursive: true, force: true });
+}
+
+// 4c-2. no-op 用户消息不得重新点燃旧台账（CFT 实测：一句 pong 曾触发 398K token 自动推进）
+{
+	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aa-noop-"));
+	fs.writeFileSync(path.join(tmp, "operation-state.json"), JSON.stringify({ criteria: [], intents: [{ id: "i1", summary: "旧桶", status: "open" }] }));
+	const mod = await import("../lib/index.js");
+	const handlers = {};
+	const followups = [];
+	const fakeAgent = { ctx: {}, session: { id: "sn", header: { cwd: tmp, agentPreset: "pentest" } }, followup: (m) => followups.push(m) };
+	const fakeCtx = {
+		on: (ev, fn) => { handlers[ev] = fn; },
+		get: () => ({ get: (id) => (id === "sn" ? fakeAgent : undefined) }),
+		agentPresets: { composedPreset: () => "pentest" }
+	};
+	await mod.apply(fakeCtx, { enable: true, cooldownMs: 0, kickoff: false, advanceOnTurnEnd: true });
+	const ev = async (type, data) => { handlers["session/event"]({ id: "sn" }, { type, data }); await tick(); };
+	await ev("user/message", { id: "u1", source: { kind: "user" }, content: [{ type: "text", text: "只回复 pong" }] });
+	await ev("turn/start", { turn: 1 });
+	await ev("turn/end", { turn: 1, reason: { kind: "completed" } });
+	ok("no-op 消息不触发旧台账自动推进", followups.length === 0);
+	await ev("user/message", { id: "u2", source: { kind: "user" }, content: [{ type: "text", text: "继续" }] });
+	await ev("turn/start", { turn: 2 });
+	await ev("turn/end", { turn: 2, reason: { kind: "completed" } });
+	ok("随后的“继续”恢复自动推进", followups.length === 1 && followups[0].content[0].text.includes("i1"));
+	fs.rmSync(tmp, { recursive: true, force: true });
 }
 
 // 4d. agent/disposed 载荷形状：会话销毁真的清掉状态（早先取错载荷 → Map 只增不减）
@@ -336,7 +377,7 @@ ok("非执行体不命中", !isAdvanceTool("bash") && !isAdvanceTool("fetch") &&
 	const followups = [];
 	const agent = { ctx: {}, session: { id: "sd", header: { cwd: tmp, agentPreset: "pentest" } }, followup: (m) => followups.push(m) };
 	const ctx = { on: (ev, fn) => { handlers[ev] = fn; }, get: () => ({ get: (id) => (id === "sd" ? agent : undefined) }), agentPresets: { composedPreset: () => "pentest" } };
-	await mod.apply(ctx, { cooldownMs: 0, kickoff: false });
+	await mod.apply(ctx, { enable: true, cooldownMs: 0, kickoff: false, advanceOnTurnEnd: true });
 	const ev = async (type, data) => { handlers["session/event"]({ id: "sd" }, { type, data }); await tick(); };
 	for (let t = 1; t <= 5; t++) {
 		await ev("turn/start", { turn: t });

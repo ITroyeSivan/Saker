@@ -1,5 +1,6 @@
 /** Shared section shape, schema, and pure helpers. */
 import z from '@deepseek-ai/schemastery';
+import type { Volatile } from '@deepseek-ai/cordis';
 import type { Config as McpClientConfig } from '@deepseek-ai/dsh-mcp-client';
 /** Stable row id grammar. */
 export declare const ID_PATTERN: RegExp;
@@ -52,8 +53,12 @@ export interface ServerEntry {
 export interface StudioSection {
     readonly servers: ServerEntry[];
 }
+/** dsh 0.1.7 Config view: the server list is a live, non-remounting reference. */
+export interface StudioConfig {
+    readonly servers: Volatile<readonly ServerEntry[]> | readonly ServerEntry[];
+}
 export declare const ServerEntrySchema: z<ServerEntry>;
-export declare const Config: z<StudioSection>;
+export declare const Config: z<StudioConfig>;
 /** Split one argument line into argv tokens; single/double quotes and backslash escapes are honored. */
 export declare function splitArgs(line: string): string[];
 /** Project one server row onto the mcp-client config shape. */

@@ -1,5 +1,6 @@
 /** Shared section shape, schema, and pure helpers. */
 import z from '@deepseek-ai/schemastery'
+import type { Volatile } from '@deepseek-ai/cordis'
 import type { Config as McpClientConfig } from '@deepseek-ai/dsh-mcp-client'
 
 /** Stable row id grammar. */
@@ -8,6 +9,11 @@ export const ID_PATTERN = /^[A-Za-z0-9_-]{1,32}$/
 export const DEFAULT_TOOL_CALL_TIMEOUT_MS = 60_000
 /** `auto` switches to proxy at or above this many tools per server. */
 export const DEFAULT_PROXY_THRESHOLD = 10
+
+function volatile<T>(schema: T): T {
+  const candidate = schema as T & { volatile?: () => T }
+  return typeof candidate.volatile === 'function' ? candidate.volatile() : schema
+}
 
 export type Transport = 'stdio' | 'streamable-http'
 /**
@@ -57,6 +63,11 @@ export interface StudioSection {
   readonly servers: ServerEntry[]
 }
 
+/** dsh 0.1.7 Config view: the server list is a live, non-remounting reference. */
+export interface StudioConfig {
+  readonly servers: Volatile<readonly ServerEntry[]> | readonly ServerEntry[]
+}
+
 export const ServerEntrySchema = z.object({
   id: z.string().required().pattern(ID_PATTERN),
   enabled: z.boolean().default(true),
@@ -76,8 +87,8 @@ export const ServerEntrySchema = z.object({
 }) as unknown as z<ServerEntry>
 
 export const Config = z.object({
-  servers: z.array(ServerEntrySchema).default([]),
-}) as unknown as z<StudioSection>
+  servers: volatile(z.array(ServerEntrySchema).default([])),
+}) as unknown as z<StudioConfig>
 
 /** Split one argument line into argv tokens; single/double quotes and backslash escapes are honored. */
 export function splitArgs(line: string): string[] {

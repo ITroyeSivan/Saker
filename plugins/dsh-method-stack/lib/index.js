@@ -41,6 +41,20 @@ const ID_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/
 const MAX_TEXT = 6000 // 单个方法正文截断保护
 const MANIFEST_NAME_RE = /^name:\s*([A-Za-z0-9][A-Za-z0-9._-]{0,63})\s*$/m
 
+// fs.cpSync crashes Node 22 on Windows paths containing non-ASCII characters.
+// Method trees only contain ordinary files and directories, so copy them
+// explicitly and reject links/special entries instead of following them.
+function copyMethodTree(src, dst) {
+  fs.mkdirSync(dst, { recursive: true })
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const from = path.join(src, entry.name)
+    const to = path.join(dst, entry.name)
+    if (entry.isDirectory()) copyMethodTree(from, to)
+    else if (entry.isFile()) fs.copyFileSync(from, to)
+    else throw new Error(`不支持复制的方法目录项：${entry.name}`)
+  }
+}
+
 function builtinGroups() {
   const out = []
   let entries
@@ -348,7 +362,7 @@ export function apply(ctx, config = {}) {
         if (!src) return failure('官方方法不存在')
         const dst = path.join(USER_METHODS_ROOT, group, id)
         fs.mkdirSync(dst, { recursive: true })
-        fs.cpSync(src, dst, { recursive: true, force: true })
+        copyMethodTree(src, dst)
         invalidateCatalog()
         audit('user', 'clone', `${group}/${id}`)
         return ok({ cloned: `${group}/${id}` })
@@ -412,7 +426,7 @@ export function apply(ctx, config = {}) {
         const hadOwn = fs.existsSync(userPrompt)
         if (!hadOwn) {
           fs.mkdirSync(dst, { recursive: true })
-          fs.cpSync(src, dst, { recursive: true, force: true })
+          copyMethodTree(src, dst)
         }
         // 覆盖用户已有正文前先备份（首次克隆官方时不产生备份，因为没有用户旧版可丢）
         const backup = hadOwn ? backupFile(userPrompt, path.join(USER_METHODS_ROOT, '.backups')) : ''

@@ -103,7 +103,7 @@ export function validateMethod(name, rawGraph, taxonomy) {
 		if (isolated.length) warnings.push({ kind: "isolated", ids: isolated.map((x) => x.id), msg: `${isolated.length} 个模块未与任何步骤衔接（孤立）：${isolated.map((x) => labelOf[x.id]).join("、")}` });
 		if (edges.length > 0) {
 			if (nodes.every((node) => hasIn.has(node.id))) warnings.push({ kind: "nostart", ids: [], msg: "全部步骤都有入边——缺少起点（必含循环衔接）" });
-			if (nodes.every((node) => hasOut.has(node.id))) warnings.push({ kind: "noend", ids: [], msg: "全部步骤都有出边——缺少收口终点" });
+			if (nodes.every((node) => hasOut.has(node.id))) warnings.push({ kind: "noend", ids: [], msg: "全部步骤都有出边——缺少结束节点" });
 		}
 		const layered = layerMethod(graph);
 		if (layered.cycle.length) warnings.push({ kind: "cycle", ids: layered.cycle, msg: `存在循环衔接：${layered.cycle.map((id) => labelOf[id]).join("、")}——运行时将按「循环段」顺序执行一轮` });
@@ -159,7 +159,7 @@ function stepLine(taxonomy, node) {
 	if (node.nt === "mcp") return `▸ MCP「${node.tool}」${node.spec ? `｜用途：${node.spec}` : ""}${note}（会话未加载时先询问用户是否启用；拒绝则降级同类工具/脚本）`;
 	if (node.nt === "custom") return `▸ 自定义工具「${node.tool}」${node.spec ? `｜要求：${node.spec}` : ""}${note}（不存在时先询问用户是否安装：说明安装方式与影响，批准后才安装；拒绝则降级：同类已有工具优先，其次写脚本等效实现并注明降级）`;
 	const loc = locate(taxonomy, node.ref);
-	if (!loc) return `▸ 「${node.label || node.ref}」（该步骤在当前图谱体系中已不存在，按标签意图执行）${note}`;
+	if (!loc) return `▸ 「${node.label || node.ref}」（该步骤在当前图谱体系中已不存在，按标签含义执行）${note}`;
 	if (loc.item) {
 		let hint = "";
 		if (loc.item.ref) {
@@ -169,7 +169,7 @@ function stepLine(taxonomy, node) {
 				: ` —— 知识手册：${p}（开测前先读对应验证姿势）`;
 		} else if (loc.item.pb) hint = ` —— 打法出处：本模式 playbook ${loc.item.pb}`;
 		else if (loc.item._cap?.template) hint = ` —— 用户自定义打法模板：\n    ${loc.item._cap.template.split("\n").join("\n    ")}`;
-		else if (loc.item._cap) hint = " —— 用户自定义步骤（未附模板，按标签意图与会话上下文执行）";
+		else if (loc.item._cap) hint = " —— 用户自定义步骤（未附模板，按标签含义与会话上下文执行）";
 		return `▸ 子项「${loc.item.label}」｜key: ${node.ref}${loc.item._cap ? "（用户自定义）" : ""}${hint}${note}`;
 	}
 	return `▸ 主类「${loc.category.label}」整组开测｜key: ${node.ref}（${loc.category._cap ? "用户自定义主类·" : ""}子项逐格终态三选一）${note}`;

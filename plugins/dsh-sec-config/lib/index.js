@@ -9,6 +9,7 @@
 // registry (mcp__burp__* / mcp__yakit__*) — saves the operator a second trip
 // to the "MCP 工作台" for the same source-of-truth data.
 import z from '@deepseek-ai/schemastery'
+import { onVolatileUpdate, plainConfig, readSettingsSection } from 'dsh-saker/settings-compat'
 import { existsSync, readdirSync, readFileSync, unlinkSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
@@ -16,6 +17,8 @@ import { startModelProxy } from './model-proxy.js'
 import { homedir } from 'node:os'
 import { basename, dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+const volatile = (schema) => typeof schema?.volatile === 'function' ? schema.volatile() : schema
 
 export const name = 'dsh-sec-config'
 export const inject = ['connection', 'settings', 'shellEnv', 'systemPrompt', 'webServer']
@@ -163,14 +166,14 @@ function isToolKey(key) {
 }
 
 /** Fields the client may write through settings/mutate. */
-const WRITABLE_FIELDS = new Set(['tools', 'services', 'dnslog', 'apiKeys', 'scanRoots', 'hiddenTools', 'roots', 'categories', 'entries', 'model'])
+const WRITABLE_FIELDS = new Set(['tools', 'services', 'dnslog', 'memshell', 'apiKeys', 'scanRoots', 'hiddenTools', 'roots', 'categories', 'entries', 'model'])
 
 /** 模型接入落在 llm-pi-ai 命名空间下的 providers.<id>.baseURL。 */
 const LLM_PI_AI_NAMESPACE = 'llm-pi-ai'
 const PROVIDER_ID_RE = /^[a-z0-9][a-z0-9-]*$/
 
 /** Secret-bearing fields: redacted on read; an empty/`***` write is ignored. */
-const SECRET_FIELDS = new Set(['dnslog.token', 'apiKeys.deepseekKey'])
+const SECRET_FIELDS = new Set(['dnslog.token', 'memshell.token', 'apiKeys.deepseekKey'])
 
 /**
  * Default search paths for the Burp MCP stdio proxy JAR. The Burp
@@ -248,7 +251,7 @@ const SEC_MANAGED_IDS = {
 const toolShape = {}
 for (const key of TOOL_KEYS) toolShape[key] = z.string().default('')
 
-const Config = z.object({
+export const Config = volatile(z.object({
   tools: z.object(toolShape),
   services: z.object({
     burpUrl: z.string().default(''),
@@ -258,6 +261,18 @@ const Config = z.object({
   dnslog: z.object({
     url: z.string().default(''),
     token: z.string().default(''),
+    /** 你在该 DNSLog 平台拥有的接收域名根（如 abc123.ceye.io）。
+     *  带外确认时工具会在这之下生成随机子域给模型注入，再用 token 回查记录。
+     *  只有 url+token 时无法知道该用哪个域名，工具会明确报"未配置接收域名"。 */
+    domain: z.string().default(''),
+  }),
+  memshell: z.object({
+    enabled: z.boolean().default(false),
+    /** 只接受自建 memshell-party backend；公共 party.mem.mk 永远禁用。 */
+    backendUrl: z.string().default(''),
+    token: z.string().default(''),
+    cliPath: z.string().default(''),
+    mcpServer: z.string().default('memshell-party'),
   }),
   apiKeys: z.object({
     deepseekKey: z.string().default(''),
@@ -333,7 +348,7 @@ const Config = z.object({
    *  （走宿主 `agent.ctx.tools.restrict({deny})`）。
    *  另注：当前版本 UI 未提供该字段的勾选入口，默认空数组 —— 属预留能力。 */
   hiddenTools: z.array(z.string()).default([]),
-})
+}))
 
 /** 兜底/缺省分类。 */
 const CATEGORY_FALLBACK = '其他'
@@ -1036,7 +1051,7 @@ export function modelBaseUrl(model) {
 /** 读 llm-pi-ai 里该 provider 当前生效的 baseURL；命名空间未注册时返回 null。 */
 function readProviderBaseUrl(settings, provider) {
   try {
-    const ns = settings.get(LLM_PI_AI_NAMESPACE)
+  const ns = readSettingsSection(settings, LLM_PI_AI_NAMESPACE)
     const entry = ns && ns.providers && ns.providers[provider]
     return entry && typeof entry.baseURL === 'string' ? entry.baseURL : null
   } catch {
@@ -1263,7 +1278,7 @@ async function syncMcpServers(settings, services) {
   }
   let current
   try {
-    current = settings.get(MCP_STUDIO_NAMESPACE)
+    current = readSettingsSection(settings, MCP_STUDIO_NAMESPACE)
   } catch (err) {
     throw new Error(`mcp-studio namespace not registered yet: ${err && err.message ? err.message : String(err)}`)
   }
@@ -1375,7 +1390,18 @@ export function renderManifest(section, listMountedMcpTools) {
   if (services.burpUrl) serviceParts.push(`burp=${services.burpUrl}`)
   if (services.yakitUrl) serviceParts.push(`yakit=${services.yakitUrl}`)
   if (serviceParts.length > 0) lines.push(`services: ${serviceParts.join(' ')}`)
-  if (section && section.dnslog && section.dnslog.url) lines.push('dnslog: url 已配（token 不回显）')
+  // 带外确认能不能用，取决于「接收域名」而不只是 url/token：没有域名就不知道让模型注入哪个子域。
+  // 所以这里分开报，别让运维以为配了 url 就能用。
+  if (section && section.dnslog && section.dnslog.url) {
+    lines.push(section.dnslog.domain
+      ? `dnslog: url 已配，接收域名 ${section.dnslog.domain}（token 不回显）`
+      : 'dnslog: url 已配但缺接收域名——带外确认不可用')
+  }
+  if (section && section.memshell && section.memshell.backendUrl) {
+    lines.push(section.memshell.enabled
+      ? 'memshell: 已启用自建 backend（token 不回显）'
+      : 'memshell: 已填 backend 但未启用')
+  }
   let mcpNames = []
   try {
     const view = listMountedMcpTools ? listMountedMcpTools() : []
@@ -1423,17 +1449,21 @@ export async function egressEndpoint(endpoint, payload) {
 }
 
 export function apply(ctx, config = {}) {
-  let current = () => config
+  const base = { tools: {}, services: {}, dnslog: {}, apiKeys: {}, scanRoots: [], ...plainConfig(config, {}) }
+  let current = () => ({ ...base, ...plainConfig(config, {}) })
   let scope = null
-  const base = { tools: {}, services: {}, dnslog: {}, apiKeys: {}, scanRoots: [], ...(config ?? {}) }
 
   recoverStaleSettingsLock(undefined, ctx.logger)
 
-  try {
-    scope = ctx.settings.register(NAMESPACE, Config, { base })
-    current = () => scope.get()
-  } catch (error) {
-    ctx.logger?.warn?.('dsh-sec-config: settings provider unavailable, using patch baseline: %s', String(error))
+  // dsh <= 0.1.6 registered a mutable namespace. dsh 0.1.7 passes a volatile
+  // Config reference and persists edits through the profile patch instead.
+  if (typeof config?.get !== 'function') {
+    try {
+      scope = ctx.settings.register(NAMESPACE, Config, { base })
+      current = () => scope.get()
+    } catch (error) {
+      ctx.logger?.warn?.('dsh-sec-config: legacy settings provider unavailable, using patch baseline: %s', String(error))
+    }
   }
 
   ctx.inject(['connection', 'settings', 'shellEnv', 'systemPrompt'], (web) => {
@@ -1800,21 +1830,32 @@ export function apply(ctx, config = {}) {
       ctx.logger?.warn?.('dsh-sec-config: systemPrompt unavailable, runtime manifest disabled: %s', String(error))
     }
 
-    // Initial mount pass + ongoing reconciliation. scope.watch delivers every
-    // commit, so UI saves and direct yaml edits both flow into
-    // mcp-studio.servers without a second round-trip.
+    // Initial mount pass + ongoing reconciliation. Legacy settings scopes
+    // notify through scope.watch; 0.1.7 commits volatile Config values and
+    // emits loader/volatile-update on the owning fiber.
     try {
+      const applyLive = (next) => {
+        const services = (next && next.services) || {}
+        scheduleSync(settings, services, ctx.logger)
+        void modelProxy.sync((next && next.model) || {})
+      }
       if (scope && typeof scope.watch === 'function') {
-        scope.watch((next) => {
-          const services = (next && next.services) || {}
-          scheduleSync(settings, services, ctx.logger)
-          // 代理参数变了就重启内置代理；参数没变时 sync 是空操作
-          void modelProxy.sync((next && next.model) || {})
-        })
-        scheduleSync(settings, (current() && current().services) || {}, ctx.logger)
-        void modelProxy.sync((current() && current().model) || {})
+        scope.watch(applyLive)
       } else {
-        console.error('[dsh-sec-config] NO settings scope — MCP bridge disabled (scope=%s)', scope === null ? 'null' : typeof scope)
+        onVolatileUpdate(ctx, () => applyLive(current()))
+      }
+      // 0.1.7 applies a plugin while the Loader still owns an HMR transaction.
+      // Writing another profile entry from inside that transaction fails with
+      // "HMR transactions cannot be nested". Run the initial mirror only after
+      // the Loader has settled; later UI saves and volatile events are already
+      // outside the activation transaction and stay immediate.
+      const runInitialSync = () => applyLive(current())
+      if (typeof ctx.loader?.await === 'function') {
+        void ctx.loader.await().then(runInitialSync).catch((error) => {
+          ctx.logger?.warn?.('dsh-sec-config: initial MCP sync deferred after loader error: %s', String(error))
+        })
+      } else {
+        setTimeout(runInitialSync, 1000)
       }
     } catch (error) {
       console.error('[dsh-sec-config] bridge setup error:', error && error.message ? error.message : String(error))

@@ -174,6 +174,33 @@ if (existsSync(hostCompatRunner)) {
   console.log(`${r.status === 0 ? 'PASS' : 'FAIL'} ${'host-preset-refs'.padEnd(26)} ok=${nOk} fail=${nFail} skip=${nSkip}`)
 }
 
+const bundledSkillRunner = join(root, 'scripts', 'test-bundled-skill-registry.mjs')
+if (existsSync(bundledSkillRunner)) {
+  const r = spawnSync(NODE, [bundledSkillRunner], { cwd: root, encoding: 'utf8' })
+  const out = `${r.stdout || ''}${r.stderr || ''}`
+  const nOk = out.split('\n').filter(l => /^\s*ok\s/.test(l)).length
+  ok += nOk
+  suites.push({ name: 'bundled-skill-registry', nOk, nFail: 0, nSkip: 0, status: r.status })
+  if (r.status !== 0 || nOk < 1) failures.push({ name: 'bundled-skill-registry', nFail: 1, status: r.status })
+  console.log(`${r.status === 0 && nOk > 0 ? 'PASS' : 'FAIL'} ${'bundled-skill-registry'.padEnd(26)} ok=${nOk} fail=${r.status === 0 && nOk > 0 ? 0 : 1} skip=0`)
+}
+
+const presetVisibilityRunner = join(root, 'scripts', 'test-preset-visibility.mjs')
+if (existsSync(presetVisibilityRunner)) {
+  const r = spawnSync(NODE, [presetVisibilityRunner], { cwd: root, encoding: 'utf8' })
+  const out = `${r.stdout || ''}${r.stderr || ''}`
+  const lines = out.split('\n')
+  const nOk = lines.filter((l) => /^\s*(?:ok|✔)\s/.test(l)).length
+  const nFail = lines.filter((l) => /^\s*(?:FAIL|✖)\s/.test(l)).length
+  ok += nOk; fail += nFail
+  suites.push({ name: 'preset-visibility', nOk, nFail, nSkip: 0, status: r.status })
+  if (r.status !== 0 || nFail > 0) {
+    failures.push({ name: 'preset-visibility', nFail, status: r.status })
+    for (const l of lines) if (/^\s*(?:FAIL|✖)\s/.test(l)) console.log(`   [preset-visibility] ${l.trim()}`)
+  }
+  console.log(`${r.status === 0 ? 'PASS' : 'FAIL'} ${'preset-visibility'.padEnd(26)} ok=${nOk} fail=${nFail} skip=0`)
+}
+
 const modelReasoningRunner = join(root, 'scripts', 'test-model-reasoning.mjs')
 if (existsSync(modelReasoningRunner)) {
   const r = spawnSync(NODE, [modelReasoningRunner], { cwd: root, encoding: 'utf8' })
@@ -224,6 +251,93 @@ if (existsSync(reportSchemaRunner)) {
 }
 
 const hygieneRunner = join(root, 'scripts', 'test-repo-hygiene.mjs')
+// Nday 语料（信创优先）：结构与诚实性门禁。字段缺项或"未复现却标 verified"
+// 都不会让任何其它测试变红，必须单独钉住。
+const ndayCatalogRunner = join(root, 'scripts', 'test-nday-catalog.mjs')
+if (existsSync(ndayCatalogRunner)) {
+  const r = spawnSync(NODE, [ndayCatalogRunner], { cwd: root, encoding: 'utf8' })
+  const out = `${r.stdout || ''}${r.stderr || ''}`
+  const lines = out.split('\n')
+  const nOk = lines.filter((l) => /^\s*(?:ok|✔)\s/.test(l)).length
+  const nFail = lines.filter((l) => /^\s*(?:FAIL|✖)\s/.test(l)).length
+  ok += nOk; fail += nFail
+  suites.push({ name: 'nday-catalog', nOk, nFail, nSkip: 0, status: r.status })
+  if (r.status !== 0 || nFail > 0) {
+    failures.push({ name: 'nday-catalog', nFail, status: r.status })
+    for (const l of lines) if (/^\s*(?:FAIL|✖)\s/.test(l)) console.log(`   [nday-catalog] ${l.trim()}`)
+  }
+  console.log(`${r.status === 0 ? 'PASS' : 'FAIL'} ${'nday-catalog'.padEnd(26)} ok=${nOk} fail=${nFail} skip=0`)
+}
+
+// Nday 语料的**运行时**门禁：结构合法 ≠ 探针打得中。一条 expect 自相矛盾的探针
+// 会被同条目里其它活探针盖住，条目照样命中、结构门禁照样全绿。这里逐条探针断言。
+const ndayRuntimeRunner = join(root, 'scripts', 'test-nday-corpus-runtime.mjs')
+if (existsSync(ndayRuntimeRunner)) {
+  const r = spawnSync(NODE, ['--import', pathToFileURL(stub).href, ndayRuntimeRunner], { cwd: root, encoding: 'utf8' })
+  const out = `${r.stdout || ''}${r.stderr || ''}`
+  const lines = out.split('\n')
+  const nOk = lines.filter((l) => /^\s*(?:ok|✔)\s/.test(l)).length
+  const nFail = lines.filter((l) => /^\s*(?:FAIL|✖)\s/.test(l)).length
+  ok += nOk; fail += nFail
+  suites.push({ name: 'nday-corpus-runtime', nOk, nFail, nSkip: 0, status: r.status })
+  if (r.status !== 0 || nFail > 0) {
+    failures.push({ name: 'nday-corpus-runtime', nFail, status: r.status })
+    for (const l of lines) if (/^\s*(?:FAIL|✖)\s/.test(l)) console.log(`   [nday-corpus-runtime] ${l.trim()}`)
+  }
+  console.log(`${r.status === 0 ? 'PASS' : 'FAIL'} ${'nday-corpus-runtime'.padEnd(26)} ok=${nOk} fail=${nFail} skip=0`)
+}
+
+// 资产账本：跨来源归一、scope 过滤、原子落盘与 assets.md 托管区块。
+const assetInventoryRunner = join(root, 'scripts', 'test-asset-inventory.mjs')
+if (existsSync(assetInventoryRunner)) {
+  const r = spawnSync(NODE, [assetInventoryRunner], { cwd: root, encoding: 'utf8' })
+  const out = `${r.stdout || ''}${r.stderr || ''}`
+  const lines = out.split('\n')
+  const nOk = lines.filter((l) => /^\s*(?:ok|✔)\s/.test(l)).length
+  const nFail = lines.filter((l) => /^\s*(?:FAIL|✖)\s/.test(l)).length
+  ok += nOk; fail += nFail
+  suites.push({ name: 'asset-inventory', nOk, nFail, nSkip: 0, status: r.status })
+  if (r.status !== 0 || nFail > 0) {
+    failures.push({ name: 'asset-inventory', nFail, status: r.status })
+    for (const l of lines) if (/^\s*(?:FAIL|✖)\s/.test(l)) console.log(`   [asset-inventory] ${l.trim()}`)
+  }
+  console.log(`${r.status === 0 ? 'PASS' : 'FAIL'} ${'asset-inventory'.padEnd(26)} ok=${nOk} fail=${nFail} skip=0`)
+}
+
+// P0-4 跨插件链路：fake FOFA → 账本 → attack_plan → nday_match → handoff。
+const attackFlowRunner = join(root, 'scripts', 'test-attack-flow.mjs')
+if (existsSync(attackFlowRunner)) {
+  const r = spawnSync(NODE, ['--import', pathToFileURL(stub).href, attackFlowRunner], { cwd: root, encoding: 'utf8' })
+  const out = `${r.stdout || ''}${r.stderr || ''}`
+  const lines = out.split('\n')
+  const nOk = lines.filter((l) => /^\s*(?:ok|✔)\s/.test(l)).length
+  const nFail = lines.filter((l) => /^\s*(?:FAIL|✖)\s/.test(l)).length
+  ok += nOk; fail += nFail
+  suites.push({ name: 'attack-flow', nOk, nFail, nSkip: 0, status: r.status })
+  if (r.status !== 0 || nFail > 0) {
+    failures.push({ name: 'attack-flow', nFail, status: r.status })
+    for (const l of lines) if (/^\s*(?:FAIL|✖)\s/.test(l)) console.log(`   [attack-flow] ${l.trim()}`)
+  }
+  console.log(`${r.status === 0 ? 'PASS' : 'FAIL'} ${'attack-flow'.padEnd(26)} ok=${nOk} fail=${nFail} skip=0`)
+}
+
+// 0day 模式库：模式必须带可观察信号、假设、先行证伪与最小验证，而不是 payload 合集。
+const zerodayCatalogRunner = join(root, 'scripts', 'test-zeroday-catalog.mjs')
+if (existsSync(zerodayCatalogRunner)) {
+  const r = spawnSync(NODE, [zerodayCatalogRunner], { cwd: root, encoding: 'utf8' })
+  const out = `${r.stdout || ''}${r.stderr || ''}`
+  const lines = out.split('\n')
+  const nOk = lines.filter((l) => /^\s*(?:ok|✔)\s/.test(l)).length
+  const nFail = lines.filter((l) => /^\s*(?:FAIL|✖)\s/.test(l)).length
+  ok += nOk; fail += nFail
+  suites.push({ name: 'zeroday-catalog', nOk, nFail, nSkip: 0, status: r.status })
+  if (r.status !== 0 || nFail > 0) {
+    failures.push({ name: 'zeroday-catalog', nFail, status: r.status })
+    for (const l of lines) if (/^\s*(?:FAIL|✖)\s/.test(l)) console.log(`   [zeroday-catalog] ${l.trim()}`)
+  }
+  console.log(`${r.status === 0 ? 'PASS' : 'FAIL'} ${'zeroday-catalog'.padEnd(26)} ok=${nOk} fail=${nFail} skip=0`)
+}
+
 const memoryEffectRunner = join(root, 'scripts', 'test-memory-effect.mjs')
 const egressRunners = [
   ['egress-policy', join(root, 'scripts', 'test-egress-policy.mjs')],
@@ -277,6 +391,22 @@ if (existsSync(hygieneRunner)) {
 
 // “跑过”不等于“该跑的还在场”：套件文件被删或整块静默跳过时，
 // 仅看总退出码会放过。固定必需套件清单，并要求每套至少有断言。
+const modePromptRunner = join(root, 'scripts', 'test-pentest-mode-prompts.mjs')
+if (existsSync(modePromptRunner)) {
+  const r = spawnSync(NODE, [modePromptRunner], { cwd: root, encoding: 'utf8' })
+  const out = (r.stdout || '') + (r.stderr || '')
+  const lines = out.split('\n')
+  const nOk = lines.filter((l) => /^\s*(?:ok|✔)\s/.test(l)).length
+  const nFail = lines.filter((l) => /^\s*(?:FAIL|✖)\s/.test(l)).length
+  ok += nOk; fail += nFail
+  suites.push({ name: 'pentest-mode-prompts', nOk, nFail, nSkip: 0, status: r.status })
+  if (r.status !== 0 || nFail > 0) {
+    failures.push({ name: 'pentest-mode-prompts', nFail, status: r.status })
+    for (const l of lines) if (/^\s*(?:FAIL|✖)\s/.test(l)) console.log('   [pentest-mode-prompts] ' + l.trim())
+  }
+  console.log((r.status === 0 ? 'PASS' : 'FAIL') + ' ' + 'pentest-mode-prompts'.padEnd(26) + ' ok=' + nOk + ' fail=' + nFail + ' skip=0')
+}
+
 const REQUIRED_SUITES = [
   'dsh-attack-atlas', 'dsh-auto-advance', 'dsh-campaign-memory', 'dsh-ctf-observer',
   'dsh-hunter', 'dsh-knowledge-hub', 'dsh-mcp-studio', 'dsh-method-stack',
@@ -285,8 +415,15 @@ const REQUIRED_SUITES = [
   'dsh-session-pulse', 'dsh-skill-browse', 'dsh-stage-gate', 'dsh-stage-gate/behavior-locks',
   'dsh-tool-scope', 'dsh-trace-vault', 'dsh-webshell-mgr', 'task-recovery',
   'metrics-history', 'knowledge-eval-guard', 'report-drafts', 'tool-description-budget',
-  'host-preset-refs', 'model-reasoning', 'project-status', 'report-schema',
+  'host-preset-refs', 'preset-visibility', 'model-reasoning', 'project-status', 'report-schema',
   'egress-policy', 'egress-consistency', 'memory-effect', 'repo-hygiene',
+  'nday-catalog',
+  'nday-corpus-runtime',
+  'pentest-mode-prompts',
+  'asset-inventory',
+  'attack-flow',
+  'zeroday-catalog',
+  'dsh-nday-hunter',
 ]
 const suiteNames = new Set(suites.map((suite) => suite.name))
 const missingSuites = REQUIRED_SUITES.filter((name) => !suiteNames.has(name))

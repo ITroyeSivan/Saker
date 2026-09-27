@@ -1789,7 +1789,9 @@ function WebShellSettings(props) {
 }
 
 function injectVisibleConversationView(ctx, field, register) {
-	var settings = ctx.settingsScope.bind({ namespace: REDTEAM_MANAGER_UI_NAMESPACE });
+	var settings = ctx.configForms && ctx.configForms.get
+		? ctx.configForms.get(REDTEAM_MANAGER_UI_NAMESPACE)
+		: ctx.settingsScope.bind({ namespace: REDTEAM_MANAGER_UI_NAMESPACE });
 	ctx.slots.inject("conversation.view", function () {
 		var disposeView;
 		function isVisible() {
@@ -1841,5 +1843,5 @@ function apply(ctx) {
 	} catch (e) { /* settings 槽不可用时忽略 */ }
 }
 
-module.exports = { name: "dsh-webshell-mgr-client", inject: ["slots", "settingsScope", "connection"], apply: apply };
+module.exports = { name: "dsh-webshell-mgr-client", inject: ["slots", "configForms", "connection"], apply: apply };
 return module.exports; } });

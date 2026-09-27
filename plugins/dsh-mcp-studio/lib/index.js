@@ -7,6 +7,10 @@ import z from "@deepseek-ai/schemastery";
 var ID_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
 var DEFAULT_TOOL_CALL_TIMEOUT_MS = 6e4;
 var DEFAULT_PROXY_THRESHOLD = 10;
+function volatile(schema) {
+  const candidate = schema;
+  return typeof candidate.volatile === "function" ? candidate.volatile() : schema;
+}
 var ServerEntrySchema = z.object({
   id: z.string().required().pattern(ID_PATTERN),
   enabled: z.boolean().default(true),
@@ -25,7 +29,7 @@ var ServerEntrySchema = z.object({
   directTools: z.array(z.string()).default([])
 });
 var Config = z.object({
-  servers: z.array(ServerEntrySchema).default([])
+  servers: volatile(z.array(ServerEntrySchema).default([]))
 });
 function splitArgs(line) {
   const tokens = [];
@@ -1119,7 +1123,27 @@ function signatureOf(server) {
   return JSON.stringify(toMcpClientConfig(server));
 }
 async function apply(ctx, config) {
-  let current = () => config;
+  let configuredServers = () => {
+    const value = config.servers;
+    const resolved = value !== null && typeof value === "object" && "get" in value && typeof value.get === "function" ? value.get() : value;
+    return Array.isArray(resolved) ? resolved : [];
+  };
+  const legacySettings = ctx.settings;
+  if (typeof legacySettings?.get === "function" && typeof legacySettings.register === "function") {
+    try {
+      const scope = legacySettings.register(STUDIO_SETTINGS_NAMESPACE, Config, {
+        base: config,
+        validate: validateSection
+      });
+      configuredServers = () => {
+        const value = scope.get();
+        return Array.isArray(value?.servers) ? value.servers : [];
+      };
+    } catch (error) {
+      ctx.logger.warn("mcp-studio: settings provider unavailable, keeping patch baseline: %s", String(error));
+    }
+  }
+  const current = () => ({ servers: [...configuredServers()] });
   let alive = true;
   const mounts = /* @__PURE__ */ new Map();
   const tracker = { states: /* @__PURE__ */ new Map() };
@@ -1355,18 +1379,10 @@ async function apply(ctx, config) {
     }
     proxy.closeAll();
   }, "mcp-studio: lifecycle");
-  try {
-    const scope = ctx.settings.register(STUDIO_SETTINGS_NAMESPACE, Config, {
-      base: config,
-      validate: validateSection
-    });
-    current = () => scope.get();
-    scope.watch(() => {
-      reconcile();
-    });
-  } catch (error) {
-    ctx.logger.warn("mcp-studio: settings provider unavailable, keeping patch baseline: %s", String(error));
-  }
+  ctx.on("loader/volatile-update", () => {
+    reconcile();
+  });
+  reconcile();
   const executions = createExecutionRing(200);
   const inflight = /* @__PURE__ */ new Map();
   ctx.effect(() => {
@@ -1488,6 +1504,7 @@ async function apply(ctx, config) {
   }
 }
 export {
+  Config,
   STUDIO_SETTINGS_NAMESPACE,
   apply,
   inject,

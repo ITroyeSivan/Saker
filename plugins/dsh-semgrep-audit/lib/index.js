@@ -21,9 +21,28 @@ import { createRequire } from "node:module";
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { defineTool } from "@deepseek-ai/dsh-tools";
+import { readSettingsSection } from "dsh-saker/settings-compat";
 
 function sessionIdOf(exec) {
 	return String(exec?.agent?.session?.id ?? exec?.agent?.id ?? "");
+}
+
+/**
+ * Resolve a path argument to an absolute path, with **relative paths resolved against the
+ * SESSION workspace**.
+ *
+ * Why (2026-09-25, real model session): `path.resolve(arg)` resolves a relative value
+ * against the HOST PROCESS cwd — the dsh source checkout / install directory, not the
+ * model's working directory. A relative `workspace` (the model really did send `"."`)
+ * or `target` would therefore point outside the session workspace, so scan artifacts
+ * land where the workbench, the report gate, and the write boundary never look.
+ * Absolute paths are unchanged.
+ */
+function resolveWorkspaceArg(value, exec) {
+	if (typeof value !== "string" || value === "") return path.resolve(".");
+	if (path.isAbsolute(value)) return path.resolve(value);
+	const sessionCwd = exec?.agent?.session?.header?.cwd;
+	return sessionCwd ? path.resolve(sessionCwd, value) : path.resolve(value);
 }
 
 /** Optional stage-gate bridge; standalone semgrep use is unaffected. */
@@ -163,18 +182,19 @@ export function parseSemgrepJson(raw, cap = 200) {
 	const seen = new Set();
 	const hits = [];
 	for (const r of results) {
-		const rule = String(r.check_id ?? "?");
+		const ruleId = String(r.check_id ?? "?");
+		const rule = ruleId.split(/[./\\]/).filter(Boolean).at(-1) ?? ruleId;
 		const sev = String(r.extra?.severity ?? "?");
 		const file = String(r.path ?? "?");
 		const line = r.start?.line ?? 0;
-		const k = `${rule}|${file}|${line}`;
+		const k = `${ruleId}|${file}|${line}`;
 		bySeverity[sev] = (bySeverity[sev] ?? 0) + 1;
-		byRule[rule] = (byRule[rule] ?? 0) + 1;
+		byRule[ruleId] = (byRule[ruleId] ?? 0) + 1;
 		if (seen.has(k)) continue;
 		seen.add(k);
-		if (hits.length < cap) hits.push({ rule, file, line, severity: sev, message: String(r.extra?.message ?? "").slice(0, 160) });
+		if (hits.length < cap) hits.push({ rule, ruleId, file, line, severity: sev, message: String(r.extra?.message ?? "").slice(0, 160) });
 	}
-	const topRules = Object.entries(byRule).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([rule, n]) => `${rule}×${n}`).join("、");
+	const topRules = Object.entries(byRule).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([rule, n]) => `${rule.split(/[./\\]/).filter(Boolean).at(-1) ?? rule}×${n}`).join("、");
 	return {
 		ok: true,
 		total: results.length,
@@ -402,11 +422,11 @@ function apply(ctx) {
 			render: (_a, v) => [{ type: "text", text: v.ok ? `semgrep：${v.summaryText ?? ""}（证据 ${v.evidenceId}）` : `semgrep 拒绝/失败：${v.error}` }]
 		},
 		async execute(args, exec) {
-			const workspace = path.resolve(args.workspace);
+			const workspace = resolveWorkspaceArg(args.workspace, exec);
 			let semgrepBin = "semgrep";
-			try { semgrepBin = resolveSemgrepBin(ctx.settings.get("sec-config")); } catch { /* fall back to PATH */ }
+			try { semgrepBin = resolveSemgrepBin(readSettingsSection(ctx.settings, "sec-config")); } catch { /* fall back to PATH */ }
 			const tracked = await runWithTaskTracking(workspace, "semgrep_scan", exec, () =>
-				runSemgrep({ workspace, target: path.resolve(args.target), layer: args.layer, rulesPath: args.rules_path, bin: semgrepBin })
+				runSemgrep({ workspace, target: resolveWorkspaceArg(args.target, exec), layer: args.layer, rulesPath: args.rules_path, bin: semgrepBin })
 			);
 			return tracked.taskId ? { ...tracked.value, task_id: tracked.taskId } : tracked.value;
 		}

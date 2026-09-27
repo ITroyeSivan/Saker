@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { MODES, inferPhase, inferRefs, inferEvidence, buildEnvelope, buildEnvelopeDetailed, purposeLine, wrapEnvelope, isEnvelopeText, envelopeRev, appendAccounting, accountingPath, isHumanUser, matchKeyword, escapePromptBraces, hasNegation, buildAuditRow, appendAuditLine, Config } from "../lib/index.js";
 import { spawn } from "node:child_process";
 import { buildSurfaceGuard, isWrapPhase } from "../lib/index.js";
-import { scanSkillDeps, checkTool } from "../lib/skilltools.mjs";
+import { scanSkillDeps, checkTool, listSkillNames } from "../lib/skilltools.mjs";
 import { detectScope } from "../lib/scope.mjs";
 import { TAXONOMIES } from "../../dsh-attack-atlas/lib/taxonomy.js";
 import os from "node:os";
@@ -20,6 +20,16 @@ const PRESETS_DIR = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)
 
 let pass = 0, fail = 0;
 const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); } else { fail++; console.log(`FAIL ${label}`); } };
+
+// Prompt and system-prompt skill inventories must match the selected preset's
+// configured skill roots. CTF is intentionally not part of Pentest's menu.
+{
+	const pentest = listSkillNames("pentest");
+	ok("pentest prompt inventory contains all three RCE submodes",
+		["pentest-regular", "pentest-nday", "pentest-0day"].every((name) => pentest.includes(name)));
+	ok("pentest prompt inventory excludes CTF playbook", !pentest.includes("ctf-playbook"));
+	ok("CTF preset retains its own playbook", listSkillNames("ctf-solver").includes("ctf-playbook"));
+}
 
 // 1. every gate id referenced by route tables exists in stage-gate GATES
 {
@@ -284,32 +294,31 @@ const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); 
 }
 
 console.log(fail === 0 ? `\nall ${pass} tests passed` : `\n${fail} FAILED, ${pass} passed`);
-// ── operation 恢复盘：有未收口准则时信封注入恢复行，全 met/无状态不注入 ──
+// ── operation 恢复盘：通用非-Pentest 模式仍支持中断恢复 ──
 {
-	const mode = MODES.pentest;
+	const presetId = "code-audit";
+	const mode = MODES[presetId];
 	const phase = mode.phases[0];
-	const op = { goal: "对 demo 靶站完成授权渗透", total: 3, met: 1, openIds: ["g2", "g3"], pending: ["复测注入点"], gates: { P1: { pass: true } } };
-	const withOp = buildEnvelope({ presetId: "pentest", mode, phase, refsHits: [], evidence: "unknown", gates: FALLBACK_GATES, operation: op });
-	ok("envelope includes operation recovery line", withOp.includes("operation 恢复") && withOp.includes("1/3 met") && withOp.includes("g2,g3") && withOp.includes("P1 pass"), withOp.slice(0, 120));
-	ok("envelope marks failed criteria as closed, not open", buildEnvelope({ presetId: "pentest", mode, phase, refsHits: [], evidence: "unknown", gates: FALLBACK_GATES, operation: { ...op, met: 1, failed: 2, openIds: [] } }).includes("failed 2") && !buildEnvelope({ presetId: "pentest", mode, phase, refsHits: [], evidence: "unknown", gates: FALLBACK_GATES, operation: { ...op, met: 1, failed: 2, openIds: [] } }).includes("未收口"));
-	const without = buildEnvelope({ presetId: "pentest", mode, phase, refsHits: [], evidence: "unknown", gates: FALLBACK_GATES });
+	const render = (operation) => buildEnvelope({ presetId, mode, phase, refsHits: [], evidence: "unknown", gates: FALLBACK_GATES, operation });
+	const op = { goal: "审计 demo 仓库", total: 3, met: 1, openIds: ["g2", "g3"], pending: ["复测注入点"], gates: { A1: { pass: true } } };
+	const withOp = render(op);
+	ok("envelope includes operation recovery line", withOp.includes("operation 恢复") && withOp.includes("完成标准 1/3 已完成") && withOp.includes("g2,g3") && withOp.includes("A1 pass"), withOp.slice(0, 120));
+	const failed = render({ ...op, met: 1, failed: 2, openIds: [] });
+	ok("envelope marks failed criteria as closed, not open", failed.includes("确认做不到 2") && !failed.includes("未完成 g"));
+	const without = render(undefined);
 	ok("envelope omits recovery line without operation", !without.includes("operation 恢复"));
-	ok("recovery line truncates long goal", buildEnvelope({ presetId: "pentest", mode, phase, refsHits: [], gates: FALLBACK_GATES, operation: { ...op, goal: "x".repeat(200) } }).includes("x".repeat(80)));
+	ok("recovery line truncates long goal", render({ ...op, goal: "x".repeat(200) }).includes("x".repeat(80)));
 
-	// 覆盖度段（scope/tested 台账）：有未测项时渲染；全测不渲染段
-	const withCov = buildEnvelope({ presetId: "pentest", mode, phase, refsHits: [], evidence: "unknown", gates: FALLBACK_GATES, operation: { ...op, coverage: { scope: 4, tested: 2, untestedIds: ["db", "api"] } } });
+	const withCov = render({ ...op, coverage: { scope: 4, tested: 2, untestedIds: ["db", "api"] } });
 	ok("recovery line includes coverage segment", withCov.includes("覆盖 2/4") && withCov.includes("未测 db,api") && withCov.includes("operation_progress tested"), withCov.slice(0, 160));
-	const fullCov = buildEnvelope({ presetId: "pentest", mode, phase, refsHits: [], evidence: "unknown", gates: FALLBACK_GATES, operation: { ...op, coverage: { scope: 4, tested: 4, untestedIds: [] } } });
+	const fullCov = render({ ...op, coverage: { scope: 4, tested: 4, untestedIds: [] } });
 	ok("full coverage renders bare segment", fullCov.includes("覆盖 4/4") && !fullCov.includes("未测"), fullCov.slice(0, 160));
 	ok("no coverage segment without ledger", !withOp.includes("覆盖 "));
-	ok("open intents render segment", buildEnvelope({ presetId: "pentest", mode, phase, refsHits: [], evidence: "unknown", gates: FALLBACK_GATES, operation: { ...op, openIntents: ["i1", "i3"] } }).includes("意图 2 未收口（i1,i3"));
-	ok("running/interrupted tasks render segment", buildEnvelope({ presetId: "pentest", mode, phase, refsHits: [], evidence: "unknown", gates: FALLBACK_GATES, maxChars: 2000, operation: { ...op, tasks: [{ id: "i2", state: "running", progress: 40, attempts: 1, maxAttempts: 3 }] } }).includes("执行任务 1 待续（i2:running 40% 1/3"));
+	ok("open intents render segment", render({ ...op, openIntents: ["i1", "i3"] }).includes("工作方向 2 条未结束（i1,i3"));
+	ok("running/interrupted tasks render segment", render({ ...op, tasks: [{ id: "i2", state: "running", progress: 40, attempts: 1, maxAttempts: 3 }] }).includes("执行任务 1 待续（i2:running 40% 1/3"));
 	ok("no intents segment when closed", !withOp.includes("意图 "));
-	ok("constraints render dedicated line", buildEnvelope({ presetId: "pentest", mode, phase, refsHits: [], evidence: "unknown", gates: FALLBACK_GATES, operation: { ...op, constraints: ["禁：不碰支付接口", "允：仅测 x.example.com"] } }).includes("约束红线:") && buildEnvelope({ presetId: "pentest", mode, phase, refsHits: [], evidence: "unknown", gates: FALLBACK_GATES, operation: { ...op, constraints: ["禁：不碰支付接口"] } }).includes("禁：不碰支付接口"));
-	ok("no constraints line without ledger", !withOp.includes("约束红线"));
-}
-
-// 17. 信封标记化（压缩存活性）+ 注入量记账 + 装配期工具面
+	ok("constraints render dedicated line", render({ ...op, constraints: ["仅审计 src/", "禁止写入"] }).includes("约束红线: 仅审计 src/；禁止写入"));
+}// 17. 信封标记化（压缩存活性）+ 注入量记账 + 装配期工具面
 {
 	const m = MODES.pentest;
 	const phase = inferPhase(m, "验证 sqli");
@@ -330,7 +339,7 @@ console.log(fail === 0 ? `\nall ${pass} tests passed` : `\n${fail} FAILED, ${pas
 	const overTools = buildEnvelopeDetailed({ presetId: "pentest", mode: m, phase, refsHits: ["web"], gates: GATES, maxChars: 200, negated: true, tools: { total: 5, ok: 3, missing: ["a", "b"] } });
 	ok("budget drops tools line before tail lines when tight", overTools.dropped.includes("tools") && overTools.text.length <= 200);
 	const deps = scanSkillDeps("pentest");
-	ok("scanSkillDeps reads playbook tools frontmatter", deps.has("nmap") && deps.has("sqlmap") && deps.has("masscan") && deps.has("hydra") && !deps.has("impacket") && deps.size === 13);
+	ok("scanSkillDeps does not make optional scanners default dependencies", deps.size === 0);
 	// 回归锁：宿主 env 可能没有 PATHEXT（实测 dsh 插件进程如此）。此时 `where cmd` 返回 1、
 	// `where cmd.exe` 返回 0 —— 探测若只信 where + 扩展名，就会把每个工具都误判成「未安装」
 	// （原先 Windows 上是 /bin/sh ENOENT 的同一症状，换 where 只是换了触发条件）。
@@ -354,24 +363,27 @@ console.log(fail === 0 ? `\nall ${pass} tests passed` : `\n${fail} FAILED, ${pas
 	else process.env.DSH_HOME = savedHome;
 }
 
-// 18. 任务口径：用户指定优先（定向只做指定项并点亮），未指定走全流程
+// 18. Pentest 只负责一条有证据的 RCE 路径；其他安全模式保留原定向/矩阵口径
 {
 	const targeted = detectScope("pentest", "帮我测试这个目标的SQL注入漏洞、XSS漏洞");
 	ok("定向判定：图谱类目命中 SQL 注入与 xss", targeted.directed === true && targeted.hits.some((h) => h.includes("SQL")) && targeted.hits.some((h) => h.toLowerCase().includes("xss")));
-	ok("全流程委托不误判", detectScope("pentest", "对 example.com 做全面渗透测试，其他你看着办").directed === false);
+	ok("全量委托不等于具体漏洞定向", detectScope("pentest", "对 example.com 做全面渗透测试，其他你看着办").directed === false);
 	ok("显式定向措辞命中", detectScope("pentest", "只测上传漏洞就好").directed === true);
 	ok("泛类词+动作词命中", detectScope("pentest", "查一下这个站的越权").directed === true);
 	ok("空文本不定向", detectScope("pentest", "").directed === false);
 	ok("判定确定性", JSON.stringify(detectScope("pentest", "测 SQL 注入")) === JSON.stringify(detectScope("pentest", "测 SQL 注入")));
 	const m = MODES.pentest, phase = inferPhase(m, "帮我测试这个目标的SQL注入漏洞、XSS漏洞");
 	const dEnv = buildEnvelopeDetailed({ presetId: "pentest", mode: m, phase, refsHits: [], gates: GATES, scope: detectScope("pentest", "帮我测试这个目标的SQL注入漏洞、XSS漏洞") });
-	ok("定向信封：用户指定优先+只做指定项+点亮+不欠账", dEnv.text.includes("scope: 定向——用户指定优先") && dEnv.text.includes("SQL 注入") && dEnv.text.includes("只执行用户指定项") && dEnv.text.includes("redteam_coverage_mark 点亮") && dEnv.text.includes("不补测不欠账"));
+	ok("定向信封：只沿可能到 RCE 的指定线索验证", dEnv.text.includes("scope: RCE 定向") && dEnv.text.includes("SQL 注入") && dEnv.text.includes("有证据通向 RCE") && dEnv.text.includes("一条可复现 RCE 成功即停止"));
 	const fEnv = buildEnvelopeDetailed({ presetId: "pentest", mode: m, phase: m.phases[0], refsHits: [], gates: GATES, scope: { directed: false, hits: [] } });
-	ok("全流程信封：按矩阵推进", fEnv.text.includes("scope: 未指定具体项——按本模式全流程矩阵推进"));
-	ok("目的行：粘滞携带原文（定向）", buildEnvelopeDetailed({ presetId: "pentest", mode: m, phase, refsHits: [], gates: GATES, scope: { directed: true, hits: ["SQL 注入"] }, purpose: "拿到 getshell 并证明可执行" }).text.includes("目的: 拿到 getshell 并证明可执行"));
+	ok("无特定漏洞线索时只走单条 RCE 主线", fEnv.text.includes("固定终点为可复现 RCE") && fEnv.text.includes("选一条最有证据的 RCE 路径") && fEnv.text.includes("不跑全漏洞矩阵") && !fEnv.text.includes("全流程矩阵推进"));
+	ok("Pentest 目标锚只接受明确授权资产", fEnv.text.includes("target: 仅测试用户明确给出的授权 URL/IP") && !fEnv.text.includes("redteam_atlas_target"));
+	ok("Pentest 边界与复核口径明确止于 RCE", m.boundary.includes("RCE 后立即停止") && m.boundary.includes("不做 webshell") && m.review.includes("不要求子代理双签"));
+	ok("目的行：粘滞携带用户原文", buildEnvelopeDetailed({ presetId: "pentest", mode: m, phase, refsHits: [], gates: GATES, scope: { directed: true, hits: ["SQL 注入"] }, purpose: "验证服务端命令执行并留存只读响应" }).text.includes("目的: 验证服务端命令执行并留存只读响应"));
 	ok("目的行：无 purpose 不出行", !buildEnvelopeDetailed({ presetId: "pentest", mode: m, phase, refsHits: [], gates: GATES }).text.includes("目的:"));
 	ok("目的行：多行原文单行化+超长裁剪", purposeLine("第一行\n第二行   空格") === "第一行 第二行 空格" && purposeLine("x".repeat(200)).length === 121 && purposeLine("x".repeat(200)).endsWith("…") && purposeLine("  ") === "");
-	ok("target 行：三作战模式注入", ["pentest", "attack-defense", "cloud-security"].every((pid) => buildEnvelopeDetailed({ presetId: pid, mode: MODES[pid], phase: MODES[pid].phases[0], refsHits: [], gates: GATES }).text.includes("target: 开战先 redteam_atlas_target")));
+	ok("target 行：Pentest 锚定用户明确授权资产", buildEnvelopeDetailed({ presetId: "pentest", mode: MODES.pentest, phase: MODES.pentest.phases[0], refsHits: [], gates: GATES }).text.includes("target: 仅测试用户明确给出的授权 URL/IP"));
+	ok("target 行：其余作战模式继续锚定图谱目标", ["attack-defense", "cloud-security"].every((pid) => buildEnvelopeDetailed({ presetId: pid, mode: MODES[pid], phase: MODES[pid].phases[0], refsHits: [], gates: GATES }).text.includes("target: 开战先 redteam_atlas_target")));
 	ok("target 行：其余模式不注入", !buildEnvelopeDetailed({ presetId: "redteam", mode: MODES.redteam, phase: MODES.redteam.phases[0], refsHits: [], gates: GATES }).text.includes("target: 开战先") && !buildEnvelopeDetailed({ presetId: "incident-response", mode: MODES["incident-response"], phase: MODES["incident-response"].phases[0], refsHits: [], gates: GATES }).text.includes("target: 开战先"));
 	ok("target 行：分析三模式按各自对象锚注入", ["code-audit", "binary-analysis", "ctf-solver"].every((pid) => buildEnvelopeDetailed({ presetId: pid, mode: MODES[pid], phase: MODES[pid].phases[0], refsHits: [], gates: GATES }).text.includes("target: ")) && buildEnvelopeDetailed({ presetId: "code-audit", mode: MODES["code-audit"], phase: MODES["code-audit"].phases[0], refsHits: [], gates: GATES }).text.includes("operation_scope 登记审计对象") && buildEnvelopeDetailed({ presetId: "binary-analysis", mode: MODES["binary-analysis"], phase: MODES["binary-analysis"].phases[0], refsHits: [], gates: GATES }).text.includes("B0 登记样本") && buildEnvelopeDetailed({ presetId: "ctf-solver", mode: MODES["ctf-solver"], phase: MODES["ctf-solver"].phases[0], refsHits: [], gates: GATES }).text.includes("challenge-board 登记题目"));
 	const rtEnv = buildEnvelopeDetailed({ presetId: "redteam", mode: MODES.redteam, phase: MODES.redteam.phases[0], refsHits: [], gates: GATES, scope: { directed: false, hits: [] } });
@@ -427,23 +439,20 @@ console.log(fail === 0 ? `\nall ${pass} tests passed` : `\n${fail} FAILED, ${pas
 	const m = MODES.pentest;
 	const wrapPhase = m.phases.find((p) => p.id === "report");
 	const env = buildEnvelope({ presetId: "pentest", mode: m, phase: wrapPhase, refsHits: [], evidence: "unknown", gates: FALLBACK_GATES, surface: "wrap" });
-	ok("信封渲染收尾工具面行", env.includes("工具面: 收尾相位") && env.includes("已收起"));
+	ok("信封渲染收尾工具面行", env.includes("工具面: 收尾阶段") && env.includes("已收起"));
 	const execPhase = m.phases.find((p) => p.id === "verify");
 	ok("执行相位无工具面行", !buildEnvelope({ presetId: "pentest", mode: m, phase: execPhase, refsHits: [], evidence: "unknown", gates: FALLBACK_GATES, surface: "" }).includes("工具面: 收尾相位"));
 }
 
-// 17b. 结束条件外置（P1-2）：信封必须告诉模型「收工前要 operation_conclude 申请」，
-// 且要带上「failed 是有效终态」这一句 —— 少了它模型会为了过闸把做不到的事写成 met。
+// 17b. Pentest 直达结果收尾，不要求全局 operation 流程；其他模式保留原申请逻辑。
 {
 	const m = MODES.pentest;
 	const env = buildEnvelope({ presetId: "pentest", mode: m, phase: m.phases[0], refsHits: [], evidence: "unknown", gates: FALLBACK_GATES });
-	ok("信封含收尾申请指引（operation_conclude）", env.includes("operation_conclude"), env.slice(0, 200));
-	ok("信封说明判定权在系统（申请/驳回语义）", env.includes("系统判定") && env.includes("驳回"));
-	ok("信封明确 failed 是有效终态（防为过闸造假）", env.includes("failed 是有效终态"));
-	// 每个模式的信封都该有（不只 pentest）
-	const missing = Object.entries(MODES).filter(([pid, mm]) =>
+	ok("Pentest 以 RCE 证据或阻断点直接收尾", env.includes("记录 RCE 是否复现") && env.includes("RCE 成功即收尾") && !env.includes("operation_conclude"));
+	const otherModes = Object.entries(MODES).filter(([pid]) => pid !== "pentest");
+	const missing = otherModes.filter(([pid, mm]) =>
 		!buildEnvelope({ presetId: pid, mode: mm, phase: mm.phases[0], refsHits: [], evidence: "unknown", gates: FALLBACK_GATES }).includes("operation_conclude")).map(([pid]) => pid);
-	ok("所有模式的信封都带该指引", missing.length === 0, missing.join(","));
+	ok("其他模式仍带 operation_conclude 收尾指引", missing.length === 0, missing.join(","));
 }
 
 // 17. 审计首写的并发安全：`appendAuditLine` 用 `flag:"wx"` 原子建表头。

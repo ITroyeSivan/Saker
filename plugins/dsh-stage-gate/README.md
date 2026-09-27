@@ -5,11 +5,11 @@ DSH 宿主平面插件：把各安全预设（Saker 的 pentest / code-audit / c
 
 ## 目标契约与中断恢复（operation-state.json）
 
-- `operation_goal`：任务开工把目标登记为可判定契约（goal + 每行一条成功准则，id g1..gN）。
+- `operation_goal`：任务开工把目标登记为可判定契约（goal + 每行一条成功完成标准，id g1..gN）。
 - `stage_gate`：每次判定自动把 gates 进度同步进同一文件（无契约时落骨架）。
-- `operation_progress`：准则逐条 met/failed/reopened + 待办清单维护；`verdict=all-met` 即契约达成。
+- `operation_progress`：完成标准逐条 met/failed/reopened + 待办清单维护；`verdict=all-met` 即契约达成。
 - 下游消费：route-boost 信封读它投递「operation 恢复」行（中断续作）；sec-enforce 报告门在
-  准则未全 met 时拦截 reports/ 落盘（gate-pass 之外的第二道确定性终态门槛）。
+  完成标准未全 met 时拦截 reports/ 落盘（gate-pass 之外的第二道确定性终态门槛）。
 
 ## 设计立场
 
@@ -21,13 +21,14 @@ DSH 宿主平面插件：把各安全预设（Saker 的 pentest / code-audit / c
 ## 工具
 
 - `stage_gate(mode, stage, workspace, file?)` → `{pass, checks, manual, missing}`，写 gate-log.md。
-- `gates_list(mode?)` → 各模式门禁 schema：规范文件名清单 / 是否需要 file 参数 / manual 项。
+- `gates_list(mode?)` → 各模式门禁 schema：规范文件名清单 / **每个文件必须出现的标记字面量、表格行列下限、哈希与 provenance 要求（`requirements`）** / 是否需要 file 参数 / manual 项。
+  `requirements` 由门禁定义派生（每条非 `file` 检查一条），照它写文件就能一次过门——不必先撞 FAIL 再反推「markers」是什么。
 
 ## 各模式门禁与规范文件名（v1 结构集）
 
 | 模式 | 门 | 规范文件 |
 |---|---|---|
-| pentest | P1 资产基线 / P2 finding（需 file）/ P3 覆盖度 | assets.md（含 WAF、速率标记）、evidence-index.md、coverage-matrix.md |
+| pentest | P1 资产基线 / P2 finding（需 file）/ P3 覆盖度 | **asset-inventory.json（机器可读资产清单）**、assets.md（含 WAF、速率标记）、evidence-index.md、coverage-matrix.md |
 | code-audit | A1 面映射 / A2 双链（需 file，语义归复核员）/ A3 覆盖+对账 | surface-map.md（含 入口/sink/深度 标记）、audit-coverage-matrix.md、scan-reconcile.md |
 | binary-analysis | B0 登记 / B1 三验（需 file）/ B2 覆盖+台账 | artifacts/<hash>/provenance.md（64 位哈希）、analysis-coverage.md、hypothesis-ledger.md |
 | attack-defense | recon / breach / lateral（需 file）/ persistence / report（需 file） | assets.md、evidence-index.md、paths-ledger.md（candidate/chosen）、persistence-registry.md（手动排除） |
@@ -47,7 +48,7 @@ profiles/web/package.json：dependencies 加 `"@dsh-external/dsh-stage-gate": "l
 
 ## 项目工作台（1.7.0）
 
-会话标签页「项目工作台」按**工作区**只读展示：目标契约、准则收口进度、意图/任务状态
+会话标签页「项目工作台」按**工作区**只读展示：目标契约、完成标准收尾进度、方向/任务状态
 （含结果冲突 `⚠` 与 `interrupted`）、产物索引（证据行 / 扫描待处置 / 最近门禁 / `reports/`）
 与需要处理的 attention 清单。
 
@@ -60,16 +61,39 @@ profiles/web/package.json：dependencies 加 `"@dsh-external/dsh-stage-gate": "l
 - 与其它标签页的分工：finding 台账在「redteam 成果」，跨会话记忆在「战役记忆」，
   覆盖矩阵在「AttackAtlas」；本页只管项目契约与执行状态。
 
+## 作业进度（1.8.0）
+
+项目工作台新增 7 步进度条：确认目标 → 快速摸底 → 整理合并 → 按指纹归类 → 排优先级 →
+先验证再铺开 → 出结果/转下一目标。页面和资产组表只读同一份工作区文件：
+
+- `asset-inventory.json` 提供资产数；
+- `fingerprint-buckets.json` 提供资产组、资产 ID 与优先分；
+- `operation-state.json` 的方向/任务提供阶段、`bucketId`、负责人与进行中/排队/受阻状态；
+- `reports/` 决定最后一步是否进入当前阶段。
+
+`attack_plan` 生成的资产组会自动登记为带 `bucketId` 的排队任务（已有 `operation-state.json`
+时），子代理领取或完成后状态回流到同一张图，不在界面里另造一套进度。任务区同时显示
+`parentTaskId` 父子树，至少支持两级：资产组任务为父、验证/复核子代理为子。
+
+`operation_intent` 模型工具现可显式携带 `stage` / `bucket_id` / `target_ids` /
+`reuse_score` / `parent_task_id`，与作业进度和攻击清单共用一套字段。
+
+## 标签页进度状态（1.9.6）
+
+`shell.overlay` 在不增加页面控件的情况下读取当前会话状态和只读工作台快照，并更新浏览器标签标题：
+运行中显示当前阶段，失败显示「失败」，有完整报告且完成标准已收齐时显示「有结果」，其余已停止任务显示「等待用户」。
+不写入会话标题事件；切换到其他主面板时保留宿主产品标题。
+
 ## 测试
 
 `node test/run.mjs`：纯函数 runGate/listGates 的 fixture 测试（含通过/失败/缺 file/未知门/审计日志写入）。
 ## 执行任务状态
 
-子代理结果回收（1.6.2）：`scanner`/`semgrep` 这类长工具由 `runTrackedTask` 自动收口；
-`subagent` 家族改为按宿主生命周期回收——`subagent/start` 把唯一匹配的 queued 任务转
+子代理结果回收（1.6.2）：`scanner`/`semgrep` 这类长工具由 `runTrackedTask` 自动收尾；
+`subagent` 家族改为按宿主生命周期回收——`subagent/start` 把唯一匹配的排队任务转
 `running`，`subagent/end` 按 `stopReason` 收进 `succeeded`（写入子代理自己的最终输出）/
-`failed` / `interrupted`。绑定规则与长工具一致：同 owner 别名 + 同 session 且候选唯一
-才动，多候选一律交给模型自己收口。
+`failed` / `interrupted`。绑定规则与长工具一致：同负责人别名 + 同 session 且候选唯一
+才动，多候选一律交给模型自己收尾。
 
 结果冲突只记不覆盖（1.6.3）：终态任务再收到**不同**结果时写 `task.conflicts[]`
 （最多留最近 5 条），**不改已落库的终态**；同结果重复上报按幂等处理（`updatedAt` 也不动）。
@@ -78,7 +102,7 @@ profiles/web/package.json：dependencies 加 `"@dsh-external/dsh-stage-gate": "l
 
 > 实现注意：`subagent/start|end` 是**作用域事件**，监听器只拿得到 `info`、拿不到 parent，
 > 所以必须挂 `agent/created` → `agent.ctx.on(...)` 把 agent 闭包进作用域监听；
-> 另外原生 `subagent` 是异步派发，`tools/result` 只代表"已启动"，不能拿它收口。
+> 另外原生 `subagent` 是异步派发，`tools/result` 只代表"已启动"，不能拿它收尾。
 
 `operation_intent` 可带 `owner` / `max_attempts`，将方向登记为可执行任务。
 `operation_task` 负责 `start / heartbeat / progress / succeed / fail / cancel / retry / interrupt`

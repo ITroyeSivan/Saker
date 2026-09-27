@@ -2,17 +2,13 @@
 
 Saker 的**模式/插件**是纯增量（`dsh plugin add` 即可）。以下改动位于 **dsh 宿主层**（DeepSeek Harness 本体），无法用插件分发——需要克隆/拿到 dsh 源码后手工应用并重新构建。**不应用也能用 Saker**（只是登录页/标题保留 dsh 原生样式、默认密码为宿主默认值）。
 
-在参考开发机上，这些改动位于 dsh 仓库（0.1.3-alpha.1）：
+在参考开发机上，Saker 0.4.0 的宿主补丁位于 dsh 仓库（`0.1.7-rc.1`）：
 
 | 宿主文件 | 改动 | 效果 |
 |---|---|---|
-| `packages/client/connection/src/browser-auth.ts` | `DEFAULT_PASSWORD_SHA256 = sha256('123456')`；master key 首次随机 mint 并打印一次；`changePassword` 用 master key 校验 + 轮换签名密钥使旧会话全失效 | 默认密码 `admin/123456`；支持「设置→安全配置→修改密码」 |
-| `apps/web/public/login.html` | 标题「Saker · 登录」+ 顶部 Saker 渐变字标；删除全部说明性文案（仅保留错误多次锁定提示） | 登录页极简 + Saker 品牌 |
-| `apps/web/index.html` / `manifest.webmanifest` | title / manifest name → Saker | 浏览器标签与 PWA 名称 |
-| `packages/bundle/web-app/src/index.ts` | 启动时先打印 `Saker — 基于 DeepSeek Harness 的攻防平台` 横幅再打印 URL | 启动即见品牌 |
-| `packages/client/locale/src/locales/zh.ts` / `en.ts` | `brand.localBuild` → `Saker 攻防平台` / `Saker` | SPA 主界面空态抬头等处的应用名 |
-| `packages/util/atomic-write/src/index.ts` | `withFileLock` 在竞争时识别 `settings.yaml.lock` 里的死 PID，安全回收后立即重试；活进程、空锁和未知格式不碰 | 宿主崩溃留下的设置写锁不再永久堵住 API key / 模型端点保存 |
+| `packages/util/atomic-write/src/index.ts` | `withFileLock` 在竞争时识别锁文件里的死 PID，二次读取确认未换主后安全回收；活进程、空锁和未知格式不碰 | 宿主崩溃留下的 profile/settings 写锁不再永久堵住配置保存 |
 | `packages/llm/llm-pi-ai/src/stream.ts` | `classifyPiAiError` 识别流式工具调用 JSON 截断（`Unterminated string in JSON...` / `Unexpected end of JSON input`）并归为可重试的 `TRANSPORT` | 上游断流导致的半截工具参数不再以不可重试的 `PI_AI_ERROR` 中止整个回合，长任务可自动重试继续 |
+| `packages/client/ui-settings-general/src/client/SettingsRoot.tsx` | 切换设置分区时把右侧内容区滚动位置复位 | 从长设置页切到另一个分区不会停在页面中部 |
 
 应用后需重新构建：
 
@@ -21,6 +17,10 @@ pnpm run build:lib:host && pnpm run build:web
 ```
 
 > ⚠️ 应用前请先审视上游许可与本仓库授权；二开分发时保留上游 MIT 版权声明。
+
+早期版本还包含登录页、Saker 品牌标题和默认密码等宿主补丁。它们不在当前
+`0.1.7-rc.1` 的官方源码树中；需要这些展示/认证改动时，应先把旧补丁 rebase
+到对应文件后再构建，不能把 Saker 插件包当作登录页补丁的替代品。
 
 ### 2026-09-08 宿主 rebase 到 dsh-v0.1.3-alpha.2（Saker 0.2.3 起）
 

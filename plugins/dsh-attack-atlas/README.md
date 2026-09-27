@@ -17,3 +17,22 @@ AttackAtlas——渗透测试 / 代码审计 / CTF 解题三种专业模式的�
 模型侧工具：`redteam_coverage_mark`（格子 / 主类终态，按目标分账、缺省归当前锚定）、`redteam_coverage_stage`（阶段推进，按目标）、`redteam_coverage_sync`（Markdown 覆盖表 / rows 批量回写）、`redteam_coverage_list`（终态全读）、`redteam_atlas_target`（目标登记 / switch 切锚 / 删除级联）、`redteam_atlas_chain`（链路拓扑登记，缺省归当前锚定目标）。存储 `~/.dsh/attack-atlas/atlas.db`，(session, mode, target) 三键分账（target='' 为会话公共 scope，旧库自动迁移且 `*_legacy` 表保留）；方法论模板与自定义能力为跨会话长期资产。
 
 测试：`node test/run.mjs`
+
+## 覆盖提醒默认静音（2026-09-24 用户反馈）
+
+用户反馈原话：*「attackatlas 乱标，而且可以考虑去掉这个功能，没什么用。还老是发消息浪费 token。」*
+
+先说清一件事：**AttackAtlas 不是纯展示面板，它是被依赖的底座**——
+`dsh-redteam-results`、`dsh-stage-gate` 都 import 它的 `store`，`dsh-route-boost` import 它的
+`taxonomy`。playbook 里"矩阵覆盖 / 阶段带 / 目标分账"整段都建在它的工具上。
+所以**直接卸载会连累这三个插件**，不是"少个面板"。
+
+真正造成"老是发消息"的是这一条：finding 登记成功后，若该主类还有未终态格子，
+插件会**往会话里注入一条 role=user 的覆盖提醒**。一次作业里按主类各发一条，
+每条都会进模型上下文再滚一轮——这就是被感知到的 token 浪费。
+
+改法：**提醒默认不再注入会话**（`lib/index.js` 的 `ATLAS_NUDGE_IN_SESSION`）。
+
+- 默认：不注入、返回值里也不带；**自动点亮（真正的产物）完全保留**。
+- 覆盖收尾并没有失去把关：`stage_gate` 阶段检查与 `redteam_coverage_list` 仍在。
+- 需要旧行为：设 `SAKER_ATLAS_NUDGE=1`（测试里传 `deps.nudge: true`）。

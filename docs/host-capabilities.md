@@ -1,10 +1,10 @@
-# dsh 0.1.6 host capability map
+# dsh 0.1.7 host capability map
 
 Saker should not rebuild capabilities that the host already owns. This map records which side is authoritative.
 
 | Capability | Authoritative implementation | Saker role |
 |---|---|---|
-| Session turn navigation, trajectory, todo panel, subagent directory | dsh `0.1.6-alpha.1` host client | `dsh-session-pulse` is disabled by default; only domain-specific security views remain |
+| Session turn navigation, trajectory, todo panel, subagent directory | dsh `0.1.7-rc.1` host client | `dsh-session-pulse` is disabled by default; only domain-specific security views remain |
 | Session persistence, paging, fork, archive, stats, projections | dsh host | Saker consumes the same session state; no second session store |
 | Browser use | dsh experimental Browser Use provider; otherwise an upstream browser MCP server | `browser-recon` is methodology only and prefers host Browser Use or MCP Studio proxy tools |
 | Computer use | dsh experimental Cua Driver providers | Saker does not ship a desktop-control runtime |
@@ -20,7 +20,8 @@ Saker should not rebuild capabilities that the host already owns. This map recor
 
 Use host Browser Use when a session must own a browser resource for its full lifetime. Use the MCP Studio Chrome DevTools preset when token pressure matters more: it pins `chrome-devtools-mcp@1.9.0`, stays disabled until explicitly enabled, and `auto`/proxy exposure keeps the full 29-tool catalog out of the standing prompt.
 
-The measured upstream catalogs at `0.1.6-alpha.1` are:
+The measured upstream catalogs at `0.1.6-alpha.1` are retained as the closest
+published baseline; 0.1.7 preserves the same Browser Use/MCP tool families:
 
 | Provider | Tools | Serialized tool schemas |
 |---|---:|---:|

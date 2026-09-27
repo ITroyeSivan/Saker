@@ -24,7 +24,7 @@ export const TAXONOMIES = {
 			{ id: "s3", label: "3 登陆口专线" },
 			{ id: "s4", label: "4 逐面挖掘" },
 			{ id: "s5", label: "5 验证与影响证明" },
-			{ id: "s6", label: "6 收口" }
+			{ id: "s6", label: "6 收尾" }
 		],
 		forms: [
 			{ id: "web", label: "Web" },
@@ -170,7 +170,7 @@ export const TAXONOMIES = {
 				id: "logic", label: "业务逻辑", desc: "规则与状态的设计缺陷",
 				items: [
 					{ id: "payment", label: "支付/订单逻辑", ref: "web/web-logic-vulns.md" },
-					{ id: "state-bypass", label: "状态机绕过", ref: "web/web-logic-vulns.md" },
+					{ id: "state-bypass", label: "状态流转绕过", ref: "web/web-logic-vulns.md" },
 					{ id: "race", label: "并发竞态", ref: "web/race-condition.md" },
 					{ id: "rule-bypass", label: "业务规则绕过", ref: "zh/logic-flaws.md" },
 					{ id: "sms-bomb", label: "短信/邮箱轰炸", ref: "zh/logic-flaws.md" },
@@ -529,7 +529,7 @@ export const TAXONOMIES = {
 				]
 			},
 			{
-				id: "defense-verify", label: "防御验证与收口", desc: "detection gap·穷尽终止", zone: "wrapup",
+				id: "defense-verify", label: "防御验证与收尾", desc: "detection gap·穷尽终止", zone: "wrapup",
 				items: [
 					{ id: "gap3", label: "detection gap 三终态（检测到/gap/无法评估）", ref: "defense/detection-matrix.md" },
 					{ id: "evidence", label: "防御证据请求（演练启动一次性）", pb: "防御证据请求清单节" },
@@ -753,9 +753,9 @@ export const TAXONOMIES = {
 				]
 			},
 			{
-				id: "attribution", label: "定性收口", desc: "疑似→取证验证→定性", zone: "reconstruct",
+				id: "attribution", label: "定性结论", desc: "疑似→取证验证→定性", zone: "reconstruct",
 				items: [
-					{ id: "tri-state", label: "三态收口（定性/疑似/排除）", pb: "失陷定性" },
+					{ id: "tri-state", label: "三态结论（定性/疑似/排除）", pb: "失陷定性" },
 					{ id: "ev4", label: "证据四级锚定", pb: "证据与时间线主线" },
 					{ id: "ai-fp", label: "AI 辅助开发指纹归因", ref: "knowledge/threat-intel-2026.md" },
 					{ id: "no-force", label: "定不实不硬凑结论", pb: "失陷定性" }
@@ -836,7 +836,7 @@ export const TAXONOMIES = {
 			{ id: "s1", label: "1 测绘" },
 			{ id: "s2", label: "2 路径验证" },
 			{ id: "s3", label: "3 横向与持久化" },
-			{ id: "s4", label: "4 权限链收口" },
+			{ id: "s4", label: "4 权限链结论" },
 			{ id: "s5", label: "5 检测缺口" },
 			{ id: "s6", label: "6 环境还原" },
 			{ id: "s7", label: "7 报告" }
@@ -861,7 +861,7 @@ export const TAXONOMIES = {
 			{ id: "entry", label: "入口与凭证" },
 			{ id: "engine", label: "战果扩大引擎" },
 			{ id: "native", label: "云原生战场" },
-			{ id: "close", label: "收口与检测" }
+			{ id: "close", label: "收尾与检测" }
 		],
 		/** 登记词别名（cloud-security 专属）：结果词（路径类型/AK-SK 族/报告词）与体系技法标签的桥接
 		 *  ——同 ad/binary/code-audit 别名机制；12 官方路径类型词全中+破 IAM/OIDC 歧义。 */
@@ -883,7 +883,7 @@ export const TAXONOMIES = {
 			"SK 泄露": "entry-disc/hardcoded-first", "密钥泄露": "entry-disc/hardcoded-first",
 			"凭据泄露": "entry-disc/hardcoded-first", "AccessKey 泄露": "entry-disc/hardcoded-first",
 			"AccessKey": "entry-disc/hardcoded-first", "前端泄露": "entry-disc/hardcoded-first",
-			// 接管/信任/收口词
+			// 接管/信任/收尾词
 			"子账号接管": "loot-order/ctrl-face", "账号接管": "loot-order/ctrl-face",
 			"IAM": "perm-recon",
 			"OIDC": "trust-lateral/oidc", "跨云": "trust-lateral",
@@ -1124,7 +1124,7 @@ export const TAXONOMIES = {
 			{ id: "dims", label: "分析维度" },
 			{ id: "craft", label: "形态与还原" },
 			{ id: "cards", label: "场景作战卡" },
-			{ id: "deliver", label: "交付与收口" }
+			{ id: "deliver", label: "交付与收尾" }
 		],
 		stateLabels: { "tested-found": "已分析·有结论", "tested-clear": "已分析·未见异常", na: "不适用（附原因）", "budget-stop": "未分析·收窄" },
 		stateShort: { found: "有结论", clear: "未见异常", na: "不适用", budget: "未分析" },
@@ -1279,7 +1279,7 @@ export const TAXONOMIES = {
 				]
 			},
 			{
-				id: "ledger-collect", label: "覆盖与假设台账", desc: "B2 收口", zone: "deliver",
+				id: "ledger-collect", label: "覆盖与假设台账", desc: "B2 结论", zone: "deliver",
 				items: [
 					{ id: "coverage", label: "analysis-coverage.md 维度终态", pb: "分析维度覆盖规则" },
 					{ id: "ledger", label: "hypothesis-ledger.md（确认/证伪/未决）", pb: "假设台账终态规则" },
@@ -1387,7 +1387,7 @@ export const TAXONOMIES = {
 			{
 				id: "biz-logic", label: "业务逻辑三行", desc: "sink 轴之外每模块另过", zone: "matrix",
 				items: [
-					{ id: "state-row", label: "状态变更（状态机跳步/回退）", pb: "业务逻辑维度行" },
+					{ id: "state-row", label: "状态变更（状态流转跳步/回退）", pb: "业务逻辑维度行" },
 					{ id: "race-row", label: "并发（双花/超卖/重复领取）", pb: "业务逻辑维度行" },
 					{ id: "client-ctrl", label: "客户端可控值（金额/角色/回调）", pb: "业务逻辑维度行" }
 				]
@@ -1622,7 +1622,7 @@ export const TAXONOMIES = {
 				]
 			},
 			{
-				id: "feedback-detect", label: "检测侧回馈", desc: "av-evasion → attack-defense 收口", zone: "deliver",
+				id: "feedback-detect", label: "检测侧回馈", desc: "av-evasion → attack-defense 收尾", zone: "deliver",
 				items: [
 					{ id: "rule-cand", label: "规则候选回馈（YARA/Sigma/遥测指标）", pb: "检测侧情报回馈" },
 					{ id: "gap-handoff", label: "detection gap 对接（方向固定）", pb: "检测侧情报回馈" }
@@ -1758,7 +1758,7 @@ export const TAXONOMIES = {
 				]
 			},
 			{
-				id: "ledger-writeup", label: "台账与复盘", desc: "两门收口", zone: "discipline",
+				id: "ledger-writeup", label: "台账与复盘", desc: "两门结论", zone: "discipline",
 				items: [
 					{ id: "board-gate", label: "board 门（challenge-board.md 题面登记）", pb: "两门门禁" },
 					{ id: "flag-gate", label: "flag 门（flag-ledger.md 验证证据）", pb: "两门门禁" },

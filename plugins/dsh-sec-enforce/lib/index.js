@@ -44,6 +44,8 @@ const Config = z.object({
 	askGate: z.boolean().default(true),
 	intentGate: z.boolean().default(true),
 	constraintGate: z.boolean().default(true),
+	pipelineGate: z.boolean().default(true),
+	spreadGate: z.boolean().default(true),
 	killSwitch: z.boolean().default(true),
 	allowDirs: z.array(z.string()).default([])
 });
@@ -82,9 +84,27 @@ export function gateLogHasPass(logText, mode, gateId) {
 	return false;
 }
 
+/**
+ * 把写入工具的 target 解析成绝对路径，**相对路径以会话工作区为基准**。
+ *
+ * 为什么（2026-09-25 真机会话实测）：写入工具接受相对路径，而写入调用里的相对路径
+ * 语义就是「相对会话工作区」。判定却只做 `path.resolve(target)`——那是相对**宿主进程
+ * 的 cwd**（dsh 源码检出目录或安装目录）。于是 `artifacts/evidence/E3.md` 这种完全合法
+ * 的工作区内写入被解析到工作区外，报「写入目标在任务工作区之外」被拦。实测模型连撞
+ * 三次、随后改用绝对路径——守卫实际上在教模型绕开它自己的 bug。
+ * 绝对路径行为不变；「是否落在工作区内」的判定本身也没改。
+ * @param target - 工具参数里的 file_path / path。
+ * @param workspace - 会话工作区（agent.session.header.cwd）。
+ * @returns 绝对路径。
+ */
+export function resolveTargetPath(target, workspace) {
+	const raw = typeof target === "string" ? target : String(target ?? "");
+	return path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(workspace ?? ".", raw);
+}
+
 /** 目标路径是否是报告文件（工作区 reports/ 目录下）。 */
 export function isReportPath(target, workspace) {
-	const norm = path.resolve(target);
+	const norm = resolveTargetPath(target, workspace);
 	const ws = path.resolve(workspace);
 	const rel = path.relative(ws, norm);
 	return !rel.startsWith("..") && rel.split(path.sep)[0] === "reports";
@@ -92,17 +112,18 @@ export function isReportPath(target, workspace) {
 
 /** 目标路径是否在允许写入的范围内（工作区内，或任一豁免目录内）。 */
 export function isWritable(target, workspace, allowDirs = []) {
+	const resolved = resolveTargetPath(target, workspace);
 	const candidates = [workspace, ...allowDirs];
 	return candidates.some((dir) => {
 		if (!dir) return false;
-		const rel = path.relative(path.resolve(dir), path.resolve(target));
+		const rel = path.relative(path.resolve(dir), resolved);
 		return !rel.startsWith("..") && !path.isAbsolute(rel);
 	});
 }
 
 /** 目标路径是否是 redteam 总控的任务书（task-briefs/*.md）。 */
 export function isTaskBriefPath(target, workspace) {
-	const rel = path.relative(path.resolve(workspace), path.resolve(target));
+	const rel = path.relative(path.resolve(workspace), resolveTargetPath(target, workspace));
 	return !rel.startsWith("..") && rel.split(path.sep)[0] === "task-briefs" && /\.md$/i.test(rel);
 }
 
@@ -168,10 +189,37 @@ export function buildAskListener({ config, appendLog, resolveMode }) {
 	return async function askListener(exec, next) {
 		if (!cfg.askGate) return next();
 		const agent = exec?.agent;
-		if (!agent || exec.name !== "bash" || typeof exec.arguments?.command !== "string") return next();
+		if (!agent) return next();
 		const mode = resolveMode(agent);
 		if (mode === undefined || !SECURITY_MODES.has(mode)) return next();
-		const ask = scanAsk(exec.arguments.command);
+		let ask;
+		let preApprovedMcp = false;
+		if (mode === "pentest" && exec.name === "memshell_cli" && exec.arguments?.action === "run") {
+			const planId = String(exec.arguments?.planId || "");
+			let planText = "";
+			if (/^ms-[a-f0-9]{12}$/i.test(planId)) {
+				try {
+					const planFile = path.join(agent.session?.header?.cwd || "", "artifacts", "memshell", `cli-plan-${planId}.json`);
+					const plan = JSON.parse(fs.readFileSync(planFile, "utf8"));
+					planText = `计划 ${plan.commandLine || planId}；风险 ${plan.payloadReview?.summary || plan.risk || "unknown"}；批准短语 ${plan.approvalPhrase || "（只读命令）"}。`;
+				} catch { /* 计划缺失时仍走审批，不泄露或猜测内容 */ }
+			}
+			ask = { reason: `内存马 CLI 执行需人工审批：${planText || `已登记 planId=${planId || "?"}`}该动作会经自建 memparty backend 生成/部署/连接持久化原语，影响目标环境——批准即按该计划执行，拒绝则只保留计划与命令模板。` };
+		} else if (/^mcp__.*(?:memshell|memparty).*__/i.test(String(exec.name || ""))) {
+			const planId = String(exec.arguments?.__sakerMemshellPlanId || "");
+			const token = String(exec.arguments?.__sakerMemshellApprovalToken || "");
+			if (/^mp-[a-f0-9]{12}$/i.test(planId) && token) {
+				try {
+					const planFile = path.join(agent.session?.header?.cwd || "", "artifacts", "memshell", `mcp-plan-${planId}.json`);
+					const plan = JSON.parse(fs.readFileSync(planFile, "utf8"));
+					if (plan.approvalToken === token) preApprovedMcp = true;
+				} catch { /* token 无法核验时退回人工审批 */ }
+			}
+			if (!preApprovedMcp) ask = { reason: `内存马 MCP 工具「${exec.name}」需人工审批：直连 MCP 会跳过 CLI 计划链；除非它携带已批准计划的一次性令牌，否则只能作为手动/调试调用。` };
+		} else if (exec.name === "bash" && typeof exec.arguments?.command === "string") {
+			ask = scanAsk(exec.arguments.command);
+		}
+		if (preApprovedMcp) return next();
 		if (ask === undefined) return next();
 		const downstream = await next();
 		if (downstream?.kind !== "allow") return downstream;
@@ -203,8 +251,8 @@ export function scanRate(command) {
 }
 
 /** 组装 guard（导出供单测直接调用，不依赖宿主）。 */
-export function buildGuard({ config, readGateLog, readOperationState, appendLog, resolveMode }) {
-	const cfg = { reportGate: true, writeBoundary: true, dangerousOps: true, rateDiscipline: true, askGate: true, intentGate: true, constraintGate: true, killSwitch: true, allowDirs: [], ...config };
+export function buildGuard({ config, readGateLog, readOperationState, readAssetInventory, readAttackPlan, readAttackProgress, appendLog, resolveMode }) {
+	const cfg = { reportGate: true, writeBoundary: true, dangerousOps: true, rateDiscipline: true, askGate: true, intentGate: true, constraintGate: true, pipelineGate: true, spreadGate: true, killSwitch: true, allowDirs: [], ...config };
 	return function guard(exec) {
 		const agent = exec?.agent;
 		if (!agent) return undefined;
@@ -212,8 +260,9 @@ export function buildGuard({ config, readGateLog, readOperationState, appendLog,
 		const mode = resolveMode(agent);
 		if (mode === undefined || !SECURITY_MODES.has(mode)) return undefined;
 		const workspace = agent.session?.header?.cwd;
-		let reason;
-		if (WRITE_TOOLS.has(exec.name)) {
+		let reason = pipelineReason(cfg, mode, exec, workspace, readAssetInventory);
+		if (reason === undefined) reason = spreadReason(cfg, mode, exec, workspace, readAttackPlan, readAttackProgress);
+		if (reason === undefined && WRITE_TOOLS.has(exec.name)) {
 			const target = exec.arguments?.file_path ?? exec.arguments?.path;
 			if (typeof target === "string" && target && workspace) {
 				if (cfg.writeBoundary && !isWritable(target, workspace, cfg.allowDirs)) {
@@ -234,23 +283,23 @@ export function buildGuard({ config, readGateLog, readOperationState, appendLog,
 							const state = typeof readOperationState === "function" ? readOperationState(workspace) : null;
 							const openIds = openCriteriaIds(state);
 							if (openIds !== null && openIds.length > 0) {
-								reason = `报告落盘被目标契约拦截：operation-state.json 尚有未收口准则（${openIds.join(", ")}）——先 operation_progress 逐条 met（带证据），或与用户确认修订目标后再产出 reports/。`;
+								reason = `报告落盘被拦住：operation-state.json 里还有未完成的完成标准（${openIds.join(", ")}）——先用 operation_progress 逐条更新结果并附证据，或与用户确认修改目标后再写 reports/。`;
 							} else if (cfg.intentGate) {
 								const openIntentIds = openIntentsOf(state);
 								if (openIntentIds.length > 0) {
-									reason = `报告落盘被意图台账拦截：尚有未收口方向（${openIntentIds.join(", ")}）——operation_progress intent_done/intent_blocked/intent_dropped 逐条收口（blocked/dropped 须 note 原因），或与用户确认放弃后再产出 reports/。`;
+									reason = `报告落盘被拦住：还有未结束的工作方向（${openIntentIds.join(", ")}）——用 operation_progress intent_done/intent_blocked/intent_dropped 逐条结束（受阻或放弃必须在 note 写明原因），或与用户确认放弃后再写 reports/。`;
 								}
 							}
 						}
 					}
 				}
 			}
-		} else if (exec.name === "bash" && typeof exec.arguments?.command === "string") {
+		} else if (reason === undefined && exec.name === "bash" && typeof exec.arguments?.command === "string") {
 			const command = exec.arguments.command;
 			const danger = cfg.dangerousOps ? scanDangerous(command) : undefined;
 			const rate = cfg.rateDiscipline ? scanRate(command) : undefined;
 			reason = danger ?? rate ?? constraintReason(cfg, workspace, command, readOperationState);
-		} else if (exec.name === "fetch" && typeof exec.arguments?.url === "string") {
+		} else if (reason === undefined && exec.name === "fetch" && typeof exec.arguments?.url === "string") {
 			reason = constraintReason(cfg, workspace, exec.arguments.url, readOperationState);
 		}
 		if (reason !== undefined && workspace) {
@@ -297,6 +346,53 @@ function constraintReason(cfg, workspace, subject, readOperationState) {
 	return `任务约束拦截（${hits.map((h) => h.id ?? "?").join(",")}）：${hits.map((h) => h.text).join("；")}——该约束为开工时登记的用户红线（operation_constraints，命中匹配词即拦）；确需此项操作，先与用户确认并修订约束台账。`;
 }
 
+const DISPATCH_TOOL_RE = /^(subagent|workflow|ralph)(?:_|$)/i;
+const REPRESENTATIVE_INTENT_RE = /代表资产|representative|access_confirm|attack_gate|最小影响确认/i;
+
+/** 攻击流程门禁：pentest 在资产清单为空时不允许先扇出子代理。 */
+function pipelineReason(cfg, mode, exec, workspace, readAssetInventory) {
+	if (!cfg.pipelineGate || mode !== "pentest" || !workspace) return undefined;
+	if (!DISPATCH_TOOL_RE.test(String(exec?.name ?? ""))) return undefined;
+	let inventory;
+	try { inventory = typeof readAssetInventory === "function" ? readAssetInventory(workspace) : null; } catch { inventory = null; }
+	const count = Array.isArray(inventory?.assets) ? inventory.assets.length : 0;
+	if (count > 0) return undefined;
+	return "攻击流程门禁拦截：信息收集还不成清单，先不要派子代理。先用 asset_search（FOFA/Hunter/Quake）或 asset_ingest（TScanPlus/fscan/nmap/httpx 导出）把资产写进 asset-inventory.json，再用 attack_plan 生成资产组；需要并行侦察时，先完成至少一轮资产清单，再按资产组分派。安全范围很小的任务也应先留下这 1 个资产的最小清单。";
+}
+
+function argsText(exec) {
+	try { return JSON.stringify(exec?.arguments ?? {}); } catch { return String(exec?.arguments ?? ""); }
+}
+
+/** 代表资产门：未 confirmed 的资产组不能直接派发“铺开/批量”子代理。 */
+function spreadReason(cfg, mode, exec, workspace, readAttackPlan, readAttackProgress) {
+	if (!cfg.spreadGate || mode !== "pentest" || !workspace) return undefined;
+	if (!DISPATCH_TOOL_RE.test(String(exec?.name ?? ""))) return undefined;
+	let plan;
+	let progress;
+	try { plan = typeof readAttackPlan === "function" ? readAttackPlan(workspace) : null; } catch { plan = null; }
+	try { progress = typeof readAttackProgress === "function" ? readAttackProgress(workspace) : null; } catch { progress = null; }
+	const buckets = Array.isArray(plan?.buckets) ? plan.buckets : [];
+	if (buckets.length === 0) return undefined;
+	const text = argsText(exec);
+	const referenced = buckets.filter((bucket) => {
+		const id = String(bucket?.bucketId ?? "");
+		return id && text.includes(id);
+	});
+	const pending = buckets.filter((bucket) => progress?.buckets?.[String(bucket?.bucketId ?? "")]?.outcome !== "confirmed");
+	const spreadIntent = /铺开|批量打|批量利用|同组全部|全部资产|spread/i.test(text);
+	if (referenced.length === 0 && !spreadIntent) return undefined;
+	const candidates = referenced.length > 0 ? referenced.filter((bucket) => pending.includes(bucket)) : pending;
+	for (const bucket of candidates) {
+		const bucketId = String(bucket?.bucketId ?? "");
+		const representative = String(bucket?.representativeAssetId || bucket?.assetIds?.[0] || "");
+		const representativeIntent = (representative && text.includes(representative)) || REPRESENTATIVE_INTENT_RE.test(text);
+		if (representativeIntent && referenced.length <= 1) continue;
+		return `代表资产门拦截：资产组 ${bucketId} 还没有 confirmed 证据，不能铺开同组。先看 attack_gate status，验证代表资产 ${representative || "（计划未指定）"}，再用 attack_gate record outcome=confirmed evidence=... 写入门禁；派代表资产验证任务时，prompt 里明确写出代表资产 id。`;
+	}
+	return undefined;
+}
+
 function apply(ctx, config) {
 	const appendLog = (workspace, line) => {
 		fs.appendFileSync(path.join(workspace, "enforce-log.md"), line);
@@ -311,6 +407,15 @@ function apply(ctx, config) {
 		},
 		readOperationState: (workspace) => {
 			try { return JSON.parse(fs.readFileSync(path.join(workspace, "operation-state.json"), "utf8")); } catch { return null; }
+		},
+		readAssetInventory: (workspace) => {
+			try { return JSON.parse(fs.readFileSync(path.join(workspace, "asset-inventory.json"), "utf8")); } catch { return null; }
+		},
+		readAttackPlan: (workspace) => {
+			try { return JSON.parse(fs.readFileSync(path.join(workspace, "fingerprint-buckets.json"), "utf8")); } catch { return null; }
+		},
+		readAttackProgress: (workspace) => {
+			try { return JSON.parse(fs.readFileSync(path.join(workspace, "attack-progress.json"), "utf8")); } catch { return null; }
 		},
 		appendLog,
 		resolveMode
