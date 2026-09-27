@@ -109,37 +109,18 @@ ok("源码树根不含 log/tmp/bak 残片", transient.length === 0, transient.jo
 // 方案 §0.2 也写明「persona 里只放声明与检索顺序」。这条把两者钉住：
 //   · persona 文本超过预算 → 红（防止提示词慢慢长回去）；
 //   · persona 里出现 playbook 的**方法论细则标志词** → 红（说明又把细则搬回常驻层了）。
-// 注意量的是 **prefix 块本身**，不是 YAML 文件字节——这些组合文件里大半是维护注释，
-// 按文件字节量会把 9–15 KB 的 persona 误报成 26–33 KB（我犯过这个错）。
+// 默认 persona 现在保存在 preset/<mode>/opening.md，由方法编排设置页整段编辑。
 {
   const CAP_BYTES = 16 * 1024;
   const DETAIL_MARKERS = ["五个切入点", "四步编排"];
   const offenders = [];
-  const extractPrefixBlock = (src) => {
-    const lines = src.split(/\r?\n/);
-    const start = lines.findIndex((l) => /^\s*prefix:\s*\|-?\s*$/.test(l));
-    if (start < 0) return "";
-    const indent = lines[start].match(/^\s*/)[0].length;
-    const out = [];
-    for (let i = start + 1; i < lines.length; i += 1) {
-      const l = lines[i];
-      if (l.trim() === "") { out.push(""); continue; }
-      const cur = l.match(/^\s*/)[0].length;
-      if (cur <= indent) break;
-      out.push(l.slice(Math.min(cur, indent + 2)));
-    }
-    return out.join("\n").trimEnd();
-  };
   for (const preset of ["pentest", "code-audit", "ctf-solver"]) {
-    for (const file of ["agent.patch.yml", "agent.cordis.yml"]) {
-      const p = join(ROOT, "preset", preset, file);
-      if (!existsSync(p)) continue;
-      const text = extractPrefixBlock(readFileSync(p, "utf8"));
-      const bytes = Buffer.byteLength(text, "utf8");
-      if (bytes > CAP_BYTES) offenders.push(`${preset}/${file} persona ${(bytes / 1024).toFixed(1)} KB > ${CAP_BYTES / 1024} KB`);
-      for (const m of DETAIL_MARKERS) {
-        if (text.includes(m)) offenders.push(`${preset}/${file} persona 里出现 playbook 的方法论细则「${m}」`);
-      }
+    const file = join(ROOT, "preset", preset, "opening.md");
+    const text = existsSync(file) ? readFileSync(file, "utf8").trimEnd() : "";
+    const bytes = Buffer.byteLength(text, "utf8");
+    if (bytes > CAP_BYTES) offenders.push(`${preset}/opening.md persona ${(bytes / 1024).toFixed(1)} KB > ${CAP_BYTES / 1024} KB`);
+    for (const m of DETAIL_MARKERS) {
+      if (text.includes(m)) offenders.push(`${preset}/opening.md persona 里出现 playbook 的方法论细则「${m}」`);
     }
   }
   ok("persona 在预算内、且没把 playbook 的方法论细则搬回常驻层", offenders.length === 0, offenders.join("; "));

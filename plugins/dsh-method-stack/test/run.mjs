@@ -180,6 +180,7 @@ const row = methodRowBody(src)
   const oldHome = process.env.DSH_HOME
   process.env.DSH_HOME = tmpHome
   let handler = null
+  let modeOpening = null
   try {
     const mod = await import(new URL(`../lib/index.js?cache-test=${Date.now()}`, import.meta.url))
     mod.apply({
@@ -187,8 +188,11 @@ const row = methodRowBody(src)
         rpc: { handle: () => {} },
         register: (_ctx, _channel, fn) => { handler = fn },
       },
-      systemPrompt: { context: () => {}, section: () => {} },
-      agentPresets: { composedPreset: () => 'pentest' },
+      systemPrompt: {
+        context: () => {},
+        section: (section) => { if (section.name === 'saker-mode-opening') modeOpening = section },
+      },
+      agentPresets: { composedPreset: (agentCtx) => agentCtx?.preset || 'pentest' },
       logger: { warn: () => {} },
     })
     ok('能拿到 method-stack RPC handler', typeof handler === 'function')
@@ -248,6 +252,59 @@ const row = methodRowBody(src)
       ok('clone 后目录缓存立即失效并切换为用户层来源',
         cloned?.ok === true && reads > afterClone && clonedMethod?.origin === 'user',
         `reads=${reads}/${afterClone}, origin=${clonedMethod?.origin ?? ''}`)
+
+      // The settings editor loads the complete shipped persona, saves a true
+      // replacement, and the next prompt assembly reads it without restarting.
+      const defaultOpening = fs.readFileSync(new URL('../../../preset/pentest/opening.md', import.meta.url), 'utf8')
+      const openingGet = await handler('opening-get', { presetId: 'pentest' })
+      ok('开场编辑器首开读取完整默认 persona',
+        openingGet?.ok === true && openingGet.value.text === defaultOpening && openingGet.value.isCustom === false)
+      ok('模式 persona 槽位清空，由方法编排插件提供唯一开场',
+        !!modeOpening && modeOpening.order < 0 && modeOpening.text({ agent: { ctx: {} } }).includes(defaultOpening.trim()))
+      ok('模式 persona 开场拒绝路径穿越',
+        (await handler('opening-get', { presetId: '../../outside' }))?.ok === false)
+
+      const customOpening = '用户自定义的完整渗透测试开场。'
+      const openingSaved = await handler('opening-save', { presetId: 'pentest', text: customOpening })
+      ok('保存完整自定义开场，且首存不产生虚假备份',
+        openingSaved?.ok === true && openingSaved.value.text === customOpening && openingSaved.value.isCustom === true && !openingSaved.value.backup)
+      ok('下一轮 prompt assembly 直接采用用户全文替换默认 persona',
+        modeOpening.text({ agent: { ctx: {} } }) === customOpening)
+      const openingSaved2 = await handler('opening-save', { presetId: 'pentest', text: '第二版完整开场。' })
+      ok('替换自定义开场前备份旧全文',
+        openingSaved2?.ok === true && fs.existsSync(openingSaved2.value.backup)
+        && fs.readFileSync(openingSaved2.value.backup, 'utf8') === customOpening)
+      const blankOpening = await handler('opening-save', { presetId: 'pentest', text: '' })
+      ok('空白内容也作为用户自定义全文保存，不会悄悄回到默认',
+        blankOpening?.ok === true && blankOpening.value.isCustom === true && blankOpening.value.text === ''
+        && modeOpening.text({ agent: { ctx: {} } }) === '')
+      const blankReset = await handler('opening-reset', { presetId: 'pentest' })
+      ok('恢复默认后重新注入随包默认全文',
+        blankReset?.ok === true && blankReset.value.isCustom === false
+        && modeOpening.text({ agent: { ctx: {} } }) === defaultOpening)
+
+      // Migrate old prepend-only data by displaying it after the official text;
+      // an explicit save creates the new replacement file, and reset removes both.
+      const openingDir = path.join(tmpHome, 'method-stack', 'opening')
+      fs.mkdirSync(openingDir, { recursive: true })
+      const legacyNote = '旧版附加开场内容'
+      fs.writeFileSync(path.join(openingDir, 'code-audit.md'), legacyNote, 'utf8')
+      const auditDefault = fs.readFileSync(new URL('../../../preset/code-audit/opening.md', import.meta.url), 'utf8')
+      const migrated = await handler('opening-get', { presetId: 'code-audit' })
+      ok('旧版追加文本迁移时与完整默认 persona 合并保留',
+        migrated?.ok === true && migrated.value.migrated === true
+        && migrated.value.text === `${auditDefault.trimEnd()}\n\n${legacyNote}`)
+      await handler('opening-save', { presetId: 'code-audit', text: '代码审计自定义完整开场。' })
+      ok('切换到其他模式后读取其独立用户全文',
+        modeOpening.text({ agent: { ctx: { preset: 'code-audit' } } }) === '代码审计自定义完整开场。')
+      const openingReset = await handler('opening-reset', { presetId: 'code-audit' })
+      ok('恢复默认会备份并移除新旧自定义稿',
+        openingReset?.ok === true && openingReset.value.isCustom === false
+        && !fs.existsSync(path.join(openingDir, 'code-audit.custom.md'))
+        && !fs.existsSync(path.join(openingDir, 'code-audit.md'))
+        && openingReset.value.text === auditDefault
+        && openingReset.value.backups.length === 2
+        && openingReset.value.backups.some((file) => fs.readFileSync(file, 'utf8') === legacyNote))
     } finally {
       fs.readdirSync = originalReaddir
     }
@@ -258,6 +315,25 @@ const row = methodRowBody(src)
     const tempRoot = path.resolve(os.tmpdir()) + path.sep
     if (!resolved.startsWith(tempRoot)) throw new Error('refusing to remove non-temp path: ' + resolved)
     fs.rmSync(resolved, { recursive: true, force: true })
+  }
+}
+
+// ── 2026-09-28：模式开场在设置里编辑的是完整 persona，而不是前置附加段 ──
+{
+  const cli = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
+  const svr = readFileSync(new URL('../lib/index.js', import.meta.url), 'utf8')
+  ok('开场说明明确编辑当前模式完整开场', cli.includes('直接编辑当前模式的完整开场'))
+  ok('设置页提供恢复默认操作', cli.includes("'opening-reset'") && cli.includes('恢复默认'))
+  ok('旧的「官方只读/注入官方之前」说明已移除',
+    !cli.includes('官方，只读') && !cli.includes('注入在官方开场之前'))
+  ok('保存后不再把默认 persona 与用户开场叠加',
+    svr.includes("name: 'saker-mode-opening'") && !svr.includes("name: 'saker-opening'"))
+  for (const preset of ['pentest', 'code-audit', 'ctf-solver']) {
+    const declarative = readFileSync(new URL(`../../../preset/${preset}/agent.cordis.yml`, import.meta.url), 'utf8')
+    const legacy = readFileSync(new URL(`../../../preset/${preset}/agent.patch.yml`, import.meta.url), 'utf8')
+    const opening = readFileSync(new URL(`../../../preset/${preset}/opening.md`, import.meta.url), 'utf8')
+    ok(`${preset} 两种声明都把 persona 槽位交给可编辑开场`,
+      /^\s*prefix: ''$/m.test(declarative) && /^\s*prefix: ''$/m.test(legacy) && opening.trim().length > 0)
   }
 }
 

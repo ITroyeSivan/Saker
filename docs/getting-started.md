@@ -81,7 +81,7 @@ dsh web
 每个目录都是独立的dsh bundle。先安装根模式包，再按需要添加插件：
 
 ```powershell
-dsh plugin --profile web add "file:C:/packages/dsh-saker-0.4.59.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-saker-0.4.60.tgz"
 dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-sec-config-1.3.27.tgz"
 dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-knowledge-hub-0.3.19.tgz"
 dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-skill-browse-1.1.10.tgz"

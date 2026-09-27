@@ -212,42 +212,43 @@ function activeIds(data) {
   return out;
 }
 
-// ── 会话开场：透明查看官方 persona 来源 + 自定义开场（注入官方之前）────
+// ── 模式开场：编辑当前模式的完整开场；恢复默认稿────
 function OpeningCard(props) {
   var [text, setText] = useState(null);
-  var [official, setOfficial] = useState(null);
+  var [isCustom, setIsCustom] = useState(false);
   var [msg, setMsg] = useState('');
-  var [expanded, setExpanded] = useState(false);
   function load() {
-    rpc(props.connection, 'opening-get', { presetId: props.presetId }).then(function (r) { if (r && r.ok) setText(r.value.text || ''); });
-  }
-  useEffect(load, [props.presetId]);
-  function viewOfficial() {
-    if (official) { setExpanded(!expanded); return; }
-    rpc(props.connection, 'opening-official', { presetId: props.presetId }).then(function (r) {
-      if (r && r.ok) { setOfficial(r.value); setExpanded(true); } else setMsg('读取官方开场失败');
+    rpc(props.connection, 'opening-get', { presetId: props.presetId }).then(function (r) {
+      if (r && r.ok) { setText(r.value.text || ''); setIsCustom(!!r.value.isCustom); }
+      else setMsg((r && r.error && r.error.message) || '读取开场失败');
     });
   }
+  useEffect(function () { setText(null); setIsCustom(false); load(); }, [props.presetId]);
   function save() {
     rpc(props.connection, 'opening-save', { presetId: props.presetId, text: text }).then(function (r) {
-      if (r && r.ok) setMsg('已保存：此开场将在下一次模型请求显示于官方 persona 之前（清空内容=取消自定义）');
+      if (r && r.ok) { setText(r.value.text || ''); setIsCustom(true); setMsg('已保存，下轮生效'); }
       else setMsg((r && r.error && r.error.message) || '保存失败');
       setTimeout(function () { setMsg(''); }, 2600);
     });
   }
+  function restore() {
+    rpc(props.connection, 'opening-reset', { presetId: props.presetId }).then(function (r) {
+      if (r && r.ok) { setText(r.value.text || ''); setIsCustom(false); setMsg('已恢复默认开场'); }
+      else setMsg((r && r.error && r.error.message) || '恢复失败');
+      setTimeout(function () { setMsg(''); }, 2600);
+    });
+  }
   if (text === null) return null;
-  var active = (official && official.sourcePath) ? official.sourcePath.replace(/.*dsh-saker[\\/]/i, 'preset/').replace(/\\/g, '/') : '';
   return React.createElement('div', { style: { border: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', borderRadius: 8, padding: '8px 12px', margin: '0 0 10px', background: 'var(--dsw-alias-bg-layer-2,#fafafb)' } },
     React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 } },
-      React.createElement('span', { style: { fontSize: 13, fontWeight: 700 } }, '会话开场（可自定义）'),
-      React.createElement('a', { href: '#', style: { fontSize: 11, color: '#2f81f7', textDecoration: 'none' }, onClick: function (e) { e.preventDefault(); viewOfficial(); } }, expanded ? '收起官方来源' : '查看官方开场是怎么写的'),
+      React.createElement('span', { style: { fontSize: 13, fontWeight: 700 } }, '模式开场（可自定义）'),
+      React.createElement('span', { style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary,#6e6e73)' } }, isCustom ? '自定义' : '默认'),
       React.createElement('div', { style: { flex: 1 } })),
     React.createElement('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', marginBottom: 4, lineHeight: 1.6 } },
-      '模型会话的第一段系统开场来自模式预设（官方，只读）' + (active ? '：' + active : '') + '。' +
-      '要自定义开头，在下方写一段——它将注入在官方开场之前（适用于授权语境/表达纪律之外的、你自己的开场指令）。'),
-    expanded && official ? React.createElement('pre', { style: { whiteSpace: 'pre-wrap', fontSize: 11, background: '#f4f4f5', borderRadius: 6, padding: 8, maxHeight: 180, overflow: 'auto', margin: '0 0 6px' } }, (official.excerpt || '(未读取到 persona 段)') + '\n\n（来源：' + (official.sourcePath || '?') + '）') : null,
-    React.createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'flex-start' } },
-      React.createElement('textarea', { value: text, onChange: function (e) { setText(e.target.value); }, rows: 4, placeholder: '留空=不自定义。例如：\n- 用中文交流；结论先给判断再给证据\n- 报告一律落到 reports/ 并登记 evidence-index\n- 每次调用工具先想清楚这一步要验证什么假设', style: { flex: 1, boxSizing: 'border-box', fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 12, lineHeight: 1.6 } }),
+      '直接编辑当前模式的完整开场；保存后下轮生效。'),
+    React.createElement('textarea', { value: text, onChange: function (e) { setText(e.target.value); }, rows: 10, spellCheck: false, placeholder: '输入当前模式的开场内容', style: { width: '100%', boxSizing: 'border-box', fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 12, lineHeight: 1.6, marginBottom: 6 } }),
+    React.createElement('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: 6 } },
+      React.createElement(Btn, { onClick: restore, disabled: !isCustom }, '恢复默认'),
       React.createElement(Btn, { onClick: save }, '保存开场')),
     msg ? React.createElement('div', { style: { fontSize: 12, color: '#1a7f37', marginTop: 4 } }, msg) : null);
 }

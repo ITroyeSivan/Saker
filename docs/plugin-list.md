@@ -14,7 +14,7 @@ Saker当前包含24 个独立插件。多数用户不需要逐个理解；`pack-
 | 界面与配置 | `dsh-mcp-studio` | 1.2.0 | 管理、诊断和预览MCP服务及工具；stdio 断管错误不再打挂宿主；Chrome DevTools 预设固定 1.9.0；删除服务器需二次确认 |
 | 界面与配置 | `dsh-knowledge-hub` | 0.3.19 | 知识库管理：**23 个自动同步知识包**（含 Awesome-POC / Nday-Exploit-Plan / PeiQi WIKI 三个护网 Nday 语料源，覆盖泛微/致远/用友/金蝶等国产系统 POC）、**可远程刷新的来源清单 + 一键更新**、SQLite FTS5 离线混合检索、随包 PATT 与手册、用户积累、Git/本机导入、Exploit-DB 字段化索引；来源筛选可跨折叠目录命中文件名，打开文章再返回保留展开与滚动位置，精读结果带磁盘绝对路径；同步结束自动回收孤儿临时 clone 与多余分叉备份；未打开文件时检索列表占满整宽；RPC 失败改回结构化错误对象（旧写法会让详情区白板卡在"保存中"，连"文件不存在"都不显示） |
 | 界面与配置 | `dsh-skill-browse` | 1.1.10 | 设置页「技能」：列出共享 / 模式专属 / 已安装技能；上传zip/tgz安装并热载、可卸载用户层技能；一键复制宿主引用串；**卸载改为移入技能目录 `.trash/`**（不再直接 rmSync，删错可找回） |
-| 界面与配置 | `dsh-method-stack` | 0.1.20 | 提示词模块化：26 个内置提示词可勾选、克隆、改正文、存组合；输入框「方法 ▾」直接切换；**保存正文/开场文本前自动备份**到 `.backups/`（覆盖与清空都可回退） |
+| 界面与配置 | `dsh-method-stack` | 0.1.21 | 提示词模块化：26 个方法可勾选、克隆、改正文、存组合；输入框「方法 ▾」直接切换；设置页可编辑当前模式的完整开场、恢复默认；保存前自动备份 |
 | 工具 | `dsh-scanner-tools` | 1.1.9 | `httpx_probe` 分开展示 title/server 与技术栈提示，歧义时才追加 favicon 指纹请求；`asset_ingest` 可把 TScanPlus/fscan/nmap/httpx 导出归一进 `asset-inventory.json`。Pentest 初始会话不携带 Nmap、目录扫描、Nuclei、Afrog、SQLMap 与爬取工具 schema；`tool_pack` 可在明确假设后按 Agent 加载/卸载这些工具，加载只改变工具面，不会自动运行扫描 |
 | 工具 | `dsh-nday-hunter` | 1.3.45 | Pentest 主线包含 `nday_scope_hunt`：按目录指纹、GET/HEAD 响应签名、FOFA `fid`、产品+目录端口、产品别名分层查询；机构模式把 ICP、域名、名称/证书线索与 Nday 指纹组合，每批不超过 20 个查询，保留 IP-only 候选但不写入活动资产账本。精确范围结果再映射到 `nday_match`；核对来源、版本与前置条件后才验证，RCE 证实即停止 |
 | 工具 | `dsh-semgrep-audit` | 1.0.11 | 使用本地Semgrep和随包规则集进行代码扫描 |

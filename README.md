@@ -7,7 +7,7 @@
 模块化提示词 · 24 个独立插件 · 自定义工具链 · MCP 接入 · 安全知识库 · WebShell 管理
 
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek-Harness-111827?style=flat-square)](https://github.com/deepseek-ai/deepseek-harness)
-[![Saker](https://img.shields.io/badge/Saker-v0.4.59-4f46e5?style=flat-square)](https://github.com/ITroyeSivan/Saker)
+[![Saker](https://img.shields.io/badge/Saker-v0.4.60-4f46e5?style=flat-square)](https://github.com/ITroyeSivan/Saker)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.5-339933?style=flat-square&logo=node.js&logoColor=white)](./package.json)
 [![License](https://img.shields.io/badge/code-MIT-2563eb?style=flat-square)](./LICENSE)
 
@@ -67,7 +67,7 @@ dsh web                          # 重启宿主
 
 工具探测、MCP 地址、DNSLog 等首次配置见 [安装与首次配置](./docs/getting-started.md)。
 
-当前版本支持 DeepSeek Harness `0.1.7-rc.2`，`0.1.6-alpha.1` 保留兼容。发布内容与验证结果见[本版更新日志](./docs/release-v0.4.59.md)。
+当前版本支持 DeepSeek Harness `0.1.7-rc.2`，`0.1.6-alpha.1` 保留兼容。发布内容与验证结果见[本版更新日志](./docs/release-v0.4.60.md)。
 
 | 你想做什么 | 看哪篇 |
 |---|---|
@@ -78,7 +78,7 @@ dsh web                          # 重启宿主
 | 判断能力该用 dsh 宿主还是 Saker | [宿主能力对照](./docs/host-capabilities.md) |
 | 改代码、打包、发版 | [开发与发布](./docs/development.md) |
 | 确认能用在哪、哪些结论要人复核 | [边界与执行约束](./docs/boundaries.md) |
-| 看这一版改了什么 | [发布说明](./docs/release-v0.4.59.md) |
+| 看这一版改了什么 | [发布说明](./docs/release-v0.4.60.md) |
 
 ## 执行范围
 

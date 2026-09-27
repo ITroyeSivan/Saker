@@ -177,7 +177,8 @@ const readPlugin = (name, file = 'lib/index.js') => {
 
   // 4.5 Pentest 的工具边界必须跟随主线提示，且只影响该模式的能力声明。
   const focus = RULES.find((r) => r.id === 'pentest-rce-focus')
-  const pentestPrompt = readFileSync(new URL('../preset/pentest/agent.patch.yml', PLUGINS), 'utf8')
+  // The mode persona is now a separate, user-editable full opening.
+  const pentestPrompt = readFileSync(new URL('../preset/pentest/opening.md', PLUGINS), 'utf8')
   ok('Pentest RCE 工具规则存在并排除该模式', !!focus && !focus.modes.includes('pentest'))
   ok('Pentest 提示明确命中 RCE 后停止且禁止派生会话', /reproducible RCE[\s\S]{0,500}stop/i.test(pentestPrompt) && /Do not spawn subagents, workflows, or side chats/i.test(pentestPrompt))
   ok('Pentest 规则收起派单、记忆轨迹、内网、后渗透和非主线 Nday 工具', ['webshell_', 'netexec_', 'crackmapexec_', 'impacket_', 'subagent', 'workflow', 'campaign_', 'trace_', 'access_confirm', 'memshell_cli', 'nday_handoff'].every((p) => focus.prefixes.includes(p)))

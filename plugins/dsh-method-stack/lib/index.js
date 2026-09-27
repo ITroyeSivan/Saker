@@ -37,8 +37,10 @@ const USER_METHODS_ROOT = path.join(HOME_ROOT, 'methods')
 const PROFILES_DIR = path.join(HOME_ROOT, 'profiles')
 const AUDIT_LOG = path.join(HOME_ROOT, 'audit.log')
 const GROUP_ORDER = ['recon', 'exploit', 'evidence', 'report', 'intranet']
+const PRESET_IDS = new Set(['pentest', 'code-audit', 'ctf-solver'])
 const ID_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/
 const MAX_TEXT = 6000 // 单个方法正文截断保护
+const MAX_OPENING_TEXT = 65536
 const MANIFEST_NAME_RE = /^name:\s*([A-Za-z0-9][A-Za-z0-9._-]{0,63})\s*$/m
 
 // fs.cpSync crashes Node 22 on Windows paths containing non-ASCII characters.
@@ -213,25 +215,47 @@ function renderActive(presetId) {
   return { rev: profile.rev || 1, active: activeIds, text, count: activeIds.length }
 }
 
-/** 用户"开场"（显示于官方 persona 之前）：~/.dsh/method-stack/opening/<preset>.md */
+/** 用户模式开场：~/.dsh/method-stack/opening/<preset>.custom.md */
 function openingDir() { return path.join(HOME_ROOT, 'opening') }
-function openingText(presetId) {
-  try { return fs.readFileSync(path.join(openingDir(), `${presetId}.md`), 'utf8').trim() } catch { return '' }
+function openingPath(presetId) { return path.join(openingDir(), `${presetId}.custom.md`) }
+function legacyOpeningPath(presetId) { return path.join(openingDir(), `${presetId}.md`) }
+function readTextFile(file) {
+  try { return fs.readFileSync(file, 'utf8') } catch { return '' }
 }
-/** 官方开场来源：preset 包 agent.cordis.yml 中 persona 行段原文（透明展示用）。 */
+function sakerPackageRoot() {
+  const req = createRequire(import.meta.url)
+  try { return path.dirname(req.resolve('dsh-saker/package.json')) } catch {
+    // Development checkout: plugins/dsh-method-stack/lib -> repository root.
+    return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
+  }
+}
+/** 随包默认开场文本；每种模式由独立 opening.md 管理，用户可直接覆盖。 */
 function officialOpeningOf(presetId) {
   try {
-    const req = createRequire(import.meta.url)
-    const pkgRoot = path.dirname(req.resolve('dsh-saker/package.json'))
-    const file = path.join(pkgRoot, 'preset', presetId, 'agent.cordis.yml')
-    if (!fs.existsSync(file)) return { sourcePath: file, excerpt: '' }
-    const raw = fs.readFileSync(file, 'utf8')
-    const start = raw.indexOf('id: persona')
-    if (start < 0) return { sourcePath: file, excerpt: '' }
-    const next = raw.indexOf('\n- id:', start + 5)
-    const seg = (next < 0 ? raw.slice(start) : raw.slice(start, next)).slice(0, 1500)
-    return { sourcePath: file, excerpt: seg }
-  } catch { return { sourcePath: '', excerpt: '' } }
+    if (!PRESET_IDS.has(presetId)) return { sourcePath: '', excerpt: '', text: '' }
+    const file = path.join(sakerPackageRoot(), 'preset', presetId, 'opening.md')
+    const text = readTextFile(file)
+    return { sourcePath: file, excerpt: text, text }
+  } catch { return { sourcePath: '', excerpt: '', text: '' } }
+}
+function openingInfo(presetId) {
+  const official = officialOpeningOf(presetId)
+  const customFile = openingPath(presetId)
+  if (fs.existsSync(customFile)) {
+    return { presetId, text: readTextFile(customFile), isCustom: true, migrated: false, sourcePath: official.sourcePath }
+  }
+  // Earlier versions stored an additive snippet in <preset>.md. Preserve it
+  // as an addition to the default until the user saves or restores this editor.
+  const legacy = readTextFile(legacyOpeningPath(presetId)).trim()
+  if (legacy) {
+    const text = [official.text.trimEnd(), legacy].filter(Boolean).join('\n\n')
+    return { presetId, text, isCustom: true, migrated: true, sourcePath: official.sourcePath }
+  }
+  return { presetId, text: official.text, isCustom: false, migrated: false, sourcePath: official.sourcePath }
+}
+function openingText(presetId) {
+  if (!PRESET_IDS.has(presetId)) return ''
+  return openingInfo(presetId).text
 }
 
 function audit(presetId, action, detail) {
@@ -390,25 +414,39 @@ export function apply(ctx, config = {}) {
       }
       if (endpoint === 'opening-get') {
         const presetId = typeof p.presetId === 'string' && p.presetId ? p.presetId : 'pentest'
-        return ok({ presetId, text: openingText(presetId) })
+        if (!PRESET_IDS.has(presetId)) return failure('未知模式：' + presetId)
+        return ok(openingInfo(presetId))
       }
       if (endpoint === 'opening-save') {
         const presetId = typeof p.presetId === 'string' && p.presetId ? p.presetId : 'pentest'
-        const text = typeof p.text === 'string' ? p.text.trim() : ''
+        if (!PRESET_IDS.has(presetId)) return failure('未知模式：' + presetId)
+        if (typeof p.text !== 'string') return failure('开场内容必须是文本')
+        const text = p.text
+        if (text.length > MAX_OPENING_TEXT) return failure(`开场不能超过 ${MAX_OPENING_TEXT} 个字符`)
         fs.mkdirSync(openingDir(), { recursive: true })
-        const openingFile = path.join(openingDir(), `${presetId}.md`)
-        // 覆盖或清空之前都先留一份：这是用户自己写的开场文本，写没了没有回退手段
+        const openingFile = openingPath(presetId)
+        // Keep a recoverable copy before replacing a full mode opening.
         const backup = backupFile(openingFile, path.join(openingDir(), '.backups'))
-        if (!text) {
-          try { fs.rmSync(openingFile, { force: true }) } catch { /* ignore */ }
-        } else {
-          fs.writeFileSync(openingFile, text, 'utf8')
+        fs.writeFileSync(openingFile, text, 'utf8')
+        audit('user', 'opening-save', `${presetId} (${text.length} chars)`)
+        return ok({ ...openingInfo(presetId), saved: true, backup })
+      }
+      if (endpoint === 'opening-reset') {
+        const presetId = typeof p.presetId === 'string' && p.presetId ? p.presetId : 'pentest'
+        if (!PRESET_IDS.has(presetId)) return failure('未知模式：' + presetId)
+        const backups = []
+        for (const file of [openingPath(presetId), legacyOpeningPath(presetId)]) {
+          if (!fs.existsSync(file)) continue
+          const backup = backupFile(file, path.join(openingDir(), '.backups'))
+          if (backup) backups.push(backup)
+          fs.rmSync(file, { force: true })
         }
-        audit('user', 'opening-save', presetId + (text ? ` (${text.length} chars)` : ' (cleared)'))
-        return ok({ presetId, saved: true, backup })
+        audit('user', 'opening-reset', presetId)
+        return ok({ ...openingInfo(presetId), reset: true, backups })
       }
       if (endpoint === 'opening-official') {
         const presetId = typeof p.presetId === 'string' && p.presetId ? p.presetId : 'pentest'
+        if (!PRESET_IDS.has(presetId)) return failure('未知模式：' + presetId)
         return ok(officialOpeningOf(presetId))
       }
       if (endpoint === 'save-prompt') {
@@ -469,12 +507,12 @@ export function apply(ctx, config = {}) {
     ctx.logger?.warn?.('dsh-method-stack: systemPrompt unavailable, method injection disabled')
   }
 
-  // 3) 用户"开场"：order -50（官方 persona order=0 之前）注册 section；
-  //    有 ~/.dsh/method-stack/opening/<preset>.md 时注入，让"开头"可自定义。
+  // 3) 当前模式的完整开场由 settings 中的 opening.md 默认稿或用户稿提供。
+  //    preset persona 槽位在 Saker 模式内留空，避免默认稿与自定义稿叠加。
   if (systemPrompt && typeof systemPrompt.section === 'function') {
     try {
       systemPrompt.section({
-        name: 'saker-opening',
+        name: 'saker-mode-opening',
         order: -50,
         text: (assembly) => {
           const agent = assembly?.agent
@@ -482,8 +520,7 @@ export function apply(ctx, config = {}) {
           let presetId = ''
           try { presetId = ctx.agentPresets.composedPreset(agent.ctx) } catch { /* ignore */ }
           if (!presetId) return ''
-          const text = openingText(presetId)
-          return text ? `<user-opening mode="${presetId}">${text}</user-opening>` : ''
+          return openingText(presetId)
         },
       })
     } catch (error) {

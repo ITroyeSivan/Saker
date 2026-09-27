@@ -18,27 +18,14 @@ assert.ok(optedIn.isVisible({ id: 'ctf-solver' }), 'explicit opt-in must expose 
 assert.equal(optedIn.canResolve('ctf-solver'), true)
 
 const pentestPatch = readFileSync(join(ROOT, 'preset/pentest/agent.patch.yml'), 'utf8')
-const extractPersona = (source) => {
-  const lines = source.split(/\r?\n/)
-  const start = lines.findIndex((line) => /^\s*prefix:\s*\|-?\s*$/.test(line))
-  if (start < 0) return ''
-  const indent = lines[start].match(/^\s*/)[0].length
-  const body = []
-  for (let i = start + 1; i < lines.length; i += 1) {
-    const line = lines[i]
-    if (line.trim() === '') { body.push(''); continue }
-    const current = line.match(/^\s*/)[0].length
-    if (current <= indent) break
-    body.push(line.slice(Math.min(current, indent + 2)))
-  }
-  return body.join('\n').trimEnd()
-}
 const pentestCordis = readFileSync(join(ROOT, 'preset/pentest/agent.cordis.yml'), 'utf8')
-assert.equal(extractPersona(pentestPatch), extractPersona(pentestCordis), 'Pentest runtime persona must match its editable cordis source')
-assert.ok(!extractPersona(pentestPatch).includes('ask_user_question'), 'Pentest persona must not inject an interactive question step')
-assert.ok(pentestPatch.includes('Never ask a follow-up question') && pentestPatch.includes('scope_missing'), 'Pentest must stop cleanly when scope is missing')
+const pentestOpening = readFileSync(join(ROOT, 'preset/pentest/opening.md'), 'utf8')
+assert.match(pentestPatch, /^\s*prefix: ''$/m, 'Pentest persona slot must be owned by the editable mode opening')
+assert.match(pentestCordis, /^\s*prefix: ''$/m, 'Pentest declarative persona slot must stay empty')
+assert.ok(!pentestOpening.includes('ask_user_question'), 'Pentest persona must not inject an interactive question step')
+assert.ok(pentestOpening.includes('Never ask a follow-up question') && pentestOpening.includes('scope_missing'), 'Pentest must stop cleanly when scope is missing')
 for (const mode of ['pentest-regular', 'pentest-nday', 'pentest-campaign', 'pentest-0day']) {
-  assert.ok(pentestPatch.includes(mode), `preset help must point to ${mode}`)
+  assert.ok(pentestOpening.includes(mode), `editable persona must point to ${mode}`)
 }
 
 console.log('ok   默认新会话突出渗透与代码审计，CTF 不抢主线')

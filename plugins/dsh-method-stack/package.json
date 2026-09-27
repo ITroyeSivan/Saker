@@ -1,7 +1,7 @@
 {
   "name": "@dsh-external/dsh-method-stack",
-  "version": "0.1.20",
-  "description": "提示词模块化方法栈：把可切换测试逻辑组织为 模块组→子方法，设置页「方法编排」勾选组合，host 经 systemPrompt context('saker-methods') 每轮注入启用方法正文；用户方法层 ~/.dsh/method-stack/methods 同名覆盖官方；组合 profile 持久化，rev/审计可追溯。",
+  "version": "0.1.21",
+  "description": "提示词模块化方法栈：把可切换测试逻辑组织为 模块组→子方法，设置页「方法编排」勾选组合，支持直接编辑各模式完整开场并恢复默认；host 每轮注入启用的方法正文；用户方法层同名覆盖官方；组合 profile 持久化、备份与审计。",
   "type": "module",
   "main": "./lib/index.js",
   "exports": {
