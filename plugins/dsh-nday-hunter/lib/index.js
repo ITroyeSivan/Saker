@@ -53,7 +53,7 @@ import { buildAccessPlan, classifyMemoryBackend, renderAccessPlan } from './post
 import { renderWorklist, triageDocs } from './triage.js'
 import { deriveProductKeywords, renderCoverageGap } from './coverage-gap.js'
 import { resolveDshHome } from './home.js'
-import { buildNdaySearchPlan } from './measurement-query.js'
+import { buildCampaignNdayQueries, buildNdaySearchPlan, campaignIdentityVariants } from './measurement-query.js'
 
 /**
  * 把工具的 workspace 参数解析成绝对路径：**相对路径以会话工作区为基准**。
@@ -816,7 +816,7 @@ function apply(ctx, config = {}) {
               return queries.length === 0
                 ? ['同类资产扩面: （本条没记测绘语法，反查不了；只能按产品名人工确认）']
                 : ['同类资产扩面（目录显式语法或 GET/HEAD 探针响应签名；命中只作候选）:',
-                   `  - call=nday_scope_hunt entryIds="${entry.id}" scope=<授权范围> workspace=<任务目录>`,
+                   `  - call=nday_scope_hunt entryIds="${entry.id}" scope=<精确范围> workspace=<任务目录>`,
                    ...queries.map((q) => `  - query=${q}`)]
             })(),
             `误报点: ${(entry.fingerprint?.falsePositiveNotes ?? []).join(' / ')}`,
@@ -840,14 +840,18 @@ function apply(ctx, config = {}) {
 
   registerNdayTool(defineTool({
     name: 'nday_scope_hunt',
-    description: 'FOFA-first passive Nday search. Requires authorized scope; saves deduplicated assets mapped to catalog entries. Results are candidates, not vulnerability proof.',
+    description: 'FOFA-first Nday search. Exact ranges write mapped assets; organization identity search without a range saves passive candidates only.',
     parameters: {
-      scope: { type: 'string', required: true, description: 'Authorized exact domains, IPs, or IPv4 CIDRs. Bare domain is exact; *.domain authorizes subdomains, not the apex.' },
+      scope: { type: 'string', description: 'Optional exact domains, IPs, or IPv4 CIDRs. A bare domain is exact; *.domain covers subdomains, not the apex.' },
+      identity: { type: 'object', description: 'Organization identity for FOFA candidate discovery: ICP, domains, organization name, and aliases.', properties: {
+        icp: { type: 'string' }, domains: { type: 'array', items: { type: 'string' } },
+        organizationName: { type: 'string' }, aliases: { type: 'array', items: { type: 'string' } },
+      }, additionalProperties: false },
       workspace: { type: 'string', required: true, description: 'Workspace for candidates and evidence' },
       focus: { type: 'string', enum: ['rce', 'all'], description: 'RCE by default, or all classes' },
       keyword: { type: 'string', description: 'Optional product, vendor, or CVE filter' },
       entryIds: { type: 'string', description: 'Optional comma-separated catalog IDs' },
-      limit: { type: 'integer', description: 'Query groups per batch; default 20, max 100. Start with high-signal catalog fingerprints, then paginate.' },
+      limit: { type: 'integer', description: 'Nday fingerprint groups per batch; default 5, max 20 total query groups in organization mode.' },
       offset: { type: 'integer', description: 'Next batch offset from prior result' },
       platform: { type: 'string', enum: ['fofa'], description: 'FOFA syntax is normalized by the catalog' },
       size: { type: 'integer', description: 'Rows per query; default 50, max 500' },
@@ -861,10 +865,23 @@ function apply(ctx, config = {}) {
     },
     async execute(args, exec) {
       const scope = String(args.scope || '').trim()
-      if (!scope) return { ok: false, error: 'scope 不能为空——FOFA Nday 搜索必须限定明确授权范围' }
+      const rawIdentity = args.identity && typeof args.identity === 'object' ? args.identity : {}
+      const identity = {
+        icp: String(rawIdentity.icp ?? '').trim().slice(0, 120),
+        domains: (Array.isArray(rawIdentity.domains) ? rawIdentity.domains : []).map((value) => String(value ?? '').trim()).filter(Boolean).slice(0, 2),
+        organizationName: String(rawIdentity.organizationName ?? '').trim().slice(0, 120),
+        aliases: (Array.isArray(rawIdentity.aliases) ? rawIdentity.aliases : []).map((value) => String(value ?? '').trim()).filter(Boolean).slice(0, 1),
+      }
+      const identityVariants = campaignIdentityVariants(identity)
+      const campaignMode = identityVariants.length > 0
+      const candidateOnly = campaignMode && !scope
+      if (!scope && !campaignMode) {
+        return { ok: false, state: 'scope_missing', error: 'scope_missing：会话中没有精确范围或机构身份；未执行 FOFA 请求。', text: 'scope_missing：没有精确范围或机构身份；未执行 FOFA 请求。' }
+      }
       if (!String(args.workspace || '').trim()) return { ok: false, error: 'workspace 不能为空' }
       const workspace = resolveWorkspaceArg(args.workspace, exec)
-      const limit = Number.isFinite(args.limit) && args.limit > 0 ? Math.min(100, Math.floor(args.limit)) : 20
+      const requestedLimit = Number.isFinite(args.limit) && args.limit > 0 ? Math.min(20, Math.floor(args.limit)) : 5
+      const limit = campaignMode ? Math.min(requestedLimit, Math.max(1, Math.floor(20 / identityVariants.length))) : requestedLimit
       const focus = args.focus === 'all' ? 'all' : 'rce'
       let catalog
       try { ({ catalog } = catalogOrThrow()) } catch (error) { return { ok: false, error: String(error?.message || error) } }
@@ -893,17 +910,21 @@ function apply(ctx, config = {}) {
         const error = '宿主未提供 tools.execute，无法调用 dsh-hunter 的 asset_search_batch'
         return { ok: false, error, text: `nday_scope_hunt 失败：${error}\n${pagination}` }
       }
-      const queries = plan.selected.map((group, index) => ({
-        id: `q${String(plan.offset + index + 1).padStart(3, '0')}`,
-        query: group.query,
-        basis: group.basis,
-        entryIds: group.entryIds,
-      }))
-      const batchArguments = { queries, scope, workspace, platform: 'fofa' }
+      const queries = campaignMode
+        ? buildCampaignNdayQueries(plan, identity, 20)
+        : plan.selected.map((group, index) => ({
+            id: 'q' + String(plan.offset + index + 1).padStart(3, '0'),
+            query: group.query,
+            basis: group.basis,
+            entryIds: group.entryIds,
+          }))
+      const batchArguments = candidateOnly
+        ? { queries, workspace }
+        : { queries, workspace, platform: 'fofa', scope }
       if (Number.isFinite(args.size)) batchArguments.size = args.size
       const batchExecution = {
         callId: `nday-asset-batch-${stamp()}`,
-        name: 'asset_search_batch',
+        name: candidateOnly ? 'asset_candidate_search_batch' : 'asset_search_batch',
         arguments: batchArguments,
         signal: exec?.signal ?? new AbortController().signal,
       }
@@ -950,15 +971,16 @@ function apply(ctx, config = {}) {
       const queryById = new Map((batch.queryResults ?? []).map((result) => [String(result.id), result]))
       const candidates = new Map()
       const queryEvidence = []
-      for (let i = 0; i < plan.selected.length; i += 1) {
-        const group = plan.selected[i]
+      for (let i = 0; i < queries.length; i += 1) {
         const query = queries[i]
+        const group = { entryIds: query.entryIds || [] }
         const result = queryById.get(query.id)
         queryEvidence.push({
           id: query.id,
           query: query.query,
           basis: query.basis,
           entryIds: group.entryIds,
+          identityType: query.identityType || '',
           ok: result?.ok === true,
           error: result?.ok === true ? '' : String(result?.error || '查询组结果缺失'),
           platformErrors: result?.platformErrors ?? [],
@@ -966,16 +988,17 @@ function apply(ctx, config = {}) {
         })
         if (result?.ok !== true) continue
         for (const asset of result.assets ?? []) {
-          const safe = scopeBoundAsset(asset, scope)
+          const safe = scope ? scopeBoundAsset(asset, scope) : asset
           if (!safe) continue
           const key = [safe.target, safe.host, safe.ip, safe.port].map((v) => String(v ?? '').toLowerCase()).join('|')
           let candidate = candidates.get(key)
           if (!candidate) {
-            candidate = { asset: safe, entryIds: [], queryIds: [] }
+            candidate = { asset: safe, entryIds: [], queryIds: [], identityTypes: [] }
             candidates.set(key, candidate)
           }
           for (const id of group.entryIds) if (!candidate.entryIds.includes(id)) candidate.entryIds.push(id)
           if (!candidate.queryIds.includes(query.id)) candidate.queryIds.push(query.id)
+          if (query.identityType && !candidate.identityTypes.includes(query.identityType)) candidate.identityTypes.push(query.identityType)
         }
       }
       const searchId = `nday-${stamp()}`
@@ -996,7 +1019,9 @@ function apply(ctx, config = {}) {
         generatedAt: new Date().toISOString(),
         catalogUpdated: plan.catalogUpdated,
         focus,
-        scope,
+        scope: scope || null,
+        identity: campaignMode ? identity : null,
+        candidateOnly,
         plan: {
           offset: plan.offset,
           limit: plan.limit,
@@ -1016,26 +1041,36 @@ function apply(ctx, config = {}) {
         },
       }
       fs.writeFileSync(file, JSON.stringify(artifact, null, 2) + '\n', 'utf8')
-      appendEvidence(workspace, searchId, `FOFA 被动 Nday 指纹搜索 ${artifact.summary.successfulGroups}/${queries.length} 组；仅记录范围内候选`, path.relative(workspace, file).replace(/\\/g, '/'))
+      appendEvidence(workspace, searchId, `FOFA Nday 指纹搜索 ${artifact.summary.successfulGroups}/${queries.length} 组；${candidateOnly ? '仅写被动候选文件' : '结果已按精确范围筛选'}`, path.relative(workspace, file).replace(/\\/g, '/'))
       const basisByQuery = new Map(queryEvidence.map((query) => [query.id, query.basis]))
       const sample = artifact.candidates.slice(0, 6).map((candidate) => {
         const bases = candidate.queryIds.map((id) => basisByQuery.get(id)).filter(Boolean)
-        return `- ${candidate.asset.target || candidate.asset.host}；候选条目 ${candidate.entryIds.join(', ')}；查询依据 ${measurementBasisLabel(bases)}`
+        const target = candidate.asset.target || candidate.asset.host || [candidate.asset.ip, candidate.asset.port].filter(Boolean).join(':')
+        const clues = [
+          candidate.asset.icp && `ICP=${candidate.asset.icp}`,
+          candidate.asset.certSubjectOrg && `证书组织=${candidate.asset.certSubjectOrg}`,
+          candidate.asset.certSubjectCn && `证书名称=${candidate.asset.certSubjectCn}`,
+          (candidate.asset.asn || candidate.asset.org) && `ASN=${candidate.asset.asn || '-'} ${candidate.asset.org || ''}`.trim(),
+          (candidate.asset.city || candidate.asset.region) && `地区=${[candidate.asset.region, candidate.asset.city].filter(Boolean).join('/')}`,
+        ].filter(Boolean)
+        return `- ${target || '未知地址'}；候选条目 ${candidate.entryIds.join(', ')}；身份查询 ${candidate.identityTypes.join(', ') || 'Nday 指纹'}${clues.length ? `；FOFA 归属线索 ${clues.join('、')}` : ''}；查询依据 ${measurementBasisLabel(bases)}`
       })
       const text = [
-        `Nday FOFA 范围搜索：${artifact.summary.successfulGroups}/${queries.length} 个查询组成功，${artifact.summary.candidateCount} 个去重候选资产；预计 ${artifact.summary.estimatedApiRequests} 次 API 请求。`,
-        `目录更新时间：${plan.catalogUpdated || '未标注'}；范围：${scope}。`,
+        (candidateOnly ? 'Nday FOFA 机构候选搜索：' : 'Nday FOFA 范围搜索：') + artifact.summary.successfulGroups + '/' + queries.length + ' 个查询组成功，' + artifact.summary.candidateCount + ' 个去重候选资产；预计 ' + artifact.summary.estimatedApiRequests + ' 次 API 请求。',
+        `目录更新时间：${plan.catalogUpdated || '未标注'}；范围：${scope || '未提供（仅被动候选）'}。`,
         `查询覆盖：${quality.catalogFingerprintEntries} 条目录明确指纹、${quality.probeSignatureEntries} 条探针响应签名；${quality.productAliasFallbackEntries} 条仍依赖产品别名兜底，${quality.entriesWithoutUsableQuery} 条没有可用查询。`,
         ...(failedGroups ? [`${failedGroups} 个查询组失败；失败与“没有命中”分开记录，详见证据文件。`] : []),
         ...(sample.length ? ['', '候选样例（测绘指纹不代表受影响版本）：', ...sample] : ['未发现候选资产；先检查查询组失败原因和 FOFA 账号可用字段等级。']),
         `证据：${path.relative(workspace, file).replace(/\\/g, '/')}`,
-        ...(artifact.candidates.length ? [`下一步：nday_match assetSource=nday-search searchId=${searchId} scope="${scope}" workspace="${workspace}"（按候选条目映射做范围内轻量筛查）`] : []),
-        ...(plan.nextOffset !== null ? [`更多查询：再次调用 nday_scope_hunt，offset=${plan.nextOffset}；单批最多 100 组。`] : []),
+        ...(candidateOnly ? ['当前仅有机构身份线索；结果保存在候选文件中，不进入活动资产账本，也不执行主机探测。'] : []),
+        ...(scope && artifact.candidates.length ? [`下一步：nday_match assetSource=nday-search searchId=${searchId} scope="${scope}" workspace="${workspace}"（按候选条目映射做轻量筛查）`] : []),
+        ...(plan.nextOffset !== null ? [`更多查询：再次调用 nday_scope_hunt，offset=${plan.nextOffset}；单批最多 20 组。`] : []),
       ].join('\n')
       return {
         ok: true,
         searchId,
         focus,
+        candidateOnly,
         queryCount: queries.length,
         successfulGroups: artifact.summary.successfulGroups,
         failedGroups,
@@ -1056,7 +1091,7 @@ function apply(ctx, config = {}) {
     description: 'Group in-scope inventory by fingerprint, rank reusable buckets, and write a plan. Does not probe or exploit.',
     parameters: {
       workspace: { type: 'string', required: true, description: 'Workspace containing asset-inventory.json' },
-      scope: { type: 'string', required: true, description: 'Authorized exact domains/IPs/CIDRs; *.domain authorizes subdomains, not the apex. Other assets are excluded.' },
+      scope: { type: 'string', required: true, description: 'Exact domains/IPs/CIDRs; *.domain covers subdomains, not the apex. Other assets are excluded.' },
       entryIds: { type: 'string', description: 'Optional catalog IDs' },
       minAssets: { type: 'integer', description: 'Minimum assets per bucket (default 1)' },
       maxBuckets: { type: 'integer', description: 'Maximum buckets (default 50, cap 200)' },
@@ -1069,7 +1104,7 @@ function apply(ctx, config = {}) {
     async execute(args, exec) {
       const workspace = resolveWorkspaceArg(args.workspace, exec)
       const scope = String(args.scope || '').trim()
-      if (!scope) return { ok: false, error: 'scope 不能为空——资产分桶必须限定本轮明确授权的范围' }
+      if (!scope) return { ok: false, error: 'scope 不能为空——资产分桶必须限定本轮精确范围' }
       const inventory = readInventory(workspace)
       const assets = inventory.assets.map((asset) => scopeBoundAsset(asset, scope)).filter(Boolean)
       const assetsExcludedByScope = inventory.assets.length - assets.length
@@ -1381,7 +1416,7 @@ function apply(ctx, config = {}) {
     description: 'Screen assets with catalog probes and write a ledger. Leads need verification; this is not a vulnerability verdict.',
     parameters: {
       targets: { type: 'string', description: 'URLs/hosts; omit for inventory or nday-search' },
-      scope: { type: 'string', required: true, description: 'Authorized exact domains/IPs/CIDRs; *.domain authorizes subdomains, not the apex. Targets stay inside scope.' },
+      scope: { type: 'string', required: true, description: 'Exact domains/IPs/CIDRs; *.domain covers subdomains, not the apex. Targets stay inside scope.' },
       workspace: { type: 'string', required: true, description: 'Workspace for ledger and evidence' },
       assetSource: { type: 'string', enum: ['targets', 'inventory', 'nday-search'], description: 'Read targets, inventory, or nday_scope_hunt candidates' },
       searchId: { type: 'string', description: 'Required for nday-search source' },
@@ -1397,7 +1432,7 @@ function apply(ctx, config = {}) {
     async execute(args, exec) {
       const workspace = resolveWorkspaceArg(args.workspace, exec)
       const scope = String(args.scope || '').trim()
-      if (!scope) return { ok: false, error: 'scope 不能为空——Nday 主动探针必须限定本轮明确授权的范围' }
+      if (!scope) return { ok: false, error: 'scope 不能为空——Nday 主动探针必须限定本轮精确范围' }
       const assetSource = ['inventory', 'nday-search'].includes(args.assetSource) ? args.assetSource : 'targets'
       let assets
       let entryIdsByAsset = null
@@ -1435,7 +1470,7 @@ function apply(ctx, config = {}) {
         if (assets.length === 0) {
           return {
             ok: false,
-            error: `assetSource=inventory 在本轮授权范围内没有可探测资产（排除 ${excludedAssets} 条范围外/不完整记录）；先用 asset_search / asset_ingest 建账本`,
+            error: `assetSource=inventory 在本轮精确范围内没有可探测资产（排除 ${excludedAssets} 条范围外/不完整记录）；先用 asset_search / asset_ingest 建账本`,
           }
         }
       } else if (assetSource === 'nday-search') {
@@ -1494,8 +1529,8 @@ function apply(ctx, config = {}) {
           return {
             ok: false,
             error: requestedIds.size
-              ? `搜索 ${searchId} 中没有同时处于当前授权范围且匹配所选 entryIds 的候选资产（排除 ${rejectedCandidates} 项）`
-              : `搜索 ${searchId} 中没有当前授权范围内的候选资产（排除 ${rejectedCandidates} 项）`,
+              ? `搜索 ${searchId} 中没有同时处于当前精确范围且匹配所选 entryIds 的候选资产（排除 ${rejectedCandidates} 项）`
+              : `搜索 ${searchId} 中没有当前精确范围内的候选资产（排除 ${rejectedCandidates} 项）`,
           }
         }
       } else {
@@ -1509,7 +1544,7 @@ function apply(ctx, config = {}) {
         excludedAssets = requested.length - scoped.length
         assets = scoped
         if (assets.length === 0) {
-          return { ok: false, error: `没有授权范围内的可探测目标（排除 ${excludedAssets} 个范围外目标）；检查 scope 和目标` }
+          return { ok: false, error: `没有精确范围内的可探测目标（排除 ${excludedAssets} 个范围外目标）；检查 scope 和目标` }
         }
       }
       const timeoutMs = Number.isFinite(args.timeoutMs) && args.timeoutMs > 0 ? Math.floor(args.timeoutMs) : DEFAULT_TIMEOUT_MS
@@ -1650,7 +1685,7 @@ function apply(ctx, config = {}) {
                 ? { queries: [], note: '条目没记测绘语法，反查不了同类资产；按产品名人工确认' }
                 : {
                     queries,
-                    nextCall: `nday_scope_hunt entryIds="${entry.id}" scope="<授权范围>" workspace="${workspace}"`,
+                    nextCall: `nday_scope_hunt entryIds="${entry.id}" scope="<精确范围>" workspace="${workspace}"`,
                   }
             })(),
             })
@@ -1775,7 +1810,7 @@ function apply(ctx, config = {}) {
 
       const notes = [
         '【口径】以下是**指纹筛选命中**，不是漏洞结论；确认要走条目里的公开工具。',
-        ...(excludedAssets ? [`【范围】本轮明确授权范围外的 ${excludedAssets} 项未发送请求。`] : []),
+        ...(excludedAssets ? [`【范围】本轮精确范围外的 ${excludedAssets} 项未发送请求。`] : []),
         ...(rows.some((r) => !r.reproducedByUs)
           ? ['【状态】命中项里含 `normalized` 条目——我方尚未复现，措辞不得写成"已确认可利用"。']
           : []),
@@ -1789,7 +1824,7 @@ function apply(ctx, config = {}) {
         `【台账】${path.relative(workspace, jsonFile)}`,
       ]
       const text = [
-        `nday_match：授权范围内 ${assets.length} 资产（来源 ${assetSource}）× ${siftable.length} 条目 = ${requests.length} 次探测（另加 ${assets.length} 次随机对照）；范围外跳过 ${excludedAssets} 项；命中 ${rows.length} 项`,
+        `nday_match：精确范围内 ${assets.length} 资产（来源 ${assetSource}）× ${siftable.length} 条目 = ${requests.length} 次探测（另加 ${assets.length} 次随机对照）；范围外跳过 ${excludedAssets} 项；命中 ${rows.length} 项`,
         ...notes,
         ...(rows.length
           ? ['', ...rows.map((r) => {
@@ -1802,7 +1837,7 @@ function apply(ctx, config = {}) {
             // 结构化字段（rows[].expand 之类）模型**看不到**。所以扩面入口必须写进文本里，
             // 否则「命中→扩面」这条链在模型侧仍然是断的。
             const expandLine = (r.expand?.queries?.length ?? 0) > 0
-              ? `\n    扩面：用 FOFA 在授权范围内查同指纹候选 → ${r.expand.nextCall}`
+              ? `\n    扩面：用 FOFA 在精确范围内查同指纹候选 → ${r.expand.nextCall}`
               : `\n    扩面：${r.expand?.note ?? '条目没记测绘语法，反查不了同类资产'}`
             // `nextStep`（用公开工具确认）同样只写在返回对象里的话，模型是看不到的——
             // 而 README 的表格明说「命中行直接给出条目 exploit.tools 里点名的公开工具」。
@@ -2179,7 +2214,7 @@ function apply(ctx, config = {}) {
     parameters: {
       entryId: { type: 'string', description: 'Catalog ID; omit for keyword mode' },
       asset: { type: 'string', required: true, description: 'Target URL or host' },
-      scope: { type: 'string', required: true, description: 'Authorized exact domains/IPs/CIDRs; *.domain authorizes subdomains, not the apex. Target must match.' },
+      scope: { type: 'string', required: true, description: 'Exact domains/IPs/CIDRs; *.domain covers subdomains, not the apex. Target must match.' },
       workspace: { type: 'string', required: true, description: 'Workspace for plan and ledger' },
       keywords: { type: 'string', description: 'Template keywords; required without entryId' },
     },
@@ -2206,9 +2241,9 @@ function apply(ctx, config = {}) {
       const requestedAsset = String(args.asset || '').trim()
       if (!requestedAsset) return { ok: false, error: 'asset 不能为空' }
       const scope = String(args.scope || '').trim()
-      if (!scope) return { ok: false, error: 'scope 不能为空——交接单中的目标命令必须限定本轮明确授权范围' }
+      if (!scope) return { ok: false, error: 'scope 不能为空——交接单中的目标命令必须限定本轮精确范围' }
       const scopedAsset = scopeBoundAsset({ target: requestedAsset }, scope)
-      if (!scopedAsset) return { ok: false, error: 'asset 不在本轮授权范围内，拒绝生成可执行命令' }
+      if (!scopedAsset) return { ok: false, error: 'asset 不在本轮精确范围内，拒绝生成可执行命令' }
       const asset = scopedAsset.target
       const workspace = resolveWorkspaceArg(args.workspace, exec)
 
@@ -2282,7 +2317,7 @@ function apply(ctx, config = {}) {
         toolLines.length ? toolLines.join('\n') : '（条目未点名公开工具）',
         '',
         '## 4. 纪律',
-        '- 本交接单**只是计划**：不执行、不投载荷。执行由你在授权范围内决定。',
+        '- 本交接单**只是计划**：不执行、不投载荷。',
         '- 命中 / 回连都要落台账；进报告前按验证等级（疑似 / 已触发未利用 / 完整利用链 / 影响证明）如实标注。',
         '- 速率按目标防护画像压；该漏洞若已在野利用，更要克制。',
         '',

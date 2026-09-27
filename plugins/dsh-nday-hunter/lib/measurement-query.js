@@ -1,6 +1,6 @@
 const QUERY_FIELDS = new Set([
-  'app', 'title', 'body', 'header', 'icon_hash', 'fid', 'cert', 'port', 'protocol', 'domain', 'ip',
-  'server', 'banner', 'jarm', 'base_protocol', 'status_code',
+  'app', 'title', 'body', 'header', 'icon_hash', 'fid', 'cert', 'port', 'protocol', 'domain', 'ip', 'host', 'icp',
+  'server', 'banner', 'jarm', 'base_protocol', 'status_code', 'org', 'asn', 'city', 'region',
   'product', 'product.version', 'category', 'header_hash', 'banner_hash', 'banner_fid',
   'cert.issuer.org', 'cert.issuer.cn', 'cert.subject.org', 'cert.subject.cn', 'cert.domain', 'cert.sn',
   'tls.ja3s', 'tls.version',
@@ -24,6 +24,57 @@ function dslTerm(field, rawValue) {
   const value = String(rawValue ?? '').trim()
   if (!QUERY_FIELDS.has(key) || !value || /[\r\n]/.test(value)) return ''
   return `${key}:"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+}
+
+/**
+ * Build a small set of organization identity facets for FOFA-first campaign
+ * discovery. Name-based matches stay candidates; only an exact scope can feed
+ * active matching later.
+ */
+export function campaignIdentityVariants(identity = {}) {
+  const variants = []
+  const add = (kind, field, value) => {
+    const query = dslTerm(field, value)
+    if (query && !variants.some((item) => item.query === query)) variants.push({ kind, query })
+  }
+  add('icp', 'icp', identity.icp)
+  const domains = [...new Set((Array.isArray(identity.domains) ? identity.domains : [identity.domains])
+    .map((value) => String(value ?? '').trim()).filter(Boolean))].slice(0, 2)
+  for (const domain of domains) add('domain', 'domain', domain)
+  const names = [...new Set([identity.organizationName, ...(Array.isArray(identity.aliases) ? identity.aliases : [])]
+    .map((value) => String(value ?? '').trim()).filter(Boolean))].slice(0, 2)
+  if (names[0]) {
+    for (const field of ['title', 'body', 'cert.subject.org', 'cert.subject.cn']) add(`name-${field}`, field, names[0])
+  }
+  if (names[1]) {
+    add('alias-title', 'title', names[1])
+    add('alias-body', 'body', names[1])
+  }
+  return variants.slice(0, 9)
+}
+
+/** Combine Nday fingerprints with explicit organization identity terms. */
+export function buildCampaignNdayQueries(plan, identity, maxQueries = 20) {
+  const variants = campaignIdentityVariants(identity)
+  const cap = Math.max(1, Math.min(20, Math.floor(Number(maxQueries) || 20)))
+  const queries = []
+  const seen = new Set()
+  for (const group of plan?.selected ?? []) {
+    for (const variant of variants) {
+      const query = `${group.query} ${variant.query}`
+      if (seen.has(query)) continue
+      seen.add(query)
+      queries.push({
+        id: `q${String(queries.length + 1).padStart(3, '0')}`,
+        query,
+        basis: `${group.basis}+${variant.kind}`,
+        entryIds: group.entryIds,
+        identityType: variant.kind,
+      })
+      if (queries.length >= cap) return queries
+    }
+  }
+  return queries
 }
 
 function normalizeMeasurementSource(source) {

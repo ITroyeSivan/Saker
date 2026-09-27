@@ -153,7 +153,7 @@ try {
   ok("Nday-first 一次调用就生成并执行范围内 FOFA 查询", scoped?.ok === true && scoped.queryCount === 1 && scoped.candidateCount === 1,
     JSON.stringify({ ok: scoped?.ok, queryCount: scoped?.queryCount, candidateCount: scoped?.candidateCount }));
   ok("FOFA 请求同时含产品指纹与授权 IP 约束", providerQueries.length === 1
-    && providerQueries[0].includes("ip=\"127.0.0.1\"")
+    && providerQueries[0].includes("ip==\"127.0.0.1\"")
     && /\b(?:app|title|body|header|icon_hash|fid)=/.test(providerQueries[0]),
   providerQueries.map((query) => query.replace(/key=[^&]+/g, "key=[redacted]")).join(" | "));
   ok("候选保存了 Nday 条目映射和可复用 searchId", scoped?.searchId
@@ -175,6 +175,32 @@ try {
       ndayDirectory: fs.existsSync(path.join(workspace, "artifacts", "nday"))
         ? fs.readdirSync(path.join(workspace, "artifacts", "nday")) : null,
     }));
+
+  const inventoryBeforeCampaign = JSON.parse(fs.readFileSync(path.join(workspace, "asset-inventory.json"), "utf8")).assets.length;
+  const campaignQueries = [];
+  const oldCampaignFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = new URL(typeof input === "string" ? input : input.url);
+    campaignQueries.push(Buffer.from(url.searchParams.get("qbase64"), "base64").toString("utf8"));
+    return { ok: true, status: 200, text: async () => JSON.stringify({
+      error: false, size: 1,
+      results: [["", "市立医院管理平台", "203.0.113.44", "", "8443", "https", "nginx", "湘ICP备20260001号", "4134", "Example Hospital Network", "上海", "上海", "市立医院", "市立医院管理平台"]],
+    }) };
+  };
+  let campaign;
+  try {
+    campaign = await tools.get("nday_scope_hunt").execute({
+      workspace, identity: { icp: "湘ICP备20260001号" },
+      entryIds: "weaver-ecology-dubboapi-debug-rce", limit: 1, size: 5,
+    }, { agent: { session: { header: { cwd: workspace } } } });
+  } finally { globalThis.fetch = oldCampaignFetch; }
+  ok("机构 Nday 模式由 ICP 直接发起 FOFA 候选搜索", campaign?.ok === true && campaign.candidateOnly === true && campaign.candidateCount === 1, JSON.stringify(campaign));
+  ok("FOFA 查询用精确 ICP 与目录 Nday 指纹组合", campaignQueries.length === 1 && campaignQueries[0].includes('icp=="湘ICP备20260001号"') && /(?:app|title|body|header|icon_hash|fid|product)=/.test(campaignQueries[0]), campaignQueries.join(" | "));
+  ok("IP-only 搜索结果保留作被动候选且不进入活动资产账本", campaign.candidates?.[0]?.asset?.ip === "203.0.113.44" && !campaign.candidates[0].asset.domain && JSON.parse(fs.readFileSync(path.join(workspace, "asset-inventory.json"), "utf8")).assets.length === inventoryBeforeCampaign, JSON.stringify(campaign.candidates?.[0]));
+  ok("IP-only 样例显示 IP:端口及 ICP/证书/网络归属线索", campaign.text.includes("203.0.113.44:8443") && campaign.text.includes("ICP=湘ICP备20260001号") && campaign.text.includes("证书组织=市立医院"), campaign.text);
+  ok("只有被动候选时不建议调用 nday_match", campaign.candidateOnly && !campaign.text.includes("下一步：nday_match"));
+  const noScope = await tools.get("nday_scope_hunt").execute({ workspace }, { agent: { session: { header: { cwd: workspace } } } });
+  ok("缺范围和机构线索返回 scope_missing，不提问、不发 FOFA 请求", noScope.state === "scope_missing" && campaignQueries.length === 1);
 
   const plan = await tools.get("attack_plan").execute({ workspace, scope: "127.0.0.1" });
   ok("attack_plan 生成泛微桶", plan.ok && plan.plan.buckets.some((bucket) => bucket.entryId === "weaver-ecology-dubboapi-debug-rce"), JSON.stringify(plan));

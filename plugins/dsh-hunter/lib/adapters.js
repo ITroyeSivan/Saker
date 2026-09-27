@@ -18,7 +18,7 @@ const LIMITS = {
 };
 
 const DSL_FIELDS = [
-	"title", "body", "header", "app", "server", "port", "protocol", "domain", "ip", "cert", "icon_hash",
+	"title", "body", "header", "app", "server", "port", "protocol", "domain", "ip", "host", "icp", "org", "asn", "city", "region", "cert", "icon_hash",
 	// FOFA 高级指纹字段。其他平台没有等价语法时由调用层拒绝该平台，不能退化成范围内全量查询。
 	"fid", "product", "product.version", "category", "header_hash", "banner_hash", "banner_fid",
 	"banner", "jarm", "base_protocol", "status_code",
@@ -26,7 +26,7 @@ const DSL_FIELDS = [
 	"tls.ja3s", "tls.version",
 ];
 const FOFA_ONLY_FIELDS = new Set([
-	"icon_hash", "fid", "product", "product.version", "category", "header_hash", "banner_hash", "banner_fid",
+	"host", "icp", "org", "asn", "city", "region", "icon_hash", "fid", "product", "product.version", "category", "header_hash", "banner_hash", "banner_fid",
 	"banner", "jarm", "base_protocol", "status_code",
 	"cert.issuer.org", "cert.issuer.cn", "cert.subject.org", "cert.subject.cn", "cert.domain", "cert.sn",
 	"tls.ja3s", "tls.version",
@@ -61,8 +61,10 @@ export function parseDsl(input) {
 function toFofaQuery(fields) {
 	const parts = [];
 	for (const [k, v] of fields) {
-	const value = String(v).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-		parts.push(`${k}="${value}"`);
+		const raw = String(v);
+		const value = raw.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+		const exact = ["domain", "host", "icp", "asn"].includes(k) || (k === "ip" && !raw.includes("/"));
+		parts.push(`${k}${exact ? "==" : "="}"${value}"`);
 	}
 	return parts.join(" && ");
 }
@@ -144,7 +146,7 @@ export async function searchFofaPage(key, query, size, nextCursor) {
 		+ "&size=" + Math.min(Number(size) || LIMITS.fofa.nextSize, LIMITS.fofa.nextSize)
 		// Stay within fields documented for all API tiers. lastupdatetime is
 		// Professional-only and can reject otherwise valid Personal queries.
-		+ "&fields=host,title,ip,domain,port,protocol,server"
+		+ "&fields=host,title,ip,domain,port,protocol,server,icp,asn,org,city,region,cert.subject.org,cert.subject.cn"
 		+ "&qbase64=" + encodeURIComponent(b64(query))
 		+ (nextCursor ? "&next=" + encodeURIComponent(nextCursor) : "");
 	const data = await fetchJson(url);

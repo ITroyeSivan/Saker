@@ -16,9 +16,9 @@ Saker当前包含24 个独立插件。多数用户不需要逐个理解；`pack-
 | 界面与配置 | `dsh-skill-browse` | 1.1.10 | 设置页「技能」：列出共享 / 模式专属 / 已安装技能；上传zip/tgz安装并热载、可卸载用户层技能；一键复制宿主引用串；**卸载改为移入技能目录 `.trash/`**（不再直接 rmSync，删错可找回） |
 | 界面与配置 | `dsh-method-stack` | 0.1.20 | 提示词模块化：26 个内置提示词可勾选、克隆、改正文、存组合；输入框「方法 ▾」直接切换；**保存正文/开场文本前自动备份**到 `.backups/`（覆盖与清空都可回退） |
 | 工具 | `dsh-scanner-tools` | 1.1.9 | `httpx_probe` 分开展示 title/server 与技术栈提示，歧义时才追加 favicon 指纹请求；`asset_ingest` 可把 TScanPlus/fscan/nmap/httpx 导出归一进 `asset-inventory.json`。Pentest 初始会话不携带 Nmap、目录扫描、Nuclei、Afrog、SQLMap 与爬取工具 schema；`tool_pack` 可在明确假设后按 Agent 加载/卸载这些工具，加载只改变工具面，不会自动运行扫描 |
-| 工具 | `dsh-nday-hunter` | 1.3.44 | Pentest 主线包含 `nday_scope_hunt`：在授权范围内按目录指纹、GET/HEAD 响应签名、FOFA `fid`、产品+目录端口、产品别名分层查询；裸域只匹配本域，`*.domain` 只含子域、不含根域。默认首批 20 组优先高信号查询，并报告各依据覆盖率。候选再映射到 `nday_match`；核对来源、精确版本与前置条件后才验证，RCE 证实即停止 |
+| 工具 | `dsh-nday-hunter` | 1.3.45 | Pentest 主线包含 `nday_scope_hunt`：按目录指纹、GET/HEAD 响应签名、FOFA `fid`、产品+目录端口、产品别名分层查询；机构模式把 ICP、域名、名称/证书线索与 Nday 指纹组合，每批不超过 20 个查询，保留 IP-only 候选但不写入活动资产账本。精确范围结果再映射到 `nday_match`；核对来源、版本与前置条件后才验证，RCE 证实即停止 |
 | 工具 | `dsh-semgrep-audit` | 1.0.11 | 使用本地Semgrep和随包规则集进行代码扫描 |
-| 工具 | `dsh-hunter` | 1.1.7 | 聚合 FOFA、Hunter、Quake 资产检索；`asset_search_batch` 支持分组查询、逐查询映射和授权范围过滤，保留 Nday 条目来源映射；裸域精确匹配，`*.domain` 只含明确授权的子域、不含根域。FOFA 支持 `fid`、产品/版本/分类、哈希、banner、JARM、证书/TLS 指纹查询，专属字段不会降级成其他平台的宽查询。结果写入 `asset-inventory.json`，供 Nday 候选闭环 |
+| 工具 | `dsh-hunter` | 1.1.8 | 聚合 FOFA、Hunter、Quake 资产检索；`asset_search_batch` 支持分组查询、逐查询映射和精确范围过滤，保留 Nday 条目来源映射；裸域精确匹配，`*.domain` 只含显式子域、不含根域。新增 FOFA 被动候选批量查询，结果单独落盘，不进活动资产账本。FOFA 支持 `icp`、`host`、产品/版本/分类、哈希、banner、JARM、证书/TLS 指纹查询，专属字段不会降级成其他平台的宽查询 |
 | 工具 | `dsh-webshell-mgr` | 1.1.32 | 管理已授权环境中的连接、文件和数据库操作；内置16种载荷生成形态；协议目录响应带上下文化 JSON 错误；RPC 失败改回结构化错误对象；**编辑保存与删除文件前都自动备份**到同目录 `.backups/`（每文件留 5 份，覆盖/删除都不再不可恢复） |
 | 工具 | `dsh-tool-scope` | 0.1.12 | 按会话模式过滤模型可见工具；Pentest 隐藏子代理/工作流、矩阵、WebShell、后渗透与内网工具。耗时扫描器按需加载由 `dsh-scanner-tools` 管理，避免宿主全局过滤器误报 preset 内工具。该过滤缩小模型工具面，不替代授权控制 |
 | 过程 | `dsh-stage-gate` | 1.9.6 | 记录任务目标与作业方向，检查阶段产物是否齐全；pentest P1 新增机器可读 `asset-inventory.json`；作业方向可带执行任务状态、心跳、重试、中断恢复及阶段/资产组/目标资产/优先分/父任务字段；项目工作台新增 **作业进度、资产组状态表、两级子任务树和按目标分组的成果路径**；结束条件由系统判断；表格门禁失败信息直接给出差几行几格 |

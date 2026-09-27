@@ -49,6 +49,18 @@ await ok("转换：native 模式直贴", () => {
 	assert.equal(q.fofa, 'title="x" && port="80"');
 	assert.equal(q.hunter, 'title="x" && port="80"');
 });
+await ok("FOFA ICP/域名精确匹配，机构指纹不误发到其他平台", () => {
+	const q = buildQueries('icp:"湘ICP备20260001号" domain:"hospital.example" host:"oa.hospital.example" asn:4134 city:"上海" region:"上海" title:"市立医院" cert.subject.org:"市立医院"', "dsl");
+	assert.ok(q.fofa.includes('icp=="湘ICP备20260001号"'), q.fofa);
+	assert.ok(q.fofa.includes('domain=="hospital.example"'), q.fofa);
+	assert.ok(q.fofa.includes('host=="oa.hospital.example"') && q.fofa.includes('asn=="4134"'), q.fofa);
+	assert.ok(q.fofa.includes('city="上海"') && q.fofa.includes('region="上海"'), q.fofa);
+	assert.ok(q.fofa.includes('title="市立医院"') && q.fofa.includes('cert.subject.org="市立医院"'), q.fofa);
+	assert.equal(q.hunter, "");
+	assert.equal(q.quake, "");
+	const cidr = buildQueries('ip:"203.0.113.0/24"', "dsl");
+	assert.ok(cidr.fofa.includes('ip="203.0.113.0/24"'), cidr.fofa);
+});
 await ok("蜜罐过滤附加", () => {
 	assert.ok(fofaGuard('app="Nginx"').includes("is_honeypot=false"));
 });
@@ -197,7 +209,7 @@ await ok("FOFA 默认字段集不要求专业版 lastupdatetime", async () => {
 	try {
 		await searchFofaPage("test-key", 'app="Tomcat"', 10);
 		const fields = new URL(requestedUrl).searchParams.get("fields");
-		assert.equal(fields, "host,title,ip,domain,port,protocol,server");
+		assert.equal(fields, "host,title,ip,domain,port,protocol,server,icp,asn,org,city,region,cert.subject.org,cert.subject.cn");
 		assert.ok(!fields.includes("lastupdatetime"));
 	} finally {
 		globalThis.fetch = oldFetch;
@@ -382,6 +394,35 @@ await ok("CSRF 头校验：匹配放行/缺失或错值拒", () => {
 		assert.equal(itemSchema.properties.entryIds.items.type, "string");
 	});
 
+	await ok("FOFA candidate batch 保持只读候选且不写入资产账本", async () => {
+		const st = openHunterStore(join(TEST_HOME, "hunter", "hunter.db"));
+		st.setKey.run("fofa", "test-key", new Date().toISOString());
+		st.close();
+		const oldFetch = globalThis.fetch;
+		const workspace = mkdtempSync(join(process.env.TEMP || process.env.TMP || process.cwd(), "hunter-candidate-"));
+		try {
+			globalThis.fetch = async (url) => {
+				const q = Buffer.from(new URL(String(url)).searchParams.get("qbase64"), "base64").toString("utf8");
+				assert.ok(q.includes('icp=="湘ICP备20260001号"') && q.includes('title="市立医院"'), q);
+				return { ok: true, status: 200, text: async () => JSON.stringify({ error: false, size: 1, results: [["203.0.113.9:8443", "市立医院管理平台", "203.0.113.9", "", "8443", "https", "nginx"]] }) };
+			};
+			const out = await tools.get("asset_candidate_search_batch").execute({
+				queries: [{ id: "org-rce", query: 'icp:"湘ICP备20260001号" title:"市立医院" app:"Example-Portal"', identityType: "icp+title" }],
+				workspace, size: 5,
+			});
+			assert.equal(out.ok, true, JSON.stringify(out));
+			assert.equal(out.candidateOnly, true);
+			assert.equal(out.assetCount, 1);
+			assert.equal(existsSync(join(workspace, "asset-inventory.json")), false);
+			assert.ok(existsSync(join(workspace, out.rawFile)));
+		} finally {
+			globalThis.fetch = oldFetch;
+			rmSync(workspace, { recursive: true, force: true });
+			const cleanupStore = openHunterStore(join(TEST_HOME, "hunter", "hunter.db"));
+			cleanupStore.setKey.run("fofa", "", new Date().toISOString());
+			cleanupStore.close();
+		}
+	});
 	await ok("asset search 工具描述要求显式授权子域通配符", () => {
 		assert.match(tools.get("asset_search").parameters.scope.description, /bare domain.*(?:exact|only itself).*\*\.example\.com/i);
 		assert.match(tools.get("asset_search_batch").parameters.scope.description, /bare domain.*(?:exact|itself).*\*\.example\.com/i);

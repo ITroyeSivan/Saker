@@ -20,7 +20,7 @@ import { isIP } from "node:net";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { parseScope, scopeSafeAsset, upsertAssets } from "dsh-saker/asset-inventory";
 import { openHunterStore, configView, getKey, nowIso } from "./store.js";
-import { buildQueries, searchFofaPage, searchHunterPage, searchQuakePage, mergeAssets, fofaGuard, LIMITS, daysAgoStamp, nowStamp } from "./adapters.js";
+import { buildQueries, parseDsl, searchFofaPage, searchHunterPage, searchQuakePage, mergeAssets, fofaGuard, LIMITS, daysAgoStamp, nowStamp } from "./adapters.js";
 import { parseFingerprint, fingerprintQuery, fingerprintLadder, searchWithRelax, verifyPipeline, SEARCH_BUDGET } from "./verify.js";
 import { openStore as openResultsStore, getFinding, updateFinding } from "@dsh-external/dsh-redteam-results/store";
 
@@ -165,7 +165,12 @@ function scopeClause(term, platform) {
 	const value = term.startsWith("*.") ? term.slice(2) : term;
 	const isIp = value.includes("/") || isIP(value) !== 0;
 	const field = isIp ? "ip" : "domain";
-	return platform === "quake" ? `${field}:"${value}"` : `${field}="${value}"`;
+	if (platform === "quake") return `${field}:"${value}"`;
+	if (platform === "fofa") {
+		const exact = !term.startsWith("*.") && !value.includes("/");
+		return `${field}${exact ? "==" : "="}"${value}"`;
+	}
+	return `${field}="${value}"`;
 }
 
 function joinScopedQuery(query, terms, platform) {
@@ -275,7 +280,13 @@ function normalizeRows(platform, rows) {
 	// adapters 的归一化内联在 search 函数里；这里按平台映射输出统一行。
 	return rows.map((r) => {
 		if (platform === "fofa") {
-			return { host: String(r[0] ?? ""), title: String(r[1] ?? ""), ip: String(r[2] ?? ""), domain: String(r[3] ?? ""), port: String(r[4] ?? ""), protocol: String(r[5] ?? ""), server: String(r[6] ?? ""), platform };
+			return {
+				host: String(r[0] ?? ""), title: String(r[1] ?? ""), ip: String(r[2] ?? ""),
+				domain: String(r[3] ?? ""), port: String(r[4] ?? ""), protocol: String(r[5] ?? ""),
+				server: String(r[6] ?? ""), icp: String(r[7] ?? ""), asn: String(r[8] ?? ""),
+				org: String(r[9] ?? ""), city: String(r[10] ?? ""), region: String(r[11] ?? ""),
+				certSubjectOrg: String(r[12] ?? ""), certSubjectCn: String(r[13] ?? ""), platform,
+			};
 		}
 		if (platform === "hunter") {
 			return { host: String(r.url ?? ""), title: String(r.web_title ?? ""), ip: String(r.ip ?? ""), domain: String(r.domain ?? ""), port: String(r.port ?? ""), protocol: String(r.protocol ?? ""), server: String(r.web_server ?? ""), isp: String(r.isp ?? ""), time: String(r.updated_at ?? ""), platform };
@@ -541,10 +552,10 @@ function apply(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "asset_search",
-		description: "Query configured FOFA / 奇安信 Hunter / 360 Quake platforms with one DSL, filter results to an explicit authorized scope, and merge them into the workspace asset-inventory.json. This is passive public-index search: it sends no traffic to the targets. If no platform key is configured it fails with the fallback recon ladder instead of pretending success.",
+		description: "Query configured FOFA / 奇安信 Hunter / 360 Quake platforms with one DSL, filter results to an exact scope, and merge them into the workspace asset-inventory.json. This is passive public-index search: it sends no traffic to the targets. If no platform key is configured it fails with the fallback recon ladder instead of pretending success.",
 		parameters: {
 			query: { type: "string", required: true, description: "Unified DSL query, e.g. domain=\"example.com\" && title=\"OA\"" },
-			scope: { type: "string", required: true, description: "Authorized scope: comma/newline separated exact domains, IPs or IPv4 CIDRs. A bare domain matches only itself; *.example.com matches explicitly authorized subdomains, not the apex. Out-of-scope results are counted but not written." },
+			scope: { type: "string", required: true, description: "Comma/newline separated exact domains, IPs or IPv4 CIDRs. A bare domain matches only itself; *.example.com matches subdomains, not the apex. Out-of-scope results are counted but not written." },
 			workspace: { type: "string", required: true, description: "Task workspace root (asset-inventory.json / assets.md / artifacts land here)" },
 			mode: { type: "string", enum: ["dsl", "native"], description: "dsl converts unified fields; native sends the query to each platform as-is" },
 			platform: { type: "string", enum: ["all", "fofa", "hunter", "quake"], description: "Search all configured platforms or only one; default all" },
@@ -557,7 +568,7 @@ function apply(ctx) {
 		async execute(args, exec) {
 			if (!String(args.workspace || "").trim()) return { ok: false, error: "workspace 不能为空" };
 			const workspace = resolveWorkspaceArg(args.workspace, exec);
-			if (!String(args.scope || "").trim()) return { ok: false, error: "scope 不能为空——资产检索必须限定授权范围" };
+			if (!String(args.scope || "").trim()) return { ok: false, error: "scope 不能为空——资产检索必须限定精确目标范围" };
 			const st = theStore();
 			let requestedPlatforms;
 			try { requestedPlatforms = selectedPlatforms(args.platform); } catch (error) { return { ok: false, error: error.message } }
@@ -627,7 +638,7 @@ function apply(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "asset_search_batch",
-		description: "Execute a bounded batch of platform-specific fingerprint queries inside one explicit authorized scope. It obeys provider rate limits, merges results into asset-inventory.json, and returns the per-query candidate map. Public-index search sends no traffic to targets.",
+		description: "Execute a bounded batch of platform-specific fingerprint queries inside one exact scope. It obeys provider rate limits, merges results into asset-inventory.json, and returns the per-query candidate map. Public-index search sends no traffic to targets.",
 		parameters: {
 			queries: {
 				type: "array",
@@ -644,7 +655,7 @@ function apply(ctx) {
 					additionalProperties: false,
 				},
 			},
-			scope: { type: "string", required: true, description: "Authorized domains, IPs or IPv4 CIDRs. A bare domain is exact; *.example.com matches explicitly authorized subdomains, not the apex. The provider query is constrained and results are filtered again." },
+			scope: { type: "string", required: true, description: "Exact domains, IPs or IPv4 CIDRs. A bare domain is exact; *.example.com matches subdomains, not the apex. The provider query is constrained and results are filtered again." },
 			workspace: { type: "string", required: true, description: "Task workspace root" },
 			platform: { type: "string", enum: ["all", "fofa", "hunter", "quake"], description: "Configured provider selection; default all" },
 			size: { type: "integer", description: "Maximum rows per query and provider (default 50, cap 500)" },
@@ -656,7 +667,7 @@ function apply(ctx) {
 		},
 		async execute(args, exec) {
 			if (!String(args.workspace || "").trim()) return { ok: false, error: "workspace 不能为空" };
-			if (!String(args.scope || "").trim()) return { ok: false, error: "scope 不能为空——批量资产检索必须限定授权范围" };
+			if (!String(args.scope || "").trim()) return { ok: false, error: "scope 不能为空——批量资产检索必须限定精确目标范围" };
 			if (!Array.isArray(args.queries) || args.queries.length === 0) return { ok: false, error: "queries 必须是非空数组" };
 			if (args.queries.length > 100) return { ok: false, error: "单批最多 100 个查询组；请分批继续" };
 			let platforms;
@@ -695,7 +706,7 @@ function apply(ctx) {
 					}
 				}
 			} catch (error) { return { ok: false, error: String(error?.message || error) } }
-			if (estimatedRequests > 200) return { ok: false, error: `本批预计发送 ${estimatedRequests} 次平台 API 请求，超过单批上限 200；减少查询组或拆分授权范围` };
+			if (estimatedRequests > 200) return { ok: false, error: `本批预计发送 ${estimatedRequests} 次平台 API 请求，超过单批上限 200；减少查询组或拆分目标范围` };
 
 			const queryResults = Array(queries.length);
 			let nextIndex = 0;
@@ -743,7 +754,7 @@ function apply(ctx) {
 			const errors = queryResults.filter((result) => !result.ok).length
 				+ queryResults.filter((result) => result.ok && result.platformErrors?.length).length;
 			const text = [
-				`asset_search_batch：${successfulQueries.length}/${queries.length} 个查询组成功，授权范围内 ${merged.length} 个去重资产，约 ${estimatedRequests} 次平台 API 请求。`,
+				`asset_search_batch：${successfulQueries.length}/${queries.length} 个查询组成功，精确范围内 ${merged.length} 个去重资产，约 ${estimatedRequests} 次平台 API 请求。`,
 				...(errors ? [`部分平台或查询失败 ${errors} 项；详见批次结果文件。`] : []),
 				`结果：${rawFile.replace(/\\/g, "/")}`,
 				`资产账本：${path.relative(workspace, written.file).replace(/\\/g, "/")}`,
@@ -758,6 +769,83 @@ function apply(ctx) {
 			};
 		},
 	}));
+  ctx.tools.register(defineTool({
+    name: "asset_candidate_search_batch",
+    description: "Run bounded FOFA-only organization/Nday searches and save passive candidates outside the active asset ledger. No requests are sent to candidate hosts.",
+    parameters: {
+      queries: {
+        type: "array", required: true,
+        description: "FOFA DSL queries. Each must include an organization identity field and may include an Nday fingerprint.",
+        items: { type: "object", properties: {
+          id: { type: "string", required: true }, query: { type: "string", required: true },
+          basis: { type: "string" }, entryIds: { type: "array", items: { type: "string" } }, identityType: { type: "string" },
+        }, additionalProperties: false },
+      },
+      workspace: { type: "string", required: true, description: "Task workspace for the passive candidate file" },
+      size: { type: "integer", description: "Rows per FOFA query (default 50, maximum 200)" },
+    },
+    output: {
+      schema: { type: "object", additionalProperties: true },
+      render: (_args, value) => [{ type: "text", text: value?.text ?? (value?.ok ? "FOFA 候选查询完成" : "FOFA 候选查询失败：" + (value?.error ?? "unknown")) }],
+    },
+    async execute(args, exec) {
+      if (!String(args.workspace || "").trim()) return { ok: false, error: "workspace 不能为空" };
+      if (!Array.isArray(args.queries) || args.queries.length === 0 || args.queries.length > 100) {
+        return { ok: false, error: "queries 必须包含 1–100 组" };
+      }
+      const seen = new Set();
+      const queries = [];
+      const identityFields = new Set(["icp", "domain", "host", "title", "body", "cert.subject.org", "cert.subject.cn"]);
+      try {
+        for (const [index, item] of args.queries.entries()) {
+          const id = String(item?.id ?? ("q" + (index + 1))).trim();
+          const query = String(item?.query ?? "").trim();
+          if (!id || !query || query.length > 1200) throw new Error("queries[" + index + "] 必须有 id 和不超过 1200 字符的 query");
+          if (seen.has(id)) throw new Error("查询 id 重复：" + id);
+          seen.add(id);
+          const fields = buildQueries(query, "dsl");
+          const parsed = parseDsl(query);
+          if (![...parsed.keys()].some((field) => identityFields.has(field))) {
+            throw new Error("查询 " + id + " 缺少机构归属字段（ICP/域名/主机名/标题/正文/证书组织）");
+          }
+          if (!fields.fofa) throw new Error("查询 " + id + " 无法转换为 FOFA 语法");
+          queries.push({
+            id, query,
+            basis: String(item?.basis ?? "").trim().slice(0, 80),
+            entryIds: Array.isArray(item?.entryIds) ? [...new Set(item.entryIds.map(String).filter(Boolean))].slice(0, 100) : [],
+            identityType: String(item?.identityType ?? "").trim().slice(0, 40),
+          });
+        }
+      } catch (error) { return { ok: false, error: String(error?.message || error) }; }
+      const workspace = resolveWorkspaceArg(args.workspace, exec);
+      const st = theStore();
+      if (!getKey(st, "fofa")) return { ok: false, degraded: true, error: "未配置 FOFA API key；未执行搜索" };
+      const size = Math.max(1, Math.min(200, Math.floor(Number(args.size) || 50)));
+      const queryResults = await Promise.all(queries.map(async (item) => {
+        try {
+          const result = await runSearch({ query: item.query, mode: "dsl", platform: "fofa", size }, st);
+          return { ...item, ok: true, assets: result.assets, effectiveQueries: result.effectiveQueries, platformErrors: result.platformErrors || [] };
+        } catch (error) {
+          return { ...item, ok: false, error: String(error?.message || error), assets: [] };
+        }
+      }));
+      const successful = queryResults.filter((item) => item.ok);
+      if (!successful.length) return { ok: false, error: "全部 " + queries.length + " 个 FOFA 查询失败；失败不计作零结果", queryResults };
+      const assets = mergeAssets(...successful.map((item) => item.assets));
+      const rawFile = path.join("artifacts", "recon", "fofa-candidates-" + stamp() + ".json");
+      const rawAbs = path.join(workspace, rawFile);
+      fs.mkdirSync(path.dirname(rawAbs), { recursive: true });
+      fs.writeFileSync(rawAbs, JSON.stringify({ generatedAt: new Date().toISOString(), candidateOnly: true, queries: queryResults, assets }, null, 2) + "\n", "utf8");
+      appendEvidence(workspace, "FOFA 被动机构/Nday 候选 " + successful.length + "/" + queries.length + " 组；未写入活动资产账本", rawFile.replace(/\\/g, "/"));
+      const errors = queryResults.filter((item) => !item.ok).length;
+      const text = [
+        "FOFA 被动候选搜索：" + successful.length + "/" + queries.length + " 组成功，" + assets.length + " 个去重候选；预计最多 " + queries.length + " 次 API 请求。",
+        "结果保存在 " + rawFile.replace(/\\/g, "/") + "，没有加入活动资产账本，也没有连接候选主机。",
+        ...(errors ? [errors + " 组失败，需与零结果区分；详见证据文件。"] : []),
+      ];
+      return { ok: true, candidateOnly: true, queryCount: queries.length, estimatedRequests: queries.length, successfulQueries: successful.length, assetCount: assets.length, queryResults, assets, rawFile: rawFile.replace(/\\/g, "/"), text: text.join("\n") };
+    },
+  }));
 }
 
 export { apply, inject, name, ROUTE_PATH, DB_PATH, openHunterStore, LIMITS, isTrustedRequest };

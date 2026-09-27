@@ -35,8 +35,9 @@ const extractPersona = (source) => {
 }
 const pentestCordis = readFileSync(join(ROOT, 'preset/pentest/agent.cordis.yml'), 'utf8')
 assert.equal(extractPersona(pentestPatch), extractPersona(pentestCordis), 'Pentest runtime persona must match its editable cordis source')
-assert.ok(/If either is missing, call `ask_user_question` once with a concise question and wait; do not replace it with prose\./i.test(pentestPatch), 'Pentest must block on ask_user_question when target or scope is missing')
-for (const mode of ['pentest-regular', 'pentest-nday', 'pentest-0day']) {
+assert.ok(!extractPersona(pentestPatch).includes('ask_user_question'), 'Pentest persona must not inject an interactive question step')
+assert.ok(pentestPatch.includes('Never ask a follow-up question') && pentestPatch.includes('scope_missing'), 'Pentest must stop cleanly when scope is missing')
+for (const mode of ['pentest-regular', 'pentest-nday', 'pentest-campaign', 'pentest-0day']) {
   assert.ok(pentestPatch.includes(mode), `preset help must point to ${mode}`)
 }
 

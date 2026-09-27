@@ -3,7 +3,7 @@ import { apply, bundledSkills } from '../lib/skill-registry.js'
 
 const bundled = bundledSkills()
 const names = bundled.map(skill => skill.name)
-for (const name of ['browser-recon', 'audit-playbook', 'pentest-playbook', 'pentest-regular', 'pentest-nday', 'pentest-0day']) {
+for (const name of ['browser-recon', 'audit-playbook', 'pentest-playbook', 'pentest-regular', 'pentest-nday', 'pentest-campaign', 'pentest-0day']) {
   assert(names.includes(name), `${name} missing from the global prompt registry`)
 }
 assert(!names.includes('ctf-playbook'), 'ctf-playbook leaked into the global prompt registry')

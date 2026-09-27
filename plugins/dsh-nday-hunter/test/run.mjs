@@ -26,7 +26,7 @@ import { buildAttackPlan } from '../lib/plan.js'
 import { bucketGates, recordGate } from '../lib/gate.js'
 import { buildMemshellCliPlan, buildMemshellMcpPlan, classifyActionImpact, executeMemshellCliPlan } from '../lib/memshell-cli.js'
 import { buildAccessPlan, classifyMemoryBackend, renderAccessPlan } from '../lib/post.js'
-import { buildNdaySearchPlan, parseMeasurementHints, probeMeasurementQueries } from '../lib/measurement-query.js'
+import { buildCampaignNdayQueries, buildNdaySearchPlan, campaignIdentityVariants, parseMeasurementHints, probeMeasurementQueries } from '../lib/measurement-query.js'
 import { apply, decodeProbeBody, describeTransportError, detectProxyEnv, probeBaseForAsset, probeRequestOptions, summarizeTransportErrors } from '../lib/index.js'
 
 let failed = 0
@@ -108,7 +108,7 @@ process.env.SAKER_ROOT = repoRoot
     const profile = path.join(fixtureRoot, 'profiles', 'web')
     const profileModules = path.join(profile, 'node_modules')
     const sharedRoot = path.join(profileModules, 'dsh-saker')
-    const stalePeer = path.join(profileModules, '.pnpm', '@dsh-external+dsh-nday-hunter@1.3.44', 'node_modules', 'dsh-saker')
+const stalePeer = path.join(profileModules, '.pnpm', '@dsh-external+dsh-nday-hunter@1.3.44', 'node_modules', 'dsh-saker')
     const fakeModule = path.join(profileModules, '.pnpm', '@dsh-external+dsh-nday-hunter@1.3.44', 'node_modules', '@dsh-external', 'dsh-nday-hunter', 'lib', 'catalog.js')
     fs.mkdirSync(sharedRoot, { recursive: true })
     fs.mkdirSync(stalePeer, { recursive: true })
@@ -203,6 +203,20 @@ process.env.SAKER_ROOT = repoRoot
     && plan.catalogFingerprintEntries.length > 0 && plan.fallbackEntries.length > 0)
   expect('查询计划：默认首批限制为 20 组，提供后续分页游标',
     buildNdaySearchPlan(catalog).selected.length <= 20)
+
+  const identity = { icp: '湘ICP备20260001号', domains: ['hospital.example'], organizationName: '市立医院' }
+  const identityVariants = campaignIdentityVariants(identity)
+  const campaignQueries = buildCampaignNdayQueries({ selected: [{ query: 'app:"Example-Portal"', basis: 'catalog-fingerprint', entryIds: ['portal-rce'] }] }, identity)
+  expect('机构查询计划包含 ICP/域名/证书/页面标题正文多个归属线索',
+    identityVariants.some((item) => item.kind === 'icp')
+    && identityVariants.some((item) => item.kind === 'domain')
+    && identityVariants.some((item) => item.query.startsWith('cert.subject.org:'))
+    && identityVariants.some((item) => item.query.startsWith('cert.subject.cn:'))
+    && identityVariants.some((item) => item.query.startsWith('body:'))
+    && campaignQueries.length > 4)
+  expect('机构查询组合 Nday 指纹与单一归属条件，保留候选映射且有查询上限',
+    campaignQueries.every((item) => item.query.includes('app:"Example-Portal"') && item.entryIds.includes('portal-rce') && !item.query.includes('||'))
+    && buildCampaignNdayQueries({ selected: Array.from({ length: 30 }, (_, i) => ({ query: 'title:"p' + i + '"', basis: 'probe-signature', entryIds: ['p' + i] })) }, identity).length <= 20)
 
   const syntheticPlan = buildNdaySearchPlan({ updated: '2026-09-26', entries: [
     { id: 'curated-rce', status: 'normalized', vulnClass: 'RCE', aliases: ['Curated Product'], fingerprint: {
@@ -997,8 +1011,8 @@ try {
         workspace,
         entryIds: 'tongtech-tongweb-ejb-deserialization',
       })
-      expect('裸域授权不会主动探测其子域或其他主机',
-        outOfScope.ok === false && outOfScope.error.includes('授权范围') && requestCount === 0,
+      expect('裸域范围不会主动探测其子域或其他主机',
+        outOfScope.ok === false && outOfScope.error.includes('精确范围') && requestCount === 0,
         JSON.stringify({ error: outOfScope.error, requestCount }))
     } finally {
       await close(guardedTarget)
@@ -1067,7 +1081,7 @@ try {
         assetSource: 'nday-search', searchId: hunted.searchId,
         scope: '127.0.0.1', workspace, entryIds: mappedEntryId, rate: 100,
       })
-      expect('搜索结果到 nday_match 闭环只筛候选实际映射的条目与本地授权资产',
+      expect('搜索结果到 nday_match 闭环只筛候选实际映射的条目与本地范围资产',
         screened.ok && screened.parameters.assetSource === 'nday-search'
         && screened.parameters.searchId === hunted.searchId
         && screened.summary.assets === 1 && screened.summary.entries === 1
@@ -1078,7 +1092,7 @@ try {
         scope: '127.0.0.1', workspace, entryIds: 'not-mapped-entry',
       })
       expect('搜索证据的 entry 映射缺失时拒绝，不退化为全目录探测',
-        invented.ok === false && /没有同时处于当前授权范围且匹配/.test(invented.error), invented.error)
+        invented.ok === false && /没有同时处于当前精确范围且匹配/.test(invented.error), invented.error)
       const callsBeforeEnd = batchCalls.length
       const ended = await scopeHunt.execute({
         scope: '127.0.0.1', workspace, entryIds: mappedEntryId,
@@ -1757,7 +1771,7 @@ try {
       (await handoff.execute({ asset: 'http://x', scope: '127.0.0.1', workspace: ws })).error.includes('keywords'))
     expect('nday_handoff 拒绝未限定范围和越界目标',
       (await handoff.execute({ asset: 'http://127.0.0.1:18097', workspace: ws, keywords: 'weaver' })).error.includes('scope')
-      && (await handoff.execute({ asset: 'http://evil.example.net', scope: 'example.com', workspace: ws, keywords: 'weaver' })).error.includes('授权范围'))
+      && (await handoff.execute({ asset: 'http://evil.example.net', scope: 'example.com', workspace: ws, keywords: 'weaver' })).error.includes('精确范围'))
     expect('带 entryId 时仍走条目模式', out.mode === 'entry' && out.entryId === 'weaver-ecology-dubboapi-debug-rce')
     fs.rmSync(ws, { recursive: true, force: true })
   } finally {

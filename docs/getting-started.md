@@ -13,7 +13,7 @@
 > 当前完整验证环境为 DeepSeek Harness **`0.1.7-rc.1-c36a83f`** 内部 Web 版本；
 > `0.1.6-alpha.1` 保留兼容。公开 npm 线以 `npm view @deepseek-ai/dsh dist-tags` 为准。
 
-**关于 `0.1.7-rc.2`**：Saker 0.4.58 基于当前 preset/config 兼容层适配。Agent preset 改为
+**关于 `0.1.7-rc.2`**：Saker 0.4.59 基于当前 preset/config 兼容层适配。Agent preset 改为
 声明式配置；`preset-root` 在 0.1.7 调用 `agentPresets.register()`，在 0.1.6
 继续走 `resolvedRoots`，因此同一条 bundle patch 在两代宿主都可启动。settings
 改为当前 profile 的 Cordis volatile Config，并对 0.1.6 缺失的
@@ -81,7 +81,7 @@ dsh web
 每个目录都是独立的dsh bundle。先安装根模式包，再按需要添加插件：
 
 ```powershell
-dsh plugin --profile web add "file:C:/packages/dsh-saker-0.4.58.tgz"
+dsh plugin --profile web add "file:C:/packages/dsh-saker-0.4.59.tgz"
 dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-sec-config-1.3.27.tgz"
 dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-knowledge-hub-0.3.19.tgz"
 dsh plugin --profile web add "file:C:/packages/dsh-external-dsh-skill-browse-1.1.10.tgz"
@@ -150,7 +150,7 @@ dsh plugin --profile web remove dsh-saker
   /dsh-attack-atlas  /dsh-campaign-memory  /dsh-hunter  /dsh-redteam-results
   /dsh-session-pulse  /dsh-webshell-mgr  /dsh-webshell-mgr-rpc  /dsh-mcp-studio
 - 设置页分区逐个打开：「安全配置」「webshell 管理」「MCP Studio」「refusal-guard」都不得停在永久「加载中…」。
-- 新建会话默认展示 pentest / code-audit，并保留宿主 standard。在渗透测试的新会话输入 / 可选 pentest-regular、pentest-nday（默认）或 pentest-0day；Nday 默认快速发现，常规全量扫描需明确设深度与时间预算，0day 一次验证一个假设。选中后可追加范围、时限、允许/禁用工具与停止条件。
+- 新建会话默认展示 pentest / code-audit，并保留宿主 standard。在渗透测试的新会话输入 / 可选 pentest-nday（默认）、pentest-campaign、pentest-regular 或 pentest-0day；机构模式以 FOFA 组合机构与 Nday 指纹搜索，Nday 默认快速发现，常规全量扫描需明确设深度与时间预算，0day 一次验证一个假设。选中后可追加范围、时限、允许/禁用工具与停止条件。
 
 【4. 出错时的排查入口（按顺序，不要瞎试）】
 - dsh 起不来：先看端口是否被占（换 --port）；NODE_OPTIONS 置空；删 ~/.dsh/.credentials.yaml.lock 再起。
