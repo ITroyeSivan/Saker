@@ -17,8 +17,10 @@ import crypto from "node:crypto";
 import os from "node:os";
 import fs from "node:fs";
 import { isIP } from "node:net";
+import { createUpdateJob } from "./update-job.js";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { parseScope, scopeSafeAsset, upsertAssets } from "dsh-saker/asset-inventory";
+import { parseQueryExpression, everyBranchHasField } from "dsh-saker/query-expression";
 import { openHunterStore, configView, getKey, nowIso } from "./store.js";
 import { buildQueries, parseDsl, searchFofaPage, searchHunterPage, searchQuakePage, mergeAssets, fofaGuard, LIMITS, daysAgoStamp, nowStamp } from "./adapters.js";
 import { parseFingerprint, fingerprintQuery, fingerprintLadder, searchWithRelax, verifyPipeline, SEARCH_BUDGET } from "./verify.js";
@@ -468,6 +470,27 @@ async function testKey(platform, key) {
 	}
 }
 
+const updateJob = createUpdateJob();
+const NDAY_POLICY_FILE = path.join(DSH_HOME, "nday-hunter", "policy.json");
+
+function readJsonFile(file, fallback) {
+	try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return fallback; }
+}
+
+function writeJsonFile(file, value) {
+	fs.mkdirSync(path.dirname(file), { recursive: true });
+	fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+async function loadNdayModules() {
+	return {
+		priority: await import("@dsh-external/dsh-nday-hunter/priority"),
+		pipeline: await import("@dsh-external/dsh-nday-hunter/source-pipeline"),
+		metrics: await import("@dsh-external/dsh-nday-hunter/metrics"),
+		registry: await import("@dsh-external/dsh-nday-hunter/source-registry"),
+	};
+}
+
 export async function dispatch(ctx, st, endpoint, payload) {
 	const p = payload ?? {};
 	if (endpoint === "config.get") return { config: configView(st), platforms: ["fofa", "hunter", "quake"] };
@@ -488,6 +511,51 @@ export async function dispatch(ctx, st, endpoint, payload) {
 		if (!key) throw new Error("该平台未配置 key");
 		const r = await testKey(platform, key);
 		return r.ok ? { ok: true, info: r.info } : { ok: false, error: r.error };
+	}
+	if (endpoint === "nday.config.get") {
+		const { priority, pipeline, metrics, registry } = await loadNdayModules();
+		const policy = priority.normalizePriorityPolicy({ ...priority.DEFAULT_POLICY, ...readJsonFile(NDAY_POLICY_FILE, {}) });
+		return {
+			ok: true,
+			policy,
+			collector: pipeline.readCollectorConfig(DSH_HOME),
+			status: pipeline.collectorStatus(DSH_HOME),
+			job: updateJob.status(),
+			metrics: metrics.summarizeMetrics(DSH_HOME),
+			registry: registry.sourceRegistrySummary(),
+		};
+	}
+	if (endpoint === "nday.config.set") {
+		const { priority, pipeline } = await loadNdayModules();
+		const policy = priority.normalizePriorityPolicy({ ...priority.DEFAULT_POLICY, ...(p.policy ?? {}) });
+		writeJsonFile(NDAY_POLICY_FILE, policy);
+		const collector = pipeline.writeCollectorConfig({ ...pipeline.readCollectorConfig(DSH_HOME), ...(p.collector ?? {}) }, DSH_HOME);
+		return { ok: true, policy, collector };
+	}
+	if (endpoint === "nday.collector.start") {
+		const { pipeline } = await loadNdayModules();
+		return { ok: true, job: updateJob.start(pipeline, DSH_HOME, p.collector ?? pipeline.readCollectorConfig(DSH_HOME), p.source) };
+	}
+	if (endpoint === "nday.collector.status") {
+		const { pipeline } = await loadNdayModules();
+		return { ok: true, status: pipeline.collectorStatus(DSH_HOME), job: updateJob.status() };
+	}
+	if (endpoint === "nday.collector.run") {
+		const { pipeline } = await loadNdayModules();
+		const result = await pipeline.runCollector({ force: true }, { home: DSH_HOME });
+		return { ok: true, ...pipeline.collectorResponse(result) };
+	}
+	if (endpoint === "nday.sources.query") {
+		const { pipeline } = await loadNdayModules();
+		return { ok: true, ...pipeline.querySourceCandidates({ query: p.query ?? "", source: p.source ?? "", limit: p.limit ?? 20, cursor: p.cursor ?? null }, DSH_HOME) };
+	}
+	if (endpoint === "nday.sources.content") {
+		const { pipeline } = await loadNdayModules();
+		return { ok: true, content: pipeline.readSourceContent(p.source, p.id, { revision: p.revision, offset: p.offset, limit: p.limit }, DSH_HOME) };
+	}
+	if (endpoint === "nday.metrics.get") {
+		const { metrics } = await loadNdayModules();
+		return { ok: true, metrics: metrics.summarizeMetrics(DSH_HOME) };
 	}
 	if (endpoint === "search") {
 		const { queries, assets, platformErrors } = await runSearch(p, st);
@@ -804,8 +872,7 @@ function apply(ctx) {
           if (seen.has(id)) throw new Error("查询 id 重复：" + id);
           seen.add(id);
           const fields = buildQueries(query, "dsl");
-          const parsed = parseDsl(query);
-          if (![...parsed.keys()].some((field) => identityFields.has(field))) {
+          if (!everyBranchHasField(parseQueryExpression(query), identityFields)) {
             throw new Error("查询 " + id + " 缺少机构归属字段（ICP/域名/主机名/标题/正文/证书组织）");
           }
           if (!fields.fofa) throw new Error("查询 " + id + " 无法转换为 FOFA 语法");

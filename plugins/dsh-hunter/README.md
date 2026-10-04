@@ -9,7 +9,8 @@ FOFA / 奇安信 Hunter / 360 Quake **三方资产测绘聚合**：统一 DSL �
   再把范围内结果归一合并到工作区 `asset-inventory.json` / `assets.md`。范围外结果只计数、不落账。
   未配置任何平台 key 时明确失败并给 `subfinder/httpx/fscan/asset_ingest` 降级路径，不返回空成功。
 - **模型工具 `asset_search_batch`**：批量执行 Nday 指纹查询，返回逐查询候选映射；FOFA 请求全局串行限速，授权范围加入查询并在本地再次过滤。支持 FOFA 官方语法中的 `fid`、`app`、`product`、`product.version`、`category`、哈希、banner、JARM、证书/TLS 指纹等字段；FOFA 不支持的字段不会静默降级到 Hunter/Quake 的宽查询。部分高级字段受 FOFA 账号等级限制，相关 API 错误会按查询组保留。
-- **设置与配额**：Web 设置面板填三家 API key（独立 SQLite `~/.dsh/hunter/hunter.db` 存储），配额感知的分页/导出与每日预算护栏。
+- **设置与配额**：主设置页「资产平台 API」（或「hunter 狩猎」右上角设置）填 FOFA / Hunter / Quake API key；key 独立存本机 SQLite `~/.dsh/hunter/hunter.db`，页面与模型侧只回显末 4 位，不写进源码。配额感知的分页/导出与每日预算护栏仍然生效。
+- **漏洞情报更新**：设置页勾选来源后直接点“更新已选源”，自动保存当前选择；也可“更新此源”。后台运行并逐源显示进度、失败原因及续传状态。定时更新默认关闭，高级分页与候选排序参数折叠。公众号需要检索词，Git 类来源需要 Git，OSV 首次全库下载较大。
 - **实测流水线**（Live-Verify）：读 redteam-results 成果库取 finding → 指纹搜索 → 存活探测 → L0/L1 分级验证 → 回写 `retestNote / evidence / status` + 历史 + 会话 followup 通知。
 - **授权边界**：互联网资产仅 L0（GET 首页+指纹）；L1 最小影响验证**仅对用户显式标记授权的资产**执行；不提供 L2 完整利用。
 
@@ -22,7 +23,7 @@ FOFA / 奇安信 Hunter / 360 Quake **三方资产测绘聚合**：统一 DSL �
 
 ## 配置
 
-在 Web「hunter」设置面板填入三平台 API key；实测前先在成果页把目标标记为「授权」。
+打开“设置 → 资产平台 API”填入三平台 API key（也可从「hunter 狩猎」右上角设置进入）；实测前先在成果页把目标标记为「授权」。任务目标直接在聊天中提供域名、IP 或机构范围；更新公告在“设置 → 漏洞情报更新”操作。
 
 ## 测试
 

@@ -18,6 +18,7 @@ import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import z from '@deepseek-ai/schemastery'
+import { defineTool } from '@deepseek-ai/dsh-tools'
 
 export const name = 'dsh-method-stack'
 // webServer 必须显式声明：宿主 0.1.5-rc.1 起 connection 服务自身不再 inject webServer，
@@ -25,7 +26,7 @@ export const name = 'dsh-method-stack'
 // 第 617 行 `owner.effect(() => owner.webServer.register(route))`）。0.1.3-alpha.2 时
 // connection 自己声明了它，所以旧代码不需要；0.1.5 不声明即抛
 // `cannot get property "webServer" without inject`。
-export const inject = ['connection', 'systemPrompt', 'agentPresets', 'webServer']
+export const inject = ['connection', 'systemPrompt', 'agentPresets', 'webServer', 'tools']
 
 const CHANNEL = '/dsh-method-stack'
 const Config = z.object({ enable: z.boolean().default(true) })
@@ -187,7 +188,7 @@ function currentProfile(presetId) {
 }
 
 /** 把 active（group/id 数组）渲染成按目录实际存在过滤后的正文拼装（按组分节，避免标题堆叠）。 */
-function renderActive(presetId) {
+function renderActive(presetId, { compact = false } = {}) {
   const profile = currentProfile(presetId)
   const catalog = fullCatalog()
   const byGroup = new Map()
@@ -195,6 +196,8 @@ function renderActive(presetId) {
     for (const m of g.methods) byGroup.set(`${g.group}/${m.id}`, { group: g.group, m })
   }
   const activeIds = (profile.active || []).filter((key) => byGroup.has(key))
+  if (compact && activeIds.length) return { rev: profile.rev || 1, active: activeIds, count: activeIds.length,
+    text: `<saker-methods mode="${presetId}" rev="${profile.rev || 1}" count="${activeIds.length}">\n已启用方法目录，按本轮问题选择相关方法，调用saker_method read key=组/方法读取正文。不要依次全读或把目录当扫描清单。\n${activeIds.slice(0, 24).map(key => key + ': ' + String(byGroup.get(key).m.description || '').slice(0, 100)).join('\n')}${activeIds.length > 24 ? '\n其余方法用saker_method list offset=24查询。' : ''}\n</saker-methods>` }
   const groupOrder = []
   for (const key of activeIds) { const grp = key.split('/')[0]; if (!groupOrder.includes(grp)) groupOrder.push(grp) }
   const groupSeq = new Map(groupOrder.map((g, i) => [g, i + 1]))
@@ -301,6 +304,26 @@ export function apply(ctx, config = {}) {
   if (!cfg.enable) return
   console.log('[method-stack] apply begin (enable)')
   const { connection, systemPrompt } = ctx
+  ctx.tools.register(defineTool({
+    name: 'saker_method', description: '读取当前启用的测试方法，按具体问题选用；不执行请求。',
+    parameters: { action: { type: 'string', enum: ['list', 'read'], required: true }, key: { type: 'string', description: 'read: group/id' }, offset: { type: 'integer', description: 'list偏移，默认0' } },
+    output: { schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
+    execute(args, exec) {
+      try {
+        const presetId = ctx.agentPresets.composedPreset(exec.agent.ctx);
+        if (!PRESET_IDS.has(presetId)) throw new Error('仅安全测试会话可读取方法');
+        const rendered = renderActive(presetId, { compact: true }), catalog = new Map(fullCatalog().flatMap(group => group.methods.map(method => [group.group + '/' + method.id, method])));
+        if (args.action === 'read') {
+          if (!rendered.active.includes(args.key)) throw new Error('当前组合未启用此方法');
+          const method = catalog.get(args.key);
+          return Promise.resolve({ ok: true, key: args.key, rev: rendered.rev, origin: method.origin, prompt: method.prompt.slice(0, MAX_TEXT), truncated: method.prompt.length > MAX_TEXT });
+        }
+        if (args.action !== 'list' || !Number.isInteger(args.offset ?? 0) || (args.offset ?? 0) < 0) throw new Error('invalid method query');
+        const offset = args.offset ?? 0;
+        return Promise.resolve({ ok: true, total: rendered.count, offset, items: rendered.active.slice(offset, offset + 24).map(key => ({ key, description: catalog.get(key).description })), more: Math.max(0, rendered.count - offset - 24) });
+      } catch (error) { return Promise.resolve({ ok: false, error: error.message }); }
+    }
+  }));
 
   // 1) RPC：目录 / 组合读写（设置页「方法编排」用）
   if (!connection || typeof connection.rpc?.handle !== 'function') {
@@ -409,7 +432,7 @@ export function apply(ctx, config = {}) {
       }
       if (endpoint === 'render-preview') {
         const presetId = typeof p.presetId === 'string' && p.presetId ? p.presetId : 'pentest'
-        const rendered = renderActive(presetId)
+        const rendered = renderActive(presetId, { compact: presetId === 'pentest' })
         return ok({ count: rendered.count, chars: rendered.text.length, rev: rendered.rev })
       }
       if (endpoint === 'opening-get') {
@@ -496,7 +519,7 @@ export function apply(ctx, config = {}) {
           let presetId = ''
           try { presetId = ctx.agentPresets.composedPreset(agent.ctx) } catch { /* ignore */ }
           if (!presetId) return ''
-          const rendered = renderActive(presetId)
+          const rendered = renderActive(presetId, { compact: presetId === 'pentest' })
           return rendered.text // renderActive 已带 <saker-methods> 标签与分节
         },
       })

@@ -1,0 +1,42 @@
+{
+  "scope": "Intermediate batch 4: fail-closed delivery evidence binding, not completed impact verification",
+  "sourceVersions": { "root": "0.4.76", "results": "1.0.28", "nday": "1.5.6" },
+  "implemented": [
+    "Every production pentest read derives execution evidence from session-scoped host receipts rather than caller-submitted flags",
+    "Current reviewed method ID/version/content, identity, endpoint, scope, normal control and probe display packets are checked",
+    "Method or packet changes revoke execution binding; review annotation changes alone do not invalidate it",
+    "HTTP replay receipts cannot claim a generated script has run",
+    "Result filters, delivery archives, outcome metrics and stop policies require execution and independent effect evidence",
+    "Finding update returns compact pending-delivery gaps instead of treating verified status as usable delivery"
+  ],
+  "verification": {
+    "actualHttpExecutionAndBindingAssertions": 8,
+    "officialElectronExecutionAndBindingAssertions": 8,
+    "productionNegativeOutcomeAssertions": 14,
+    "officialElectronNegativeOutcomeAssertions": 14,
+    "receiptReverseMutationsCaught": 6,
+    "deliveryReverseMutationsCaught": 4,
+    "taskPolicyAssertions": 6,
+    "desktopUiContractAssertions": 8,
+    "researchLedgerAssertions": 11,
+    "taskPromptAssertions": 7,
+    "bundleSerializationAndNegativeRpcAssertions": 10,
+    "sharedVerificationAssertions": 12,
+    "resultsPluginRegression": { "passed": 82, "skipped": 6 }
+  },
+  "criticalLimitations": [
+    "Independent effect verifier is NOT implemented; host-derived impactVerified is currently always false",
+    "Consequently no production record currently passes confirmed delivery readiness, including legitimate candidates awaiting a supported verifier",
+    "This intermediate source is not a finished practical release; rejecting all records does not demonstrate recall, efficiency or false-positive reduction",
+    "Legacy claimed verification remains readable, but no longer supplies a confirmed result count",
+    "Positive formatter tests explicitly use an internal verdict fixture only; they do not attest actual execution or impact",
+    "Positive production delivery, deduplication and stopping flows must be tested after the effect verifier is implemented",
+    "Current source is not installed in the running user's Desktop, and actual Desktop/model/token/recall verification remains incomplete"
+  ],
+  "nextRequiredWork": [
+    "Implement independent deterministic effect verifiers with controlled positive and negative cases and observed ownership/identity baselines",
+    "Do not treat status, echo, callback or a caller assertion as execution impact",
+    "Verify true positive production delivery and stop/dedup/export behavior without fabricating host verdicts",
+    "Finish adaptive scheduling and same-model real usage/recall comparison, then Desktop test and update the final guide"
+  ]
+}

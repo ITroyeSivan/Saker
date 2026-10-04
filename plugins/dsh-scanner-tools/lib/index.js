@@ -819,7 +819,9 @@ function apply(ctx, config = {}) {
 	const deferredDefinitions = new Map();
 	const registerScannerTool = (tool) => {
 		if (exposedTools && !exposedTools.has(tool.name)) return;
-		if (deferredNames.has(tool.name)) {
+		// Saker's central tool-scope owns all packs. Preset-local registration
+		// would shadow its tool_pack and make Nday/asset packs impossible to load.
+		if (deferredNames.has(tool.name) && config?.managedToolPacks !== true) {
 			deferredDefinitions.set(tool.name, tool);
 			return;
 		}

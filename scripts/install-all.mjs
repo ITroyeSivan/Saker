@@ -16,9 +16,7 @@
 //       DSH_CLI="node /abs/path/to/deepseek-harness/apps/cli/lib/bin.js"
 //   - tgz artifacts present (run `node scripts/pack-all.mjs` after a clone)
 //
-// Usage:
-//   node scripts/install-all.mjs              # profile `web`
-//   SAKER_PROFILE=prod node scripts/install-all.mjs
+// Legacy custom profiles only. Desktop users use install-desktop.mjs.
 //
 import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, statSync, readFileSync, writeFileSync } from 'node:fs'
@@ -27,7 +25,17 @@ import { dirname, join, resolve } from 'node:path'
 import { stashInstalledDir, restoreStash, dropStash, sweepStashRoot } from './lib/install-stash.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const profile = process.env.SAKER_PROFILE || 'web'
+const profile = process.env.SAKER_PROFILE || ''
+// Desktop owns its executable graph and activation state. Refuse before any
+// profile reconciliation, stashing or package-manager invocation.
+if (profile.trim().toLowerCase() === 'desktop') {
+  console.error('Desktop profile is managed by the desktop application. Use its Plugins page or the official bundled desktop command; install-all cannot modify profiles/desktop.')
+  process.exit(1)
+}
+if (!profile.trim() || profile.trim().toLowerCase() === 'web') {
+  console.error('The standalone Web deployment is retired. Use scripts/install-desktop.mjs or the Desktop Plugins page. Legacy custom profiles require an explicit SAKER_PROFILE.')
+  process.exit(1)
+}
 const cli = process.env.DSH_CLI || 'dsh'
 /**
  * 每个包的安装尝试次数（默认 5）。

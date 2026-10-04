@@ -1425,15 +1425,27 @@ async function defaultResolvers() {
 	try {
 		const { openStore: openResults } = await import("@dsh-external/dsh-redteam-results/store");
 		const results = openResults(path.join(DSH_HOME, "redteam-results", "results.db"));
+		results.close();
 		out.findingExists = (sessionId, id) => {
-			try { return Boolean(results.getFinding(sessionId, id)); } catch { return false; }
+			let reader;
+			try {
+				reader = openResults(path.join(DSH_HOME, "redteam-results", "results.db"));
+				return Boolean(reader.getFinding(sessionId, id));
+			} catch { return false; }
+			finally { reader?.close(); }
 		};
 	} catch { /* 成果库不可达：finding 锚走格式校验降级 */ }
 	try {
 		const { openStore: openAtlas, listChain } = await import("@dsh-external/dsh-attack-atlas/store");
 		const atlas = openAtlas(path.join(DSH_HOME, "attack-atlas", "atlas.db"));
+		atlas.close();
 		out.chainExists = (sessionId, mode, id) => {
-			try { return listChain(atlas, sessionId, mode).nodes.some((n) => n.id === id); } catch { return false; }
+			let reader;
+			try {
+				reader = openAtlas(path.join(DSH_HOME, "attack-atlas", "atlas.db"));
+				return listChain(reader, sessionId, mode).nodes.some((n) => n.id === id);
+			} catch { return false; }
+			finally { reader?.close(); }
 		};
 	} catch { /* 图谱库不可达：chain 锚走格式校验降级 */ }
 	return out;

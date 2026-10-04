@@ -45,7 +45,7 @@ for (const p of ['dsh-campaign-memory', 'dsh-attack-atlas', 'dsh-redteam-results
   const idx = readFileSync(`${P}/${p}/lib/index.js`, 'utf8')
   // 两种正确写法都认：模块级 closeStore() 或 store 单例上的 .close()
   ok(`${p}: 有库句柄释放钩子（卸载时 close，防文件被锁）`,
-    /ctx\.effect\(\(\) => \(\) => \{[\s\S]{0,140}?(store\?\.close\?\.\(\)|closeStore\(\))/.test(idx)
+    /ctx\.effect\(\(\) => (?:async )?\(\) => \{[\s\S]{0,240}?(store\?\.close\?\.\(\)|closeStore\(\))/.test(idx)
     && idx.includes(': store handle"'))
 }
 

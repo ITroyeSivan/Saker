@@ -15,8 +15,6 @@ function rpc(connection, endpoint, payload) {
 }
 var PRESETS = [
   { id: 'pentest', label: '渗透测试' },
-  { id: 'code-audit', label: '代码审计' },
-  { id: 'ctf-solver', label: 'CTF 解题' },
 ];
 var GROUP_LABELS = { recon: '侦察', exploit: '攻击', evidence: '证据与复核', report: '报告', intranet: '内网' };
 function groupLabel(g) { return (GROUP_LABELS[g] || g) + ' · ' + g; }
@@ -91,7 +89,7 @@ function MethodRow(props) {
       m.hasUser
         ? React.createElement('span', { style: { fontSize: 11, padding: '1px 7px', borderRadius: 999, background: '#dafbe1', color: '#1a7f37', fontWeight: 600 } }, '用户版（编辑它；还原官方可恢复）')
         : React.createElement('span', { style: { fontSize: 11, padding: '1px 7px', borderRadius: 999, background: '#eef2f6', color: '#4a5568', fontWeight: 600 } }, '官方版 · 保存将自动派生到用户层')),
-    React.createElement('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', margin: '6px 0' } }, '正文即注入模型的指令。可含 {{变量}}。修改只影响该方法，工具/知识库配置不受影响。'),
+    React.createElement('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', margin: '6px 0' } }, '模型按当前问题读取相关方法正文。修改只影响该方法，工具和知识库配置不受影响。'),
     React.createElement('textarea', { value: draft, onChange: function (e) { setDraft(e.target.value); setDirty(true); }, rows: 20, style: { width: '100%', boxSizing: 'border-box', fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 12, lineHeight: 1.6 } }),
     React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 } },
       React.createElement(Btn, { onClick: save }, '保存'),
@@ -320,8 +318,10 @@ function MethodDock(props) {
   return React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0', fontSize: 12 }, ref: ref },
     React.createElement('button', {
       type: 'button', onClick: function () { setOpen(!open); },
+      'aria-label': '选择测试方法', 'aria-expanded': open,
+      title: '已启用 ' + activeCount + ' 个方法',
       style: { display: 'inline-flex', alignItems: 'center', gap: 6, borderRadius: 999, padding: '2px 10px', fontSize: 12, cursor: 'pointer', border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: 'var(--dsw-alias-bg-base,#fff)', color: 'var(--dsw-alias-label-primary,#1a1a1a)' },
-    }, '方法 ▾', React.createElement('span', { style: { fontSize: 11, fontWeight: 700, color: '#2f81f7' } }, (presetMeta ? presetMeta.label + ' ' : '') + activeCount)),
+    }, '方法 ▾'),
     open ? React.createElement('div', { style: { position: 'absolute', bottom: 'calc(100% + 6px)', left: 0, zIndex: 600, width: 400, maxHeight: '70vh', overflow: 'auto', background: 'var(--dsw-alias-bg-base,#fff)', border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', borderRadius: 10, padding: 10, boxShadow: '0 10px 32px rgba(0,0,0,0.18)' } },
       React.createElement('div', { style: { fontSize: 12, fontWeight: 700, marginBottom: 6, color: 'var(--dsw-alias-label-primary,#1a1a1a)' } }, '方法组合 · ' + (presetMeta ? presetMeta.label : preset)),
       // 一键全开/全关：方法正文是每轮常驻注入，收窄上下文时「全部关闭」是最常用的动作
@@ -330,8 +330,8 @@ function MethodDock(props) {
         React.createElement('a', { href: '#', style: { color: '#2f81f7', textDecoration: 'none' }, onClick: function (e) { e.preventDefault(); setAllGroups(false); } }, '全部关闭'),
         React.createElement('span', { style: { color: 'var(--dsw-alias-label-tertiary,#6e6e73)' } },
           activeCount === 0
-            ? '未启用任何方法 —— 不注入方法正文'
-            : '已启用 ' + activeCount + ' 个，每轮注入约 ' + (activeChars >= 1000 ? (activeChars / 1000).toFixed(1) + 'K' : activeChars) + ' 字符')),
+            ? '未启用任何方法'
+            : '已启用 ' + activeCount + ' 个；每轮只提供目录，相关正文按需读取')),
       combos.length ? React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 } },
         combos.map(function (name) {
           return React.createElement('button', { key: name, type: 'button', onClick: function () { useCombo(name); }, style: { padding: '1px 9px', borderRadius: 999, fontSize: 11, border: '1px solid #2f81f7', background: '#eaf2fe', color: '#175cd3', cursor: 'pointer' } }, '组合：' + name);

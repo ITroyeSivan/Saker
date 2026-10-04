@@ -23,23 +23,17 @@ A one-page MCP server studio for DeepSeek Harness (dsh): live-mount servers, rea
 
 ## 快速开始 / Quick Start
 
-要求：dsh ≥ 0.1.0-rc.6（`dsh plugin` 自动登记 bundles 行为）、Node ^22.19 或 ≥24。
+当前验证基线：官方 Windows 桌面端 0.2.0-rc.2。先打开应用初始化配置，再完全退出后安装；插件管理使用桌面端随附 CLI。
 
-```bash
-# 方式一：GitHub（本仓库）
-dsh plugin --profile web add file:path\to\dsh-mcp-studio.tar.gz   # 或 GitHub Release URL
-
-# 方式二：npm（发布后）
-npx @deepseek-ai/dsh plugin --profile web add dsh-mcp-studio
-
-# 方式三：本地路径 / 内网
-npx @deepseek-ai/dsh plugin --profile web add link:/path/to/dsh-mcp-studio
+```powershell
+# 在 Saker 仓库根目录安装整套插件
+node scripts/install-desktop.mjs --desktop-dir "C:/path/to/DeepSeek Harness"
 ```
 
-装完重启 `dsh web`，设置对话框出现 **MCP 工作台**（位于侧边卡片之下）。卸载同样一条命令：
+单独安装可通过官方桌面端插件管理入口选择本插件打包产物。安装后重新打开桌面端，设置对话框出现 **MCP 工作台**。卸载使用桌面端插件管理入口，或完全退出应用后调用随附 CLI：
 
-```bash
-npx @deepseek-ai/dsh plugin --profile web remove dsh-mcp-studio
+```powershell
+& "C:/path/to/DeepSeek Harness/resources/runtime/cli/bin/dsh.cmd" plugin --profile desktop remove dsh-mcp-studio
 ```
 
 ## 使用 / Usage

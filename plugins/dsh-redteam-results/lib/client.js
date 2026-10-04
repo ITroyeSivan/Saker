@@ -181,6 +181,7 @@ function statusLabelSetFor(archetype, mode) {
 	return archetype === "assets" ? ASSET_STATUS_LABEL : archetype === "ledger" ? LEDGER_STATUS_LABEL : archetype === "timeline" ? TIMELINE_STATUS_LABEL : archetype === "cloudpath" ? CLOUDPATH_STATUS_LABEL : STATUS_LABEL;
 }
 function statusTextFor(f, mode, labelSet) {
+	if (mode === "pentest" && f.status === "verified" && (!f.delivery || !f.delivery.ready)) return "待补证·不可交付";
 	if (mode === "code-audit" && f.status === "pending" && f.auditMode !== "dynamic") return "待动态验证";
 	return labelSet[f.status] || f.status;
 }
@@ -192,6 +193,11 @@ function download(name, text, mime) {
 	a.href = url; a.download = name;
 	document.body.appendChild(a); a.click(); a.remove();
 	setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+}
+function downloadArchive(name, base64) {
+	var raw = atob(base64), bytes = new Uint8Array(raw.length);
+	for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+	download(name, bytes, 'application/zip');
 }
 
 //#region 导出生成器（MD 报告 / MD 总览 / MD 表格 / HTML 报告包）
@@ -979,6 +985,7 @@ function Chip(props) {
 	return React.createElement("span", { className: "dsh-rtr-sev dsh-rtr-sev-" + props.severity }, SEVERITY_LABEL[props.severity] || props.severity);
 }
 function statusTextForExport(f, mode) {
+	if (mode === "pentest" && f.status === "verified" && (!f.delivery || !f.delivery.ready)) return "待补证·不可交付";
 	if (mode === "code-audit" && f.status === "pending" && f.auditMode !== "dynamic") return "待动态验证";
 	if (mode === "cloud-security") return CLOUDPATH_STATUS_LABEL[f.status] || f.status;
 	if (mode === "ctf-solver") return CTF_STATUS_LABEL[f.status] || f.status;
@@ -988,7 +995,7 @@ function statusTextForExport(f, mode) {
 function Btn(props) {
 	return React.createElement("button", {
 		className: "dsh-rtr-btn" + (props.primary ? " is-primary" : "") + (props.danger ? " is-danger" : ""),
-		onClick: props.onClick, disabled: props.disabled, type: "button"
+		onClick: props.onClick, disabled: props.disabled, type: "button", 'aria-pressed': props['aria-pressed'], style: props.style
 	}, props.children);
 }
 /** 视口自适应 popover（手动触发打开，外点/ESC 关闭，位置钳制）——导出菜单等目录收纳用。 */
@@ -1173,6 +1180,7 @@ function StatsPanel(props) {
 	});
 	var cards = [{ key: "", label: "总数", color: null }].concat(SEVERITY_ORDER.map(function (s) { return { key: s, label: SEVERITY_LABEL[s], color: SEV_COLORS[s] }; }));
 	return React.createElement("div", { className: "dsh-rtr-stats" },
+		props.mode === 'pentest' && stats.delivery ? React.createElement('div', { role: 'status' }, '可交付（去重） ' + stats.delivery.ready + '；待验证或补证 ' + stats.delivery.incomplete) : null,
 		React.createElement("div", { className: "dsh-rtr-cardsrow" }, cards.map(function (c) {
 			var value = c.key === "" ? total : (stats.bySeverity[c.key] || 0);
 			var active = props.severityFilter === c.key || (c.key === "" && !props.severityFilter);
@@ -1226,6 +1234,7 @@ function MetaBar(props) {
 }
 
 function Detail(props) {
+	var deliveryError = useState('');
 	var f = props.f, mode = props.mode;
 	var meta = props.meta || MODE_META.pentest;
 	var audit = mode === "code-audit";
@@ -1375,6 +1384,11 @@ function Detail(props) {
 				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize: 11, color: "#8a8a8f" } }, "危险点 sink"), React.createElement("pre", null, f.snippetSink || "（未填）")))) : null,
 		f.poc ? Block({ title: meta.pocTitle }, f.poc) : null,
 		binary && f.iocs ? Block({ title: "IOC 清单" }, f.iocs) : null,
+		mode === 'pentest' && f.delivery ? Block({ title: '利用交付' },
+			f.delivery.ready ? '材料完整；复现' + (f.delivery.reproductionVerified ? '已实测' : '尚未运行')
+				: '材料待补齐：' + f.delivery.missing.join('、')) : null,
+		deliveryError[0] ? Block({ title: '导出失败' }, deliveryError[0]) : null,
+    mode === 'pentest' ? React.createElement(EffectEvidenceView, { finding: f, onReviewed: props.onEffectReview }) : null,
 		binary && f.detectionRule ? Block({ title: "检测规则（YARA/Sigma）" }, f.detectionRule) : null,
 		mode === "pentest" && f.requestPkt ? Block({ title: "完整请求包" }, f.requestPkt) : null,
 		mode === "pentest" && f.responsePkt ? Block({ title: "关键响应" }, f.responsePkt) : null,
@@ -1387,7 +1401,255 @@ function Detail(props) {
 		React.createElement("div", { className: "dsh-rtr-rowactions" },
 			mode === "code-audit" ? React.createElement(Btn, { primary: true, onClick: function () { props.onLiveVerify ? props.onLiveVerify(f) : null; } }, "实测") : null,
 			React.createElement(Btn, { onClick: function () { props.onVerify(f); } }, "发送到会话验证"),
-			React.createElement(Btn, { onClick: function () { props.onExportOne(f); } }, "导出报告（MD）")));
+			React.createElement(Btn, { onClick: function () { props.onExportOne(f); } }, "导出报告（MD）"),
+			mode === 'pentest' && f.delivery && f.delivery.ready ? React.createElement(Btn, { onClick: function () {
+				api('finding.delivery', { sessionId: f.sessionId || props.sessionId, id: f.id }).then(function (result) {
+					if (result.ok) download(result.filename, result.text);
+					else deliveryError[1](result.error || '交付材料不完整');
+				}).catch(function (error) { deliveryError[1](error.message || String(error)); });
+			} }, '导出完整利用方法') : null));
+}
+
+function EffectEvidenceView(props) {
+  var f=props.finding, host=f&&f.executionEvidence, saved=useState(null), note=useState(''), ids=useState((host&&host.receiptIds||[]).join(', ')), permission=useState(false), impact=useState(false), restoration=useState(false), rating=useState('high'), notice=useState(''), busy=useState(false);
+  var evidence=saved[0]||(host&&host.effectEvidence);
+  if(evidence) return React.createElement('details',{'aria-label':'独立影响对照',style:{margin:'12px 0'}},
+    React.createElement('summary',null,(evidence.source==='desktop-impact-review'?'桌面人工复核':'自动影响对照')+' · '+evidence.kind),
+    React.createElement('p',null,evidence.source==='desktop-impact-review'?'这是操作人的独立判断；不是程序自动证明，也不证明RCE。':'按已审阅业务条件比较两轮真实执行；结论限于对应对象、身份和执行时间。'),
+    React.createElement('pre',{style:{whiteSpace:'pre-wrap',maxHeight:360,overflow:'auto'}},JSON.stringify(evidence,null,2)));
+  if(!host||!host.verified||['access','write','other-impact'].indexOf(f.proofKind)<0)return null;
+  function submit(){busy[1](true);notice[1]('');return api('finding.impact-review',{sessionId:f.sessionId,id:f.id,note:note[0],receiptIds:ids[0].split(/[\s,，]+/).filter(Boolean),permissionsConfirmed:permission[0],impactConfirmed:impact[0],restorationConfirmed:restoration[0],secondRating:rating[0]}).then(function(value){if(!value.ok)throw Error(typeof value.error==='string'?value.error:(value.error&&value.error.message)||'复核保存失败');saved[1](value.review);if(props.onReviewed)return props.onReviewed();}).catch(function(error){notice[1](error.message);}).finally(function(){busy[1](false);});}
+  function check(state,label){return React.createElement('label',{style:{display:'block',margin:'6px 0'}},React.createElement('input',{type:'checkbox',checked:state[0],onChange:function(event){state[1](event.target.checked);}}),label);}
+  return React.createElement('details',{'aria-label':'人工复核实际效果',style:{margin:'12px 0'}},React.createElement('summary',null,'人工复核实际效果'),
+    React.createElement('p',null,'程序已保存正常与异常请求。请独立核对角色、对象和真实业务效果；状态码、success或菜单变化不足以确认。写入测试还需效果和还原的两次实际读取回执。'),
+    React.createElement('label',null,'实际证据回执ID（逗号分隔）',React.createElement('textarea',{'aria-label':'效果证据回执',value:ids[0],onChange:function(event){ids[1](event.target.value);},style:{width:'100%'}})),
+    React.createElement('label',null,'复核依据：角色、对象、影响、局限及恢复情况',React.createElement('textarea',{'aria-label':'效果复核依据',value:note[0],onChange:function(event){note[1](event.target.value);},style:{width:'100%',minHeight:80}})),
+    check(permission,'已核对该身份本不应具有对应权限'),check(impact,'已核对独立证据中的实际效果'),f.proofKind==='write'?check(restoration,'已核对受控对象恢复到原状态'):null,
+    React.createElement('label',null,'独立评级',React.createElement('select',{value:rating[0],onChange:function(event){rating[1](event.target.value);}},['critical','high','medium','low','info'].map(function(value){return React.createElement('option',{key:value,value:value},value);}))),
+    React.createElement(Btn,{onClick:submit,disabled:busy[0]},busy[0]?'正在保存':'保存人工复核'),notice[0]?React.createElement('div',{role:'alert'},notice[0]):null);
+}
+function WorkflowSelector(props) {
+  var state = useState(null), busy = useState(false), error = useState('');
+  useEffect(function () {
+    var active = true;
+    api('task.status', { sessionId: props.sessionId }).then(function (result) {
+      if (!result.ok) throw new Error(result.error || '读取流程失败');
+      if (active) state[1](result);
+    }).catch(function (failure) { if (active) error[1](failure.message || String(failure)); });
+    return function () { active = false; };
+  }, [props.sessionId]);
+  function choose(mode) {
+    busy[1](true); error[1]('');
+    return api('task.choose', { sessionId: props.sessionId, mode: mode }).then(function (result) {
+      if (!result.ok) throw new Error(result.error || '选择流程失败');
+      state[1](result);
+    }).catch(function (failure) { error[1](failure.message || String(failure)); }).finally(function () { busy[1](false); });
+  }
+  var current = state[0], chosen = current && (current.configured ? current.policy.mode : current.choice);
+  return React.createElement('div', { 'aria-label': '测试流程', style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 } },
+    ['nday', 'regular', '0day'].map(function (mode) {
+      return React.createElement('button', { key: mode, type: 'button', 'aria-pressed': chosen === mode, disabled: busy[0] || !!(current && current.configured),
+        onClick: function () { return choose(mode); },
+        style: { fontSize: 12, padding: '5px 9px', borderRadius: 7, cursor: 'pointer',
+          border: '1px solid ' + (chosen === mode ? 'var(--dsw-alias-state-business-primary,#4c6ef5)' : 'var(--dsw-alias-border-l1,#e9e9ec)'),
+          color: 'var(--dsw-alias-label-primary,#1a1a1a)', background: chosen === mode ? 'var(--dsw-alias-bg-active,#eef2ff)' : 'var(--dsw-alias-bg-base,#fff)' }
+      }, { nday: 'Nday发现', regular: '常规测试', '0day': '0Day挖掘' }[mode]); }),
+    error[0] ? React.createElement('span', { role: 'alert', style: { fontSize: 12 } }, error[0]) : null);
+}
+
+function WorkerFindings(props) {
+  var result=useState(null), error=useState(''), expanded=useState(false);
+  function load(){expanded[1](true); return api('workers.findings',{sessionId:props.sessionId,childId:props.childId,delivery:'all'}).then(function(value){if(!value.ok)throw Error(value.error);result[1](value);}).catch(function(e){error[1](e.message);});}
+  return React.createElement('div',null,React.createElement(Btn,{onClick:load},'查看子任务成果'),error[0]?React.createElement('div',{role:'alert'},error[0]):null,
+    expanded[0]&&result[0]?React.createElement('div',null,React.createElement('p',null,'成果 '+result[0].list.total+'；详细记录保留在子会话 '+props.childId),result[0].list.rows.map(function(f){return React.createElement('details',{key:f.id},React.createElement('summary',null,f.title+' · '+(STATUS_LABEL[f.status]||f.status)),React.createElement(Detail,{f:Object.assign({},f,{sessionId:props.childId}),mode:'pentest',sessionId:props.childId,meta:MODE_META.pentest,onEffectReview:load}));})):null);
+}
+function TaskPanel(props) {
+  var status=useState(null), error=useState(''), busy=useState(false);
+  var selected=useState('regular'), question=useState(''), target=useState(''), calls=useState('30'), discovery=useState('5'), minutes=useState('15'), workers=useState('1'), resolution=useState('');
+  function load(){return api('task.status',{sessionId:props.sessionId}).then(function(value){if(!value.ok)throw Error(value.error||'读取任务失败');status[1](value);if(!value.configured&&value.choice)selected[1](value.choice);}).catch(function(e){error[1](e.message);});}
+  useEffect(function(){var active=true;load();var timer=setInterval(function(){if(active)load();},5000);return function(){active=false;clearInterval(timer);};},[props.sessionId]);
+  function run(endpoint,payload){busy[1](true);error[1]('');return api(endpoint,Object.assign({sessionId:props.sessionId},payload||{})).then(function(value){if(!value.ok)throw Error(value.error||'操作失败');status[1](value);}).catch(function(e){error[1](e.message);}).finally(function(){busy[1](false);});}
+  function choose(mode){selected[1](mode);return run('task.choose',{mode:mode});}
+  function start(){var budget={toolCalls:Number(calls[0]),workers:Number(workers[0])};if(minutes[0]!=='')budget.minutes=Number(minutes[0]);if(selected[0]==='0day')budget.discoveryCalls=Number(discovery[0]);var policy={mode:selected[0],question:question[0].trim(),budget:budget};if(target[0].trim())policy.target=target[0].trim();return run('task.start',{policy:policy});}
+  var current=status[0], labels={regular:'常规测试',nday:'Nday发现','0day':'0Day挖掘'}, workerLabels={starting:'正在启动',running:'正在工作',closing:'正在关闭','cleanup-failed':'关闭失败',released:'已释放'};
+  var reasons={cancelled:'用户已停止',time_budget_exhausted:'时间预算已用完',tool_budget_exhausted:'操作预算已用完',first_verified_high:'已达到首个高危目标',first_verified_rce:'已达到RCE目标',queue_complete:'候选已检查完',plan_complete:'本轮任务完成',observation_budget_exhausted:'有限观察已结束，需要选择具体方向'};
+  function input(label,state,type){return React.createElement('label',{style:{display:'block',marginBottom:6}},label+' ',React.createElement('input',{'aria-label':label,type:type||'text',value:state[0],onChange:function(e){state[1](e.target.value);},style:{width:type==='number'?76:'100%',maxWidth:600}}));}
+  return React.createElement('section',{'aria-label':'本轮测试任务',style:{padding:props.compact?10:16,borderBottom:'1px solid var(--dsw-alias-border-primary,#ddd)'}},
+    React.createElement('h3',null,'本轮测试任务'),error[0]?React.createElement('div',{role:'alert'},error[0]):null,
+    current&&current.configured?React.createElement('div',null,
+      React.createElement('p',null,'问题：'+current.policy.question),React.createElement('p',null,'站点：'+(current.policy.target||'按聊天中已给范围')+' · '+labels[current.policy.mode]),
+      React.createElement('p',null,current.stopped?(reasons[current.reason]||'已暂停目标操作'):'沿当前问题继续研究'),
+      React.createElement('p',null,'操作 '+current.policy.used.toolCalls+'/'+current.policy.budget.toolCalls+'（包含子代理操作） · 本会话已确认成果 '+current.reviewedReproducedFindings),
+      React.createElement('p',null,'目标执行阶段经过 '+Math.floor((current.elapsedSeconds||0)/60)+' 分 '+((current.elapsedSeconds||0)%60)+' 秒；操作预算计目标执行，资料阅读另列在模型统计中。'),
+      current.roundCost?React.createElement('p',null,'本轮模型调用 '+current.roundCost.modelCalls+' · 工具调用 '+current.roundCost.toolCalls+' · token '+(current.roundCost.totalTokens===null?'未取得':current.roundCost.totalTokens)+'（含缓存读取 '+(current.roundCost.cacheReadTokens===null?'未知':current.roundCost.cacheReadTokens)+'）'):null,
+      current.roundCost?React.createElement('p',null,'本轮模型运行含收尾 '+(current.roundCost.elapsedModelMs===null?'未取得':Math.ceil(current.roundCost.elapsedModelMs/1000)+' 秒')+'；父子代理并发时间合并计算。'):null,
+      current.cost?React.createElement('details',null,React.createElement('summary',null,'主代理与全部子代理累计成本'),
+        React.createElement('p',null,'总 token '+(current.cost.totalTokens===null?'未取得':current.cost.totalTokens)+' · 模型调用 '+current.cost.modelCalls+' · 工具调用 '+current.cost.toolCalls),
+        current.cost.sessions.map(function(row){return React.createElement('p',{key:row.sessionId},(row.role==='main'?'主代理':'子代理')+' '+row.sessionId+'：token '+(row.totalTokens===null?'未取得':row.totalTokens)+'，缓存读取 '+(row.cacheReadTokens===null?'未知':row.cacheReadTokens)+'，工具调用 '+row.toolCalls);}),
+        React.createElement('p',null,'缺少用量的模型调用 '+current.cost.unknownUsageCalls+'；无法读取的会话 '+current.cost.unavailableSessions+'。不含后台标题生成，不估算金额。')):null,
+      current.policy.blocker?React.createElement('div',{role:'alert'},React.createElement('p',null,current.policy.blocker.reason),React.createElement('p',null,'证据：'+current.policy.blocker.evidence),input('访问恢复情况',resolution),React.createElement(Btn,{disabled:busy[0]||!resolution[0].trim(),onClick:function(){return run('task.resume',{note:resolution[0]});}},'已处理阻碍，先复查正常访问')):null,
+      React.createElement('p',null,'站点子代理 '+(current.active||0)+'/'+current.policy.workerLimit+'；仅确有需要时分派'),
+      (current.workers||[]).map(function(worker){return React.createElement('details',{key:worker.childId},React.createElement('summary',null,worker.site+' · '+(workerLabels[worker.state]||worker.state)),React.createElement('p',null,worker.question),worker.report?React.createElement('p',null,worker.report.summary):null,worker.error?React.createElement('p',{role:'alert'},worker.error):null,React.createElement(WorkerFindings,{sessionId:props.sessionId,childId:worker.childId}),worker.state!=='released'?React.createElement(Btn,{disabled:busy[0],onClick:function(){return run('task.cleanup',{childId:worker.childId});}},'保存已有记录并关闭'):null);}),
+      current.more?React.createElement('p',null,'另有 '+current.more+' 条历史子任务；详细证据保留在原会话'):null,
+      current.stopped?(current.policy.blocker?null:React.createElement(Btn,{disabled:busy[0]||(current.active||0)>0,onClick:function(){question[1]('');return run('task.new-round');}},'保留资料，选择下一轮问题')):React.createElement(Btn,{disabled:busy[0],onClick:function(){return run('task.cancel');}},'停止本轮与子代理')):
+    current&&!current.isPentest?React.createElement('p',null,'请选择渗透测试会话。'):React.createElement('div',null,
+      React.createElement('div',{role:'group','aria-label':'选择子模式'},['regular','nday','0day'].map(function(mode){return React.createElement(Btn,{key:mode,primary:selected[0]===mode,disabled:busy[0],onClick:function(){return choose(mode);}},labels[mode]);})),
+      React.createElement('p',null,selected[0]==='regular'?'围绕已选功能检查正常行为、权限和业务流程。':selected[0]==='nday'?'从少量资产与产品线索选择相关公开漏洞，核对条件后验证。':'围绕一个业务疑点追查页面、JS、身份、请求和实际效果。'),
+      current&&current.previousRounds?React.createElement('p',null,'已有 '+current.previousRounds+' 轮结束记录；资产、请求、材料、证据和累计成本继续保留。'):null,
+      input('这一轮要查什么',question),input('目标站点（已有聊天范围可留空）',target),
+      React.createElement('details',null,React.createElement('summary',null,'本轮预算'),input('操作预算',calls,'number'),input('时间上限（分钟）',minutes,'number'),input('允许同时工作子代理数（0至2）',workers,'number'),selected[0]==='0day'?input('初步观察预算',discovery,'number'):null),
+      React.createElement(Btn,{primary:true,disabled:busy[0]||!question[0].trim(),onClick:start},'开始这个小任务')),
+    React.createElement(Btn,{disabled:busy[0],onClick:load},'刷新状态'));
+}
+
+function ContextPanel(props) {
+  var text = useState(''), error = useState(''), kind = useState('request'), id = useState(''), version = useState(''), offset = useState(0);
+  function read(detail) {
+    error[1]('');
+    var payload = detail ? { sessionId: props.sessionId, kind: kind[0], id: id[0], version: version[0] || undefined } : { sessionId: props.sessionId, offset: offset[0] };
+    return api(detail ? 'context.detail' : 'context.index', payload).then(function (result) {
+      if (!result.ok) throw new Error(result.error || '读取共享记录失败');
+      text[1](result.text);
+    }).catch(function (failure) { error[1](failure.message || String(failure)); });
+  }
+  return React.createElement('details', { style: { padding: 16 }, 'aria-label': '共享资产与请求记录' },
+    React.createElement('summary', null, '共享资产、请求与方法'),
+    React.createElement('p', null, '查看本会话已有记录，按入口、身份和版本复用。'),
+    React.createElement('label', null, '索引偏移 ', React.createElement('input', { type: 'number', min: 0, max: 2000, value: offset[0], onChange: function (event) { offset[1](Number(event.target.value)); } })),
+    React.createElement(Btn, { onClick: function () { return read(false); } }, '读取索引'),
+    React.createElement('select', { 'aria-label': '记录类型', value: kind[0], onChange: function (event) { kind[1](event.target.value); } },
+      ['asset', 'request', 'method'].map(function (item) { return React.createElement('option', { key: item, value: item }, { asset: '资产', request: '请求', method: '方法' }[item]); })),
+    React.createElement('input', { 'aria-label': '记录ID', value: id[0], onChange: function (event) { id[1](event.target.value); } }),
+    React.createElement('input', { 'aria-label': '请求或方法版本', value: version[0], onChange: function (event) { version[1](event.target.value); } }),
+    React.createElement(Btn, { onClick: function () { return read(true); } }, '读取详情'),
+    error[0] ? React.createElement('div', { role: 'alert' }, error[0]) : null,
+    text[0] ? React.createElement('pre', { style: { whiteSpace: 'pre-wrap', overflow: 'auto', maxHeight: 360 } }, text[0]) : null);
+}
+
+function ResearchPanel(props) {
+  var index = useState(null), selected = useState(null), error = useState(''), busy = useState(false), offset = useState(0);
+  function run(endpoint, payload) {
+    busy[1](true); error[1]('');
+    return api(endpoint, Object.assign({ sessionId: props.sessionId }, payload)).then(function (result) {
+      if (!result.ok) throw new Error(result.error || '读取研究记录失败');
+      return result;
+    }).catch(function (failure) { error[1](failure.message || String(failure)); return null; }).finally(function () { busy[1](false); });
+  }
+  function load(next) { return run('research.index', { offset: next }).then(function (result) { if (result) { offset[1](next); index[1](result); } }); }
+  function detail(id) { return run('research.detail', { id: id }).then(function (result) { if (result) selected[1](result); }); }
+  var labels = { active: '研究中', stopped: '已停止', restricted: '受限／未覆盖', refuted: '出现反证', supported: '重复观察支持', blocked: '基线失效' };
+  var classes = { 'known-vulnerability': '已知漏洞', 'new-variant': '新变体', 'suspected-unpublished': '疑似未公开', 'unconfirmed-anomaly': '未证实异常' };
+  var reasons = { no_new_information: '连续没有新信息，已停止这个方向', hypothesis_budget_exhausted: '本假设的尝试次数已用完',
+    falsifier_observed: '观察到反证，已结束这个方向', repeat_with_normal_control: '已保存两次带正常对照的支持观察' };
+  var row = selected[0];
+  return React.createElement('details', { style: { padding: 16 }, 'aria-label': '研究假设记录' },
+    React.createElement('summary', null, '研究假设'),
+    React.createElement(Btn, { disabled: busy[0], onClick: function () { return load(offset[0]); } }, '读取研究记录'),
+    index[0] ? React.createElement('div', null,
+      index[0].items.length ? index[0].items.map(function (item) { return React.createElement('div', { key: item.id, style: { display: 'flex', gap: 12, padding: '8px 0' } },
+        React.createElement('span', { style: { flex: 1 } }, item.title + ' · ' + labels[item.state] + ' · ' + item.attempts + '/' + item.maxAttempts),
+        React.createElement(Btn, { disabled: busy[0], onClick: function () { return detail(item.id); } }, '查看假设')); }) : React.createElement('p', null, '尚无研究记录'),
+      React.createElement(Btn, { disabled: busy[0] || offset[0] === 0, onClick: function () { return load(Math.max(0, offset[0] - 20)); } }, '上一页'),
+      React.createElement(Btn, { disabled: busy[0] || offset[0] + 20 >= index[0].total, onClick: function () { return load(offset[0] + 20); } }, '下一页')) : null,
+    row ? React.createElement('div', null,
+      React.createElement('h4', null, row.title),
+      React.createElement('p', null, row.binding.endpoint + ' · ' + row.binding.authContext + ' · ' + row.binding.requestRevision),
+      row.restriction ? React.createElement('p', null, '受限／未覆盖 · ' + row.restriction.code + ' · ' + (row.restriction.coverage === 'partial' ? '仅有部分观察' : '尚未执行') + '；结论未知。中断原因：' + row.reason) : null,
+      React.createElement('p', null, classes[row.classification] + '；仍须独立核对影响与复现，缺少CVE不证明首次发现。'),
+      [['serverPath', '处理路径'], ['boundary', '边界'], ['normalBehavior', '正常行为'], ['supportCriterion', '支持判据'], ['falsifier', '反证'], ['nextInformation', '下一步信息']].map(function (item) { return React.createElement('p', { key: item[0] }, item[1] + '：' + row[item[0]]); }),
+      React.createElement('p', null, row.blockedReason ? '当前基线失效，请核对入口、身份和请求版本' : reasons[row.reason] || row.reason),
+      React.createElement('details', null, React.createElement('summary', null, '正常对照、观察与公开解释'), React.createElement('pre', { style: { whiteSpace: 'pre-wrap', overflow: 'auto', maxHeight: 360 } }, JSON.stringify({ knownCheck: row.knownCheck, observations: row.observations }, null, 2)))) : null,
+    error[0] ? React.createElement('div', { role: 'alert' }, error[0]) : null);
+}
+
+function MethodPackagesPanel(props) {
+  var index = useState(null), selected = useState(null), notes = useState(''), error = useState(''), offset = useState(0), busy = useState(false);
+  function run(action, payload) {
+    error[1](''); busy[1](true);
+    return api('methods.action', Object.assign({ sessionId: props.sessionId, action: action }, payload || {})).then(function (result) {
+      if (!result.ok) throw new Error(typeof result.error === 'string' ? result.error : result.error && result.error.message || '方法操作失败');
+      return result;
+    }).catch(function (failure) { error[1](failure.message || String(failure)); return null; }).finally(function () { busy[1](false); });
+  }
+  function load(next) { return run('list', { offset: next }).then(function (result) { if (result) { offset[1](next); index[1](result); } }); }
+  function detail(digest) { return run('detail', { digest: digest }).then(function (result) { if (result) { selected[1](result); notes[1](''); } }); }
+  function importFile(event, action) {
+    var file = event.target.files && event.target.files[0]; event.target.value = '';
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { error[1]('文件不能超过2MB'); return; }
+    return file.text().then(function (text) { return run(action, { digest: selected[0] && selected[0].digest, document: text }); }).then(function (result) {
+      if (result) return load(offset[0]).then(function () { return detail(result.digest); });
+    }).catch(function (failure) { error[1](failure.message); });
+  }
+  function review(decision) {
+    if (!selected[0]) return;
+    return run('review', { digest: selected[0].digest, document: JSON.stringify({ methodDigest: selected[0].digest, reviewer: 'Desktop local review', decision: decision, notes: notes[0] }) })
+      .then(function (result) { if (result) return load(offset[0]).then(function () { return detail(result.digest); }); });
+  }
+  function activate(rollback) {
+    if (!selected[0]) return;
+    return run(rollback ? 'rollback' : 'activate', { digest: selected[0].digest, expectedDigest: selected[0].activeDigest })
+      .then(function (result) { if (result) return load(offset[0]).then(function () { return detail(result.digest); }); });
+  }
+  var method = selected[0], doc = method && method.document;
+  return React.createElement('details', { style: { padding: 16 }, 'aria-label': '精选方法包管理' },
+    React.createElement('summary', null, '精选方法包'),
+    React.createElement('div', { style: { display: 'flex', gap: 10, alignItems: 'center', marginTop: 12 } },
+      React.createElement(Btn, { disabled: busy[0], onClick: function () { return load(offset[0]); } }, '读取方法目录'),
+      React.createElement('label', null, '导入方法包 ', React.createElement('input', { type: 'file', accept: '.json,application/json', disabled: busy[0], 'aria-label': '导入方法包', onChange: function (event) { return importFile(event, 'stage'); } }))),
+    index[0] ? React.createElement('div', null,
+      index[0].items.length ? index[0].items.map(function (item) { return React.createElement('div', { key: item.digest, style: { display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--dsw-alias-border-l1,#e9e9ec)' } },
+        React.createElement('span', { style: { flex: 1 } }, item.title + ' · ' + item.version + ' · ' + (item.active ? '已激活' : item.status === 'trusted' ? '审阅及测试通过' : item.status === 'rejected' ? '已否决' : '待审阅')),
+        React.createElement(Btn, { disabled: busy[0], onClick: function () { return detail(item.digest); } }, '查看资料')); }) : React.createElement('p', null, '尚未导入精选方法'),
+      React.createElement(Btn, { disabled: busy[0] || offset[0] === 0, onClick: function () { return load(Math.max(0, offset[0] - 20)); } }, '上一页'),
+      React.createElement(Btn, { disabled: busy[0] || offset[0] + 20 >= index[0].total, onClick: function () { return load(offset[0] + 20); } }, '下一页')) : null,
+    doc ? React.createElement('div', { style: { marginTop: 12 } },
+      React.createElement('h4', null, doc.title + ' · ' + method.version),
+      React.createElement('p', null, '产品：' + doc.products.join('、') + '；机制：' + doc.mechanism),
+      React.createElement('p', null, '方法摘要：' + method.digest),
+      React.createElement('details', null, React.createElement('summary', null, '请求、对照、代码、依赖与来源'), React.createElement('pre', { style: { whiteSpace: 'pre-wrap', overflow: 'auto', maxHeight: 360 } }, JSON.stringify(doc, null, 2))),
+      React.createElement('details', null, React.createElement('summary', null, '审阅和测试记录'), React.createElement('pre', { style: { whiteSpace: 'pre-wrap', overflow: 'auto', maxHeight: 280 } }, JSON.stringify({ review: method.review, verification: method.verification }, null, 2))),
+      React.createElement('textarea', { 'aria-label': '方法审阅意见', placeholder: '记录对方法、判据、代码及测试证据的审阅意见', value: notes[0], rows: 3, style: { width: '100%' }, onChange: function (event) { notes[1](event.target.value); } }),
+      React.createElement(Btn, { disabled: busy[0] || !notes[0].trim(), onClick: function () { return review('approved'); } }, '审阅通过'),
+      React.createElement(Btn, { disabled: busy[0] || !notes[0].trim(), onClick: function () { return review('rejected'); } }, '否决方法'),
+      React.createElement('label', { style: { marginLeft: 12 } }, '导入正反例测试证据 ', React.createElement('input', { type: 'file', accept: '.json,application/json', disabled: busy[0], 'aria-label': '导入方法测试证据', onChange: function (event) { return importFile(event, 'verify'); } })),
+      React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } },
+        React.createElement(Btn, { disabled: busy[0] || method.status !== 'trusted' || method.active, onClick: function () { return activate(false); } }, '激活此版本'),
+        React.createElement(Btn, { disabled: busy[0] || method.status !== 'trusted' || method.active, onClick: function () { return activate(true); } }, '回退到此版本'))) : null,
+    error[0] ? React.createElement('div', { role: 'alert' }, error[0]) : null,
+    busy[0] ? React.createElement('span', { role: 'status' }, '正在处理…') : null);
+}
+
+function CheckedList(props) {
+	var state = useState(null), setState = state[1];
+	var error = useState(''), setError = error[1];
+	function load() {
+		setError('');
+		return api('checks.list', { sessionId: props.sessionId }).then(function (result) {
+			if (!result.ok) throw new Error(result.error || '读取失败');
+			setState(result.rows);
+		}).catch(function (failure) { setError(failure.message); });
+	}
+	function exportChecks() {
+		return api('checks.export', { sessionId: props.sessionId }).then(function (result) {
+			if (!result.ok) throw new Error(result.error || '导出失败');
+			download(result.filename, result.text, 'text/tab-separated-values');
+		}).catch(function (failure) { setError(failure.message); });
+	}
+	function exportBundle() {
+		return api('delivery.bundle', { sessionId: props.sessionId }).then(function (result) {
+			if (!result.ok) throw new Error(result.error || '交付包生成失败');
+			downloadArchive(result.filename, result.archive);
+		}).catch(function (failure) { setError(failure.message); });
+	}
+	return React.createElement('div', null,
+		React.createElement(Btn, { onClick: load }, '本会话已测清单'),
+		React.createElement(Btn, { onClick: exportChecks }, '导出 checked.tsv'),
+		React.createElement(Btn, { onClick: exportBundle }, '导出本会话完整交付包'),
+		error[0] ? React.createElement('div', { role: 'alert' }, error[0]) : null,
+		state[0] ? React.createElement('div', null,
+			React.createElement('div', null, state[0].length ? '资产／检查项／状态' : '本会话暂无检查记录'),
+			state[0].map(function (row, i) { return React.createElement('div', { key: i }, row.asset + '／' + row.check + '：' + row.status); })) : null);
 }
 
 function ModePage(props) {
@@ -1403,6 +1665,8 @@ function ModePage(props) {
 	var page = useState(1); var setPage = page[1];
 	var severity = useState(""); var setSeverity = severity[1];
 	var status = useState(""); var setStatus = status[1];
+	var delivery = useState(mode === 'pentest' ? 'ready' : 'all'); var setDelivery = delivery[1];
+	var emptyMessage = mode === 'pentest' && delivery[0] === 'ready' ? '当前筛选暂无可交付发现。可切换“待验证或补证”查看未完成记录。' : meta.empty;
 	var q = useState(""); var setQ = q[1];
 	var qDraft = useState(""); var setQDraft = qDraft[1];
 	var grouped = useState(false); var setGrouped = grouped[1];
@@ -1431,6 +1695,7 @@ function ModePage(props) {
 			page: o.page !== undefined ? o.page : page[0], pageSize: 10,
 			severity: o.severity !== undefined ? o.severity : severity[0],
 			status: o.status !== undefined ? o.status : status[0],
+			delivery: delivery[0],
 			q: o.q !== undefined ? o.q : q[0],
 			from: rangeIso(range[0], customFrom[0], customTo[0])[0], to: rangeIso(range[0], customFrom[0], customTo[0])[1]
 		}).then(function (res) {
@@ -1446,12 +1711,12 @@ function ModePage(props) {
 		}).finally(function () {
 			if (token === stale.current) setLoading(false);
 		});
-	}, [sessionId, mode, page[0], severity[0], status[0], q[0], range[0], customFrom[0], customTo[0]]);
+	}, [sessionId, mode, page[0], severity[0], status[0], delivery[0], q[0], range[0], customFrom[0], customTo[0]]);
 
 	var fetchGroups = useCallback(function () {
 		var token = ++stale.current;
 		setLoading(true);
-		api("findings.groups", { scope: "all", sessionId: sessionId, mode: mode, severity: severity[0], status: status[0], q: q[0], from: rangeIso(range[0], customFrom[0], customTo[0])[0], to: rangeIso(range[0], customFrom[0], customTo[0])[1] })
+		api("findings.groups", { scope: "all", sessionId: sessionId, mode: mode, severity: severity[0], status: status[0], delivery: delivery[0], q: q[0], from: rangeIso(range[0], customFrom[0], customTo[0])[0], to: rangeIso(range[0], customFrom[0], customTo[0])[1] })
 				.then(function (res) {
 					if (token !== stale.current) return;
 					var groups = (res || {}).groups || [];
@@ -1462,12 +1727,12 @@ function ModePage(props) {
 				})
 			.catch(function (e) { if (token === stale.current) setNotice("分组读取失败：" + (e && e.message ? e.message : e)); })
 			.finally(function () { if (token === stale.current) setLoading(false); });
-	}, [sessionId, mode, severity[0], status[0], q[0], range[0], customFrom[0], customTo[0]]);
+	}, [sessionId, mode, severity[0], status[0], delivery[0], q[0], range[0], customFrom[0], customTo[0]]);
 
 	useEffect(function () {
 		setPage(1); setExpanded(""); setSelected({}); setConfirmDel("");
 		if (grouped[0]) fetchGroups(); else fetchList({ page: 1 });
-	}, [sessionId, mode, severity[0], status[0], q[0], grouped[0], range[0], customFrom[0], customTo[0]]);
+	}, [sessionId, mode, severity[0], status[0], delivery[0], q[0], grouped[0], range[0], customFrom[0], customTo[0]]);
 
 	useEffect(function () {
 		if (!notice) return;
@@ -1482,6 +1747,7 @@ function ModePage(props) {
 	}, [qDraft[0]]);
 
 	var view = data[0] || {};
+	function onEffectReview() { setNotice('实际效果复核已保存；请在“可交付发现”查看通过材料校验的记录。'); if (props.onRefreshCounts) props.onRefreshCounts(); return grouped[0] ? fetchGroups() : fetchList({}); }
 	var rows = view.rows || [];
 	var stats = view.stats || { total: view.total || 0, bySeverity: {}, byStatus: {}, byType: [], byCwe: [], bySource: [], byTarget: [] };
 	var sesMeta = view.meta || { targetLabel: "", version: "", scope: "" };
@@ -1590,7 +1856,7 @@ function ModePage(props) {
 		var rtx = rangeIso(range[0], customFrom[0], customTo[0]);
 		var acc = [];
 		function pageOf(n) {
-			return api("findings.list", { scope: "all", sessionId: sessionId, mode: mode, page: n, pageSize: 100, severity: severity[0], status: status[0], q: q[0], from: rtx[0], to: rtx[1] })
+			return api("findings.list", { scope: "all", sessionId: sessionId, mode: mode, page: n, pageSize: 100, severity: severity[0], status: status[0], delivery: delivery[0], q: q[0], from: rtx[0], to: rtx[1] })
 				.then(function (raw) {
 					var l = ((raw || {}).list) || {};
 					acc = acc.concat(l.rows || []);
@@ -1664,7 +1930,7 @@ function ModePage(props) {
 					mode === "code-audit" ? React.createElement(Btn, { primary: true, onClick: function () { onLiveVerify(f); } }, "实测") : null,
 					React.createElement(Btn, { onClick: function () { onVerify(f); } }, "验证"),
 					React.createElement(Btn, { danger: true, onClick: function () { onDelete(f); } }, confirmDel[0] === uid ? "确认删除" : "删除"))),
-				expanded[0] === uid ? React.createElement(Detail, { f: f, mode: mode, meta: meta, onVerify: onVerify, onLiveVerify: onLiveVerify, onExportOne: exportOne }) : null);
+				expanded[0] === uid ? React.createElement(Detail, { f: f, mode: mode, meta: meta, onVerify: onVerify, onLiveVerify: onLiveVerify, onExportOne: exportOne, onEffectReview: onEffectReview }) : null);
 	};
 
 	var tlItem = function (f) {
@@ -1696,7 +1962,7 @@ function ModePage(props) {
 						React.createElement("span", null, "主机 ", React.createElement("b", null, f.target || "（未填）")),
 						React.createElement("span", null, "证据 ", React.createElement("b", null, f.evidence || "（未填）")),
 						React.createElement("span", { className: "dsh-rtr-tl-concl" }, f.summary || "")),
-					open ? React.createElement(Detail, { f: f, mode: mode, meta: meta, onVerify: onVerify, onLiveVerify: onLiveVerify, onExportOne: exportOne }) : null)));
+					open ? React.createElement(Detail, { f: f, mode: mode, meta: meta, onVerify: onVerify, onLiveVerify: onLiveVerify, onExportOne: exportOne, onEffectReview: onEffectReview }) : null)));
 	};
 
 	var cpItem = function (f) {
@@ -1730,7 +1996,7 @@ function ModePage(props) {
 					hop("权限", f.permission),
 					hop("资源", f.resource || f.target),
 					hop("影响", f.impact || f.summary)),
-				open ? React.createElement(Detail, { f: f, mode: mode, meta: meta, onVerify: onVerify, onLiveVerify: onLiveVerify, onExportOne: exportOne }) : null));
+				open ? React.createElement(Detail, { f: f, mode: mode, meta: meta, onVerify: onVerify, onLiveVerify: onLiveVerify, onExportOne: exportOne, onEffectReview: onEffectReview }) : null));
 	};
 
 	var listBody;
@@ -1741,7 +2007,7 @@ function ModePage(props) {
 		if (grouped[0]) {
 			var cpGroups = view.groups || [];
 			listBody = cpGroups.length === 0
-				? React.createElement("div", { className: "dsh-rtr-empty" }, meta.empty, React.createElement("br", null), rangeHint(range[0]))
+				? React.createElement("div", { className: "dsh-rtr-empty" }, emptyMessage, React.createElement("br", null), rangeHint(range[0]))
 				: cpGroups.map(function (g) {
 					return React.createElement("div", { key: g.target },
 						React.createElement("div", { className: "dsh-rtr-grouphead" }, g.target, React.createElement("span", { className: "dsh-rtr-count" }, g.count + " 条")),
@@ -1751,7 +2017,7 @@ function ModePage(props) {
 			var cpRows = rows.slice().sort(function (a, b) { return SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity); });
 			listBody = cpRows.length === 0
 				? React.createElement("div", { className: "dsh-rtr-empty" },
-					meta.empty, React.createElement("br", null),
+					emptyMessage, React.createElement("br", null),
 					rangeHint(range[0]), React.createElement("br", null),
 					"会话内模型会把攻击路径通过 redteam_finding_register 登记到这里（也可让模型补登记：\"把攻击路径登记到成果页\"）。")
 				: React.createElement("div", { className: "dsh-rtr-cp" }, cpRows.map(cpItem));
@@ -1760,14 +2026,14 @@ function ModePage(props) {
 		var chronoRows = rows.slice().sort(cmpTimeline);
 		listBody = chronoRows.length === 0
 			? React.createElement("div", { className: "dsh-rtr-empty" },
-				meta.empty, React.createElement("br", null),
+				emptyMessage, React.createElement("br", null),
 				rangeHint(range[0]), React.createElement("br", null),
 				"会话内模型会把攻击链节点通过 redteam_finding_register 登记到这里（也可让模型补登记：\"把攻击链节点登记到成果页\"）。")
 			: React.createElement("div", { className: "dsh-rtr-tl" }, chronoRows.map(tlItem));
 	} else if (grouped[0]) {
 		var groups = view.groups || [];
 		listBody = groups.length === 0
-			? React.createElement("div", { className: "dsh-rtr-empty" }, meta.empty, React.createElement("br", null), rangeHint(range[0]))
+			? React.createElement("div", { className: "dsh-rtr-empty" }, emptyMessage, React.createElement("br", null), rangeHint(range[0]))
 			: groups.map(function (g) {
 				return React.createElement("div", { key: g.target },
 					React.createElement("div", { className: "dsh-rtr-grouphead" }, g.target, React.createElement("span", { className: "dsh-rtr-count" }, g.count + " 项")),
@@ -1776,12 +2042,13 @@ function ModePage(props) {
 	} else {
 		listBody = rows.length === 0
 			? React.createElement("div", { className: "dsh-rtr-empty" },
-				meta.empty, React.createElement("br", null),
+				emptyMessage, React.createElement("br", null),
 				"会话内模型会把进入报告的 finding 通过 redteam_finding_register 登记到这里（也可让模型补登记：\"把已发现的成果登记到成果页\"）。")
 			: rows.map(rowEl);
 	}
 
 	return React.createElement(React.Fragment, null,
+		mode === 'pentest' && sessionId ? React.createElement(CheckedList, { key: sessionId, sessionId: sessionId }) : null,
 		(notice[0] && String(notice[0]).trim()) ? React.createElement("div", { className: "dsh-rtr-notice" }, notice[0]) : null,
 		// 人工复核向导弹层（原生对话框会阻塞渲染进程，故全部就地渲染）
 		(rv[0] ? React.createElement("div", { style: { position: "fixed", left: "50%", top: "72px", transform: "translateX(-50%)", zIndex: 3000, width: "min(580px, 92vw)", maxHeight: "70vh", overflowY: "auto", background: "var(--dsw-alias-bg-base,#fff)", border: "1px solid var(--dsw-alias-border-l1,#d9d9de)", borderRadius: 10, boxShadow: "0 12px 40px rgba(0,0,0,.2)", padding: "14px 16px", whiteSpace: "normal" } },
@@ -1821,6 +2088,10 @@ function ModePage(props) {
 			onTarget: function (t) { setQ(t); }
 		}),
 		React.createElement("div", { className: "dsh-rtr-toolbar" },
+			mode === 'pentest' ? React.createElement('select', { className: 'dsh-rtr-select', 'aria-label': '交付状态', value: delivery[0], onChange: function (e) { setDelivery(e.target.value); setPage(1); setExpanded(''); setSelected({}); } },
+				React.createElement('option', { value: 'ready' }, '可交付发现'),
+				React.createElement('option', { value: 'incomplete' }, '待验证或补证'),
+				React.createElement('option', { value: 'all' }, '全部记录')) : null,
 			React.createElement(RangePicker, { range: range[0], customFrom: customFrom[0], customTo: customTo[0], onChange: function (sel, cf, ct) { setRange(sel); setCustomFrom(cf); setCustomTo(ct); } }),
 			meta.archetype !== "assets" && mode !== "av-evasion" && mode !== "ctf-solver" && mode !== "binary-analysis" ? React.createElement("select", { className: "dsh-rtr-select", value: severity[0], onChange: function (e) { setSeverity(e.target.value); } },
 				React.createElement("option", { value: "" }, meta.archetype === "ledger" ? "全部优先级" : "全部等级"),
@@ -2083,12 +2354,16 @@ function ResultsView(props) {
 					key: m.id, type: "button",
 					className: "dsh-rtr-side-item" + (mode[0] === m.id ? " is-active" : ""),
 					onClick: function () { setMode(m.id); }
-				}, m.label, React.createElement("span", { className: "dsh-rtr-count" }, (counts[0] || {})[m.id] || 0));
+				}, m.id==='code-audit'?'历史代码审计成果':m.label, React.createElement("span", { className: "dsh-rtr-count" }, (counts[0] || {})[m.id] || 0));
 			})),
 		React.createElement("div", { className: "dsh-rtr-main" },
+			React.createElement(TaskPanel, { key: sessionId + '-task', sessionId: sessionId }),
+			React.createElement(ContextPanel, { key: sessionId + '-context', sessionId: sessionId }),
+      React.createElement(MethodPackagesPanel, { key: sessionId + '-methods', sessionId: sessionId }),
+      React.createElement(ResearchPanel, { key: sessionId + '-research', sessionId: sessionId }),
 				mode[0] === "__ledger__"
 					? React.createElement(BigScreen, { sessionId: sessionId })
-					: React.createElement(ModePage, { sessionId: sessionId, mode: mode[0], onRefreshCounts: refreshCounts })));
+					: React.createElement(ModePage, { key: mode[0], sessionId: sessionId, mode: mode[0], onRefreshCounts: refreshCounts })));
 }
 
 var REDTEAM_MANAGER_UI_NAMESPACE = "redteam-manager-ui";
@@ -2139,5 +2414,5 @@ function apply(ctx) {
 	});
 }
 
-module.exports = { name: "dsh-redteam-results-client", inject: ["slots", "configForms"], apply: apply };
+module.exports = { name: "dsh-redteam-results-client", inject: ["slots", "configForms"], apply: apply, WorkflowSelector: WorkflowSelector };
 return module.exports; } });

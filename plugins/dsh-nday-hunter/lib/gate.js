@@ -21,6 +21,7 @@ export function normalizeProgress(value) {
     if (!outcome) continue
     out[String(bucketId)] = {
       representativeAssetId: clean(record.representativeAssetId, 200),
+      serviceSignature: clean(record.serviceSignature, 100),
       outcome,
       evidence: clean(record.evidence, 2000),
       note: clean(record.note, 1000),
@@ -41,7 +42,9 @@ export function bucketGates(plan, progress) {
     const bucketId = clean(bucket?.bucketId, 200)
     const representativeAssetId = clean(bucket?.representativeAssetId, 200)
       || clean(Array.isArray(bucket?.assetIds) ? bucket.assetIds[0] : '', 200)
-    const record = normalized.buckets[bucketId] || null
+    const saved = normalized.buckets[bucketId] || null
+    const record = saved && (bucket.serviceSignature ? saved.serviceSignature === bucket.serviceSignature : (bucket.assetIds?.length || 0) <= 1)
+      && saved.representativeAssetId === representativeAssetId ? saved : null
     const status = record?.outcome === 'confirmed'
       ? 'verified'
       : record?.outcome === 'refuted'
@@ -54,7 +57,7 @@ export function bucketGates(plan, progress) {
       representativeAssetId,
       assetCount: Array.isArray(bucket?.assetIds) ? bucket.assetIds.length : 0,
       status,
-      spreadAllowed: status === 'verified',
+      spreadAllowed: status === 'verified' && (bucket.serviceSignature || (bucket.assetIds?.length || 0) <= 1) ? true : false,
       nextAction: status === 'verified' ? 'spread' : status === 'refuted' ? 'next-bucket' : 'verify-representative',
       evidence: record?.evidence || '',
       note: record?.note || '',
@@ -85,6 +88,7 @@ export function recordGate(plan, progress, input) {
   next.updatedAt = new Date().toISOString()
   next.buckets[bucketId] = {
     representativeAssetId: representative,
+    serviceSignature: bucket.serviceSignature || '',
     outcome,
     evidence,
     note,

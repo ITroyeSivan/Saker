@@ -3,10 +3,14 @@ import { apply, bundledSkills } from '../lib/skill-registry.js'
 
 const bundled = bundledSkills()
 const names = bundled.map(skill => skill.name)
-for (const name of ['browser-recon', 'audit-playbook', 'pentest-playbook', 'pentest-regular', 'pentest-nday', 'pentest-campaign', 'pentest-0day']) {
+for (const name of ['browser-recon', 'pentest-playbook', 'pentest-regular', 'pentest-nday', 'pentest-0day']) {
   assert(names.includes(name), `${name} missing from the global prompt registry`)
 }
 assert(!names.includes('ctf-playbook'), 'ctf-playbook leaked into the global prompt registry')
+assert(!names.includes('audit-playbook'), 'audit-playbook leaked into the global prompt registry')
+assert(!names.includes('pentest-campaign'), 'legacy campaign is a route alias, not a fourth mode')
+assert.deepEqual(names.filter(name => /^pentest-(?:nday|regular|0day|campaign)$/.test(name)).sort(),
+  ['pentest-0day', 'pentest-nday', 'pentest-regular'])
 assert.equal(new Set(names).size, names.length, 'duplicate skill names')
 const registered = new Map()
 const dispose = apply({ skills: { register(skill) {

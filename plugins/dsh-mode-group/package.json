@@ -1,7 +1,7 @@
 {
   "name": "@dsh-external/dsh-mode-group",
-  "version": "1.0.3",
-  "description": "DSH web client plugin: grouped agent-preset picker on the new-session screen — the pentest / code-audit security modes are kept as a clear group over host built-ins, viewport-adaptive, with no other surface touched.",
+  "version": "1.0.5",
+  "description": "桌面新会话保留渗透测试专业入口，历史模式保留解析。",
   "files": [
     "lib",
     "cordis.patch.yml",

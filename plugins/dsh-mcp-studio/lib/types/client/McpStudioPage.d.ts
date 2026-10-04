@@ -10,4 +10,4 @@ export declare function createStudioPage(face: StudioCardFace, t: Translate, pol
     cleared: boolean;
 } | {
     error: string;
-}>): () => ReactElement;
+}>, refreshSettings?: () => Promise<void>): () => ReactElement;

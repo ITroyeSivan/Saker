@@ -10,11 +10,11 @@ var module = { exports: {} }; var exports = module.exports;
 var React = require("react");
 var useState = React.useState, useEffect = React.useEffect, useRef = React.useRef, useCallback = React.useCallback;
 
-var PRO_IDS = ["pentest", "code-audit", "ctf-solver"];
+var PRO_IDS = ["pentest"];
 var RESEARCHER = "";
 var L10N = {
-	zh: { group: "专业安全模式", groupDesc: "渗透测试 / 代码审计 / CTF 解题", researcher: "通用模式" },
-	en: { group: "Professional security", groupDesc: "Pentest / Code audit / CTF", researcher: "General" }
+	zh: { group: "渗透测试", groupDesc: "常规测试 / Nday发现 / 0Day挖掘", researcher: "通用模式" },
+	en: { group: "Penetration testing", groupDesc: "Regular / Nday / 0Day", researcher: "General" }
 };
 function t() {
 	return /^zh/.test(navigator.language || "") ? L10N.zh : L10N.en;
@@ -59,7 +59,17 @@ function createController(api, currentSession, onApplied) {
 		set({ current: id, error: null });
 		return applyStaged();
 	}
-	return { snap: snap, subscribe: subscribe, load: load, select: select, applyStaged: applyStaged };
+	return { snap: snap, subscribe: subscribe, load: load, select: select, applyStaged: applyStaged, currentSession: currentSession };
+}
+
+function TaskChoices(props) {
+  if (props.current !== 'pentest') return null;
+  var session = props.ctl.currentSession();
+  if (!session || !session.id || session.agentPreset !== 'pentest') return null;
+  try {
+    var Selector = require('@dsh-external/dsh-redteam-results').WorkflowSelector;
+    return Selector ? React.createElement(Selector, { key: session.id, sessionId: session.id }) : null;
+  } catch { return null; }
 }
 
 // —— 视口自适应弹层定位 ——
@@ -100,7 +110,7 @@ function Chip(props) {
 	var pro = options.filter(function (o) { return PRO_IDS.indexOf(o.id) >= 0; })
 		.sort(function (a, b) { return PRO_IDS.indexOf(a.id) - PRO_IDS.indexOf(b.id); });
 	// 专业模式之外的可见模式（standard 等）：排在专业模式之后平铺，供通用/办公会话选择。
-	var others = options.filter(function (o) { return PRO_IDS.indexOf(o.id) < 0; });
+	var others = options.filter(function (o) { return PRO_IDS.indexOf(o.id) < 0 && o.id !== 'code-audit' && o.id !== 'ctf-solver'; });
 	var builtin = [];
 	var researcher = undefined;
 	var groupable = false;                                 // 平铺展示：专业模式在前，其余模式随后
@@ -181,7 +191,8 @@ function Chip(props) {
 				if (pinned.current) return;
 				closeTimer.current = window.setTimeout(function () { setSubOpen(false); }, 160);
 			} },
-			pro.map(item)) : null);
+			pro.map(item)) : null,
+    React.createElement(TaskChoices, { ctl: ctl, current: snap.current }));
 }
 
 function installStyles() {
@@ -225,6 +236,18 @@ function apply(ctx) {
 			try {
 				var state = scope.sessions.list.getSnapshot();
 				var s = state.current === undefined ? undefined : state.byId[state.current];
+				if (!s || !s.blank) {
+					var blanks = Object.keys(state.byId || {}).map(function (id) { return state.byId[id]; }).filter(function (row) {
+						return row && row.blank;
+					});
+					var retained = blanks.filter(function (row) {
+						try {
+							var info = scope.sessions.retainInfo(row.id).getSnapshot();
+							return info && info.retainedBy && (info.retainedBy.mainView || 0) > 0;
+						} catch { return false; }
+					});
+					s = retained[0] || blanks[0];
+				}
 				return s === undefined ? undefined : { id: s.id, blank: s.blank, agentPreset: s.projectionValues && s.projectionValues.agentPreset };
 			} catch { return undefined; }
 		}, function (sessionId, agentPreset) {

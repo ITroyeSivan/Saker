@@ -72,6 +72,12 @@ const expect = (n, c, d) => { if (c) console.log(`ok   ${n}`); else { failed++; 
 	let rejected = false;
 	try { apply({ tools: { register() {} } }, { exposedTools, deferredTools: ["httpx_probe"] }); } catch { rejected = true; }
 	expect("only the active-scan scanner allowlist may be deferred", rejected);
+	const managed = new Map();
+	apply({ tools: { register(definition) { managed.set(definition.name, definition); } },
+		settings: { get() { return { tools: configured }; } } },
+		{ exposedTools, deferredTools: activeScanNames, managedToolPacks: true });
+	expect("central pack ownership registers scanner definitions without shadowing tool_pack",
+		activeScanNames.every(name => managed.has(name)) && !managed.has("tool_pack"));
 }
 
 {
@@ -94,9 +100,14 @@ const expect = (n, c, d) => { if (c) console.log(`ok   ${n}`); else { failed++; 
 {
 	const json = parseAssetPayload(JSON.stringify([
 		{ url: "https://oa.example.com", ip: "203.0.113.10", port: 443, title: "OA", tech: "weaver,ecology" },
-		{ host: "oa.example.com", ip: "203.0.113.10", port: "443", server: "nginx" },
+		{ url: "https://oa.example.com", host: "oa.example.com", ip: "203.0.113.10", port: "443", server: "nginx" },
 	]), { source: "tscanplus" });
 	expect("JSON 导入并去重为一条", json.assets.length === 1 && json.deduped === 1, JSON.stringify(json));
+	const uncertainProtocol = parseAssetPayload(JSON.stringify([
+		{ url: "https://oa.example.com", ip: "203.0.113.10", port: 443 },
+		{ host: "oa.example.com", ip: "203.0.113.10", port: 443 },
+	]), { source: "tscanplus" });
+	expect("缺少协议的裸主机不借共享IP合并到已知HTTPS服务", uncertainProtocol.assets.length === 2, JSON.stringify(uncertainProtocol));
 	expect("JSON 字段归一（tech 拆分、source 保留）",
 		json.assets[0].tech.join(",") === "weaver,ecology" && json.assets[0].sources.includes("tscanplus"), JSON.stringify(json.assets[0]));
 	const csv = parseAssetPayload('host,ip,port,title,server\nhttps://c.example.com,198.51.100.2,8443,C,nginx\n', { source: "csv" });

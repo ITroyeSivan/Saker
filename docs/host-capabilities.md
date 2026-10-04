@@ -1,10 +1,14 @@
-# dsh 0.1.7 host capability map
+> 2026-10-03入口调整：新任务仅保留渗透测试，其下为常规测试、Nday发现、0Day挖掘。文中旧模式资料仅供历史兼容；当前用法见[使用介绍](saker-improvements-and-plugin-guide-2026-10-02.md)。
+
+# dsh Desktop host capability map
+
+Current verified Windows baseline: official Desktop 0.2.0-rc.2. The plugin client runs in the application's shared renderer; `client.platform = web` remains the official renderer API identifier. Historical provider measurements below retain their original versions.
 
 Saker should not rebuild capabilities that the host already owns. This map records which side is authoritative.
 
 | Capability | Authoritative implementation | Saker role |
 |---|---|---|
-| Session turn navigation, trajectory, todo panel, subagent directory | dsh `0.1.7-rc.1` host client | `dsh-session-pulse` is disabled by default; only domain-specific security views remain |
+| Session turn navigation, trajectory, todo panel, subagent directory | dsh Desktop shared host client | `dsh-session-pulse` is disabled by default; only domain-specific security views remain |
 | Session persistence, paging, fork, archive, stats, projections | dsh host | Saker consumes the same session state; no second session store |
 | Browser use | dsh experimental Browser Use provider; otherwise an upstream browser MCP server | `browser-recon` is methodology only and prefers host Browser Use or MCP Studio proxy tools |
 | Computer use | dsh experimental Cua Driver providers | Saker does not ship a desktop-control runtime |
@@ -13,7 +17,7 @@ Saker should not rebuild capabilities that the host already owns. This map recor
 | Subagents | dsh `dsh-subagent`, spawn/fork providers, and host UI | `dsh-product-subagents` only adds external Codex/Claude Code execution providers |
 | PTC and workflow | dsh `dsh-ptc-runtime` / `dsh-workflow-ptc` | Saker presets mount the provider in their agent scope and consume it |
 | Web search and fetch | dsh base tools | `dsh-hunter` remains specialized asset discovery, not a generic search duplicate |
-| Web terminal | dsh web sidebar terminal | `dsh-webshell-mgr` remains remote authorized-shell management |
+| Host terminal | dsh host terminal provider, subject to the current Desktop workspace and provider availability | `dsh-webshell-mgr` remains remote authorized-shell management |
 | Auto review | dsh experimental Auto Review | Saker does not duplicate it |
 
 ## Browser integration
@@ -21,7 +25,7 @@ Saker should not rebuild capabilities that the host already owns. This map recor
 Use host Browser Use when a session must own a browser resource for its full lifetime. Use the MCP Studio Chrome DevTools preset when token pressure matters more: it pins `chrome-devtools-mcp@1.9.0`, stays disabled until explicitly enabled, and `auto`/proxy exposure keeps the full 29-tool catalog out of the standing prompt.
 
 The measured upstream catalogs at `0.1.6-alpha.1` are retained as the closest
-published baseline; 0.1.7 preserves the same Browser Use/MCP tool families:
+published baseline; 0.2.0-rc.1 preserves the same Browser Use/MCP tool families:
 
 | Provider | Tools | Serialized tool schemas |
 |---|---:|---:|

@@ -1,0 +1,77 @@
+{
+  "date": "2026-10-02",
+  "runtime": "official DeepSeek Harness Desktop 0.2.0-rc.2",
+  "rootVersion": "0.4.68",
+  "hunterVersion": "1.5.2",
+  "ndayVersion": "1.5.2",
+  "desktopChecks": {
+    "clientLoaded": true,
+    "srcSettingsAbsent": true,
+    "advancedSettingsCollapsed": true,
+    "unsavedSelectionPersisted": true,
+    "singleSourceUpdate": [
+      "cisa-kev"
+    ],
+    "sourceResults": [
+      {
+        "source": "cisa-kev",
+        "ok": true,
+        "count": 1731,
+        "status": "complete",
+        "complete": true,
+        "coverage": "current-kev-catalog-query",
+        "watermark": "2026-10-02T07:41:59.469Z",
+        "cursor": null,
+        "revision": null,
+        "contentGaps": 0,
+        "downloadBytes": 0,
+        "downloadTotalBytes": 0,
+        "error": "",
+        "limitation": ""
+      }
+    ],
+    "panelErrors": 0,
+    "localTimeDisplayed": "2026/10/2 15:41:59",
+    "loginPerformed": false
+  },
+  "sourceConfiguration": {
+    "enabled": false,
+    "intervalHours": 24,
+    "sources": [
+      "cisa-kev",
+      "nvd",
+      "osv",
+      "github-advisories",
+      "nuclei",
+      "cve-official"
+    ],
+    "query": "",
+    "lastDays": 30,
+    "limit": 50,
+    "wechatQuery": "",
+    "maxPagesPerRun": 5
+  },
+  "regression": {
+    "suites": 67,
+    "ok": 13421,
+    "fail": 1,
+    "skip": 17,
+    "failure": "model-reasoning dependency missing from source tree; no assertions ran",
+    "focusedRerun": {
+      "modelReasoningOk": 6,
+      "sourceUpdateUiOk": 7,
+      "electronRealToolsOk": 7
+    }
+  },
+  "limits": [
+    "No real vulnerability execution or token/recall comparison",
+    "First isolated node_modules junction prevented external plugin imports; physical copy corrected it",
+    "Second Desktop encountered port conflict from owned prior instance; stopped owned tree and retried",
+    "Hidden desktop screenshot capture timed out; DOM, real callbacks, server state and restart were checked; no screenshot evidence claimed."
+  ],
+  "installation": {
+    "profile": "desktop",
+    "officialCliVerifiedPackages": 25,
+    "finalInstalledBytesMatch": true
+  }
+}

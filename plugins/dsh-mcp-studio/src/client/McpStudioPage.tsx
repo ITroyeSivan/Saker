@@ -25,7 +25,7 @@ function matchesStatusFilter(state: ServerLive['state'], filter: StatusFilter): 
   return state === 'mounting' || state === 'unreachable' || state === 'error'
 }
 
-export function createStudioPage(face: StudioCardFace, t: Translate, pollStatus: () => Promise<StudioLive | { error: string }>, diagnose?: (id: string) => Promise<DiagnoseReport | { error: string }>, clearExecutions?: () => Promise<{ cleared: boolean } | { error: string }>): () => ReactElement {
+export function createStudioPage(face: StudioCardFace, t: Translate, pollStatus: () => Promise<StudioLive | { error: string }>, diagnose?: (id: string) => Promise<DiagnoseReport | { error: string }>, clearExecutions?: () => Promise<{ cleared: boolean } | { error: string }>, refreshSettings?: () => Promise<void>): () => ReactElement {
   return function McpStudioPage(): ReactElement {
     const state = useStoreState(face.hooks.studio)
     // Cards are collapsed by default; only rows created via 添加服务器 expand.
@@ -44,10 +44,12 @@ export function createStudioPage(face: StudioCardFace, t: Translate, pollStatus:
     const [execServerFilter, setExecServerFilter] = useState('')
     const [confirmClear, setConfirmClear] = useState(false)
 
-    // Live status: poll while the page is mounted; each poll is one cheap RPC.
+    // Refresh the saved rows too: another settings panel can change MCP mounts.
+    // Keep an unsaved draft and its revision untouched so a conflicting save is rejected.
     useEffect(() => {
       let alive = true
       const tick = async (): Promise<void> => {
+        if (!state.dirty && !state.saving) await refreshSettings?.()
         const result = await pollStatus()
         if (alive && !('error' in result)) setLive(result)
       }
@@ -57,7 +59,7 @@ export function createStudioPage(face: StudioCardFace, t: Translate, pollStatus:
         alive = false
         clearInterval(timer)
       }
-    }, [pollStatus])
+    }, [pollStatus, refreshSettings, state.dirty, state.saving])
 
     const toggle = useCallback((id: string) => {
       setOpenIds(current => {

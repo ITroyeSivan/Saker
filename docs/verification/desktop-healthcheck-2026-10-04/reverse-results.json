@@ -1,0 +1,32 @@
+[
+  {
+    "label": "reflected dictionary normalization",
+    "detected": true,
+    "status": 1
+  },
+  {
+    "label": "external settings refresh",
+    "detected": true,
+    "status": 1
+  },
+  {
+    "label": "proxy execution logging",
+    "detected": true,
+    "status": 1
+  },
+  {
+    "label": "rejected call classification",
+    "detected": true,
+    "status": 1
+  },
+  {
+    "label": "mount validation error retention",
+    "detected": true,
+    "status": 1
+  },
+  {
+    "label": "Desktop JSON tool argument decoding",
+    "detected": true,
+    "status": 1
+  }
+]

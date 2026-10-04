@@ -1,7 +1,7 @@
 {
   "name": "@dsh-external/dsh-method-stack",
-  "version": "0.1.21",
-  "description": "提示词模块化方法栈：把可切换测试逻辑组织为 模块组→子方法，设置页「方法编排」勾选组合，支持直接编辑各模式完整开场并恢复默认；host 每轮注入启用的方法正文；用户方法层同名覆盖官方；组合 profile 持久化、备份与审计。",
+  "version": "0.1.22",
+  "description": "测试方法目录按当前问题读取正文；桌面可编辑、保存组合和恢复默认。",
   "type": "module",
   "main": "./lib/index.js",
   "exports": {

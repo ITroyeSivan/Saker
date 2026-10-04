@@ -53,3 +53,5 @@ cordis.patch.yml 注释，默认不启用——preset 平面分层）。
 - `node test/run.mjs`：登记检查/无 assets 提示/缺二进制兜底提示/默认速率（5 项，全过）。
 - 实机冒烟（DVWA 127.0.0.1:8081）：httpx 真跑通+证据落盘 ✓；ffuf 小字典真跑通+证据 ✓；
   防盲打拒绝 ✓；nuclei 模板缺失前置拦截 ✓（模板下载待用户批准，见 PROGRESS）。
+
+Saker渗透预设设置 managedToolPacks: true，由 dsh-tool-scope 统一管理工具包；扫描器不再注册同名 tool_pack。独立安装默认保留扫描器自己的 active-scan 入口。工具隐藏需要统一插件实际生效，不能靠本项配置单独保证。

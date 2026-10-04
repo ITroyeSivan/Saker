@@ -35,6 +35,13 @@
 | status | pending/code-reviewed/suspect/verified/false-positive/fixed | 默认 pending；suspect=疑似未定论（可按模式省略）；verified=动态验证成功可复现（代审静态复核填 code-reviewed）；fixed 需先 verified 且修复后复测不成功 |
 | evidenceLevel | confirmed/partial/unknown | 证据等级，默认 unknown |
 
+## 可接收级别与弱配置排除（模型登记硬门禁）
+
+- `redteam_finding_register` 只接收 `medium` / `high` / `critical`。`low` / `info` 不进入成果库；漏填等级也不能靠默认值蒙混。
+- TLS/SSL 配置、CORS 配置、缺失安全头（HSTS/CSP/X-Frame-Options 等）、banner/version disclosure、普通 information disclosure、self-XSS、无影响 open redirect、rate-limit 缺失、cookie flags 等**弱配置项默认不接收**。
+- 只有在补齐 `chain`（入口 → 影响）以及 `impact` 或可复现 `poc` 时，弱配置项才可能作为中危以上 finding 登记；单列“配置错误/扫描器命中/建议加固”无效。
+- 如果证据只支持低危或信息项，不登记成果、不写进报告；继续找可利用链，或明确标为未验证/不接收。
+
 ## 代码审计富字段（findings 板式；**登记时必填组**：auditMode / chain / chainTracer / chainVerdict / snippetEntry / snippetSink / poc（完整 EXP） / fix）
 
 | 字段 | 语义 |
@@ -91,6 +98,37 @@
 |---|---|
 | timelineAt | 攻击时间节点（时间线排序：ISO 或 `YYYY-MM-DD HH:MM`；未知填 unknown） |
 
+## 渗透模式的利用交付
+
+`proofKind` 区分 `fingerprint`、`interaction`、`execution`、`access`、`write` 与 `other-impact`。外带交互不得写成执行证明。
+
+`reproduction` 是完整方法的 JSON 字符串，登记与更新均支持，落入成果库并随导出保存：
+
+```json
+{
+  "kind": "method",
+  "mechanism": "漏洞编号或确切机制名称",
+  "methodVersion": "v1",
+  "endpoint": "https://example.com/api/import",
+  "prerequisites": ["所需身份、模块和受影响条件"],
+  "dependencies": [],
+  "parameters": ["认证输入方式及所需参数，不硬编码当前凭据"],
+  "steps": ["可操作的完整步骤，包含实际请求及必要状态处理"],
+  "successCriterion": "怎样根据输出判定已证实的影响",
+  "reviewSteps": "复核步骤与对照",
+  "recovery": "恢复步骤；无持久修改时明确说明",
+  "verification": {"status":"not-run","evidenceIds":[]}
+}
+```
+
+脚本形式使用 `kind:script`，给 `code`、`language` 与 `runCommand`；其他字段相同。没有依赖或额外前提时使用空数组。方法需要实际步骤，公告或仓库链接不能替代。超过 20000 字的材料显式拒绝，避免截断脚本后仍声称完整。
+
+`verification.status` 使用 `verified` 或 `not-run`；已实测必须引用相应复现证据。目标的影响已证实、但生成脚本未运行时用 `not-run`，不得把两者混为一谈。成果页可显示材料完整性并导出完整利用方法；证据不够、复核未完成或仅有交互时，完整成果导出会拒绝。
+
+渗透模式的status和二次评级是记录声明，不能单独晋级为可交付成果。门禁要求宿主执行回执匹配同会话、入口、identity、当前methodId/methodVersion及关键报文；run提供methodId/methodVersion，reproduction.verification提供controlReceiptId/probeReceiptId。派生executionEvidence不接受模型填写。HTTP执行仍不证明影响，必须另有独立效果验证。当前只支持已审阅的private-json-read/v1契约：两轮所有者参考、正常身份/归属、跨身份私有对象探测及匿名拒绝，均用实际回执；通过的effectReceiptId只能证明access，不能称为RCE。其他机制仍待验证。此阶段不代表完整实战检出完成。
+
+Nday 成果指标从成果库当前状态读取：独立复核、明确影响、关键证据及完整方法齐备才计数；同会话的同机制与实际入口去重。重复反馈不增加成果数，删除、降级和证据撤回立即生效。成果库不存在、未迁移或不可读时报告未知，不写成零；没有唯一筛选/复核记录时不计算指纹误报率。
+
 ## verifyNote（update 专用）
 
 复核注记：结论+依据，简短——「确认/挑战」二选一结论、对照三件套/确定性信号的判定要点、
@@ -108,3 +146,12 @@
 - 授权边界：互联网资产仅 L0（存活+指纹）；L1 仅对「hunter 狩猎」页标记授权的资产；
   L2 完整 EXP 默认禁用。未授权资产需要完整 POC 验证时不设死路：建议标记授权后重试
   L1，或交接渗透测试模式按渗透纪律执行（先确认该资产测试授权，成果登记后回标）。
+# 极简检查记录
+
+`redteam_delivery` 将当前渗透会话的已复核有效成果打包为 ZIP，保存到该会话工作目录，返回实际路径。成果页面也可下载完整交付包。内含 `delivery/findings.md`、`repro/`、`evidence/` 和 `checked.tsv`。只计入证据及独立复核齐全的有效漏洞；待补齐记录保留本地，重复机制/入口合并。
+
+脚本使用参数或环境变量接收认证信息，不能硬编码凭据。`reproduction` 可给 `scriptFilename`（安全的单个文件名），并使 `runCommand` 引用该名称；省略时由运行命令中唯一脚本名推导，无法确定则拒绝交付，须补齐名称。脚本保存在每条成果独立目录，说明中给出运行目录；代码按原字节交付，不自动修改。关键证据中的常见认证头、URL/JSON/表单凭据字段脱敏，原始记录仍保留在本地。已证实目标效果和生成脚本尚未实测必须分别标明。
+
+使用 `redteam_checks` 批量保存或读取当前渗透会话检查记录。JSON 数组中每项含 `assetId/entryId/endpoint/methodVersion/authContext/requestRevision`（身份与请求基线变化应单独记录）、可选展示名 `asset/check`、`status`、`executed/requestValid/observationValid`、`evidenceIds`、本地 `reason` 及可选 `supplementAttempts`。
+
+`not-hit`（已测未命中）要求真实执行、有效请求、有效观察和证据；登录失效、网关阻断及外带观测不可用不能标成未命中。`not-applicable` 需要排除条件的证据；`blocked` 保存本地阻断原因；`not-tested` 表示没有执行。不能将阴性记录登记为有效漏洞。简表 `checked.tsv` 仅有资产、检查项、状态三列，详细身份、原因与证据引用留在任务库。方法、身份、入口或请求变化后可以重测，阴性不能推导整个站点安全。

@@ -11,6 +11,8 @@
 // 归一化：统一字段 host/ip/port/domain/protocol/title/server/isp/time/platform，
 // 跨平台按 ip:port 去重合并（冲突字段取时间新者）。
 
+import { parseQueryExpression, queryTerms, compileQueryExpression } from 'dsh-saker/query-expression';
+
 const LIMITS = {
 	fofa: { pageSize: 100, nextSize: 1000, freeExport: 10000 },
 	hunter: { pageSize: 100, creditPerRow: 1 },
@@ -34,27 +36,8 @@ const FOFA_ONLY_FIELDS = new Set([
 
 /** 统一 DSL 解析：返回字段映射；非法输入抛错（查询语法安全）。 */
 export function parseDsl(input) {
-	const s = String(input ?? "").trim();
-	if (!s) throw new Error("查询为空");
-	const out = new Map();
-	const re = /([a-z0-9_]+(?:\.[a-z0-9_]+)*)\s*:\s*("(?:\\.|[^"\\])*"|(\S+))/g;
-	let m, last = 0;
-	const matched = [];
-	while ((m = re.exec(s)) !== null) {
-		const field = m[1];
-		const value = m[2].startsWith('"')
-			? m[2].slice(1, -1).replace(/\\(["\\])/g, "$1")
-			: m[3];
-		if (!DSL_FIELDS.includes(field)) throw new Error(`未知字段 "${field}"；支持: ${DSL_FIELDS.join("/")}`);
-		if (!value) throw new Error(`字段 "${field}" 值为空`);
-		out.set(field, value);
-		matched.push(m[0]);
-		last = m.index + m[0].length;
-	}
-	const leftover = s.slice(last).replace(/\s+/g, "");
-	if (out.size === 0) throw new Error("未识别到任何 字段:值 条件（如 title:\"login\" port:8080）");
-	if (leftover !== "") throw new Error(`无法解析的片段: "${s.slice(last).trim()}"`);
-	return out;
+	// Metadata view only. Compilation uses the complete tree, including repeated fields.
+	return new Map(queryTerms(parseQueryExpression(input)).map(term => [term.field, term.value]));
 }
 
 /** 统一 DSL 字段映射 → 各平台原生语法。 */
@@ -114,8 +97,8 @@ function toQuakeQuery(fields) {
 /** 查询描述 → 各平台查询串（native=平台原生语法直贴）。 */
 export function buildQueries(query, mode = "dsl") {
 	if (mode === "native") return { fofa: String(query), hunter: String(query), quake: String(query) };
-	const fields = parseDsl(query);
-	return { fofa: toFofaQuery(fields), hunter: toHunterQuery(fields), quake: toQuakeQuery(fields) };
+	const tree = parseQueryExpression(query);
+	return Object.fromEntries(['fofa', 'hunter', 'quake'].map(provider => [provider, compileQueryExpression(tree, provider)]));
 }
 
 function b64(s) {

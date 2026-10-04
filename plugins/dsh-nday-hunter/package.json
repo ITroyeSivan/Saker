@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-nday-hunter",
-  "version": "1.3.45",
+  "version": "1.5.7",
   "description": "DSH Nday hunter (preset-plane, pentest): turn the Nday corpus into action — catalog query, fleet-scale fingerprint screening against machine-checkable probes, honest verdicts (screening signal is never reported as a vulnerability), and a ledger that hands the shortlist to the public exploitation tools.",
   "files": [
     "lib",
@@ -22,11 +22,21 @@
   "exports": {
     ".": "./lib/index.js",
     "./catalog": "./lib/catalog.js",
+    "./metrics": "./lib/metrics.js",
+    "./priority": "./lib/priority.js",
+    "./source-pipeline": "./lib/source-pipeline.js",
+    "./source-registry": "./lib/source-registry.js",
     "./package.json": "./package.json"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-tools": "*",
-    "dsh-saker": "*"
+    "dsh-saker": "*",
+    "@dsh-external/dsh-redteam-results": "*"
+  },
+  "peerDependenciesMeta": {
+    "@dsh-external/dsh-redteam-results": {
+      "optional": true
+    }
   },
   "dsh": {
     "bundle": {

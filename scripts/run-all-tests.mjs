@@ -7,6 +7,7 @@ import { readdirSync, existsSync, statSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
+import './test-home-isolation.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const pluginsDir = join(root, 'plugins')
@@ -407,9 +408,60 @@ if (existsSync(modePromptRunner)) {
   console.log((r.status === 0 ? 'PASS' : 'FAIL') + ' ' + 'pentest-mode-prompts'.padEnd(26) + ' ok=' + nOk + ' fail=' + nFail + ' skip=0')
 }
 
+for (const [suiteName, runner] of [
+  ['nday-planning', join(root, 'scripts', 'test-nday-planning.mjs')],
+  ['desktop-install-boundary', join(root, 'scripts', 'test-desktop-install-boundary.mjs')],
+  ['nday-outcomes', join(root, 'scripts', 'test-nday-outcomes.mjs')],
+  ['test-home-isolation', join(root, 'scripts', 'test-test-home-isolation.mjs')],
+  ['checked-delivery', join(root, 'scripts', 'test-checked-delivery.mjs')],
+  ['delivery-bundle', join(root, 'scripts', 'test-delivery-bundle.mjs')],
+  ['shared-verification', join(root, 'scripts', 'test-shared-verification.mjs')],
+  ['source-update-ui', join(root, 'scripts', 'test-source-update-ui.mjs')],
+  ['probe-batch', join(root, 'scripts', 'test-probe-batch.mjs')],
+  ['match-efficiency', join(root, 'scripts', 'test-match-efficiency.mjs')],
+  ['recon-routing', join(root, 'scripts', 'test-recon-routing.mjs')],
+  ['recon-routing-reverse', join(root, 'scripts', 'test-recon-routing-reverse.mjs')],
+  ['source-incremental', join(root, 'scripts', 'test-source-incremental.mjs')],
+  ['source-index', join(root, 'scripts', 'test-source-index.mjs')],
+  ['osv-export', join(root, 'scripts', 'test-osv-export.mjs')],
+  ['cve-official', join(root, 'scripts', 'test-cve-official.mjs')],
+  ['source-git', join(root, 'scripts', 'test-source-git.mjs')],
+  ['repository-sources', join(root, 'scripts', 'test-repository-sources.mjs')],
+  ['research-input', join(root, 'scripts', 'test-research-input.mjs')],
+  ['task-policy-runtime', join(root, 'scripts', 'test-task-policy-runtime.mjs')],
+  ['desktop-task-ui', join(root, 'scripts', 'test-desktop-task-ui.mjs')],
+  ['method-packages', join(root, 'scripts', 'test-method-packages.mjs')],
+  ['service-groups', join(root, 'scripts', 'test-service-groups.mjs')],
+  ['research-ledger', join(root, 'scripts', 'test-research-ledger.mjs')],
+  ['execution-receipts', join(root, 'scripts', 'test-execution-receipts.mjs')],
+  ['effect-verifications', join(root, 'scripts', 'test-effect-verifications.mjs')],
+  ['effect-verifications-reverse', join(root, 'scripts', 'test-effect-verifications-reverse.mjs')],
+  ['effect-jobs-reverse', join(root, 'scripts', 'test-effect-jobs-reverse.mjs')],
+  ['framework-runtime', join(root, 'scripts', 'test-framework-runtime.mjs')],
+  ['execution-receipts-reverse', join(root, 'scripts', 'test-execution-receipts-reverse.mjs')],
+  ['adaptive-execution-reverse', join(root, 'scripts', 'test-adaptive-execution-reverse.mjs')],
+  ['verification-basis-reverse', join(root, 'scripts', 'test-verification-basis-reverse.mjs')],
+  ['delivery-semantics-reverse', join(root, 'scripts', 'test-delivery-semantics-reverse.mjs')],
+]) {
+  const r = spawnSync(NODE, ['--import', pathToFileURL(stub).href, runner], { cwd: root, encoding: 'utf8' })
+  const lines = `${r.stdout || ''}${r.stderr || ''}`.split('\n')
+  const nOk = lines.filter(line => /^\s*ok\s/.test(line)).length
+  const nFail = lines.filter(line => /^\s*FAIL\s/.test(line)).length
+  ok += nOk; fail += nFail
+  suites.push({ name: suiteName, nOk, nFail, nSkip: 0, status: r.status })
+  if (r.status !== 0 || nFail) {
+    failures.push({ name: suiteName, nFail, status: r.status })
+    console.log(lines.filter(line => /^\s*FAIL\s/.test(line)).join('\n') || lines.slice(-12).join('\n'))
+    // A process failure without a counted assertion is still a failed suite.
+    if (r.status !== 0 && !nFail) fail++
+  }
+  console.log(`${r.status === 0 ? 'PASS' : 'FAIL'} ${suiteName.padEnd(26)} ok=${nOk} fail=${nFail} skip=0`)
+}
+
 const REQUIRED_SUITES = [
   'dsh-attack-atlas', 'dsh-auto-advance', 'dsh-campaign-memory', 'dsh-ctf-observer',
   'dsh-hunter', 'dsh-knowledge-hub', 'dsh-mcp-studio', 'dsh-method-stack',
+  'dsh-mode-group',
   'dsh-product-subagents', 'dsh-redteam-results', 'dsh-refusal-guard', 'dsh-route-boost',
   'dsh-scanner-tools', 'dsh-sec-config', 'dsh-sec-enforce', 'dsh-semgrep-audit',
   'dsh-session-pulse', 'dsh-skill-browse', 'dsh-stage-gate', 'dsh-stage-gate/behavior-locks',
@@ -420,6 +472,39 @@ const REQUIRED_SUITES = [
   'nday-catalog',
   'nday-corpus-runtime',
   'pentest-mode-prompts',
+  'nday-planning',
+  'desktop-install-boundary',
+  'nday-outcomes',
+  'test-home-isolation',
+  'checked-delivery',
+  'delivery-bundle',
+  'shared-verification',
+  'source-update-ui',
+  'probe-batch',
+  'match-efficiency',
+  'recon-routing',
+  'recon-routing-reverse',
+  'source-incremental',
+  'source-index',
+  'osv-export',
+  'cve-official',
+  'source-git',
+  'repository-sources',
+  'research-input',
+  'task-policy-runtime',
+  'desktop-task-ui',
+  'method-packages',
+  'service-groups',
+  'research-ledger',
+  'execution-receipts',
+  'effect-verifications',
+  'effect-verifications-reverse',
+  'effect-jobs-reverse',
+  'framework-runtime',
+  'execution-receipts-reverse',
+  'adaptive-execution-reverse',
+  'verification-basis-reverse',
+  'delivery-semantics-reverse',
   'asset-inventory',
   'attack-flow',
   'zeroday-catalog',
@@ -442,4 +527,4 @@ if (missingSuites.length === 0 && emptySuites.length === 0) {
 
 console.log(`\n总计 ${suites.length} 套 · ${ok} ok / ${fail} fail / ${skip} skip`)
 if (failures.length) console.log('失败套件：' + failures.map((f) => f.name).join(', '))
-process.exit(fail ? 1 : 0)
+process.exit(fail || failures.length ? 1 : 0)

@@ -1,0 +1,37 @@
+{
+  "scope": "Partial batch 4: deterministic private JSON read effect under a reviewed business contract",
+  "sourceVersions": { "root": "0.4.77", "results": "1.0.29", "nday": "1.5.6" },
+  "implemented": [
+    "private-json-read/v1 checks actual owner/viewer IDs, explicit private ACL readers and a non-reflected opaque owner marker",
+    "Two rounds use eight distinct session-scoped host executions: owner, subject normal, subject probe and anonymous denial",
+    "Distinct credential bytes, resource identity and matching reviewed method/context are checked",
+    "Successful effect can promote an access finding through production readiness, metrics, filtered deduplication, grouping and export",
+    "Effect cannot promote a caller relabelled RCE; first-high stops on a valid positive, first-RCE does not stop on access",
+    "Comparison hashes are included in the delivery archive and a collapsed Desktop source view; raw private markers are excluded from that summary",
+    "Old executions cannot create a fresh effect outside the window; timestamped historical proof remains readable without automatic repeat HTTP",
+    "Method or request/context changes revoke reuse; failed observations are inconclusive rather than global negative coverage"
+  ],
+  "verification": {
+    "actualHttpPositiveNegativeAndLifecycleAssertions": 6,
+    "negativeFixtureClasses": ["fixed-acl", "public", "shared", "html", "expired-identity", "request-echo", "wrong-viewer"],
+    "officialElectronRealDefineToolAssertions": 6,
+    "isolatedEffectReverseMutationsCaught": 6,
+    "executionAndDeliveryBindingAssertions": 8,
+    "receiptReverseMutationsCaught": 6,
+    "legacyClaimRejectionAssertions": 14,
+    "deliveryReverseMutationsCaught": 4,
+    "desktopUiContractAssertions": 9,
+    "deliveryBundleAssertions": 10,
+    "taskPolicyAssertions": 6,
+    "resultsPluginRegression": { "passed": 82, "skipped": 6 }
+  },
+  "limitations": [
+    "The ACL/viewer/marker field semantics must be established by the reviewed business contract; the verifier cannot infer them for arbitrary products",
+    "This is one protected read recipe, not a general exploit, write, RCE or blind-interaction effect engine",
+    "Eight executions are referenced; automatic scheduling of all roles in a single model call is not implemented",
+    "No actual model token/recall/time comparison or real-world effectiveness improvement is proven",
+    "Desktop source view is contract-tested only; latest packages are not installed and actual Desktop flow remains unverified",
+    "The user's Desktop PID 32264 was confirmed live and left open for login",
+    "Local filesystem access can alter the database; no cryptographic tamper-proof isolation is claimed"
+  ]
+}

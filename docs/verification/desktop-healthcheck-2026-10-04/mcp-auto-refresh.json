@@ -1,0 +1,38 @@
+{
+  "beforeUi": [
+    "burp",
+    "saker_health_direct",
+    "saker_health_proxy",
+    "yakit"
+  ],
+  "afterUi": [
+    "burp",
+    "yakit"
+  ],
+  "removedFixtureCount": 2,
+  "remainingConfiguredNames": [
+    "burp",
+    "yakit"
+  ],
+  "status": [
+    {
+      "id": "srv-sec-burp",
+      "name": "burp",
+      "state": "unreachable",
+      "toolCount": 0
+    },
+    {
+      "id": "srv-sec-yakit",
+      "name": "yakit",
+      "state": "unreachable",
+      "toolCount": 0
+    }
+  ],
+  "summary": {
+    "total": 2,
+    "enabled": 2,
+    "connected": 0,
+    "tools": 0
+  },
+  "passed": true
+}

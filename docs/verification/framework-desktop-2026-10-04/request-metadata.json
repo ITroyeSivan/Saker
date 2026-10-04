@@ -1,0 +1,2974 @@
+{
+  "requests": [
+    {
+      "kind": "regular",
+      "phase": "before",
+      "metadataLimit": "Actual official model/prepare base request metadata; may precede later extension amendments; not on-wire body capture. Frozen benchmark time window excludes later followups.",
+      "requests": [
+        {
+          "at": 1791040714111,
+          "sessionId": "session-fa6a1cb5-9369-45c2-a549-332af14a557d",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 98549,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 27404,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791040717831,
+          "sessionId": "session-fa6a1cb5-9369-45c2-a549-332af14a557d",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 98549,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 27404,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791040721943,
+          "sessionId": "session-fa6a1cb5-9369-45c2-a549-332af14a557d",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 114219,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 43074,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791040730565,
+          "sessionId": "session-fa6a1cb5-9369-45c2-a549-332af14a557d",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 123178,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 52033,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791040734074,
+          "sessionId": "session-fa6a1cb5-9369-45c2-a549-332af14a557d",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 124808,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 53663,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791040736757,
+          "sessionId": "session-fa6a1cb5-9369-45c2-a549-332af14a557d",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 136304,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 65159,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791040739557,
+          "sessionId": "session-fa6a1cb5-9369-45c2-a549-332af14a557d",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 138542,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 67397,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791040741734,
+          "sessionId": "session-fa6a1cb5-9369-45c2-a549-332af14a557d",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 142626,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 71481,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791040753026,
+          "sessionId": "session-fa6a1cb5-9369-45c2-a549-332af14a557d",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 147964,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 76819,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791040756669,
+          "sessionId": "session-fa6a1cb5-9369-45c2-a549-332af14a557d",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 149888,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 78743,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791040762163,
+          "sessionId": "session-fa6a1cb5-9369-45c2-a549-332af14a557d",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 153088,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 81943,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791040768666,
+          "sessionId": "session-fa6a1cb5-9369-45c2-a549-332af14a557d",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 155844,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 84699,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791040771703,
+          "sessionId": "session-fa6a1cb5-9369-45c2-a549-332af14a557d",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 167885,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 96740,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791040776081,
+          "sessionId": "session-fa6a1cb5-9369-45c2-a549-332af14a557d",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 180253,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 109108,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        }
+      ]
+    },
+    {
+      "kind": "regular",
+      "phase": "after",
+      "metadataLimit": "Actual official model/prepare base request metadata; may precede later extension amendments; not on-wire body capture. Frozen benchmark time window excludes later followups.",
+      "requests": [
+        {
+          "at": 1791042503381,
+          "sessionId": "session-04170b95-3c73-4fb2-8bfd-fb41ee44d790",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 72293,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 27404,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791042509333,
+          "sessionId": "session-04170b95-3c73-4fb2-8bfd-fb41ee44d790",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 90978,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 46089,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791042514188,
+          "sessionId": "session-04170b95-3c73-4fb2-8bfd-fb41ee44d790",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 100469,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 55580,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791042517849,
+          "sessionId": "session-04170b95-3c73-4fb2-8bfd-fb41ee44d790",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 114511,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 69622,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791042522077,
+          "sessionId": "session-04170b95-3c73-4fb2-8bfd-fb41ee44d790",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 119948,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 75059,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791042528557,
+          "sessionId": "session-04170b95-3c73-4fb2-8bfd-fb41ee44d790",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 125987,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 81098,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791042533794,
+          "sessionId": "session-04170b95-3c73-4fb2-8bfd-fb41ee44d790",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 140806,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 95917,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        }
+      ]
+    },
+    {
+      "kind": "nday",
+      "phase": "before",
+      "metadataLimit": "Actual official model/prepare base request metadata; may precede later extension amendments; not on-wire body capture. Frozen benchmark time window excludes later followups.",
+      "requests": [
+        {
+          "at": 1791040772713,
+          "sessionId": "session-d87fe9a1-71da-4548-8a59-2f75d0dff114",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 95993,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 24848,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791040777438,
+          "sessionId": "session-d87fe9a1-71da-4548-8a59-2f75d0dff114",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 97950,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 26805,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791040780661,
+          "sessionId": "session-d87fe9a1-71da-4548-8a59-2f75d0dff114",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 110419,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 39274,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791040784421,
+          "sessionId": "session-d87fe9a1-71da-4548-8a59-2f75d0dff114",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 122522,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 51377,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        }
+      ]
+    },
+    {
+      "kind": "nday",
+      "phase": "after",
+      "metadataLimit": "Actual official model/prepare base request metadata; may precede later extension amendments; not on-wire body capture. Frozen benchmark time window excludes later followups.",
+      "requests": [
+        {
+          "at": 1791042948741,
+          "sessionId": "session-34db2aa7-d354-45d8-9323-f68e6566da9f",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 69737,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 24848,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791042952037,
+          "sessionId": "session-34db2aa7-d354-45d8-9323-f68e6566da9f",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 74283,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 29394,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791042954266,
+          "sessionId": "session-34db2aa7-d354-45d8-9323-f68e6566da9f",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 86495,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 41606,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791042957231,
+          "sessionId": "session-34db2aa7-d354-45d8-9323-f68e6566da9f",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 99703,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 43476,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 46491
+          },
+          "toolCount": 55,
+          "toolDefinitionBytes": 46435
+        },
+        {
+          "at": 1791042959758,
+          "sessionId": "session-34db2aa7-d354-45d8-9323-f68e6566da9f",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 100492,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 44265,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 46491
+          },
+          "toolCount": 55,
+          "toolDefinitionBytes": 46435
+        },
+        {
+          "at": 1791042964552,
+          "sessionId": "session-34db2aa7-d354-45d8-9323-f68e6566da9f",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 115287,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 59060,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 46491
+          },
+          "toolCount": 55,
+          "toolDefinitionBytes": 46435
+        }
+      ]
+    },
+    {
+      "kind": "0day",
+      "phase": "before",
+      "metadataLimit": "Actual official model/prepare base request metadata; may precede later extension amendments; not on-wire body capture. Frozen benchmark time window excludes later followups.",
+      "requests": [
+        {
+          "at": 1791041238638,
+          "sessionId": "session-9f76860a-04c9-4a7f-9dc3-523456b9a973",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 98543,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 27398,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041243457,
+          "sessionId": "session-9f76860a-04c9-4a7f-9dc3-523456b9a973",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 112633,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 41488,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041246371,
+          "sessionId": "session-9f76860a-04c9-4a7f-9dc3-523456b9a973",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 114859,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 43714,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041250640,
+          "sessionId": "session-9f76860a-04c9-4a7f-9dc3-523456b9a973",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 115664,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 44519,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041252556,
+          "sessionId": "session-9f76860a-04c9-4a7f-9dc3-523456b9a973",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 116828,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 45683,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041255054,
+          "sessionId": "session-9f76860a-04c9-4a7f-9dc3-523456b9a973",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 117886,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 46741,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041258358,
+          "sessionId": "session-9f76860a-04c9-4a7f-9dc3-523456b9a973",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 119648,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 48503,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041261328,
+          "sessionId": "session-9f76860a-04c9-4a7f-9dc3-523456b9a973",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 131650,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 60505,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041263882,
+          "sessionId": "session-9f76860a-04c9-4a7f-9dc3-523456b9a973",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 133261,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 62116,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041266506,
+          "sessionId": "session-9f76860a-04c9-4a7f-9dc3-523456b9a973",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 137742,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 66597,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041271562,
+          "sessionId": "session-9f76860a-04c9-4a7f-9dc3-523456b9a973",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 141451,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 70306,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041273692,
+          "sessionId": "session-9f76860a-04c9-4a7f-9dc3-523456b9a973",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 143067,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 71922,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041280374,
+          "sessionId": "session-9f76860a-04c9-4a7f-9dc3-523456b9a973",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 146413,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 75268,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041285773,
+          "sessionId": "session-9f76860a-04c9-4a7f-9dc3-523456b9a973",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 147528,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 76383,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041294009,
+          "sessionId": "session-9f76860a-04c9-4a7f-9dc3-523456b9a973",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 147528,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 76383,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041295826,
+          "sessionId": "session-9f76860a-04c9-4a7f-9dc3-523456b9a973",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 158797,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 87652,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        }
+      ]
+    },
+    {
+      "kind": "0day",
+      "phase": "after",
+      "metadataLimit": "Actual official model/prepare base request metadata; may precede later extension amendments; not on-wire body capture. Frozen benchmark time window excludes later followups.",
+      "requests": [
+        {
+          "at": 1791043061730,
+          "sessionId": "session-96497408-d24f-4f06-b261-56ad4bd934f6",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 72287,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 27398,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043065088,
+          "sessionId": "session-96497408-d24f-4f06-b261-56ad4bd934f6",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 87965,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 43076,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043069038,
+          "sessionId": "session-96497408-d24f-4f06-b261-56ad4bd934f6",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 102031,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 57142,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043072501,
+          "sessionId": "session-96497408-d24f-4f06-b261-56ad4bd934f6",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 105392,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 60503,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043074829,
+          "sessionId": "session-96497408-d24f-4f06-b261-56ad4bd934f6",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 112402,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 67513,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043079567,
+          "sessionId": "session-96497408-d24f-4f06-b261-56ad4bd934f6",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 126402,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 81513,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043083225,
+          "sessionId": "session-96497408-d24f-4f06-b261-56ad4bd934f6",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 128913,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 84024,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043087028,
+          "sessionId": "session-96497408-d24f-4f06-b261-56ad4bd934f6",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 134255,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 89366,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043093689,
+          "sessionId": "session-96497408-d24f-4f06-b261-56ad4bd934f6",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 139873,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 94984,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043096098,
+          "sessionId": "session-96497408-d24f-4f06-b261-56ad4bd934f6",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 142158,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 97269,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043108420,
+          "sessionId": "session-96497408-d24f-4f06-b261-56ad4bd934f6",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 151049,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 106160,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043114459,
+          "sessionId": "session-96497408-d24f-4f06-b261-56ad4bd934f6",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 153955,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 109066,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043116466,
+          "sessionId": "session-96497408-d24f-4f06-b261-56ad4bd934f6",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 165499,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 120610,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        }
+      ]
+    },
+    {
+      "kind": "workers-1",
+      "phase": "before",
+      "metadataLimit": "Actual official model/prepare base request metadata; may precede later extension amendments; not on-wire body capture. Frozen benchmark time window excludes later followups.",
+      "requests": [
+        {
+          "at": 1791041731275,
+          "sessionId": "session-26133df0-917f-44e2-80c7-130950f3b9e4",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 96667,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 25522,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041734875,
+          "sessionId": "session-26133df0-917f-44e2-80c7-130950f3b9e4",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 109945,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 38800,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041742285,
+          "sessionId": "session-26133df0-917f-44e2-80c7-130950f3b9e4",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 113476,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 42331,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041742296,
+          "sessionId": "36917cde-2652-4fca-a47c-61366eb4a07d",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 51604,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 25257,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9350,
+            "tools": 16843
+          },
+          "toolCount": 15,
+          "toolDefinitionBytes": 16827
+        },
+        {
+          "at": 1791041744831,
+          "sessionId": "session-26133df0-917f-44e2-80c7-130950f3b9e4",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 115488,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 44343,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041747221,
+          "sessionId": "36917cde-2652-4fca-a47c-61366eb4a07d",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 55619,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 29272,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9350,
+            "tools": 16843
+          },
+          "toolCount": 15,
+          "toolDefinitionBytes": 16827
+        },
+        {
+          "at": 1791041747342,
+          "sessionId": "session-26133df0-917f-44e2-80c7-130950f3b9e4",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 117285,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 46140,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041749484,
+          "sessionId": "36917cde-2652-4fca-a47c-61366eb4a07d",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 57146,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 30799,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9350,
+            "tools": 16843
+          },
+          "toolCount": 15,
+          "toolDefinitionBytes": 16827
+        },
+        {
+          "at": 1791041752232,
+          "sessionId": "36917cde-2652-4fca-a47c-61366eb4a07d",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 58132,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 31785,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9350,
+            "tools": 16843
+          },
+          "toolCount": 15,
+          "toolDefinitionBytes": 16827
+        },
+        {
+          "at": 1791041754011,
+          "sessionId": "36917cde-2652-4fca-a47c-61366eb4a07d",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 59061,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 32714,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9350,
+            "tools": 16843
+          },
+          "toolCount": 15,
+          "toolDefinitionBytes": 16827
+        },
+        {
+          "at": 1791041759143,
+          "sessionId": "36917cde-2652-4fca-a47c-61366eb4a07d",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 60205,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 33858,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9350,
+            "tools": 16843
+          },
+          "toolCount": 15,
+          "toolDefinitionBytes": 16827
+        },
+        {
+          "at": 1791041761893,
+          "sessionId": "36917cde-2652-4fca-a47c-61366eb4a07d",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 62128,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 35781,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9350,
+            "tools": 16843
+          },
+          "toolCount": 15,
+          "toolDefinitionBytes": 16827
+        },
+        {
+          "at": 1791041761897,
+          "sessionId": "session-26133df0-917f-44e2-80c7-130950f3b9e4",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 120233,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 49088,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041764131,
+          "sessionId": "session-26133df0-917f-44e2-80c7-130950f3b9e4",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 122699,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 51554,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041766828,
+          "sessionId": "session-26133df0-917f-44e2-80c7-130950f3b9e4",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 126281,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 55136,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041768609,
+          "sessionId": "session-26133df0-917f-44e2-80c7-130950f3b9e4",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 128364,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 57219,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041770327,
+          "sessionId": "session-26133df0-917f-44e2-80c7-130950f3b9e4",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 139632,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 68487,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        }
+      ]
+    },
+    {
+      "kind": "workers-1",
+      "phase": "after",
+      "metadataLimit": "Actual official model/prepare base request metadata; may precede later extension amendments; not on-wire body capture. Frozen benchmark time window excludes later followups.",
+      "requests": [
+        {
+          "at": 1791043599193,
+          "sessionId": "session-f22f5fb1-5dc5-4903-876f-04da37b34165",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 70411,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 25522,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043600902,
+          "sessionId": "session-f22f5fb1-5dc5-4903-876f-04da37b34165",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 82075,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 37186,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043602492,
+          "sessionId": "session-f22f5fb1-5dc5-4903-876f-04da37b34165",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 83123,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 38234,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043605728,
+          "sessionId": "session-f22f5fb1-5dc5-4903-876f-04da37b34165",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 84775,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 39886,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043605750,
+          "sessionId": "ac57bfb3-4842-41e9-9ce0-832c90a7236b",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 51860,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 25257,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9600,
+            "tools": 16849
+          },
+          "toolCount": 15,
+          "toolDefinitionBytes": 16833
+        },
+        {
+          "at": 1791043608853,
+          "sessionId": "session-f22f5fb1-5dc5-4903-876f-04da37b34165",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 86500,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 41611,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043610511,
+          "sessionId": "session-f22f5fb1-5dc5-4903-876f-04da37b34165",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 87531,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 42642,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043611616,
+          "sessionId": "ac57bfb3-4842-41e9-9ce0-832c90a7236b",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 57652,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 31049,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9600,
+            "tools": 16849
+          },
+          "toolCount": 15,
+          "toolDefinitionBytes": 16833
+        },
+        {
+          "at": 1791043613727,
+          "sessionId": "ac57bfb3-4842-41e9-9ce0-832c90a7236b",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 58650,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 32047,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9600,
+            "tools": 16849
+          },
+          "toolCount": 15,
+          "toolDefinitionBytes": 16833
+        },
+        {
+          "at": 1791043615111,
+          "sessionId": "session-f22f5fb1-5dc5-4903-876f-04da37b34165",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 90432,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 45543,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043617004,
+          "sessionId": "session-f22f5fb1-5dc5-4903-876f-04da37b34165",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 92122,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 47233,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043620033,
+          "sessionId": "session-f22f5fb1-5dc5-4903-876f-04da37b34165",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 95612,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 50723,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043622365,
+          "sessionId": "session-f22f5fb1-5dc5-4903-876f-04da37b34165",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 106927,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 62038,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        }
+      ]
+    },
+    {
+      "kind": "workers-2",
+      "phase": "before",
+      "metadataLimit": "Actual official model/prepare base request metadata; may precede later extension amendments; not on-wire body capture. Frozen benchmark time window excludes later followups.",
+      "requests": [
+        {
+          "at": 1791041825569,
+          "sessionId": "session-a70da93a-f14a-479d-9988-ebc7573d94be",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 97212,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 26067,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041828977,
+          "sessionId": "session-a70da93a-f14a-479d-9988-ebc7573d94be",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 109826,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 38681,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041831856,
+          "sessionId": "716b2bb9-7399-4257-88cf-eb6696413671",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 51604,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 25257,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9350,
+            "tools": 16843
+          },
+          "toolCount": 15,
+          "toolDefinitionBytes": 16827
+        },
+        {
+          "at": 1791041831999,
+          "sessionId": "session-a70da93a-f14a-479d-9988-ebc7573d94be",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 113347,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 42202,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041832023,
+          "sessionId": "ba2fbf8c-4cd6-4adb-b5d8-3a3b0a84906d",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 51673,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 25285,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9391,
+            "tools": 16843
+          },
+          "toolCount": 15,
+          "toolDefinitionBytes": 16827
+        },
+        {
+          "at": 1791041833961,
+          "sessionId": "session-a70da93a-f14a-479d-9988-ebc7573d94be",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 115654,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 44509,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041834368,
+          "sessionId": "716b2bb9-7399-4257-88cf-eb6696413671",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 54438,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 28091,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9350,
+            "tools": 16843
+          },
+          "toolCount": 15,
+          "toolDefinitionBytes": 16827
+        },
+        {
+          "at": 1791041835824,
+          "sessionId": "ba2fbf8c-4cd6-4adb-b5d8-3a3b0a84906d",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 56308,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 29920,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9391,
+            "tools": 16843
+          },
+          "toolCount": 15,
+          "toolDefinitionBytes": 16827
+        },
+        {
+          "at": 1791041837881,
+          "sessionId": "716b2bb9-7399-4257-88cf-eb6696413671",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 56454,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 30107,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9350,
+            "tools": 16843
+          },
+          "toolCount": 15,
+          "toolDefinitionBytes": 16827
+        },
+        {
+          "at": 1791041839158,
+          "sessionId": "session-a70da93a-f14a-479d-9988-ebc7573d94be",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 119170,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 48025,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041839856,
+          "sessionId": "ba2fbf8c-4cd6-4adb-b5d8-3a3b0a84906d",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 57824,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 31436,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9391,
+            "tools": 16843
+          },
+          "toolCount": 15,
+          "toolDefinitionBytes": 16827
+        },
+        {
+          "at": 1791041843852,
+          "sessionId": "session-a70da93a-f14a-479d-9988-ebc7573d94be",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 123842,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 52697,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041846060,
+          "sessionId": "session-a70da93a-f14a-479d-9988-ebc7573d94be",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 128407,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 57262,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        },
+        {
+          "at": 1791041847700,
+          "sessionId": "session-a70da93a-f14a-479d-9988-ebc7573d94be",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 139535,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 68390,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9332,
+            "tools": 61659
+          },
+          "toolCount": 71,
+          "toolDefinitionBytes": 61587
+        }
+      ]
+    },
+    {
+      "kind": "workers-2",
+      "phase": "after",
+      "metadataLimit": "Actual official model/prepare base request metadata; may precede later extension amendments; not on-wire body capture. Frozen benchmark time window excludes later followups.",
+      "requests": [
+        {
+          "at": 1791043670938,
+          "sessionId": "session-434c5dc4-194a-42d4-8da4-33016bfd2853",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 70956,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 26067,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043673823,
+          "sessionId": "session-434c5dc4-194a-42d4-8da4-33016bfd2853",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 84188,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 39299,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043676952,
+          "sessionId": "c8066133-20f4-4fa8-a2c4-b8e9abf640d8",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 51860,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 25257,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9600,
+            "tools": 16849
+          },
+          "toolCount": 15,
+          "toolDefinitionBytes": 16833
+        },
+        {
+          "at": 1791043677101,
+          "sessionId": "session-434c5dc4-194a-42d4-8da4-33016bfd2853",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 88080,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 43191,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043677112,
+          "sessionId": "b101b990-dac9-4c78-a06a-58515a094b41",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 51929,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 25285,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9641,
+            "tools": 16849
+          },
+          "toolCount": 15,
+          "toolDefinitionBytes": 16833
+        },
+        {
+          "at": 1791043679262,
+          "sessionId": "c8066133-20f4-4fa8-a2c4-b8e9abf640d8",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 54453,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 27850,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9600,
+            "tools": 16849
+          },
+          "toolCount": 15,
+          "toolDefinitionBytes": 16833
+        },
+        {
+          "at": 1791043679715,
+          "sessionId": "session-434c5dc4-194a-42d4-8da4-33016bfd2853",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 90533,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 45644,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043680792,
+          "sessionId": "b101b990-dac9-4c78-a06a-58515a094b41",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 54061,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 27417,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9641,
+            "tools": 16849
+          },
+          "toolCount": 15,
+          "toolDefinitionBytes": 16833
+        },
+        {
+          "at": 1791043682656,
+          "sessionId": "c8066133-20f4-4fa8-a2c4-b8e9abf640d8",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 55559,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 28956,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9600,
+            "tools": 16849
+          },
+          "toolCount": 15,
+          "toolDefinitionBytes": 16833
+        },
+        {
+          "at": 1791043682969,
+          "sessionId": "session-434c5dc4-194a-42d4-8da4-33016bfd2853",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 95261,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 50372,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043685770,
+          "sessionId": "session-434c5dc4-194a-42d4-8da4-33016bfd2853",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 105679,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 60790,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        },
+        {
+          "at": 1791043687885,
+          "sessionId": "session-434c5dc4-194a-42d4-8da4-33016bfd2853",
+          "purpose": null,
+          "model": "deepseek-flash",
+          "thinking": {
+            "type": "enabled"
+          },
+          "outputConfig": {
+            "effort": "max"
+          },
+          "baseRequestBytes": 117079,
+          "sections": {
+            "model": 16,
+            "stream": 4,
+            "messages": 72190,
+            "max_tokens": 6,
+            "thinking": 18,
+            "output_config": 16,
+            "system": 9582,
+            "tools": 35153
+          },
+          "toolCount": 41,
+          "toolDefinitionBytes": 35111
+        }
+      ]
+    }
+  ]
+}

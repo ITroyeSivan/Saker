@@ -10,7 +10,7 @@ import { openHunterStore, configView, getKey } from "../lib/store.js";
 
 const TEST_HOME = mkdtempSync(join(tmpdir(), "hunter-test-home-"));
 process.env.DSH_HOME = TEST_HOME;
-const { isTrustedRequest, checkCsrf, buildFindingPatch, apply, closeSharedStore } = await import("../lib/index.js");
+const { isTrustedRequest, checkCsrf, buildFindingPatch, apply, closeSharedStore, dispatch } = await import("../lib/index.js");
 
 let pass = 0, fail = 0;
 // 异步用例必须等待完成后再计数，否则断言未执行就被进程退出（假绿）。
@@ -264,6 +264,14 @@ await ok("hunter store：配置视图不回传完整 key", () => {
 	assert.equal(getKey(st, "fofa"), "abcdef1234567890", "插件内部可读完整 key");
 	st.close();
 });
+await ok("hunter client：主设置页提供三平台 key 配置入口且不回显完整值", () => {
+	const src = readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
+	assert.match(src, /id: "hunter-api-platforms"/);
+	assert.match(src, /label: function \(\) \{ return "资产平台 API"; \}/);
+	assert.match(src, /type: "password"/);
+	assert.match(src, /api\("config\.set"/);
+	assert.ok(!/(?:fofa|hunter|quake)[^\n]{0,50}["'][A-Za-z0-9_-]{24,}["']/i.test(src), "客户端不应硬编码长 API key");
+});
 	await ok("hunter store：历史与授权白名单", () => {
 		const st = openHunterStore(":memory:");
 		st.insertHistory.run("2026-01-01T00:00:00Z", "code-audit-1", "code-audit", 'title:"x"', "fofa,hunter", "l0-confirmed", "{}");
@@ -273,6 +281,15 @@ await ok("hunter store：配置视图不回传完整 key", () => {
 		st.unauthorize.run("1.2.3.4:80");
 		assert.equal(st.listAuthorized.all().length, 0);
 		st.close();
+	});
+
+	await ok("SRC 范围策略 RPC 已移除，资产授权功能仍可用", async () => {
+		const st = openHunterStore(":memory:");
+		try {
+			for (const endpoint of ["scope.list", "scope.bulkAdd", "scope.program.list", "scope.program.upsert", "scope.program.expand", "scope.target.setStatus"])
+				await assert.rejects(dispatch(null, st, endpoint, {}), /unknown endpoint/);
+			assert.equal((await dispatch(null, st, "authorized.list", {})).ok, true);
+		} finally { st.close(); }
 	});
 
 // 7. 互联网侧寻源（放宽阶梯）
@@ -383,6 +400,11 @@ await ok("CSRF 头校验：匹配放行/缺失或错值拒", () => {
 
 	await ok("asset_search 注册为模型工具", () => {
 		assert.ok(tools.has("asset_search"));
+	});
+	await ok("SRC 范围模型工具已移除", () => {
+		assert.ok(!tools.has("scope_program_list"));
+		assert.ok(!tools.has("scope_program_get"));
+		assert.ok(!tools.has("scope_program_expand"));
 	});
 
 	await ok("asset_search_batch 数组项用宿主支持的字段级必填并保留 Nday 映射", () => {
@@ -548,7 +570,7 @@ await ok("CSRF 头校验：匹配放行/缺失或错值拒", () => {
 			};
 			const out = await tools.get("asset_search_batch").execute({
 				queries: [
-					{ id: "q-portal", query: 'title:"Portal"', basis: "catalog-fingerprint", entryIds: ["nday-portal-rce"] },
+					{ id: "q-portal", query: '(body="Portal" || header="Portal") && title=="Admin"', basis: "catalog-fingerprint", entryIds: ["nday-portal-rce"] },
 					{ id: "q-version", query: 'product.version:"7.0.4.9"' },
 				],
 				scope: "*.example.com,*.corp.example.net", workspace, platform: "fofa", size: 10,
@@ -562,6 +584,7 @@ await ok("CSRF 头校验：匹配放行/缺失或错值拒", () => {
 			assert.equal(out.queryResults[1].assets.length, 1);
 			assert.equal(out.queryResults[1].assets[0].host, "portal.corp.example.net");
 			assert.equal(requestedQueries.length, 2);
+			assert.ok(requestedQueries[0].includes('(body="Portal" || header="Portal")') && requestedQueries[0].includes('title=="Admin"'), requestedQueries[0]);
 			assert.ok(requestedQueries.every((query) => query.includes('domain="example.com"') && query.includes('domain="corp.example.net"')));
 			assert.ok(requestedQueries[1].includes('product.version="7.0.4.9"'));
 			const saved = JSON.parse(readFileSync(join(workspace, out.rawFile), "utf8"));

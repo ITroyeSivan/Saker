@@ -1,0 +1,62 @@
+{
+  "at": "2026-10-04T01:16:58.068Z",
+  "sourceVersion": "0.4.86",
+  "policies": [
+    {
+      "id": "session-f22f5fb1-5dc5-4903-876f-04da37b34165",
+      "mode": "0day",
+      "stop": "budget",
+      "question": "核对公开地图key是否证明私有凭证泄露",
+      "target": "http://127.0.0.1:8794",
+      "workerLimit": 1,
+      "budget": {
+        "toolCalls": 8,
+        "discoveryCalls": 0,
+        "deadline": 1791077400458
+      },
+      "used": {
+        "toolCalls": 0,
+        "discoveryCalls": 0
+      },
+      "startedAt": 1791076500458,
+      "cancelled": false,
+      "planComplete": true,
+      "queueComplete": false,
+      "finishedAt": 1791076511831
+    },
+    {
+      "id": "ac57bfb3-4842-41e9-9ce0-832c90a7236b",
+      "mode": "0day",
+      "stop": "budget",
+      "question": "仅离线判断公开地图JS中已标注public的mapClientKey，没有任何服务端授权效果，是否足以证明私有凭证泄露？一句话回答不能以及缺少的实际证据。不要联网、命令、文件或派代理，结束report state=completed。",
+      "target": "http://127.0.0.1:8794",
+      "workerLimit": 0,
+      "parentSession": "session-f22f5fb1-5dc5-4903-876f-04da37b34165",
+      "parentRound": 1791076500458,
+      "budget": {
+        "toolCalls": 8,
+        "discoveryCalls": 0,
+        "deadline": 1791077400458
+      },
+      "used": {
+        "toolCalls": 0,
+        "discoveryCalls": 0
+      },
+      "startedAt": 1791076502221,
+      "cancelled": false,
+      "planComplete": false,
+      "queueComplete": false
+    }
+  ],
+  "worker": {
+    "childId": "ac57bfb3-4842-41e9-9ce0-832c90a7236b",
+    "state": "released",
+    "report": {
+      "state": "completed",
+      "summary": "不能——公开地图 JS 中已标注 public 的 mapClientKey 属按设计随前端分发的公开标识、且无任何服务端授权效果，缺少的实际证据是：用它换取非公开权限或资源的可复现服务端效果（受保护接口/私有数据/配额或计费的对照差异），以及证明该 key 不在官方公开范围、其作用域绑定非公开资产且未被匿名对照组同样取得。",
+      "at": 1791076506650,
+      "source": "submitted-worker-report, not a verified finding"
+    },
+    "previousReports": 2
+  }
+}

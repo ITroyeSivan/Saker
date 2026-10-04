@@ -22,5 +22,5 @@ export function apply(ctx: ClientContext): void {
     id: 'mcp-studio',
     order: 110,
     label: () => t('nav'),
-  }, createStudioPage(face, t, () => scope.status(), id => scope.diagnose(id), () => scope.clearExecutions())))
+  }, createStudioPage(face, t, () => scope.status(), id => scope.diagnose(id), () => scope.clearExecutions(), () => scope.refresh())))
 }

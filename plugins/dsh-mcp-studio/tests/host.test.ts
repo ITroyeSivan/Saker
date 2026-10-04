@@ -21,6 +21,53 @@ interface ScopeLike {
   replace(section: object): Promise<void>
 }
 
+test('studio host: rejected direct calls remain failures and proxy calls keep their server identity', async (t) => {
+  const root = new Context()
+  new StubTools(root)
+  new StubSettings(root)
+  new StubWebServer(root)
+  const connection = new StubConnection(root)
+  const fiber = root.plugin({ name: studioName, inject: studioInject, apply: studioApply }, { servers: [] })
+  t.after(() => fiber.dispose())
+  await fiber
+  const session = { id: 'health-session' }
+  await root.emit('session/event', session, { type: 'tool/call', time: 100, data: { name: 'mcp__direct__health_ping', callId: 'rejected' } })
+  await root.emit('session/event', session, { type: 'tool/result', time: 101, data: { message: { isError: true, source: { kind: 'tool', callId: 'rejected' }, content: [{ type: 'text', text: 'blocked before execution' }] } } })
+  // The official Desktop transcript stores tool arguments as JSON text.
+  await root.emit('session/event', session, { type: 'tool/call', time: 102, data: { name: 'mcp_call', callId: 'proxied', arguments: JSON.stringify({ server: 'proxy-fixture', tool: 'health_ping', args: { message: 'local' } }) } })
+  await root.emit('session/event', session, { type: 'tool/result', time: 103, data: { message: { isError: false, source: { kind: 'tool', callId: 'proxied' }, content: [{ type: 'text', text: 'HEALTH_OK:local' }] } } })
+  const result = await connection.handler!('status', {})
+  if (!result.ok) throw new Error(result.error.message)
+  const records = (result.value as { executions: Array<{ server: string; tool: string; ok: boolean }> }).executions
+  assert.equal(records.length, 2)
+  assert.equal(records.find(r => r.server === 'direct')?.ok, false)
+  assert.deepEqual(records.find(r => r.server === 'proxy-fixture'), { at: 102, server: 'proxy-fixture', tool: 'health_ping', durationMs: 1, ok: true })
+})
+
+test('studio host: synchronous mount validation errors remain visible in status', async (t) => {
+  const root = new Context()
+  const registryPrototype = Object.getPrototypeOf(root.registry)
+  const originalPlugin = registryPrototype.plugin
+  registryPrototype.plugin = function (plugin: unknown, ...args: unknown[]) {
+    if ((plugin as { name?: string }).name === 'mcp-client') throw new Error('invalid config: synchronous fixture rejection')
+    return originalPlugin.call(this, plugin, ...args)
+  }
+  t.after(() => { registryPrototype.plugin = originalPlugin })
+  new StubTools(root)
+  new StubSettings(root)
+  new StubWebServer(root)
+  const connection = new StubConnection(root)
+  const server = { id: 'bad-name', enabled: true, name: 'invalid name', transport: 'stdio', command: process.execPath, argsLine: '', env: {}, cwd: '', url: '', headers: {}, toolCallTimeoutMs: 10000, failOnStartupError: false, exposure: 'direct', proxyThreshold: 10, directTools: [] }
+  const fiber = root.plugin({ name: studioName, inject: studioInject, apply: studioApply }, { servers: [server] })
+  t.after(() => fiber.dispose())
+  await fiber
+  const result = await connection.handler!('status', {})
+  if (!result.ok) throw new Error(result.error.message)
+  const rows = (result.value as { servers: Array<{ state: string; error?: string }> }).servers
+  assert.equal(rows[0]?.state, 'error')
+  assert.match(rows[0]?.error ?? '', /invalid config/)
+})
+
 class VolatileValue<T> {
   constructor(private value: T) {}
   get(): T {

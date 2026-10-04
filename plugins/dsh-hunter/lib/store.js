@@ -27,6 +27,30 @@ CREATE TABLE IF NOT EXISTS authorized (
   note TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS scope_assets (
+  id TEXT NOT NULL PRIMARY KEY,
+  value TEXT NOT NULL UNIQUE,
+  label TEXT NOT NULL DEFAULT '',
+  authorization TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL DEFAULT '',
+  tags TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS scope_programs (
+  id TEXT NOT NULL PRIMARY KEY,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'custom-src',
+  authorization TEXT NOT NULL DEFAULT '',
+  seeds TEXT NOT NULL DEFAULT '',
+  include_rules TEXT NOT NULL DEFAULT '',
+  exclude_rules TEXT NOT NULL DEFAULT '',
+  auto_expand INTEGER NOT NULL DEFAULT 1,
+  auto_approve INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 `;
 
 const PLATFORMS = ["fofa", "hunter", "quake"];
@@ -93,6 +117,16 @@ export function openHunterStore(dbPath) {
 		}
 	}
 	db.exec(SCHEMA);
+	for (const column of [
+		"ALTER TABLE scope_assets ADD COLUMN program_id TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE scope_assets ADD COLUMN status TEXT NOT NULL DEFAULT 'in-scope'",
+		"ALTER TABLE scope_assets ADD COLUMN relation TEXT NOT NULL DEFAULT 'manual'",
+		"ALTER TABLE scope_assets ADD COLUMN provenance TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE scope_assets ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'",
+		"ALTER TABLE scope_assets ADD COLUMN last_seen TEXT NOT NULL DEFAULT ''",
+	]) {
+		try { db.exec(column); } catch { /* column already exists */ }
+	}
 	return {
 		dbPath,
 		db,
@@ -103,6 +137,17 @@ export function openHunterStore(dbPath) {
 		authorize: db.prepare("INSERT INTO authorized (key, note, created_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET note=excluded.note, created_at=excluded.created_at"),
 		unauthorize: db.prepare("DELETE FROM authorized WHERE key = ?"),
 		listAuthorized: db.prepare("SELECT key, note, created_at FROM authorized ORDER BY created_at DESC"),
+		upsertScope: db.prepare("INSERT INTO scope_assets (id, value, label, authorization, note, tags, enabled, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(value) DO UPDATE SET label=excluded.label, authorization=excluded.authorization, note=excluded.note, tags=excluded.tags, enabled=excluded.enabled, updated_at=excluded.updated_at"),
+		removeScope: db.prepare("DELETE FROM scope_assets WHERE id = ? OR value = ?"),
+		listScope: db.prepare("SELECT id, value, label, authorization, note, tags, enabled, created_at, updated_at FROM scope_assets ORDER BY enabled DESC, label COLLATE NOCASE, value COLLATE NOCASE"),
+		clearScope: db.prepare("DELETE FROM scope_assets"),
+		upsertProgram: db.prepare("INSERT INTO scope_programs (id, name, kind, authorization, seeds, include_rules, exclude_rules, auto_expand, auto_approve, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, kind=excluded.kind, authorization=excluded.authorization, seeds=excluded.seeds, include_rules=excluded.include_rules, exclude_rules=excluded.exclude_rules, auto_expand=excluded.auto_expand, auto_approve=excluded.auto_approve, updated_at=excluded.updated_at"),
+		listPrograms: db.prepare("SELECT id, name, kind, authorization, seeds, include_rules, exclude_rules, auto_expand, auto_approve, created_at, updated_at FROM scope_programs ORDER BY name COLLATE NOCASE"),
+		getProgram: db.prepare("SELECT id, name, kind, authorization, seeds, include_rules, exclude_rules, auto_expand, auto_approve, created_at, updated_at FROM scope_programs WHERE id = ?"),
+		removeProgram: db.prepare("DELETE FROM scope_programs WHERE id = ?"),
+		upsertProgramTarget: db.prepare("INSERT INTO scope_assets (id, value, label, authorization, note, tags, enabled, created_at, updated_at, program_id, status, relation, provenance, source, last_seen) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET label=excluded.label, authorization=excluded.authorization, note=excluded.note, tags=excluded.tags, enabled=excluded.enabled, updated_at=excluded.updated_at, status=excluded.status, relation=excluded.relation, provenance=excluded.provenance, source=excluded.source, last_seen=excluded.last_seen"),
+		listProgramTargets: db.prepare("SELECT id, value, label, authorization, note, tags, enabled, created_at, updated_at, program_id, status, relation, provenance, source, last_seen FROM scope_assets WHERE program_id = ? ORDER BY status COLLATE NOCASE, value COLLATE NOCASE"),
+		clearProgramTargets: db.prepare("DELETE FROM scope_assets WHERE program_id = ?"),
 		close: () => { try { db.close(); } catch { /* 已关闭 */ } }
 	};
 }

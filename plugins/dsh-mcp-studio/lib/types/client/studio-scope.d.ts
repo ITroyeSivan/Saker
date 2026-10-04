@@ -15,6 +15,7 @@ export declare class StudioScope implements SettingsScope {
         };
     }>);
     getSnapshot: () => StudioScopeSnapshot;
+    refresh: () => Promise<void>;
     subscribe: (listener: () => void) => (() => void);
     set(field: string, value: unknown): Promise<void>;
     unset(field: string): Promise<void>;
@@ -45,4 +46,4 @@ export declare function createStudioScope(connection: {
             };
         }>;
     };
-}): SettingsScope;
+}): StudioScope;

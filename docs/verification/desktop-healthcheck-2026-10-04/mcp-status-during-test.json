@@ -1,0 +1,54 @@
+{
+  "summary": {
+    "total": 4,
+    "enabled": 4,
+    "connected": 2,
+    "tools": 2
+  },
+  "servers": [
+    {
+      "id": "srv-sec-burp",
+      "name": "burp",
+      "state": "unreachable",
+      "toolCount": 0,
+      "exposure": "direct"
+    },
+    {
+      "id": "saker-health-direct",
+      "name": "saker_health_direct",
+      "state": "connected",
+      "toolCount": 1,
+      "exposure": "direct"
+    },
+    {
+      "id": "saker-health-proxy",
+      "name": "saker_health_proxy",
+      "state": "connected",
+      "toolCount": 1,
+      "exposure": "proxy"
+    },
+    {
+      "id": "srv-sec-yakit",
+      "name": "yakit",
+      "state": "unreachable",
+      "toolCount": 0,
+      "exposure": "direct"
+    }
+  ],
+  "executions": [
+    {
+      "at": 1791098996610,
+      "server": "saker_health_proxy",
+      "tool": "health_ping",
+      "durationMs": 13,
+      "ok": true
+    },
+    {
+      "at": 1791098996585,
+      "server": "saker_health_direct",
+      "tool": "mcp__saker_health_direct__health_ping",
+      "durationMs": 21,
+      "ok": true
+    }
+  ]
+}

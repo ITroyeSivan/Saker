@@ -55,12 +55,10 @@ gate 标题直接 import `dsh-stage-gate` 的 `GATES`（单一事实源；同级
 - `node ../../../.zcode/chain-probe.mjs` — 预设作用域真实 `systemPrompt.assemble()` 渲染实证
 - `node ../../../.zcode/route-boost-live.mjs` — 真实 AgentLoop 四轮 8 项检查（注入/切换/去重/粘滞/
   证据行/留痕）全部通过
-- 真机验收：重启 dsh web 后任一模式会话发首条消息，观察 `[route-boost]` 快照与阶段切换时机
+- 真机验收：重新打开官方桌面端，在模式会话发首条消息，核对实际请求中的 `[route-boost]` 快照与阶段切换时机
 
-## 安装（本机已装）
+## 桌面端安装
 
-web profile `package.json`：dependencies 加 `@dsh-external/dsh-route-boost` link +
-`dsh.profile.bundles` 追加同名 bundle，`pnpm install`，**重启 dsh web 生效**。
-新环境随 Saker 发布用 `dsh plugin add` 增量安装（hostPlane 组）。
+使用官方桌面端的插件管理入口选择本插件打包产物。整套 Saker 安装在仓库根目录运行 `node scripts/install-desktop.mjs --desktop-dir "C:/path/to/DeepSeek Harness"`：首次打开官方桌面端初始化后，完全退出应用再安装。安装器使用桌面端随附 CLI 管理 desktop profile；安装完成后重新打开应用验证实际注入。
 恢复摘要会在 operation-state 中存在排队 / 进行中 / 中断任务时，额外注入一行紧凑的
 任务摘要（id、状态、进度、尝试次数）；全部结束时不再占用上下文。

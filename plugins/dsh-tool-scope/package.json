@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-tool-scope",
-  "version": "0.1.12",
+  "version": "0.1.15",
   "description": "Per-mode tool visibility filtering. Pentest hides expensive scanners by default and exposes them through an on-demand active-scan tool pack; it also hides delegation, post-RCE, and internal-network tools. Uses host tools.restrict({ deny }) and is not an authorization boundary.",
   "files": [
     "lib",

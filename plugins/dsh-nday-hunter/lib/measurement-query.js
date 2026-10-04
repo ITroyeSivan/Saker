@@ -1,3 +1,5 @@
+import { parseQueryExpression, compileQueryExpression } from 'dsh-saker/query-expression'
+
 const QUERY_FIELDS = new Set([
   'app', 'title', 'body', 'header', 'icon_hash', 'fid', 'cert', 'port', 'protocol', 'domain', 'ip', 'host', 'icp',
   'server', 'banner', 'jarm', 'base_protocol', 'status_code', 'org', 'asn', 'city', 'region',
@@ -59,20 +61,22 @@ export function buildCampaignNdayQueries(plan, identity, maxQueries = 20) {
   const cap = Math.max(1, Math.min(20, Math.floor(Number(maxQueries) || 20)))
   const queries = []
   const seen = new Set()
+  if (!variants.length) return []
+  // All identity facets are alternatives within one bounded product query.
+  // This preserves every facet without spending one API call per facet/product.
+  const identityQuery = variants.map(variant => `(${variant.query})`).join(' || ')
   for (const group of plan?.selected ?? []) {
-    for (const variant of variants) {
-      const query = `${group.query} ${variant.query}`
+      const query = `(${group.query}) && (${identityQuery})`
       if (seen.has(query)) continue
       seen.add(query)
       queries.push({
         id: `q${String(queries.length + 1).padStart(3, '0')}`,
         query,
-        basis: `${group.basis}+${variant.kind}`,
+        basis: `${group.basis}+identity-union`,
         entryIds: group.entryIds,
-        identityType: variant.kind,
+        identityType: variants.map(variant => variant.kind).join(','),
       })
       if (queries.length >= cap) return queries
-    }
   }
   return queries
 }
@@ -88,48 +92,36 @@ function normalizeMeasurementSource(source) {
  * are never sent to FOFA or translated to another provider.
  */
 export function parseMeasurementHints(lines = []) {
+  return measurementHintStatus(lines).queries
+}
+
+export function measurementHintStatus(lines = []) {
   const out = []
+  const rejected = []
   for (const raw of Array.isArray(lines) ? lines : [lines]) {
     const source = String(raw ?? '').trim()
     if (!source || /^\s*(?:shodan|google|zoomeye|quake|hunter)(?:-query)?\s*[:：]/i.test(source)) continue
-    const matches = [...normalizeMeasurementSource(source).matchAll(FIELD_QUERY)]
-    if (matches.length === 0) continue
-
-    let branch = []
-    const flush = () => {
-      if (branch.length) out.push(branch.join(' '))
-      branch = []
+    const normalized = normalizeMeasurementSource(source)
+    const start = new RegExp(`(?:\\(*\\s*!?\\s*)\\b(?:[a-z][a-z0-9_.]*\\s*(?:==|!=|=)|(?:${FIELD_PATTERN})\\s*:)`, 'i').exec(normalized)
+    if (!start) {
+      if (/^\s*fofa(?:-query)?\s*[:：]/i.test(normalized)) rejected.push({ source, error: '没有可解析的 FOFA 条件' })
+      continue
     }
-    for (let i = 0; i < matches.length; i += 1) {
-      const match = matches[i]
-      const value = match[3] !== undefined
-        ? match[3].replace(/\\(["\\])/g, '$1')
-        : match[4] ?? match[5]
-      const term = dslTerm(match[1], value)
-      if (!term) continue
-      if (i > 0) {
-        const previous = matches[i - 1]
-        const gap = source.slice(previous.index + previous[0].length, match.index).trim()
-        if (/^(?:&&|&|and|与|并且|且)$/i.test(gap)) {
-          // Keep documented conjuncts together. A different connector or prose
-          // starts a separate, broader fingerprint alternative.
-        } else {
-          flush()
-        }
-      }
-      branch.push(term)
-    }
-    flush()
+    // Only descriptive text outside the expression is removed. A bad field or
+    // unsupported connector inside it rejects the whole authored fingerprint.
+    const expression = normalized.slice(start.index).split(/[（；;\r\n]/, 1)[0].trim()
+    try { out.push(compileQueryExpression(parseQueryExpression(expression), 'fofa')) }
+    catch (error) { rejected.push({ source, error: String(error.message) }) }
   }
-  return [...new Set(out)]
+  return { queries: [...new Set(out)], rejected }
 }
 
 export function expansionQueries(entry) {
-  const authored = parseMeasurementHints([
+  const authored = measurementHintStatus([
     ...(entry?.fingerprint?.signals ?? []),
     ...(entry?.fingerprint?.mappingHints ?? []),
   ])
-  return authored.length > 0 ? authored : probeMeasurementQueries(entry)
+  return authored.queries.length > 0 ? authored.queries : authored.rejected.length ? [] : probeMeasurementQueries(entry)
 }
 
 /**
@@ -244,15 +236,19 @@ export function buildNdaySearchPlan(catalog, options = {}) {
   const probeSignatureEntries = []
   const fallbackEntries = []
   const portRefinedEntries = []
+  const rejectedHints = []
   const basisRank = { 'catalog-fingerprint': 0, 'probe-signature': 1, 'port-refinement': 2, 'product-alias': 3 }
   const basisPenalty = { 'catalog-fingerprint': 0, 'probe-signature': 8, 'port-refinement': 25, 'product-alias': 45 }
   for (const entry of candidates) {
-    const catalogQueries = parseMeasurementHints([
+    const authored = measurementHintStatus([
       ...(entry?.fingerprint?.signals ?? []),
       ...(entry?.fingerprint?.mappingHints ?? []),
     ])
-    const probeQueries = probeMeasurementQueries(entry).filter((query) => !catalogQueries.includes(query))
-    const productQuery = catalogQueries.length === 0 ? productFallbackQuery(entry) : ''
+    const catalogQueries = authored.queries
+    rejectedHints.push(...authored.rejected.map(hint => ({ entryId: entry.id, ...hint })))
+    const blocked = catalogQueries.length === 0 && authored.rejected.length > 0
+    const probeQueries = blocked ? [] : probeMeasurementQueries(entry).filter((query) => !catalogQueries.includes(query))
+    const productQuery = catalogQueries.length === 0 && !blocked ? productFallbackQuery(entry) : ''
     const portQueries = productPortRefinements(entry, productQuery)
     const queryRecords = [
       ...catalogQueries.map((query) => ({ query, basis: 'catalog-fingerprint' })),
@@ -313,5 +309,6 @@ export function buildNdaySearchPlan(catalog, options = {}) {
     fallbackEntries,
     portRefinedEntries,
     unknownEntryIds,
+    rejectedHints,
   }
 }

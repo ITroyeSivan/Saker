@@ -2,43 +2,13 @@
 //
 // The plan is deliberately deterministic. It orders work by expected reuse, but
 // does not execute anything and does not upgrade an entry's verification status.
+import { groupServices } from './service-groups.js';
+import { createHash } from 'node:crypto';
+import { selectReconCandidates, productTerms } from './recon-candidates.js';
 
 const HIGH_IMPACT = /rce|code exec|command exec|deserial|file upload|upload|ssti|expression|反序列化|命令执行|代码执行|文件上传|表达式注入|rce/i
 const MEDIUM_IMPACT = /auth|admin|unauth|unauthorized|session|idor|ssrf|越权|未授权|认证|管理员|会话|ssrf/i
 const LOW_COST = /strong/
-
-function clean(value, max = 500) {
-  return String(value ?? '').trim().slice(0, max)
-}
-
-function termsFor(entry) {
-  const raw = [
-    ...(Array.isArray(entry?.aliases) ? entry.aliases : []),
-    entry?.product,
-    entry?.vendor,
-  ]
-  const out = []
-  for (const value of raw) {
-    const text = clean(value, 160).toLowerCase()
-    if (!text) continue
-    if (text.length >= 3) out.push(text)
-    for (const part of text.split(/[\s/|,()[\]{}:_-]+/)) {
-      if (part.length >= 3) out.push(part)
-    }
-  }
-  return [...new Set(out)]
-}
-
-function haystack(asset) {
-  return [
-    asset?.target,
-    asset?.host,
-    asset?.title,
-    asset?.server,
-    ...(Array.isArray(asset?.tech) ? asset.tech : []),
-    ...(Array.isArray(asset?.tags) ? asset.tags : []),
-  ].map((value) => clean(value, 300).toLowerCase()).filter(Boolean).join(' ')
-}
 
 export function exploitabilityWeight(entry) {
   const text = `${entry?.vulnClass || ''} ${entry?.impact || ''} ${entry?.severity || ''}`
@@ -65,11 +35,10 @@ export function buildAttackPlan(entries, assets, options = {}) {
   const clues = []
 
   for (const entry of Array.isArray(entries) ? entries : []) {
-    const terms = termsFor(entry)
+    const terms = productTerms(entry)
     if (terms.length === 0) continue
     const matched = list.filter((asset) => {
-      const text = haystack(asset)
-      return terms.some((term) => text.includes(term))
+      return selectReconCandidates([entry], asset).length > 0
     })
     if (matched.length < minAssets) continue
     const siftable = Array.isArray(entry?.fingerprint?.probes) && entry.fingerprint.probes.length > 0
@@ -85,28 +54,33 @@ export function buildAttackPlan(entries, assets, options = {}) {
     }
     const exploit = exploitabilityWeight(entry)
     const cost = verificationCost(entry)
-    buckets.push({
-      bucketId: `bucket-${entry.id}`,
+    const services = groupServices(matched)
+    for (const service of services) buckets.push({
+      bucketId: `bucket-${entry.id}${services.length > 1 ? '-' + service.id : ''}`,
+      serviceSignature: createHash('sha256').update(JSON.stringify([service.signature, entry.id, entry.version, entry.updatedAt, entry.auth, entry.fingerprint, entry.conditions])).digest('hex'),
+      identityConfirmed: service.identityConfirmed,
+      groupingEvidenceIds: service.evidenceIds,
+      independentChecks: service.independentChecks,
       entryId: entry.id,
       product: entry.product,
       vendor: entry.vendor,
       vulnClass: entry.vulnClass,
       entryStatus: entry.status,
       fingerprint: terms,
-      assetIds: matched.map((asset) => asset.id),
-      representativeAssetId: matched[0]?.id || '',
-      assets: matched.map((asset) => asset.target || asset.host).filter(Boolean),
-      reuseScore: Number(((matched.length * exploit) / cost).toFixed(2)),
+      assetIds: service.assets.map((asset) => asset.id),
+      representativeAssetId: service.representativeAssetId,
+      assets: service.assets.map((asset) => asset.target || asset.host).filter(Boolean),
+      reuseScore: Number(((service.assets.length * exploit) / cost).toFixed(2)),
       exploitability: exploit,
       verificationCost: cost,
       status: 'queued',
-      owner: `subagent-nday-${entry.id}`,
+      owner: 'main',
     })
   }
 
   buckets.sort((a, b) => b.reuseScore - a.reuseScore || b.assetIds.length - a.assetIds.length || a.entryId.localeCompare(b.entryId))
   return {
-    schema: 'saker.attack-plan/1',
+    schema: 'saker.attack-plan/2',
     generatedAt: new Date().toISOString(),
     totalAssets: list.length,
     buckets: buckets.slice(0, maxBuckets),
@@ -128,7 +102,7 @@ export function renderAttackPlan(plan) {
   plan.buckets.forEach((bucket, index) => {
     lines.push(`| ${index + 1} | \`${bucket.bucketId}\` | ${bucket.product || bucket.entryId} | \`${bucket.representativeAssetId || '-'}\` | ${bucket.assetIds.length} | ${bucket.reuseScore} | ${bucket.status} | ${(bucket.assets || []).join(', ')} |`)
   })
-  lines.push('', '## 执行纪律', '', '- 每组先拿一个资产验证；成功后再铺开同组全部资产。', '- 第一个资产被证伪时写清证据，再转下一组。', '- 本计划不投放任何利用载荷。')
+  lines.push('', '## 执行纪律', '', '- 每个独立应用先校准代表入口；共享IP、标题和产品不证明同一应用。', '- 同组只共享已确认部署和方法资料；每个入口独立核对当前身份、有效请求、适用条件和实际影响。', '- 代表入口证伪不推导其他独立应用安全。', '- 按redteam_task的当前停止规则工作；本计划不执行请求。')
   if (plan.clues.length > 0) {
     lines.push('', '## 只有线索、不能机器筛选', '')
     for (const clue of plan.clues) {

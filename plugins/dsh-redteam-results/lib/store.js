@@ -9,6 +9,17 @@
 import fs, { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { PROOF_KINDS, normalizeReproduction, findingDeliveryState, outcomeSummary } from './delivery.js';
+import { METHOD_PACKAGE_SCHEMA } from './method-packages.js';
+import { RESEARCH_SCHEMA } from './research.js';
+import { EXECUTION_RECEIPT_SCHEMA } from './execution-receipts.js';
+import { attachDeliveryEvidence } from './delivery-evidence.js';
+import { EFFECT_VERIFICATION_SCHEMA } from './effect-verifications.js';
+import { EFFECT_JOB_SCHEMA } from './effect-jobs.js';
+import { SITE_WORKER_SCHEMA } from './site-workers.js';
+import { BUSINESS_MATERIAL_SCHEMA } from './business-materials.js';
+import { IMPACT_REVIEW_SCHEMA } from './impact-reviews.js';
+import { TASK_COST_SCHEMA } from './task-cost.js';
 
 const SEVERITIES = ["critical", "high", "medium", "low"];
 const STATUSES = ["pending", "code-reviewed", "suspect", "verified", "false-positive", "fixed"];
@@ -55,6 +66,19 @@ const DEFAULT_PAGE_SIZE = 10;
 const MODES = ["pentest", "code-audit", "ctf-solver"];
 
 const SCHEMA = `
+${METHOD_PACKAGE_SCHEMA}
+${RESEARCH_SCHEMA}
+${EXECUTION_RECEIPT_SCHEMA}
+${EFFECT_VERIFICATION_SCHEMA}
+${EFFECT_JOB_SCHEMA}
+${SITE_WORKER_SCHEMA}
+${BUSINESS_MATERIAL_SCHEMA}
+${IMPACT_REVIEW_SCHEMA}
+${TASK_COST_SCHEMA}
+CREATE TABLE IF NOT EXISTS task_rounds (
+ session_id TEXT NOT NULL, started_at INTEGER NOT NULL, record TEXT NOT NULL,
+ PRIMARY KEY(session_id,started_at)
+);
 CREATE TABLE IF NOT EXISTS findings (
 	session_id TEXT NOT NULL,
 	id         TEXT NOT NULL,
@@ -105,9 +129,40 @@ CREATE TABLE IF NOT EXISTS findings (
 	audit_mode  TEXT NOT NULL DEFAULT '',
 	second_rating TEXT NOT NULL DEFAULT '',
 	second_rating_note TEXT NOT NULL DEFAULT '',
+	proof_kind TEXT NOT NULL DEFAULT '',
+	reproduction TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (session_id, id)
 );
 CREATE INDEX IF NOT EXISTS idx_findings_session_mode ON findings(session_id, mode, seq);
+CREATE TABLE IF NOT EXISTS checked_items (
+ session_id TEXT NOT NULL,
+ context_key TEXT NOT NULL,
+ record TEXT NOT NULL,
+ updated_at TEXT NOT NULL,
+ PRIMARY KEY (session_id, context_key)
+);
+CREATE TABLE IF NOT EXISTS task_context (
+ session_id TEXT NOT NULL PRIMARY KEY,
+ record TEXT NOT NULL,
+ updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS task_policy (
+ session_id TEXT NOT NULL PRIMARY KEY,
+ record TEXT NOT NULL,
+ updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS task_choice (
+ session_id TEXT NOT NULL PRIMARY KEY,
+ mode TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS task_context_records (
+ session_id TEXT NOT NULL,
+ kind TEXT NOT NULL,
+ record_id TEXT NOT NULL,
+ version TEXT NOT NULL,
+ record TEXT NOT NULL,
+ PRIMARY KEY (session_id, kind, record_id, version)
+);
 CREATE TABLE IF NOT EXISTS counters (
 	session_id TEXT NOT NULL,
 	mode       TEXT NOT NULL,
@@ -123,7 +178,7 @@ CREATE TABLE IF NOT EXISTS session_meta (
 );
 `;
 
-const COLS = "session_id,id,seq,mode,title,severity,status,evidence_level,type,target,summary,description,poc,chain,evidence,fix,verify_note,created_at,updated_at,verified_at,baseline,diff_evidence,marker_echo,impact,cvss,retest_note,retest_at,request_pkt,response_pkt,snippet_entry,snippet_sink,chain_tracer,chain_verdict,cwe,patch,source_origin,sample_hash,family,packer,iocs,detection_rule,timeline_at,entry,identity,permission,resource,audit_mode,second_rating,second_rating_note";
+const COLS = "session_id,id,seq,mode,title,severity,status,evidence_level,type,target,summary,description,poc,chain,evidence,fix,verify_note,created_at,updated_at,verified_at,baseline,diff_evidence,marker_echo,impact,cvss,retest_note,retest_at,request_pkt,response_pkt,snippet_entry,snippet_sink,chain_tracer,chain_verdict,cwe,patch,source_origin,sample_hash,family,packer,iocs,detection_rule,timeline_at,entry,identity,permission,resource,audit_mode,second_rating,second_rating_note,proof_kind,reproduction";
 const N_COLS = COLS.split(",").length;
 
 /** 存量库新列（逐列 ALTER，已存在则忽略）。 */
@@ -133,7 +188,7 @@ const MIGRATION_COLUMNS = [
 	"cwe", "patch", "source_origin", "chain", "sample_hash", "family", "packer", "iocs", "detection_rule", "timeline_at",
 	"entry", "identity", "permission", "resource"
 
-	, "audit_mode", "second_rating", "second_rating_note"
+	, "audit_mode", "second_rating", "second_rating_note", "proof_kind", "reproduction"
 ];
 
 /** 打开（或创建）库并预编译语句。dbPath 传 ":memory:" 供测试。 */
@@ -216,7 +271,7 @@ export function openStore(dbPath) {
 	get: db.prepare(`SELECT ${COLS} FROM findings WHERE session_id = ? AND id = ?`),
 	counterGet: db.prepare("SELECT last_seq AS n FROM counters WHERE session_id = ? AND mode = ?"),
 	counterSet: db.prepare("INSERT INTO counters (session_id, mode, last_seq) VALUES (?, ?, ?) ON CONFLICT(session_id, mode) DO UPDATE SET last_seq = excluded.last_seq"),
-	update: db.prepare(`UPDATE findings SET title=?, severity=?, status=?, evidence_level=?, type=?, target=?, summary=?, description=?, poc=?, chain=?, evidence=?, fix=?, verify_note=?, updated_at=?, verified_at=?, baseline=?, diff_evidence=?, marker_echo=?, impact=?, cvss=?, retest_note=?, retest_at=?, request_pkt=?, response_pkt=?, snippet_entry=?, snippet_sink=?, chain_tracer=?, chain_verdict=?, cwe=?, patch=?, source_origin=?, sample_hash=?, family=?, packer=?, iocs=?, detection_rule=?, timeline_at=?, entry=?, identity=?, permission=?, resource=?, audit_mode=?, second_rating=?, second_rating_note=? WHERE session_id=? AND id=?`),
+	update: db.prepare(`UPDATE findings SET title=?, severity=?, status=?, evidence_level=?, type=?, target=?, summary=?, description=?, poc=?, chain=?, evidence=?, fix=?, verify_note=?, updated_at=?, verified_at=?, baseline=?, diff_evidence=?, marker_echo=?, impact=?, cvss=?, retest_note=?, retest_at=?, request_pkt=?, response_pkt=?, snippet_entry=?, snippet_sink=?, chain_tracer=?, chain_verdict=?, cwe=?, patch=?, source_origin=?, sample_hash=?, family=?, packer=?, iocs=?, detection_rule=?, timeline_at=?, entry=?, identity=?, permission=?, resource=?, audit_mode=?, second_rating=?, second_rating_note=?, proof_kind=?, reproduction=? WHERE session_id=? AND id=?`),
 	remove: db.prepare("DELETE FROM findings WHERE session_id = ? AND id = ?"),
 	listAll: db.prepare(`SELECT ${COLS} FROM findings WHERE session_id = ? AND mode = ? ORDER BY seq DESC`),
 	listAllAll: db.prepare(`SELECT ${COLS} FROM findings WHERE session_id = ? ORDER BY updated_at DESC, seq DESC`),
@@ -281,6 +336,7 @@ export function secondReviewVerdict(finding) {
 /** 追加的可选富字段（camelCase → 列名映射）。 */
 const EXTRA_FIELDS = ["baseline", "diffEvidence", "markerEcho", "impact", "cvss", "retestNote", "retestAt", "requestPkt", "responsePkt", "snippetEntry", "snippetSink", "chainTracer", "chainVerdict", "cwe", "patch", "sampleHash", "family", "packer", "iocs", "detectionRule", "timelineAt", "entry", "identity", "permission", "resource", "auditMode"];
 const COL_OF = {
+	proofKind: 'proof_kind', reproduction: 'reproduction',
 	baseline: "baseline", diffEvidence: "diff_evidence", markerEcho: "marker_echo", impact: "impact",
 	cvss: "cvss", retestNote: "retest_note", retestAt: "retest_at", requestPkt: "request_pkt",
 	responsePkt: "response_pkt", snippetEntry: "snippet_entry", snippetSink: "snippet_sink",
@@ -289,7 +345,7 @@ const COL_OF = {
 	timelineAt: "timeline_at", entry: "entry", identity: "identity", permission: "permission", resource: "resource", auditMode: "audit_mode"
 	};
 
-function rowToFinding(row) {
+function rowToFinding(row, store) {
 	const f = {
 	id: row.id, seq: row.seq, mode: row.mode,
 	title: row.title, severity: row.severity, status: row.status, evidenceLevel: row.evidence_level,
@@ -298,15 +354,23 @@ function rowToFinding(row) {
 	createdAt: row.created_at, updatedAt: row.updated_at, verifiedAt: row.verified_at,
 	sourceOrigin: row.source_origin || "manual",
 	secondRating: row.second_rating ?? "",
-	secondRatingNote: row.second_rating_note ?? ""
+	secondRatingNote: row.second_rating_note ?? "",
+	proofKind: row.proof_kind ?? '', reproduction: row.reproduction ?? ''
 	};
 	for (const k of EXTRA_FIELDS) f[k] = row[COL_OF[k]] ?? "";
+	if (f.mode === 'pentest') {
+    const derived = attachDeliveryEvidence(store, row.session_id, f);
+    derived.delivery = findingDeliveryState(derived);
+    return derived;
+  }
 	return f;
 	}
 
 /** 登记一条 finding（会话内 mode 维度自增序号；mode 由宿主从会话推导，调用方不可指定他模式）。
  *  序号走 counters 独立计数器（永不复用——删除末尾行后新登记不回收 id，报告引用 finding id 不漂移）。 */
 export function registerFinding(store, sessionId, mode, input) {
+	if (input.proofKind !== undefined && input.proofKind !== '' && !PROOF_KINDS.includes(input.proofKind)) throw new Error('invalid proofKind');
+	const reproduction = normalizeReproduction(input.reproduction);
 	// 状态词表按模式取（产物型=各自本体词）——与 update/mark 同源。
 	const status = cleanStatus(input.status, mode, "pending");
 	// 漏洞生命周期模式：fixed=已修复终态，不可在登记时直接写入（先登记、验证成立后经 update 流转）；
@@ -338,7 +402,7 @@ export function registerFinding(store, sessionId, mode, input) {
 	createdAt: now, updatedAt: now, verifiedAt: "",
 	sourceOrigin: cleanEnum(input.sourceOrigin, SOURCE_ORIGINS, "manual"),
 	secondRating: "",
-	secondRatingNote: ""
+	secondRatingNote: "", proofKind: input.proofKind || '', reproduction
 	};
 	for (const k of EXTRA_FIELDS) f[k] = cleanText(input[k]);
 	if (mode === "code-audit") f.auditMode = ["static", "dynamic"].includes(f.auditMode) ? f.auditMode : ""; // 枚举清洗：错值清空（Web 通道无 schema 闸）
@@ -348,16 +412,18 @@ export function registerFinding(store, sessionId, mode, input) {
 	f.baseline, f.diffEvidence, f.markerEcho, f.impact, f.cvss, f.retestNote, f.retestAt, f.requestPkt,
 	f.responsePkt, f.snippetEntry, f.snippetSink, f.chainTracer, f.chainVerdict, f.cwe, f.patch, f.sourceOrigin,
 	f.sampleHash, f.family, f.packer, f.iocs, f.detectionRule, f.timelineAt, f.entry, f.identity, f.permission, f.resource, f.auditMode,
-	f.secondRating, f.secondRatingNote
+	f.secondRating, f.secondRatingNote, f.proofKind, f.reproduction
 	);
 	return f;
 	}
 
 /** 按 (sessionId, mode, id) 更新——跨模式 id 一律 undefined（隔离由存储层强制）。 */
 export function updateFinding(store, sessionId, mode, id, patch = {}) {
+	if (patch.proofKind !== undefined && patch.proofKind !== '' && !PROOF_KINDS.includes(patch.proofKind)) throw new Error('invalid proofKind');
+	const reproduction = patch.reproduction === undefined ? undefined : normalizeReproduction(patch.reproduction);
 	const row = store.get.get(sessionId, id);
 	if (row === undefined || row.mode !== mode) return undefined;
-	const prev = rowToFinding(row);
+	const prev = rowToFinding(row, store);
 	const statusSet = statusesOf(mode);
 	// 状态是报告结论的一部分，不能像普通展示字段一样静默回落。旧实现把
 	// 模型请求的 suspect 悄悄写成 pending，工具却返回成功，导致复核结论与
@@ -400,7 +466,9 @@ export function updateFinding(store, sessionId, mode, id, patch = {}) {
 	verifiedAt: nextVerifiedAt,
 	sourceOrigin: cleanEnum(patch.sourceOrigin, SOURCE_ORIGINS, prev.sourceOrigin),
 	secondRating: patch.secondRating !== undefined ? cleanEnum(patch.secondRating, SECOND_RATINGS, prev.secondRating) : prev.secondRating,
-	secondRatingNote: patch.secondRatingNote !== undefined ? cleanText(patch.secondRatingNote) : prev.secondRatingNote
+	secondRatingNote: patch.secondRatingNote !== undefined ? cleanText(patch.secondRatingNote) : prev.secondRatingNote,
+	proofKind: patch.proofKind !== undefined ? patch.proofKind : prev.proofKind,
+	reproduction: reproduction !== undefined ? reproduction : prev.reproduction
 	};
 	for (const k of EXTRA_FIELDS) next[k] = patch[k] !== undefined ? cleanText(patch[k]) : prev[k];
 	if (mode === "code-audit") next.auditMode = ["static", "dynamic"].includes(next.auditMode) ? next.auditMode : "";
@@ -410,9 +478,9 @@ export function updateFinding(store, sessionId, mode, id, patch = {}) {
 	next.baseline, next.diffEvidence, next.markerEcho, next.impact, next.cvss, next.retestNote, next.retestAt,
 	next.requestPkt, next.responsePkt, next.snippetEntry, next.snippetSink, next.chainTracer, next.chainVerdict,
 	next.cwe, next.patch, next.sourceOrigin, next.sampleHash, next.family, next.packer, next.iocs, next.detectionRule, next.timelineAt,
-	next.entry, next.identity, next.permission, next.resource, next.auditMode, next.secondRating, next.secondRatingNote, sessionId, id
+	next.entry, next.identity, next.permission, next.resource, next.auditMode, next.secondRating, next.secondRatingNote, next.proofKind, next.reproduction, sessionId, id
 	);
-	return { ...prev, ...next };
+	return getFinding(store, sessionId, id);
 	}
 
 /** 按 (sessionId, id) 删除（行不存在则无操作）。 */
@@ -422,19 +490,30 @@ export function removeFinding(store, sessionId, id) {
 
 export function getFinding(store, sessionId, id) {
 	const row = store.get.get(sessionId, id);
-	return row === undefined ? undefined : rowToFinding(row);
+	return row === undefined ? undefined : rowToFinding(row, store);
 	}
 
 export function allFindings(store, sessionId, mode) {
-	return store.listAll.all(sessionId, mode).map(rowToFinding);
+	return store.listAll.all(sessionId, mode).map(row => rowToFinding(row, store));
 	}
 
-export function listFindings(store, sessionId, mode, { page = 1, pageSize = DEFAULT_PAGE_SIZE, severity = "", status = "", q = "" } = {}) {
+function matchesDelivery(finding, mode, filter) {
+  if (!['all', 'ready', 'incomplete'].includes(filter)) throw new Error('invalid delivery filter');
+  if (mode !== 'pentest' || filter === 'all') return true;
+  const ready = findingDeliveryState(finding).ready;
+  return filter === 'ready' ? ready : !ready;
+}
+function deliveryRows(rows, mode, filter) {
+  return mode === 'pentest' && filter === 'ready' ? outcomeSummary(rows).outcomes.map(item => item.finding) : rows;
+}
+export function listFindings(store, sessionId, mode, { page = 1, pageSize = DEFAULT_PAGE_SIZE, severity = "", status = "", q = "", delivery = 'all' } = {}) {
 	const needle = String(q ?? "").trim().toLowerCase();
-	const rows = allFindings(store, sessionId, mode)
+	let rows = allFindings(store, sessionId, mode)
+	.filter((f) => matchesDelivery(f, mode, delivery))
 	.filter((f) => (severity ? f.severity === severity : true))
 	.filter((f) => (status ? f.status === status : true))
 	.filter((f) => (needle ? `${f.title} ${f.summary} ${f.target} ${f.type} ${f.cwe}`.toLowerCase().includes(needle) : true));
+	rows = deliveryRows(rows, mode, delivery);
 	const size = Math.max(1, Math.min(100, Number(pageSize) || DEFAULT_PAGE_SIZE));
 	const total = rows.length;
 	const pages = Math.max(1, Math.ceil(total / size));
@@ -453,12 +532,14 @@ const groupKeyOf = (mode, f) => mode === "binary-analysis"
 	: (f.target || "（未填）");
 
 /** 按目标/位置分组（渗透=资产分组，代审=文件分组共用；binary=按样本哈希分组）。 */
-export function groupByTarget(store, sessionId, mode, { severity = "", status = "", q = "" } = {}) {
+export function groupByTarget(store, sessionId, mode, { severity = "", status = "", q = "", delivery = 'all' } = {}) {
 	const needle = String(q ?? "").trim().toLowerCase();
-	const rows = allFindings(store, sessionId, mode)
+	let rows = allFindings(store, sessionId, mode)
+	.filter((f) => matchesDelivery(f, mode, delivery))
 	.filter((f) => (severity ? f.severity === severity : true))
 	.filter((f) => (status ? f.status === status : true))
 	.filter((f) => (needle ? `${f.title} ${f.summary} ${f.target} ${f.type} ${f.cwe}`.toLowerCase().includes(needle) : true));
+	rows = deliveryRows(rows, mode, delivery);
 	const groups = new Map();
 	for (const f of rows) {
 	const key = groupKeyOf(mode, f);
@@ -499,6 +580,7 @@ function statsOf(all, mode = "") {
 	const top = (m, n) => [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, n).map(([key, count]) => ({ key, count }));
 	return {
 	total: all.length,
+	...(mode === 'pentest' ? { delivery: (() => { const result = outcomeSummary(all); return { ready: result.confirmedFindings, rce: result.confirmedRce, incomplete: result.incompleteRecords }; })() } : {}),
 	bySeverity,
 	byStatus,
 	byEvidence,
@@ -525,7 +607,7 @@ export function computeStatsAll(store, mode, { from = "", to = "" } = {}) {
 	// 旧版直接把裸行喂进去，导致 evidenceLevel / sourceOrigin / auditMode / updatedAt
 	// 全部读不到 —— 导出的 JSON 里 byEvidence 四档全 0、多一个 "undefined": null，
 	// bySource 全算成 manual，byAuditMode 永远为空。
-	.map(rowToFinding)
+	.map(row => ({ ...rowToFinding(row, store), sessionId: row.session_id }))
 	.filter((f) => (from === "" || f.createdAt >= from) && (to === "" || f.createdAt <= to));
 	return statsOf(rows, mode);
 }
@@ -538,15 +620,17 @@ export function modeCountsAll(store) {
 	}
 
 /** 跨会话清单：按 mode 全表 + 筛选（severity/status/q）+ created_at 范围 + 分页；行带 sessionId。 */
-export function listFindingsAll(store, mode, { page = 1, pageSize = DEFAULT_PAGE_SIZE, severity = "", status = "", q = "", from = "", to = "", all = false } = {}) {
+export function listFindingsAll(store, mode, { page = 1, pageSize = DEFAULT_PAGE_SIZE, severity = "", status = "", q = "", from = "", to = "", all = false, delivery = 'all' } = {}) {
 	const needle = String(q ?? "").trim().toLowerCase();
-	const rows = store.listGlobalMode.all(mode)
-	.map((row) => ({ ...rowToFinding(row), sessionId: row.session_id }))
+	let rows = store.listGlobalMode.all(mode)
+	.map((row) => ({ ...rowToFinding(row, store), sessionId: row.session_id }))
+	.filter((f) => matchesDelivery(f, mode, delivery))
 	.filter((f) => (severity ? f.severity === severity : true))
 	.filter((f) => (status ? f.status === status : true))
 	.filter((f) => (from === "" || f.createdAt >= from))
 	.filter((f) => (to === "" || f.createdAt <= to))
 	.filter((f) => (needle ? `${f.title} ${f.summary} ${f.target} ${f.type} ${f.cwe}`.toLowerCase().includes(needle) : true));
+	rows = deliveryRows(rows, mode, delivery);
 	if (all) return { rows, total: rows.length, page: 1, pageSize: rows.length, pages: 1 }; // 内部全量路径（分组/导出）——不受分页钳制
 	const size = Math.max(1, Math.min(100, Number(pageSize) || DEFAULT_PAGE_SIZE));
 	const total = rows.length;
@@ -556,8 +640,8 @@ export function listFindingsAll(store, mode, { page = 1, pageSize = DEFAULT_PAGE
 	}
 
 /** 跨会话按目标分组（平铺分组视图共享；binary=按样本哈希跨会话聚合同一样本产物）。 */
-export function groupByTargetAll(store, mode, { severity = "", status = "", q = "", from = "", to = "" } = {}) {
-	const list = listFindingsAll(store, mode, { severity, status, q, from, to, all: true });
+export function groupByTargetAll(store, mode, { severity = "", status = "", q = "", from = "", to = "", delivery = 'all' } = {}) {
+	const list = listFindingsAll(store, mode, { severity, status, q, from, to, delivery, all: true });
 	const groups = new Map();
 	for (const f of list.rows) {
 	const key = groupKeyOf(mode, f);
@@ -583,7 +667,7 @@ export function ledgerOverview(store, sessionId) {
 	if (byEvidence[row.evidence_level] !== undefined) byEvidence[row.evidence_level] += 1;
 	if (row.updated_at > lastAt) lastAt = row.updated_at;
 	}
-	const recent = rows.slice(0, 120).map(rowToFinding);
+	const recent = rows.slice(0, 120).map(row => rowToFinding(row, store));
 	return { total: rows.length, byMode, byStatus, bySeverity, byEvidence, recent, lastAt };
 	}
 
@@ -609,7 +693,7 @@ export function ledgerOverviewAll(store, { from = "", to = "" } = {}) {
 	if (byEvidence[row.evidence_level] !== undefined) byEvidence[row.evidence_level] += 1;
 	if (row.updated_at > lastAt) lastAt = row.updated_at;
 	}
-	const recent = rows.filter(inRange).slice(0, 120).map((row) => ({ ...rowToFinding(row), sessionId: row.session_id }));
+	const recent = rows.filter(inRange).slice(0, 120).map((row) => ({ ...rowToFinding(row, store), sessionId: row.session_id }));
 	return { total, sessions: sessions.size, byMode, byStatus, bySeverity, byEvidence, recent, lastAt, range: { from, to } };
 	}
 

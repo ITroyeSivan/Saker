@@ -1,0 +1,70 @@
+{
+  "configured": 16,
+  "existing": 12,
+  "entries": [
+    {
+      "name": "Semgrep",
+      "exists": true
+    },
+    {
+      "name": "Fscan",
+      "exists": true
+    },
+    {
+      "name": "JWT Tool",
+      "exists": true
+    },
+    {
+      "name": "SQLMap",
+      "exists": true
+    },
+    {
+      "name": "BloodHound",
+      "exists": false
+    },
+    {
+      "name": "Kerbrute",
+      "exists": false
+    },
+    {
+      "name": "Mimikatz",
+      "exists": false
+    },
+    {
+      "name": "Httpx",
+      "exists": true
+    },
+    {
+      "name": "Subfinder",
+      "exists": true
+    },
+    {
+      "name": "Afrog",
+      "exists": true
+    },
+    {
+      "name": "Nuclei",
+      "exists": true
+    },
+    {
+      "name": "Dirsearch",
+      "exists": true
+    },
+    {
+      "name": "Ffuf",
+      "exists": true
+    },
+    {
+      "name": "Katana",
+      "exists": true
+    },
+    {
+      "name": "Impacket",
+      "exists": false
+    },
+    {
+      "name": "Nmap",
+      "exists": true
+    }
+  ]
+}

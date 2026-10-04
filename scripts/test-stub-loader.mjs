@@ -70,6 +70,12 @@ export function resolve(specifier, context, nextResolve) {
   const url = URLS.get(specifier);
   if (url) return { url, format: "module", shortCircuit: true };
 
+  if (specifier.startsWith('dsh-saker/')) {
+    const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
+    const target = pkg.exports?.['./' + specifier.slice('dsh-saker/'.length)];
+    if (typeof target === 'string') return { url: pathToFileURL(path.join(REPO_ROOT, target)).href, shortCircuit: true };
+  }
+
   if (specifier === "dsh-saker/settings-compat") {
     return { url: pathToFileURL(path.join(REPO_ROOT, "lib", "settings-compat.js")).href, shortCircuit: true };
   }

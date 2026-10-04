@@ -88,7 +88,7 @@ const ok = (label, cond, extra) => {
 {
   const fixture = mkdtempSync(join(tmpdir(), 'stash-repo-'))
   const home = mkdtempSync(join(tmpdir(), 'stash-home-'))
-  const profile = 'web'
+  const profile = 'legacy-rollback-test'
   const profileDir = join(home, 'profiles', profile)
   const nm = join(profileDir, 'node_modules')
 

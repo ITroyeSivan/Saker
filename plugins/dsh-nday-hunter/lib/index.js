@@ -25,6 +25,7 @@ import { randomBytes } from 'node:crypto'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { readSettingsSection } from 'dsh-saker/settings-compat'
 import { readInventory, scopeSafeAsset } from 'dsh-saker/asset-inventory'
+import { parseQueryExpression, queryTerms, compileQueryExpression } from 'dsh-saker/query-expression'
 import {
   VERDICT,
   candidateEntries,
@@ -46,14 +47,23 @@ import {
 } from './catalog.js'
 import { draftProbes, extractNdayCandidates } from './extract.js'
 import { buildAttackPlan, renderAttackPlan } from './plan.js'
+import { groupProbeRequests, executeProbeBatch } from './probe-batch.js'
+import { selectReconCandidates, reconObservation } from './recon-candidates.js'
 import { ATTACK_PROGRESS_FILE, bucketGates, emptyProgress, recordGate, renderGateStatus } from './gate.js'
 import { buildMemshellCliPlan, buildMemshellMcpPlan, executeMemshellCliPlan, redactObject } from './memshell-cli.js'
-import { loadZdayCatalog, matchZdayPatterns, renderZdayHypotheses } from './zday.js'
+import { loadZdayCatalog, matchZdayPatterns, renderZdayHypotheses, observedResearchInputs } from './zday.js'
 import { buildAccessPlan, classifyMemoryBackend, renderAccessPlan } from './post.js'
 import { renderWorklist, triageDocs } from './triage.js'
 import { deriveProductKeywords, renderCoverageGap } from './coverage-gap.js'
 import { resolveDshHome } from './home.js'
 import { buildCampaignNdayQueries, buildNdaySearchPlan, campaignIdentityVariants } from './measurement-query.js'
+import { DEFAULT_POLICY, buildPriorityPlan, normalizePriorityPolicy, renderPriorityPlan } from './priority.js'
+import { mergeSavedVerification } from './verification-queue.js'
+let readSavedVerification
+try { ({ readSavedVerification } = await import('@dsh-external/dsh-redteam-results/task-context')) } catch { /* optional result plugin */ }
+import { FREE_SOURCE_IDS, fetchFreeSource } from './free-sources.js'
+import { collectorStatus, collectorResponse, querySourceCandidates, readSourceContent, readSourceApplicability, enrichCandidate, mergeCandidates, readCollectorConfig, runCollectorIfDue, runCollector, writeCollectorConfig } from './source-pipeline.js'
+import { readMetrics, recordFeedbackMetric, recordMatchMetric, recordSearchMetric, summarizeMetrics } from './metrics.js'
 
 /**
  * 把工具的 workspace 参数解析成绝对路径：**相对路径以会话工作区为基准**。
@@ -478,6 +488,28 @@ function catalogOrThrow() {
   }
 }
 
+function priorityPolicyFile() {
+  return path.join(resolveDshHome(), 'nday-hunter', 'policy.json')
+}
+
+function readPriorityPolicy() {
+  const file = priorityPolicyFile()
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'))
+    return normalizePriorityPolicy({ ...DEFAULT_POLICY, ...parsed })
+  } catch {
+    return normalizePriorityPolicy(DEFAULT_POLICY)
+  }
+}
+
+function writePriorityPolicy(policy) {
+  const file = priorityPolicyFile()
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  const next = normalizePriorityPolicy(policy)
+  fs.writeFileSync(file, JSON.stringify(next, null, 2) + '\n', 'utf8')
+  return next
+}
+
 // ── 带外（OOB）确认原语 ──────────────────────────────────────────────────────
 //
 // 为什么放在这个插件：T1（Nday 轨）的第二阶段是「确认可达」。反序列化 / 盲 RCE /
@@ -756,7 +788,9 @@ export function coverageScan({ keyword, catalogEntries = [], importsDir = '', nu
 function apply(ctx, config = {}) {
   const enablePostRceTools = config?.enablePostRceTools === true
   const allToolNames = new Set([
-    'nday_catalog', 'attack_plan', 'attack_gate', 'memshell_cli', 'zday_pattern',
+    'nday_catalog', 'nday_priority_plan', 'nday_policy_get', 'nday_policy_set', 'nday_source_fetch',
+    'nday_source_radar', 'nday_source_collect', 'nday_metrics',
+    'attack_plan', 'attack_gate', 'memshell_cli', 'zday_pattern',
     'nday_scope_hunt', 'nday_match', 'nday_coverage', 'nday_triage', 'nday_learn', 'nday_draft',
     'nday_handoff', 'access_confirm', 'oob_probe',
   ])
@@ -773,9 +807,311 @@ function apply(ctx, config = {}) {
     ctx.tools.register(tool)
   }
 
+  // The preset-plane plugin may be mounted per session; the collector state
+  // and lock make concurrent mounts harmless. It checks every 15 minutes and
+  // only performs network work when the configured interval is due.
+  const collectorTimer = setInterval(() => {
+    void runCollectorIfDue().catch((error) => {
+      try { ctx.logger?.warn?.(`nday source collector: ${String(error?.message || error)}`) } catch { /* ignore logger failures */ }
+    })
+  }, 15 * 60 * 1000)
+  collectorTimer.unref?.()
+  if (typeof ctx.effect === 'function') {
+    ctx.effect(() => () => clearInterval(collectorTimer), 'nday-hunter: source collector')
+  }
+  void runCollectorIfDue().catch(() => undefined)
+
+  registerNdayTool(defineTool({
+    name: 'nday_priority_plan',
+    description: 'Rank relevant Ndays; draft FOFA and verification plans without requests.',
+    parameters: {
+      target: { type: 'string', description: 'Target product, vendor, URL, or free-text context' },
+      targetTerms: { type: 'string', description: 'Comma/newline separated target keywords for relevance scoring' },
+      workspace: { type: 'string', description: 'Read existing asset inventory for product routing' },
+      scope: { type: 'string', description: 'Optional exact inventory scope; planning sends no requests' },
+      entryIds: { type: 'string', description: 'Optional comma-separated catalog ids to restrict candidates' },
+      excludeIds: { type: 'string', description: 'Optional comma-separated catalog ids to exclude' },
+      recentDays: { type: 'integer', description: 'Recency window, days' },
+      domesticBoost: { type: 'integer', description: 'Domestic/信创 score boost' },
+      trendKeywords: { type: 'string', description: 'Trend keywords, comma separated' },
+      excludeVendors: { type: 'string', description: 'Excluded vendors/products' },
+      maxCandidates: { type: 'integer', description: 'Ranked candidate limit' },
+      queriesPerNday: { type: 'integer', description: 'FOFA queries per Nday' },
+      concurrency: { type: 'integer', description: 'Policy override: batch tool concurrency ceiling' },
+      mode: { type: 'string', enum: ['nday', 'regular', '0day'], description: 'Outer task mode; regular/research reuse Nday without changing stopping policy' },
+      stop: { type: 'string', enum: ['first-high', 'first-rce', 'queue', 'budget'], description: 'Explicit task stopping override' },
+      technologies: { type: 'string', description: 'Observed technology families, comma separated; hypotheses only' },
+      verificationContext: { type: 'string', description: 'Evidence JSON assets/checks/history/maxSupplementAttempts. Omit to load session context; stored check history merges automatically. See README.' },
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true },
+      render: (_a, v) => [{ type: 'text', text: v.ok ? v.text : `nday_priority_plan 失败：${v.error}` }],
+    },
+    async execute(args, exec) {
+      try {
+        const { catalog } = catalogOrThrow()
+        const sessionId = exec?.agent?.session?.id
+        const saved = readSavedVerification ? readSavedVerification(resolveDshHome(), sessionId)
+          : { available: false, reason: 'task-plugin-unavailable', context: null, history: [] }
+        const verificationContext = mergeSavedVerification(args.verificationContext, saved)
+        const overrides = {
+          recentDays: args.recentDays,
+          domesticBoost: args.domesticBoost,
+          trendKeywords: args.trendKeywords,
+          excludeVendors: args.excludeVendors,
+          maxCandidates: args.maxCandidates,
+          queriesPerNday: args.queriesPerNday,
+          concurrency: args.concurrency,
+        }
+        const policy = normalizePriorityPolicy({
+          ...readPriorityPolicy(),
+          ...Object.fromEntries(Object.entries(overrides).filter(([, value]) => value !== undefined)),
+        })
+        const inventoryAssets = args.workspace ? readInventory(resolveWorkspaceArg(args.workspace, exec)).assets
+          .map(asset => args.scope ? scopeBoundAsset(asset, args.scope) : asset).filter(Boolean)
+          .map(asset => ({ ...asset, url: asset.target })) : []
+        const contextAssets = new Map(inventoryAssets.map(asset => [asset.id, asset]))
+        for (const asset of verificationContext.assets || []) contextAssets.set(asset.id, { ...contextAssets.get(asset.id), ...asset })
+        verificationContext.assets = [...contextAssets.values()]
+        const plan = buildPriorityPlan(catalog, {
+          target: args.target,
+          targetTerms: args.targetTerms,
+          entryIds: args.entryIds,
+          excludeIds: args.excludeIds,
+          mode: args.mode,
+          stop: args.stop,
+          technologies: args.technologies,
+          verificationContext,
+          policy,
+        })
+        plan.sharedHistory = { available: saved.available, reason: saved.reason, storedChecks: saved.available ? saved.history.length : null, contextLoaded: Boolean(saved.context) }
+        return { ok: true, plan, text: renderPriorityPlan(plan) + '\n共享任务记录：' + (saved.available ? `检查 ${saved.history.length} 条；上下文${saved.context ? '已加载' : '尚未保存'}` : `不可用（${saved.reason}）；未声称已经去重`) }
+      } catch (error) {
+        return { ok: false, error: String(error?.message || error) }
+      }
+    },
+  }))
+
+  registerNdayTool(defineTool({
+    name: 'nday_policy_get',
+    description: 'Read Nday ranking, filters and request limits.',
+    parameters: {},
+    output: {
+      schema: { type: 'object', additionalProperties: true },
+      render: (_a, v) => [{ type: 'text', text: JSON.stringify(v.policy ?? v, null, 2) }],
+    },
+    async execute() {
+      return { ok: true, policy: readPriorityPolicy() }
+    },
+  }))
+
+  registerNdayTool(defineTool({
+    name: 'nday_policy_set',
+    description: 'Update the structured Nday prioritization policy.',
+    parameters: {
+      recentDays: { type: 'integer', description: 'Recency window in days' },
+      domesticBoost: { type: 'integer', description: 'Domestic/信创 score boost' },
+      trendKeywords: { type: 'string', description: 'Trend keywords, comma separated' },
+      excludeVendors: { type: 'string', description: 'Vendors/products to exclude, comma separated' },
+      maxCandidates: { type: 'integer', description: 'Maximum ranked candidates' },
+      queriesPerNday: { type: 'integer', description: 'FOFA queries per Nday' },
+      concurrency: { type: 'integer', description: 'Batch tool concurrency ceiling' },
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true },
+      render: (_a, v) => [{ type: 'text', text: v.ok ? JSON.stringify(v.policy, null, 2) : `nday_policy_set 失败：${v.error}` }],
+    },
+    async execute(args) {
+      try {
+        const next = {
+          ...readPriorityPolicy(),
+          ...Object.fromEntries(Object.entries(args).filter(([, value]) => value !== undefined)),
+        }
+        return { ok: true, policy: writePriorityPolicy(next) }
+      } catch (error) {
+        return { ok: false, error: String(error?.message || error) }
+      }
+    },
+  }))
+
+  registerNdayTool(defineTool({
+    name: 'nday_source_fetch',
+    description: 'Fetch free/public Nday sources (CISA KEV, NVD, OSV, GitHub, nuclei, WeChat). Candidates only.',
+    parameters: {
+      source: { type: 'string', enum: FREE_SOURCE_IDS, required: true, description: 'Free source id' },
+      query: { type: 'string', description: 'Keyword or CVE/CNVD/GHSA id' },
+      id: { type: 'string', description: 'OSV vulnerability id' },
+      packageName: { type: 'string', description: 'OSV package name' },
+      ecosystem: { type: 'string', description: 'OSV ecosystem, e.g. Maven/npm/PyPI' },
+      version: { type: 'string', description: 'OSV package version, optional' },
+      limit: { type: 'integer', description: 'Maximum candidates (default 20, cap 100)' },
+      lastDays: { type: 'integer', description: 'NVD/GitHub/nuclei recency window in days' },
+      severity: { type: 'string', description: 'GitHub advisory severity filter' },
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true },
+      render: (_a, value) => [{ type: 'text', text: value.ok ? value.text : `nday_source_fetch 失败：${value.error}` }],
+    },
+    async execute(args) {
+      try {
+        const rows = await fetchFreeSource(args.source, args)
+        const candidates = mergeCandidates(rows)
+        const lines = [
+          `免费源 ${args.source}：${candidates.length} 条候选。`,
+          '这些是公开情报候选，不代表目标存在漏洞，也不包含利用载荷。',
+          ...candidates.slice(0, 12).map((item) => `- [${item.source}/${item.trust}/${item.freshness}] ${item.id || '-'} | ${item.title} | ${item.publishedAt || '日期未标注'} | ${item.url}`),
+        ]
+        return {
+          ok: true,
+          source: args.source,
+          count: candidates.length,
+          candidates,
+          text: lines.join('\n'),
+        }
+      } catch (error) {
+        return { ok: false, source: args.source, error: String(error?.message || error) }
+      }
+    },
+  }))
+
+  registerNdayTool(defineTool({
+    name: 'nday_source_radar',
+    description: 'Read source status; search local metadata or page pinned originals.',
+    parameters: {
+      includeCandidates: { type: 'boolean', description: 'Show 20 previews' },
+      query: { type: 'string', description: 'Metadata terms' },
+      cursor: { type: 'string', description: 'Search nextCursor' },
+      record: { type: 'string', description: 'Original source:id' },
+      revision: { type: 'string', description: 'Pinned revision hash' },
+      offset: { type: 'integer', description: 'Original nextOffset' },
+      environment: { type: 'json', description: 'packages:[{name,ecosystem,version,evidenceIds}];cpes;products' },
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true },
+      render: (_a, value) => [{ type: 'text', text: value.ok ? value.text : `nday_source_radar 失败：${value.error}` }],
+    },
+    async execute(args) {
+      try {
+        if (args.environment !== undefined && args.record === undefined) throw new Error('environment requires record=source:id')
+        if (args.record !== undefined) {
+          const match = /^([^:]+):(.+)$/.exec(args.record)
+          if (!match) throw new Error('Original record must be source:id')
+          if (args.environment !== undefined) {
+            if (args.offset !== undefined) throw new Error('Applicability does not accept a text offset')
+            const assessment = readSourceApplicability(match[1], match[2], args.environment, { revision: args.revision })
+            return { ok: true, assessment, text: `条件判断（以所提供资产清单为前提，非漏洞证据）：${JSON.stringify(assessment)}` }
+          }
+          const content = readSourceContent(match[1], match[2], { revision: args.revision, offset: args.offset })
+          return { ok: true, content, text: `来源 ${args.record}；修订 ${content.revision}；SHA256 ${content.sha256}；材料格式 ${content.representation}；原文字符 ${content.offset}..${content.offset + content.text.length}；nextOffset=${content.nextOffset}\n${content.text}` }
+        }
+        const status = collectorStatus()
+        const metrics = summarizeMetrics()
+        const page = args.includeCandidates === true || args.query !== undefined || args.cursor !== undefined
+          ? querySourceCandidates({ query: args.query ?? '', cursor: args.cursor ?? null }) : null
+        const candidates = page?.rows ?? []
+        const sourceLines = status.sources.map((row) =>
+          `- ${row.source}: ${row.status || (row.ok ? 'legacy-unknown' : 'failed')} ${row.count ?? 0}; ${row.coverage || 'coverage unknown'}${row.error ? `; ${row.error}` : ''}`)
+        const text = [
+          `采集器：${status.config.enabled ? '启用' : '停用'}；间隔 ${status.config.intervalHours}h；上次 ${status.lastRunAt || '未运行'}；下次 ${status.nextDueAt || '待计算'}；due=${status.due}`,
+          `候选：${status.summary?.mergedCandidates ?? status.candidateCount} 条合并；${status.summary?.freshCandidates ?? '未知'} 条 7 天内。`,
+          `指标：首轮命中率 ${metrics.firstRoundHitRate === null ? '暂无' : (metrics.firstRoundHitRate * 100).toFixed(1) + '%'}；指纹误报率 ${metrics.fingerprintFalsePositiveRate === null ? '暂无' : (metrics.fingerprintFalsePositiveRate * 100).toFixed(1) + '%'}；查询到 RCE 平均 ${metrics.averageQueryToRceMs === null ? '暂无' : Math.round(metrics.averageQueryToRceMs / 1000) + 's'}。`,
+          ...(sourceLines.length ? ['来源状态：', ...sourceLines] : []),
+          ...(page ? [`本地检索：${page.total} 条匹配；nextCursor=${page.nextCursor ?? 'null'}；来源原文用 record=来源ID:记录ID 读取。`] : []),
+          ...(candidates.length ? ['', '候选（已按编号/URL/标题去重，保留来源时间与可信等级）：', ...candidates.slice(0, 20).map((row) => `- [${row.trust}/${row.freshness}] ${row.source}:${row.id || '-'} | ${row.title} | ${row.publishedAt || row.published || '日期未标注'} | ${row.url} | revision=${row.revision}${row.requiresSourceReview ? ' | 需要回源复核' : ''}`)] : []),
+        ].join('\n')
+        return { ok: true, status, metrics, candidates, matchedCandidates: page?.total ?? null, nextCursor: page?.nextCursor ?? null, text }
+      } catch (error) {
+        return { ok: false, error: String(error?.message || error) }
+      }
+    },
+  }))
+
+  registerNdayTool(defineTool({
+    name: 'nday_source_collect',
+    description: 'Run the free-source collector now or persist its settings; failures stay explicit.',
+    parameters: {
+      sources: { type: 'string', description: 'Comma-separated source ids' },
+      query: { type: 'string', description: 'Shared source keyword' },
+      wechatQuery: { type: 'string', description: 'WeChat keyword; empty skips' },
+      lastDays: { type: 'integer', description: 'Recency window for NVD/GitHub/nuclei' },
+      limit: { type: 'integer', description: 'Page size (1-100)' },
+      intervalHours: { type: 'integer', description: 'Persist schedule interval (1-168 hours)' },
+      enabled: { type: 'boolean', description: 'Persist whether the background collector is enabled' },
+      force: { type: 'boolean', description: 'Run even when not due' },
+      saveConfig: { type: 'boolean', description: 'Persist supplied settings before running' },
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true },
+      render: (_a, value) => [{ type: 'text', text: value.text || `nday_source_collect 失败：${value.error}` }],
+    },
+    async execute(args) {
+      try {
+        const patch = {}
+        if (args.sources !== undefined) patch.sources = String(args.sources).split(',').map((value) => value.trim()).filter(Boolean)
+        for (const key of ['query', 'wechatQuery', 'lastDays', 'limit', 'intervalHours', 'enabled']) {
+          if (args[key] !== undefined) patch[key] = args[key]
+        }
+        if (args.saveConfig === true || Object.keys(patch).length > 0) writeCollectorConfig({ ...readCollectorConfig(), ...patch })
+        const result = await runCollector({ ...patch, force: args.force === true }, { home: resolveDshHome() })
+        if (result.skipped) return { ok: true, skipped: true, reason: result.reason, text: `采集器跳过：${result.reason}` }
+        const failed = result.sources.filter((row) => !row.ok && !row.skipped)
+        const text = [
+          `本轮采集结束：累计 ${result.summary.mergedCandidates} 条合并候选；本轮读取 ${result.summary.rawCandidates} 条；完整窗口 ${result.summary.completeSources}/${result.summary.sourceCount}，部分 ${result.summary.partialSources}。`,
+          ...result.sources.map(row => `- ${row.source}: ${row.status || 'unknown'}; ${row.coverage || 'unknown coverage'}; 水位 ${row.watermark || '未推进'}${row.limitation ? `; ${row.limitation}` : ''}`),
+          ...(failed.length ? ['失败源：', ...failed.map((row) => `- ${row.source}: ${row.error}`)] : []),
+          ...(result.summary.skippedSources ? [`跳过 ${result.summary.skippedSources} 个源（未配置公众号检索词等）。`] : []),
+        ].join('\n')
+        return { ok: true, ...collectorResponse(result), text }
+      } catch (error) {
+        return { ok: false, error: String(error?.message || error) }
+      }
+    },
+  }))
+
+  registerNdayTool(defineTool({
+    name: 'nday_metrics',
+    description: 'Read costs and reviewed result counts; feedback alone never confirms a finding.',
+    parameters: {
+      action: { type: 'string', enum: ['get', 'record'], required: true },
+      kind: { type: 'string', enum: ['false-positive', 'confirmed-rce'], description: 'Required for action=record' },
+      runId: { type: 'string', description: 'Optional scope-hunt runId used to compute query-to-RCE duration' },
+      count: { type: 'integer', description: 'Legacy feedback quantity only' },
+      findingId: { type: 'string', description: 'Current-session reviewed result id' },
+      note: { type: 'string', description: 'Short evidence note' },
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true },
+      render: (_a, value) => [{ type: 'text', text: value.ok ? value.text : `nday_metrics 失败：${value.error}` }],
+    },
+    async execute(args, exec) {
+      try {
+        if (args.action === 'record') {
+          const event = recordFeedbackMetric({
+            kind: args.kind,
+            runId: args.runId,
+            count: args.count,
+            note: args.note,
+            findingId: args.findingId,
+            sessionId: exec?.agent?.session?.id || '',
+          })
+          return { ok: true, event, text: `已记录 ${event.kind} 反馈；成果数以当前证据与复核记录为准。` }
+        }
+        const metrics = summarizeMetrics(undefined, { sessionId: exec?.agent?.session?.id || '' })
+        const text = [
+          `搜索 ${metrics.searches} 次 / 匹配 ${metrics.matches} 次；候选 ${metrics.candidates}；API 请求 ${metrics.apiRequests}。`,
+          `首轮命中率 ${metrics.firstRoundHitRate === null ? '暂无' : (metrics.firstRoundHitRate * 100).toFixed(1) + '%'}；指纹误报率 ${metrics.fingerprintFalsePositiveRate === null ? '暂无' : (metrics.fingerprintFalsePositiveRate * 100).toFixed(1) + '%'}。`,
+          `已确认 RCE ${metrics.confirmedRce === null ? '暂无有效成果库' : metrics.confirmedRce}；完整复现 ${metrics.reproducedFindings ?? '暂无'}；查询到 RCE 平均 ${metrics.averageQueryToRceMs === null ? '暂无' : Math.round(metrics.averageQueryToRceMs / 1000) + 's'}。`,
+        ].join('\n')
+        return { ok: true, metrics, text }
+      } catch (error) {
+        return { ok: false, error: String(error?.message || error) }
+      }
+    },
+  }))
+
   registerNdayTool(defineTool({
     name: 'nday_catalog',
-    description: 'Filter the Nday corpus or return one entry’s probes and next tools. Fingerprints are not vulnerability proof.',
+    description: 'Filter the Nday corpus or read one entry’s probes and next tools.',
     parameters: {
       keyword: { type: 'string', description: 'Free-text match over id/product/alias/CVE/QVD/versions' },
       status: { type: 'string', description: 'normalized | verified | legacy-unreviewed | deprecated' },
@@ -840,10 +1176,10 @@ function apply(ctx, config = {}) {
 
   registerNdayTool(defineTool({
     name: 'nday_scope_hunt',
-    description: 'FOFA-first Nday search. Exact ranges write mapped assets; organization identity search without a range saves passive candidates only.',
+    description: 'FOFA-first Nday search; auto-falls back to Hunter/Quake. Candidates only.',
     parameters: {
-      scope: { type: 'string', description: 'Optional exact domains, IPs, or IPv4 CIDRs. A bare domain is exact; *.domain covers subdomains, not the apex.' },
-      identity: { type: 'object', description: 'Organization identity for FOFA candidate discovery: ICP, domains, organization name, and aliases.', properties: {
+      scope: { type: 'string', description: 'Exact domains, IPs, or CIDRs. *.domain excludes the apex.' },
+      identity: { type: 'object', description: 'FOFA organization identity: ICP, domains, name, aliases.', properties: {
         icp: { type: 'string' }, domains: { type: 'array', items: { type: 'string' } },
         organizationName: { type: 'string' }, aliases: { type: 'array', items: { type: 'string' } },
       }, additionalProperties: false },
@@ -851,9 +1187,9 @@ function apply(ctx, config = {}) {
       focus: { type: 'string', enum: ['rce', 'all'], description: 'RCE by default, or all classes' },
       keyword: { type: 'string', description: 'Optional product, vendor, or CVE filter' },
       entryIds: { type: 'string', description: 'Optional comma-separated catalog IDs' },
-      limit: { type: 'integer', description: 'Nday fingerprint groups per batch; default 5, max 20 total query groups in organization mode.' },
+      limit: { type: 'integer', description: 'Fingerprint groups per batch; default 5, max 20.' },
       offset: { type: 'integer', description: 'Next batch offset from prior result' },
-      platform: { type: 'string', enum: ['fofa'], description: 'FOFA syntax is normalized by the catalog' },
+      platform: { type: 'string', enum: ['auto', 'fofa', 'hunter', 'quake'], description: 'Provider; auto tries FOFA → Hunter → Quake.' },
       size: { type: 'integer', description: 'Rows per query; default 50, max 500' },
     },
     output: {
@@ -864,6 +1200,7 @@ function apply(ctx, config = {}) {
       }],
     },
     async execute(args, exec) {
+      const startedAt = new Date().toISOString()
       const scope = String(args.scope || '').trim()
       const rawIdentity = args.identity && typeof args.identity === 'object' ? args.identity : {}
       const identity = {
@@ -881,7 +1218,7 @@ function apply(ctx, config = {}) {
       if (!String(args.workspace || '').trim()) return { ok: false, error: 'workspace 不能为空' }
       const workspace = resolveWorkspaceArg(args.workspace, exec)
       const requestedLimit = Number.isFinite(args.limit) && args.limit > 0 ? Math.min(20, Math.floor(args.limit)) : 5
-      const limit = campaignMode ? Math.min(requestedLimit, Math.max(1, Math.floor(20 / identityVariants.length))) : requestedLimit
+      const limit = requestedLimit
       const focus = args.focus === 'all' ? 'all' : 'rce'
       let catalog
       try { ({ catalog } = catalogOrThrow()) } catch (error) { return { ok: false, error: String(error?.message || error) } }
@@ -900,12 +1237,12 @@ function apply(ctx, config = {}) {
         return {
           ok: true, searchId: null, focus, queryCount: 0, candidateCount: 0,
           nextOffset: null, plan,
-          text,
+          text: text + (plan.rejectedHints.length ? `\n无效指纹 ${plan.rejectedHints.length} 条，未自动扩宽；需修订指纹。` : ''),
         }
       }
-      const pagination = plan.nextOffset === null
+      const pagination = (plan.rejectedHints.length ? `无效指纹 ${plan.rejectedHints.length} 条，未自动扩宽；详情见计划。\n` : '') + (plan.nextOffset === null
         ? `分页状态：offset=${plan.offset}，总查询组=${plan.queryGroups}，nextOffset=null（末页）。本页无论成功或失败都应停止，不要请求更大的 offset。`
-        : `分页状态：offset=${plan.offset}，总查询组=${plan.queryGroups}，nextOffset=${plan.nextOffset}。`
+        : `分页状态：offset=${plan.offset}，总查询组=${plan.queryGroups}，nextOffset=${plan.nextOffset}。`)
       if (typeof ctx.tools?.execute !== 'function') {
         const error = '宿主未提供 tools.execute，无法调用 dsh-hunter 的 asset_search_batch'
         return { ok: false, error, text: `nday_scope_hunt 失败：${error}\n${pagination}` }
@@ -918,56 +1255,102 @@ function apply(ctx, config = {}) {
             basis: group.basis,
             entryIds: group.entryIds,
           }))
-      const batchArguments = candidateOnly
-        ? { queries, workspace }
-        : { queries, workspace, platform: 'fofa', scope }
-      if (Number.isFinite(args.size)) batchArguments.size = args.size
-      const batchExecution = {
-        callId: `nday-asset-batch-${stamp()}`,
-        name: candidateOnly ? 'asset_candidate_search_batch' : 'asset_search_batch',
-        arguments: batchArguments,
-        signal: exec?.signal ?? new AbortController().signal,
+      const supportedMeasurementFields = {
+        hunter: new Set(['app', 'body', 'cert', 'domain', 'header', 'ip', 'port', 'protocol', 'server', 'title']),
+        quake: new Set(['app', 'body', 'cert', 'domain', 'header', 'icon_hash', 'ip', 'port', 'protocol', 'server', 'title']),
       }
-      if (exec?.rootCallId !== undefined) batchExecution.rootCallId = exec.rootCallId
-      if (exec?.token !== undefined) batchExecution.parent = exec.token
-      if (exec?.agent !== undefined) batchExecution.agent = exec.agent
-      let raw
-      try {
-        raw = await ctx.tools.execute(batchExecution)
-      } catch (error) {
-        const detail = String(error?.message || error)
-        const message = /unknown tool|not found|no tool|asset_search_batch/i.test(detail)
-          ? '当前宿主没有可执行的 asset_search_batch（请检查 dsh-hunter 插件是否加载并向本会话暴露）'
-          : `FOFA 查询失败：${detail}`
+      const fieldWarningsFor = (platform) => {
+        const supported = supportedMeasurementFields[platform]
+        if (!supported) return []
+        const seen = new Set()
+        for (const query of queries) {
+          const tree = parseQueryExpression(query.query)
+          for (const term of queryTerms(tree)) {
+            const field = term.field
+            if (!supported.has(field)) seen.add(field)
+          }
+          if (!compileQueryExpression(tree, platform)) seen.add('表达式/等号语义')
+        }
+        return [...seen].map((field) => `${platform} 不支持字段或语义 ${field}；该查询组必须拒绝，不做宽查询降级。`)
+      }
+      const requestedPlatform = ['auto', 'fofa', 'hunter', 'quake'].includes(String(args.platform))
+        ? String(args.platform) : 'auto'
+      if (candidateOnly && requestedPlatform !== 'auto' && requestedPlatform !== 'fofa') {
         return {
           ok: false,
-          error: message,
-          text: `nday_scope_hunt 失败：${message}\n${pagination}`,
+          error: '机构身份候选查询仅支持 FOFA：Hunter/Quake 不支持 ICP、证书组织、icon_hash 等身份字段；未执行请求。',
+          text: '机构身份候选查询仅支持 FOFA：Hunter/Quake 不支持 ICP、证书组织、icon_hash 等身份字段；未执行请求。',
         }
       }
-      if (raw?.isError === true) {
-        const failure = raw.error
-        const detail = typeof failure === 'string'
-          ? failure
-          : String(failure?.message ?? failure?.code ?? '宿主工具执行失败')
-        const message = /unknown tool|not found|no tool|asset_search_batch/i.test(detail)
-          ? '当前宿主没有可执行的 asset_search_batch（请检查 dsh-hunter 插件是否加载并向本会话暴露）'
-          : `asset_search_batch 执行失败：${detail}`
-        return {
-          ok: false,
-          error: message,
-          text: `nday_scope_hunt 失败：${message}\n${pagination}`,
-          detail: {
-            code: String(failure?.code ?? ''),
-            message: detail,
-          },
+      const platformOrder = candidateOnly ? ['fofa']
+        : requestedPlatform === 'auto' ? ['fofa', 'hunter', 'quake'] : [requestedPlatform]
+      const platformAttempts = []
+      let batch = null
+      let activePlatform = platformOrder[0]
+      for (const platform of platformOrder) {
+        const attemptFieldWarnings = fieldWarningsFor(platform)
+        const batchArguments = candidateOnly
+          ? { queries, workspace }
+          : { queries, workspace, platform, scope }
+        if (Number.isFinite(args.size)) batchArguments.size = args.size
+        const batchExecution = {
+          callId: `nday-asset-batch-${stamp()}`,
+          name: candidateOnly ? 'asset_candidate_search_batch' : 'asset_search_batch',
+          arguments: batchArguments,
+          signal: exec?.signal ?? new AbortController().signal,
         }
+        if (exec?.rootCallId !== undefined) batchExecution.rootCallId = exec.rootCallId
+        if (exec?.token !== undefined) batchExecution.parent = exec.token
+        if (exec?.agent !== undefined) batchExecution.agent = exec.agent
+        let raw
+        try {
+          raw = await ctx.tools.execute(batchExecution)
+        } catch (error) {
+          const detail = String(error?.message || error)
+          const message = /unknown tool|not found|no tool|asset_search_batch/i.test(detail)
+            ? '当前宿主没有可执行的 asset_search_batch（请检查 dsh-hunter 插件是否加载并向本会话暴露）'
+            : `${platform} 查询失败：${detail}`
+          platformAttempts.push({ platform, ok: false, error: message, fieldWarnings: attemptFieldWarnings })
+          if (requestedPlatform === 'auto' && platform !== platformOrder[platformOrder.length - 1]) continue
+          return { ok: false, error: message, text: `nday_scope_hunt 失败：${message}\n${pagination}`, platformAttempts, fieldWarnings: attemptFieldWarnings }
+        }
+        if (raw?.isError === true) {
+          const failure = raw.error
+          const detail = typeof failure === 'string'
+            ? failure
+            : String(failure?.message ?? failure?.code ?? '宿主工具执行失败')
+          const message = /unknown tool|not found|no tool|asset_search_batch/i.test(detail)
+            ? '当前宿主没有可执行的 asset_search_batch（请检查 dsh-hunter 插件是否加载并向本会话暴露）'
+            : `${platform} 执行失败：${detail}`
+          platformAttempts.push({ platform, ok: false, error: message, fieldWarnings: attemptFieldWarnings })
+          if (requestedPlatform === 'auto' && platform !== platformOrder[platformOrder.length - 1]) continue
+          return {
+            ok: false,
+            error: message,
+            text: `nday_scope_hunt 失败：${message}${attemptFieldWarnings.length ? `\n字段差异：\n${attemptFieldWarnings.map((line) => `- ${line}`).join('\n')}` : ''}\n${pagination}`,
+            platformAttempts,
+            fieldWarnings: attemptFieldWarnings,
+            detail: { code: String(failure?.code ?? ''), message: detail },
+          }
+        }
+        const value = raw && typeof raw === 'object' && 'value' in raw ? raw.value : raw
+        if (!value || value.ok !== true) {
+          const error = String(value?.error || raw?.error || `${platform} 未返回成功结果`)
+          platformAttempts.push({ platform, ok: false, error, fieldWarnings: attemptFieldWarnings })
+          if (requestedPlatform === 'auto' && platform !== platformOrder[platformOrder.length - 1]) continue
+          return { ok: false, error, text: `nday_scope_hunt 失败：${error}${attemptFieldWarnings.length ? `\n字段差异：\n${attemptFieldWarnings.map((line) => `- ${line}`).join('\n')}` : ''}\n${pagination}`, platformAttempts, fieldWarnings: attemptFieldWarnings, detail: value }
+        }
+        batch = value
+        activePlatform = platform
+        platformAttempts.push({ platform, ok: true, configuredPlatforms: value.configuredPlatforms ?? [], fieldWarnings: attemptFieldWarnings })
+        break
       }
-      const batch = raw && typeof raw === 'object' && 'value' in raw ? raw.value : raw
-      if (!batch || batch.ok !== true) {
-        const error = String(batch?.error || raw?.error || 'asset_search_batch 未返回成功结果')
-        return { ok: false, error, text: `nday_scope_hunt 失败：${error}\n${pagination}`, detail: batch }
+      if (!batch) {
+        const error = platformAttempts.map((row) => `${row.platform}: ${row.error}`).join('；') || '没有可用平台'
+        return { ok: false, error, text: `nday_scope_hunt 失败：${error}\n${pagination}`, platformAttempts }
       }
+      const degradedFrom = platformAttempts.slice(0, -1).map((row) => row.platform)
+      const fieldWarnings = fieldWarningsFor(activePlatform)
       const queryById = new Map((batch.queryResults ?? []).map((result) => [String(result.id), result]))
       const candidates = new Map()
       const queryEvidence = []
@@ -1019,6 +1402,10 @@ function apply(ctx, config = {}) {
         generatedAt: new Date().toISOString(),
         catalogUpdated: plan.catalogUpdated,
         focus,
+        platform: activePlatform,
+        platformAttempts,
+        degradedFrom,
+        fieldWarnings,
         scope: scope || null,
         identity: campaignMode ? identity : null,
         candidateOnly,
@@ -1038,6 +1425,8 @@ function apply(ctx, config = {}) {
           failedGroups,
           candidateCount: candidates.size,
           estimatedApiRequests: Number(batch.estimatedRequests) || 0,
+          platform: activePlatform,
+          degradedFrom,
         },
       }
       fs.writeFileSync(file, JSON.stringify(artifact, null, 2) + '\n', 'utf8')
@@ -1056,9 +1445,10 @@ function apply(ctx, config = {}) {
         return `- ${target || '未知地址'}；候选条目 ${candidate.entryIds.join(', ')}；身份查询 ${candidate.identityTypes.join(', ') || 'Nday 指纹'}${clues.length ? `；FOFA 归属线索 ${clues.join('、')}` : ''}；查询依据 ${measurementBasisLabel(bases)}`
       })
       const text = [
-        (candidateOnly ? 'Nday FOFA 机构候选搜索：' : 'Nday FOFA 范围搜索：') + artifact.summary.successfulGroups + '/' + queries.length + ' 个查询组成功，' + artifact.summary.candidateCount + ' 个去重候选资产；预计 ' + artifact.summary.estimatedApiRequests + ' 次 API 请求。',
+        (candidateOnly ? 'Nday 机构候选搜索：' : 'Nday 范围搜索：') + artifact.summary.successfulGroups + '/' + queries.length + ' 个查询组成功，' + artifact.summary.candidateCount + ' 个去重候选资产；平台 ' + activePlatform + (degradedFrom.length ? `（已从 ${degradedFrom.join(' → ')} 降级）` : '') + '；预计 ' + artifact.summary.estimatedApiRequests + ' 次 API 请求。',
         `目录更新时间：${plan.catalogUpdated || '未标注'}；范围：${scope || '未提供（仅被动候选）'}。`,
         `查询覆盖：${quality.catalogFingerprintEntries} 条目录明确指纹、${quality.probeSignatureEntries} 条探针响应签名；${quality.productAliasFallbackEntries} 条仍依赖产品别名兜底，${quality.entriesWithoutUsableQuery} 条没有可用查询。`,
+        ...(fieldWarnings.length ? ['字段差异：', ...fieldWarnings.map((line) => `- ${line}`)] : []),
         ...(failedGroups ? [`${failedGroups} 个查询组失败；失败与“没有命中”分开记录，详见证据文件。`] : []),
         ...(sample.length ? ['', '候选样例（测绘指纹不代表受影响版本）：', ...sample] : ['未发现候选资产；先检查查询组失败原因和 FOFA 账号可用字段等级。']),
         `证据：${path.relative(workspace, file).replace(/\\/g, '/')}`,
@@ -1066,11 +1456,27 @@ function apply(ctx, config = {}) {
         ...(scope && artifact.candidates.length ? [`下一步：nday_match assetSource=nday-search searchId=${searchId} scope="${scope}" workspace="${workspace}"（按候选条目映射做轻量筛查）`] : []),
         ...(plan.nextOffset !== null ? [`更多查询：再次调用 nday_scope_hunt，offset=${plan.nextOffset}；单批最多 20 组。`] : []),
       ].join('\n')
+      try {
+        recordSearchMetric({
+          runId: searchId,
+          source: activePlatform,
+          candidateCount: candidates.size,
+          apiRequests: artifact.summary.estimatedApiRequests,
+          queryCount: queries.length,
+          successfulGroups: artifact.summary.successfulGroups,
+          startedAt,
+          finishedAt: new Date().toISOString(),
+        })
+      } catch { /* metrics must not break a completed search */ }
       return {
         ok: true,
         searchId,
         focus,
         candidateOnly,
+        platform: activePlatform,
+        platformAttempts,
+        degradedFrom,
+        fieldWarnings,
         queryCount: queries.length,
         successfulGroups: artifact.summary.successfulGroups,
         failedGroups,
@@ -1088,10 +1494,10 @@ function apply(ctx, config = {}) {
 
   registerNdayTool(defineTool({
     name: 'attack_plan',
-    description: 'Group in-scope inventory by fingerprint, rank reusable buckets, and write a plan. Does not probe or exploit.',
+    description: 'Group in-scope inventory by fingerprint and write a ranked attack plan.',
     parameters: {
       workspace: { type: 'string', required: true, description: 'Workspace containing asset-inventory.json' },
-      scope: { type: 'string', required: true, description: 'Exact domains/IPs/CIDRs; *.domain covers subdomains, not the apex. Other assets are excluded.' },
+      scope: { type: 'string', required: true, description: 'Exact domains/IPs/CIDRs; other assets are excluded.' },
       entryIds: { type: 'string', description: 'Optional catalog IDs' },
       minAssets: { type: 'integer', description: 'Minimum assets per bucket (default 1)' },
       maxBuckets: { type: 'integer', description: 'Maximum buckets (default 50, cap 200)' },
@@ -1169,7 +1575,7 @@ function apply(ctx, config = {}) {
         // 与其让模型撞墙再回读报错，不如在这里就把「按桶跑」写清楚。
         `下一步：逐组验证——nday_match assetSource=inventory scope="${scope}" entryIds=<该组 entryId>（一次只跑这一组的条目）。`,
         '⚠ 不要不带 entryIds 全量跑：全部可筛条目 × 全部资产会撞上单次 800 次探测的上限，工具会直接拒绝并让你收窄。',
-        '纪律：先按当前来源核对影响版本和前置条件；探针命中只是线索，取得一条可复现 RCE 后立即停止。',
+        '纪律：独立应用分别校准；同组仍独立确认身份、正常请求、适用条件和实际影响。探针命中只是线索，按redteam_task的当前停止规则工作。',
       ]
       return { ok: true, plan, graph, assetsExcludedByScope, files: { json: 'fingerprint-buckets.json', markdown: 'attack-plan.md' }, text: text.join('\n') }
     },
@@ -1177,7 +1583,7 @@ function apply(ctx, config = {}) {
 
   registerNdayTool(defineTool({
     name: 'attack_gate',
-    description: 'Record a representative asset as confirmed/refuted with evidence; only confirmation unlocks batch spread. State only.',
+    description: 'Record a representative asset result; confirmation unlocks batch spread.',
     parameters: {
       action: { type: 'string', enum: ['status', 'record'], required: true, description: 'Show gates or record the representative result' },
       workspace: { type: 'string', required: true, description: 'Workspace containing fingerprint-buckets.json' },
@@ -1225,7 +1631,7 @@ function apply(ctx, config = {}) {
 
   if (enablePostRceTools) registerNdayTool(defineTool({
     name: 'memshell_cli',
-    description: 'Plan or run a self-hosted memparty action. Run needs host approval; public party.mem.mk is rejected.',
+    description: 'Plan or run a self-hosted memparty action with host approval.',
     parameters: {
       action: { type: 'string', enum: ['status', 'plan', 'run'], required: true },
       workspace: { type: 'string' },
@@ -1376,11 +1782,13 @@ function apply(ctx, config = {}) {
 
   registerNdayTool(defineTool({
     name: 'zday_pattern',
-    description: 'Match a product surface to zero-day patterns with a falsifiable hypothesis and minimal-impact check. Hypotheses are not findings.',
+    description: 'Match a surface to zero-day patterns with a falsifiable, minimal-impact check.',
     parameters: {
       surface: { type: 'string', required: true, description: 'Product feature or attack surface' },
       tech: { type: 'string', description: 'Optional language/framework' },
       limit: { type: 'integer', description: 'Patterns to return (default 5, max 12)' },
+      requestId: { type: 'string', description: 'Baseline ID' },
+      requestRevision: { type: 'string', description: 'Revision' },
     },
     output: {
       schema: { type: 'object', additionalProperties: true },
@@ -1389,6 +1797,14 @@ function apply(ctx, config = {}) {
     execute(args, exec) {
       const surface = String(args.surface || '').trim()
       if (!surface) return { ok: false, error: 'surface 不能为空' }
+      const sessionId = exec?.agent?.session?.id;
+      const shared = readSavedVerification?.(resolveDshHome(), sessionId);
+      const inputs = observedResearchInputs(shared?.context, args.requestId, args.requestRevision);
+      if (!inputs.length) return { ok: true, blocked: true, reason: 'backend_api_missing', patterns: [],
+        text: 'backend_api_missing：当前会话没有范围内可达后台/API的有效业务请求和可控输入证据。先在独立定位预算内捕获正常请求，写入redteam_context；无入口就结束定位，不在静态门户深入研究。' };
+      if (inputs.length !== 1) return { ok: true, blocked: true, reason: 'research_input_ambiguous', patterns: [],
+        text: 'research_input_ambiguous：存在多个研究入口或请求版本，请用requestId和requestRevision选择当前功能的唯一正常基线。',
+        inputs: inputs.map(request => ({ id: request.id, endpoint: request.endpoint, revision: request.revision })) };
       let catalog
       try {
         catalog = loadZdayCatalog(path.join(resolveSakerRoot(), 'preset', 'pentest', 'refs', 'zeroday-patterns', 'catalog.json'))
@@ -1405,22 +1821,24 @@ function apply(ctx, config = {}) {
       return {
         ok: true,
         exact: result.exact,
+        inputs: inputs.map(request => ({ id: request.id, endpoint: request.endpoint, authContext: request.authContext, revision: request.revision, inputs: request.inputs })),
         patterns,
-        text: renderZdayHypotheses(query, result),
+        text: ['已确认研究输入：', ...inputs.map(request => `${request.id} | ${request.endpoint} | 身份 ${request.authContext} | 请求 ${request.revision}`), renderZdayHypotheses(query, result)].join('\n'),
       }
     },
   }))
 
   registerNdayTool(defineTool({
     name: 'nday_match',
-    description: 'Screen assets with catalog probes and write a ledger. Leads need verification; this is not a vulnerability verdict.',
+    description: 'Screen assets with catalog probes and write a ledger; leads need verification.',
     parameters: {
       targets: { type: 'string', description: 'URLs/hosts; omit for inventory or nday-search' },
-      scope: { type: 'string', required: true, description: 'Exact domains/IPs/CIDRs; *.domain covers subdomains, not the apex. Targets stay inside scope.' },
+      scope: { type: 'string', required: true, description: 'Exact domains/IPs/CIDRs; targets stay inside scope.' },
       workspace: { type: 'string', required: true, description: 'Workspace for ledger and evidence' },
       assetSource: { type: 'string', enum: ['targets', 'inventory', 'nday-search'], description: 'Read targets, inventory, or nday_scope_hunt candidates' },
       searchId: { type: 'string', description: 'Required for nday-search source' },
       entryIds: { type: 'string', description: 'Optional catalog IDs to narrow screening' },
+      resultLimit: { type: 'integer', description: 'Displayed leads (default 12, max 50); full ledger retained' },
       timeoutMs: { type: 'integer', description: `Timeout (default ${DEFAULT_TIMEOUT_MS})` },
       concurrency: { type: 'integer', description: `Concurrent requests (default ${DEFAULT_CONCURRENCY})` },
       rate: { type: 'integer', description: `Requests/sec (default ${DEFAULT_RATE}, max ${HARD_MAX_RATE})` },
@@ -1430,6 +1848,7 @@ function apply(ctx, config = {}) {
       render: (_a, v) => [{ type: 'text', text: v.ok ? v.text : `nday_match 拒绝/失败：${v.error}` }],
     },
     async execute(args, exec) {
+      const startedAt = new Date().toISOString()
       const workspace = resolveWorkspaceArg(args.workspace, exec)
       const scope = String(args.scope || '').trim()
       if (!scope) return { ok: false, error: 'scope 不能为空——Nday 主动探针必须限定本轮精确范围' }
@@ -1445,27 +1864,28 @@ function apply(ctx, config = {}) {
           .filter(Boolean)
           .map((asset) => ({
             // 端口/协议补全只作用于**探测**（见 probeBaseForAsset 的注释）。
+            ...asset,
             target: probeBaseForAsset(asset),
             host: String(asset.host || '').trim(),
           }))
           .filter((row) => row.target)
         excludedAssets = inventory.assets.length - rows.length
-        assets = parseTargets(rows.map((row) => row.target).join('\n'))
+        assets = []
         // 把账本里的 **vhost** 带下来：`target` 是 IP、`host` 是域名时，探针必须显式发
         // `Host: <域名>`，否则打到默认站点（护网里 FOFA/Hunter 给的正是「IP + 域名」组合）。
         // 只有 host 与目标主机名不同才设，避免对已经是域名的目标做无谓改动。
-        const vhostByBase = new Map()
+        const seenServices = new Set()
         for (const row of rows) {
-          if (!row.host) continue
           const parsed = parseTargets(row.target)[0]
           if (!parsed) continue
           let targetHost = ''
           try { targetHost = new URL(parsed.base).hostname.toLowerCase() } catch { targetHost = '' }
           const bare = row.host.replace(/:\d+$/, '').toLowerCase()
-          if (bare && bare !== targetHost) vhostByBase.set(parsed.base, bare)
-        }
-        if (vhostByBase.size > 0) {
-          assets = assets.map((asset) => (vhostByBase.has(asset.base) ? { ...asset, hostHeader: vhostByBase.get(asset.base) } : asset))
+          const hostHeader = bare && bare !== targetHost ? bare : ''
+          const key = JSON.stringify([parsed.base, hostHeader])
+          if (seenServices.has(key)) continue
+          seenServices.add(key)
+          assets.push({ ...row, ...parsed, hostHeader })
         }
         if (assets.length === 0) {
           return {
@@ -1554,6 +1974,12 @@ function apply(ctx, config = {}) {
       const concurrency = Number.isFinite(args.concurrency) && args.concurrency > 0
         ? Math.floor(args.concurrency) : DEFAULT_CONCURRENCY
       const entryIds = String(args.entryIds || '').split(',').map((s) => s.trim()).filter(Boolean)
+      const rate = Number.isFinite(args.rate) && args.rate > 0
+        ? Math.min(Math.floor(args.rate), HARD_MAX_RATE) : DEFAULT_RATE
+      const rateGate = makeRateGate(rate)
+      const discoveryRecords = []
+      const reconGaps = []
+      const automaticSelection = assetSource !== 'nday-search' && entryIds.length === 0
 
       let catalog
       try {
@@ -1561,21 +1987,56 @@ function apply(ctx, config = {}) {
       } catch (error) {
         return { ok: false, error: String(error?.message || error) }
       }
+      if (automaticSelection) {
+        // At most one initial observation per service; never silently spray the
+        // catalog when the product is unknown. Existing recon avoids that GET.
+        const available = candidateEntries(catalog, [])
+        const initial = assets.map(asset => selectReconCandidates(available, asset))
+        const missing = assets.map((asset, assetIndex) => ({ asset, assetIndex }))
+          .filter(({ assetIndex }) => initial[assetIndex].length === 0)
+        const cap = Math.min(32, HARD_MAX_REQUESTS, DEFAULT_MAX_REQUESTS)
+        if (missing.length > cap) return { ok: false, error: `产品基线 ${missing.length} 次超过请求上限 ${cap}；按资产分批，禁止回退全库。` }
+        const observed = await mapLimit(missing, concurrency, async ({ asset, assetIndex }) => {
+          await rateGate()
+          const response = await fetchProbe({ url: asset.base, method: 'GET', timeoutMs, hostHeader: asset.hostHeader })
+          const observation = reconObservation(asset, response)
+          const selected = observation.blocked ? [] : selectReconCandidates(available, observation)
+          return { assetIndex, asset: asset.base, hostHeader: asset.hostHeader || '', response,
+            selected, surfaces: observation.surfaces, inputObserved: observation.inputObserved,
+            blocked: observation.blocked, nextAction: observation.nextAction }
+        })
+        discoveryRecords.push(...observed)
+        for (const row of observed) initial[row.assetIndex] = row.selected
+        entryIdsByAsset = initial.map(rows => rows.map(row => row.entryId))
+        for (const [assetIndex, selected] of initial.entries()) {
+          const observed = discoveryRecords.find(row => row.assetIndex === assetIndex)
+          reconGaps.push({ asset: assets[assetIndex].base, hostHeader: assets[assetIndex].hostHeader || '',
+            productState: selected.length ? 'candidate' : 'unknown', componentState: 'unassessed',
+            entryIds: selected.map(row => row.entryId),
+            matchedTerms: selected,
+            observedFacts: { title: assets[assetIndex].title || '', server: assets[assetIndex].server || '', tech: assets[assetIndex].tech || [] },
+            sourceReferences: assets[assetIndex].rawFiles || [],
+            nextAction: selected.length ? 'check-product-version-and-prerequisites' : observed?.nextAction || 'record-product-and-component-gap',
+            surfaces: observed?.surfaces || [], inputObserved: observed?.inputObserved || false,
+            blocked: observed?.blocked || '' })
+        }
+      }
       const knownEntryIds = new Set(catalog.entries.map((entry) => entry.id))
       if (entryIdsByAsset) entryIdsByAsset = entryIdsByAsset.map((ids) => ids.filter((id) => knownEntryIds.has(id)))
       const mappedEntryIds = entryIdsByAsset ? [...new Set(entryIdsByAsset.flat())] : []
-      if (entryIdsByAsset && mappedEntryIds.length === 0) {
+      if (assetSource === 'nday-search' && mappedEntryIds.length === 0) {
         return { ok: false, error: '搜索证据没有映射到当前版本目录中的有效 entryId；拒绝退化为全目录探测' }
       }
-      const entries = candidateEntries(catalog, entryIdsByAsset ? mappedEntryIds : entryIds)
-      if (entries.length === 0) return { ok: false, error: 'entryIds 没有匹配到任何条目' }
+      const entries = entryIdsByAsset && mappedEntryIds.length === 0 ? []
+        : candidateEntries(catalog, entryIdsByAsset ? mappedEntryIds : entryIds)
+      if (entries.length === 0 && !automaticSelection) return { ok: false, error: 'entryIds 没有匹配到任何条目' }
 
       // 计划先算清楚再动手：规模超限就明确拒绝，不做静默截断。
       // 没有探针的条目（legacy-unreviewed：只有来源、还没落实指纹）**不参与筛选**，
       // 但必须显式报出来——静默跳过会让调用方以为"都筛过了"。
       const siftable = entries.filter((entry) => probePlan(entry, 'http://x').length > 0)
       const notSiftable = entries.filter((entry) => probePlan(entry, 'http://x').length === 0)
-      if (siftable.length === 0) {
+      if (siftable.length === 0 && entries.length > 0 && !automaticSelection) {
         return {
           ok: false,
           error: `候选 ${entries.length} 条都没有机器可判定探针，无法批量筛选：`
@@ -1593,18 +2054,18 @@ function apply(ctx, config = {}) {
           }
         }
       }
+      const requestGroups = groupProbeRequests(requests)
+      const controlAssets = assets.map((asset, assetIndex) => ({ asset, assetIndex }))
+        .filter(({ assetIndex }) => requests.some(request => request.assetIndex === assetIndex))
+      const plannedRequests = requestGroups.length + controlAssets.length + discoveryRecords.length
       const cap = Math.min(HARD_MAX_REQUESTS, DEFAULT_MAX_REQUESTS)
-      if (requests.length > cap) {
+      if (plannedRequests > cap) {
         return {
           ok: false,
-          error: `本次计划 ${assets.length} 个资产 × ${siftable.length} 个可筛条目 = ${requests.length} 次请求，超过单次上限 ${cap}。`
+          error: `本次计划 ${assets.length} 个资产 × ${siftable.length} 个可筛条目：${requestGroups.length} 次去重探针 + ${controlAssets.length} 次对照 + ${discoveryRecords.length} 次已执行基线 = ${plannedRequests} 次请求，超过单次上限 ${cap}；未发送条目探针。`
             + '请用 entryIds 收窄条目，或把目标分批跑。',
         }
       }
-
-      const rate = Number.isFinite(args.rate) && args.rate > 0
-        ? Math.min(Math.floor(args.rate), HARD_MAX_RATE) : DEFAULT_RATE
-      const rateGate = makeRateGate(rate)
 
       // 对照：每个资产先发一次**随机不存在路径**的请求。
       // 软 404 / SPA / WAF 统一响应下，「路径存在性」这类判据对任何路径都成立——
@@ -1612,7 +2073,7 @@ function apply(ctx, config = {}) {
       // （实测：软 404 靶子上 3/3 条目全部"命中"）。对照本身不参与命中统计。
       const controlPath = `/.saker-control-${randomBytes(6).toString('hex')}`
       const controls = new Map()
-      await mapLimit(assets.map((asset, assetIndex) => ({ asset, assetIndex })), concurrency, async (item) => {
+      await mapLimit(controlAssets, concurrency, async (item) => {
         await rateGate()
         const response = await fetchProbe({
           url: probeUrl(item.asset.base, controlPath),
@@ -1626,17 +2087,7 @@ function apply(ctx, config = {}) {
         return null
       })
 
-      const results = await mapLimit(requests, concurrency, async (item) => {
-        // 先过速率闸门再发包：并发只管「同时在飞几个」，速率才管「每秒发几个」。
-        await rateGate()
-        const response = await fetchProbe({
-          url: item.plan.url,
-          method: item.plan.method,
-          timeoutMs,
-          hostHeader: item.hostHeader,
-        })
-        return { ...item, response }
-      })
+      const results = await executeProbeBatch(requestGroups, { mapLimit, concurrency, rateGate, fetchProbe })
 
       const outcomes = new Map() // `${ai}:${ei}` -> outcomes[]
       const transportErrors = []
@@ -1753,8 +2204,13 @@ function apply(ctx, config = {}) {
         assetsExcludedByScope: excludedAssets,
         entries: siftable.length,
         entriesNotSiftable: notSiftable.length,
-        requests: requests.length,
-        controlRequests: assets.length,
+        requests: requestGroups.length,
+        probeEvaluations: requests.length,
+        requestsReused: requests.length - requestGroups.length,
+        totalRequests: plannedRequests,
+        controlRequests: controlAssets.length,
+        discoveryRequests: discoveryRecords.length,
+        assetsWithoutProductCandidates: reconGaps.filter(row => row.productState === 'unknown').length,
         controlSuppressed,
         controlUniform,
         transportErrors: transportErrors.length,
@@ -1777,6 +2233,8 @@ function apply(ctx, config = {}) {
         summary,
         rows,
         transportErrors,
+        discoveryRecords,
+        reconGaps,
       }, null, 2) + '\n', 'utf8')
       const csvEscape = (v) => `"${String(v).replace(/"/g, '""')}"`
       fs.writeFileSync(csvFile, [
@@ -1810,6 +2268,8 @@ function apply(ctx, config = {}) {
 
       const notes = [
         '【口径】以下是**指纹筛选命中**，不是漏洞结论；确认要走条目里的公开工具。',
+        ...(automaticSelection ? [`【画像】复用产品线索；无产品候选 ${reconGaps.filter(row => row.productState === 'unknown').length} 项，不回退全库；组件与版本仍需逐入口补证。`,
+          ...reconGaps.filter(row => row.productState === 'unknown').slice(0, 6).map(row => `【缺口】${row.asset}${row.hostHeader ? ' Host='+row.hostHeader : ''}：${row.blocked || '产品未知'}；下一步 ${row.nextAction}；已观察入口 ${row.surfaces.slice(0, 3).join(', ') || '无'}`)] : []),
         ...(excludedAssets ? [`【范围】本轮精确范围外的 ${excludedAssets} 项未发送请求。`] : []),
         ...(rows.some((r) => !r.reproducedByUs)
           ? ['【状态】命中项里含 `normalized` 条目——我方尚未复现，措辞不得写成"已确认可利用"。']
@@ -1823,11 +2283,13 @@ function apply(ctx, config = {}) {
         ...(notSiftable.length ? [`【跳过】${notSiftable.length} 个条目没有机器可判定探针，未参与筛选（仅可人工阅读）：${notSiftable.map((e) => e.id).join(', ')}`] : []),
         `【台账】${path.relative(workspace, jsonFile)}`,
       ]
+      const resultLimit = Math.max(1, Math.min(50, Math.floor(Number(args.resultLimit) || 12)))
       const text = [
-        `nday_match：精确范围内 ${assets.length} 资产（来源 ${assetSource}）× ${siftable.length} 条目 = ${requests.length} 次探测（另加 ${assets.length} 次随机对照）；范围外跳过 ${excludedAssets} 项；命中 ${rows.length} 项`,
+        `nday_match：精确范围内 ${assets.length} 资产（来源 ${assetSource}）× ${siftable.length} 条目：${requests.length} 次判据评估，实际 ${requestGroups.length} 次探测 + ${controlAssets.length} 次随机对照 + ${discoveryRecords.length} 次基线识别，复用 ${requests.length - requestGroups.length} 次请求；范围外跳过 ${excludedAssets} 项；命中 ${rows.length} 项`,
         ...notes,
+        ...(rows.length > resultLimit ? [`【显示】仅列前 ${resultLimit} 项；其余 ${rows.length - resultLimit} 项见完整台账 ${path.relative(workspace, jsonFile)}，未删除证据。`] : []),
         ...(rows.length
-          ? ['', ...rows.map((r) => {
+          ? ['', ...rows.slice(0, resultLimit).map((r) => {
             const confirm = r.confirm?.ready
               ? `\n    确认：把 ${r.confirm.domain} 注入后调 ${r.confirm.nextCall}`
               : r.confirm?.needed
@@ -1850,10 +2312,21 @@ function apply(ctx, config = {}) {
           : ['', '（无命中）']),
       ].join('\n')
 
+      try {
+        recordMatchMetric({
+          runId: assetSource === 'nday-search' ? String(args.searchId || '') : `match-${stamp()}`,
+          assetCount: assets.length,
+          hitCount: rows.length,
+          startedAt,
+          finishedAt: new Date().toISOString(),
+        })
+      } catch { /* metrics must not break a completed screen */ }
+
       return {
         ok: true,
         summary,
         rows,
+        reconGaps,
         // 生效参数回给调用方：速率是**纪律**的一部分，不能只写在台账里。
         parameters: {
           assetSource,
@@ -1953,7 +2426,7 @@ function apply(ctx, config = {}) {
 
   registerNdayTool(defineTool({
     name: 'nday_triage',
-    description: 'Rank local POC documents by identifiers, paths, signatures, impact, and coverage. Does not write the catalog.',
+    description: 'Rank local POC documents by identifiers, paths, signatures, and coverage.',
     parameters: {
       root: { type: 'string', required: true, description: 'Directory to scan' },
       workspace: { type: 'string', description: 'Base path for a relative root' },
@@ -2024,7 +2497,7 @@ function apply(ctx, config = {}) {
 
   registerNdayTool(defineTool({
     name: 'nday_learn',
-    description: 'Save a new Nday to the user corpus. normalized needs machine-checkable probes; verified needs reproduction evidence.',
+    description: 'Save a new Nday to the user corpus with evidence gates.',
     parameters: {
       entry: { type: 'string', required: true, description: 'Catalog entry object' },
       note: { type: 'string', description: 'Optional source note' },
@@ -2121,7 +2594,7 @@ function apply(ctx, config = {}) {
 
   registerNdayTool(defineTool({
     name: 'nday_draft',
-    description: 'Draft an Nday from a POC; review its paths and signatures before saving. Never marks it verified.',
+    description: 'Draft an Nday from a POC for review; never marks it verified.',
     parameters: {
       workspace: { type: 'string', description: 'Workspace for the draft' },
       documentPath: { type: 'string', description: 'Workspace-relative POC path' },
@@ -2131,6 +2604,7 @@ function apply(ctx, config = {}) {
       vendor: { type: 'string', description: 'Vendor name' },
       vulnClass: { type: 'string', description: 'Vulnerability class' },
       sourceUrl: { type: 'string', description: 'Source URL if absent from document' },
+      published: { type: 'string', description: 'Source publication time when known' },
       maxPaths: { type: 'integer', description: 'Path candidates (default 3)' },
     },
     output: {
@@ -2168,6 +2642,22 @@ function apply(ctx, config = {}) {
       if (!String(args.entryId || '').trim()) needsHuman.push('缺少 entryId——请按“厂商-产品-漏洞类型”命名后再落库')
       const sourceUrl = String(args.sourceUrl || '').trim() || candidates.links[0] || ''
       if (!sourceUrl) needsHuman.push('缺少 http(s) 来源——nday_learn 会拒绝没有来源的条目')
+      const sourceKind = /github\.com/i.test(sourceUrl) || /github/i.test(origin)
+        ? 'github'
+        : /nuclei/i.test(origin)
+          ? 'nuclei'
+          : /weixin|sogou/i.test(sourceUrl)
+            ? 'wechat'
+            : 'public'
+      const sourceMeta = enrichCandidate({
+        source: sourceKind,
+        sourceKind,
+        title: String(args.product || args.entryId || ''),
+        url: sourceUrl,
+        ids: candidates.ids,
+        published: args.published,
+        products: [args.product, args.vendor].filter(Boolean),
+      })
       const id = draftId(args.entryId) || (origin !== 'text' ? draftId(path.basename(origin, path.extname(origin))) : '')
       const entry = {
         id,
@@ -2182,12 +2672,20 @@ function apply(ctx, config = {}) {
           paths: candidates.paths,
           probes: draft.probes,
         },
+        provenance: {
+          sourceKind: sourceMeta.sourceKind,
+          trust: sourceMeta.trust,
+          publishedAt: sourceMeta.publishedAt,
+          freshness: sourceMeta.freshness,
+          dedupKey: sourceMeta.dedupKey,
+        },
         sources: sourceUrl ? [{ url: sourceUrl, kind: 'poc', title: origin }] : [],
         lastReviewed: new Date().toISOString().slice(0, 10),
       }
       const text = [
         `条目草案：\`${id || '<缺少 entryId>'}\``,
         '- 这是抽取结果，**不是漏洞结论**；状态固定为 `legacy-unreviewed`。',
+        `- 来源：${sourceMeta.sourceKind} / 可信等级 ${sourceMeta.trust} / 新鲜度 ${sourceMeta.freshness}${sourceMeta.publishedAt ? `（${sourceMeta.publishedAt}）` : '（日期未标注）'} / 去重键 ${sourceMeta.dedupKey}`,
         '- 落库前必须人工确认：路径确实是漏洞入口、判据只在该分支出现、来源 URL 可访问。',
         needsHuman.length ? `- 待人工补全：${needsHuman.join('；')}` : '- 抽取项齐全，仍需确认判据质量。',
         '',
@@ -2210,11 +2708,11 @@ function apply(ctx, config = {}) {
 
   registerNdayTool(defineTool({
     name: 'nday_handoff',
-    description: 'Create a scoped Nuclei hand-off plan from local templates. Does not execute or send payloads.',
+    description: 'Create a scoped Nuclei hand-off plan; does not execute payloads.',
     parameters: {
       entryId: { type: 'string', description: 'Catalog ID; omit for keyword mode' },
       asset: { type: 'string', required: true, description: 'Target URL or host' },
-      scope: { type: 'string', required: true, description: 'Exact domains/IPs/CIDRs; *.domain covers subdomains, not the apex. Target must match.' },
+      scope: { type: 'string', required: true, description: 'Exact domains/IPs/CIDRs; target must match.' },
       workspace: { type: 'string', required: true, description: 'Workspace for plan and ledger' },
       keywords: { type: 'string', description: 'Template keywords; required without entryId' },
     },
@@ -2359,7 +2857,7 @@ function apply(ctx, config = {}) {
 
   if (enablePostRceTools) registerNdayTool(defineTool({
     name: 'access_confirm',
-    description: 'After screening, write a minimal-impact access-confirmation plan with evidence, stop, and cleanup steps. Does not execute.',
+    description: 'Write a minimal-impact access-confirmation plan with stop and cleanup steps.',
     parameters: {
       entryId: { type: 'string', required: true, description: 'Catalog entry ID' },
       asset: { type: 'string', required: true, description: 'Target URL or host' },
@@ -2431,7 +2929,7 @@ function apply(ctx, config = {}) {
 
   registerNdayTool(defineTool({
     name: 'oob_probe',
-    description: 'DNSLog callbacks: create labels, batch one per asset, or check callbacks. Needs a configured endpoint; callback proves reachability only.',
+    description: 'DNSLog callbacks: create, batch, or check labels; callback proves reachability only.',
     parameters: {
       action: { type: 'string', enum: ['new', 'batch', 'check'], required: true, description: 'Create, batch, or check callbacks' },
       label: { type: 'string', description: 'Label returned by new/batch' },

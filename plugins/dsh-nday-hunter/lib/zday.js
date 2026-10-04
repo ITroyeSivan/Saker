@@ -3,6 +3,25 @@
 
 import fs from "node:fs";
 
+export function observedResearchInputs(context, requestId, revision) {
+  if (!context || !Array.isArray(context.assets) || !Array.isArray(context.requests)) return [];
+  return context.requests.filter(request => {
+    if (requestId && request.id !== requestId) return false;
+    if (revision && request.revision !== revision) return false;
+    if (!['backend', 'api'].includes(request.kind) || request.valid !== true || !request.request?.trim() || !request.response?.trim()) return false;
+    if (!Array.isArray(request.inputs) || !request.inputs.some(input => typeof input.name === 'string' && input.name.trim()
+      && ['query', 'body', 'path', 'header'].includes(input.location) && input.evidenceIds?.includes(request.id))) return false;
+    const status = Number(request.response.match(/^HTTP\/\S+\s+(\d{3})/i)?.[1]);
+    if (!Number.isInteger(status) || status < 200 || status >= 300) return false;
+    let url;
+    try { url = new URL(request.endpoint) } catch { return false }
+    return context.assets.some(asset => {
+      try { return asset.inScope === true && asset.reachable === true && new URL(asset.url).origin === url.origin }
+      catch { return false }
+    });
+  });
+}
+
 function clean(value, max = 500) {
   return String(value ?? "").trim().slice(0, max);
 }

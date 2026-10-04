@@ -4,15 +4,18 @@ import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
+import { homedir } from 'node:os'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const SCRIPT = join(ROOT, 'scripts', 'configure-model-reasoning.mjs')
-const HOST_SRC = process.env.DSH_SRC || resolve(ROOT, '..', '_ref', 'dsh-src-0.1.7-rc.2')
+const HOST_SRC = process.env.DSH_SRC || resolve(ROOT, '..', '_ref', 'dsh-src-0.2.0-rc.2')
 const TEMP_ROOT = resolve(ROOT, '..', '_ref', 'tmp')
-const yamlPkg = join(HOST_SRC, 'node_modules', 'js-yaml', 'package.json')
-if (!existsSync(yamlPkg)) {
-  console.log('skip model-reasoning（缺少 js-yaml，设置 DSH_SRC 后重跑）')
-  process.exit(0)
+const yamlPkg = [join(HOST_SRC, 'node_modules', 'js-yaml', 'package.json'),
+  join(ROOT, 'node_modules', 'js-yaml', 'package.json'),
+  join(homedir(), '.dsh', 'profiles', 'web', 'node_modules', 'js-yaml', 'package.json')].find(existsSync)
+if (!yamlPkg) {
+  console.log('FAIL model-reasoning 缺少 YAML 运行库，不能把未执行的必需验证算通过')
+  process.exit(1)
 }
 const yaml = createRequire(pathToFileURL(yamlPkg).href)('js-yaml')
 const HOME = mkdtempSync(join(TEMP_ROOT, 'saker-model-reasoning-'))

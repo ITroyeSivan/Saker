@@ -45,7 +45,6 @@ codex:      { bin: codex, sandbox: workspace-write, timeoutMs: 600000, extraArgs
   claude-code 15s / codex 48s 双 completed）
 - `node ../../../.zcode/chain-probe.mjs` — 五预设作用域工具面应出现两个产品工具
 
-## 安装（本机已装）
+## 桌面端安装
 
-web profile `package.json`：dependencies 加 `@dsh-external/dsh-product-subagents` 的
-link + `dsh.profile.bundles` 追加同名 bundle，`pnpm install`，**重启 dsh web 生效**。
+使用官方桌面端的插件管理入口选择本插件打包产物。整套 Saker 安装在仓库根目录运行 `node scripts/install-desktop.mjs --desktop-dir "C:/path/to/DeepSeek Harness"`：首次打开官方桌面端初始化后，完全退出应用再安装。安装器使用桌面端随附 CLI 管理 desktop profile；重新打开应用后核对当前预设中的实际工具清单。

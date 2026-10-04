@@ -12,13 +12,13 @@ Saker 的知识库中心：随包 refs、用户积累、自动同步知识包与
 - 知识量上来后子串扫描会漏、会慢——本插件用 SQLite FTS5 + BM25，中文 bigram 召回，标题/路径/许可证/metadata 参与重排。
 - Exploit-DB 的元数据体积大、更新频繁，不适合随包——本插件对它做**字段化索引**：约定目录 `imports/exploitdb/`，识别到 `files_exploits.csv`（16 列：id/file/description/date_published/author/type/platform/port/.../codes/tags）即建索引，兼容旧布局 `exploits.csv` 兜底。
 
-## 安装
+## 桌面端安装
 
 ```powershell
-dsh plugin --profile web add "file:./plugins/dsh-knowledge-hub/dsh-external-dsh-knowledge-hub-0.3.19.tgz"
+node scripts/install-desktop.mjs --desktop-dir "C:/path/to/DeepSeek Harness"
 ```
 
-设置页出现「知识库」tab。
+在 Saker 仓库根目录执行；先运行过官方桌面端以初始化配置，再完全退出应用。安装器使用桌面端随附 CLI 管理 desktop profile，并校验安装文件。重新打开桌面端后，设置页出现「知识库」tab。单独安装也应使用官方桌面插件管理入口，选择本插件打包产物。
 
 ## 功能
 

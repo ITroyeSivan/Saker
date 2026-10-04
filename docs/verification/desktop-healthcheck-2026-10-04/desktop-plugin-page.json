@@ -1,0 +1,32 @@
+{
+  "pluginNames": [
+    "@dsh-external/dsh-attack-atlas",
+    "@dsh-external/dsh-auto-advance",
+    "@dsh-external/dsh-campaign-memory",
+    "@dsh-external/dsh-ctf-observer",
+    "@dsh-external/dsh-hunter",
+    "@dsh-external/dsh-knowledge-hub",
+    "@dsh-external/dsh-mcp-studio",
+    "@dsh-external/dsh-method-stack",
+    "@dsh-external/dsh-mode-group",
+    "@dsh-external/dsh-nday-hunter",
+    "@dsh-external/dsh-product-subagents",
+    "@dsh-external/dsh-redteam-results",
+    "@dsh-external/dsh-refusal-guard",
+    "@dsh-external/dsh-route-boost",
+    "dsh-saker",
+    "@dsh-external/dsh-scanner-tools",
+    "@dsh-external/dsh-sec-config",
+    "@dsh-external/dsh-sec-enforce",
+    "@dsh-external/dsh-semgrep-audit",
+    "@dsh-external/dsh-session-pulse",
+    "@dsh-external/dsh-skill-browse",
+    "@dsh-external/dsh-stage-gate",
+    "@dsh-external/dsh-tool-scope",
+    "@dsh-external/dsh-trace-vault",
+    "@dsh-external/dsh-webshell-mgr"
+  ],
+  "count": 25,
+  "mcpListed": true,
+  "visibleLoadFailure": false
+}

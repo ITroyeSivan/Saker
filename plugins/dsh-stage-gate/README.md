@@ -40,11 +40,9 @@ DSH 宿主平面插件：把各安全预设（Saker 的 pentest / code-audit / c
 - 不拦截工具调用、不监听会话事件（那是未来版本；先证明 schema 校验有用）。
 - 哈希检查是「存在 64 位十六进制串」，不重算哈希（重算需要原始样本，属复核员/人工范围）。
 
-## 安装（与 dsh-webbridge/mcp-studio 同法）
+## 桌面端安装
 
-profiles/web/package.json：dependencies 加 `"@dsh-external/dsh-stage-gate": "link:本目录"`，
-`dsh.profile.bundles` 加 `"@dsh-external/dsh-stage-gate"`，然后 profiles/web 下 `pnpm install`，
-重启 dsh web 后 `stage_gate` / `gates_list` 对全部预设可见。
+使用官方桌面端的插件管理入口选择本插件打包产物。整套 Saker 安装在仓库根目录运行 `node scripts/install-desktop.mjs --desktop-dir "C:/path/to/DeepSeek Harness"`：首次打开官方桌面端初始化后，完全退出应用再安装。安装器调用桌面端随附 CLI 管理 desktop profile，不直接修改 profile 文件。重新打开桌面端后检查当前预设中的 `stage_gate` / `gates_list` 工具。
 
 ## 项目工作台（1.7.0）
 

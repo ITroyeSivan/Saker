@@ -47,16 +47,16 @@ export const RULES = [
   {
     id: 'security',
     label: '安全作业工具面（成果/记忆/留痕/知识库）',
-    prefixes: ['redteam_', 'campaign_', 'gates_', 'trace_', 'knowledge_'],
+    prefixes: ['redteam_', 'campaign_', 'gates_', 'trace_', 'knowledge_', 'saker_method'],
     modes: DEFAULT_MODES,
     source: 'dsh-redteam-results MODES / dsh-campaign-memory·dsh-trace-vault·dsh-knowledge-hub 的 MODE_IDS',
     note: '四个插件的模式清单均为 ["pentest","code-audit","ctf-solver"]；标准模式（宿主默认预设）下它们的注入与入库都不生效',
   },
   {
     id: 'pentest-rce-focus',
-    label: 'Pentest RCE 主线工具面',
+    label: '渗透测试常用工具',
     prefixes: [
-      'webshell_', 'operation_', 'subagent', 'workflow', 'attack_',
+      'webshell_', 'operation_', 'attack_',
       'redteam_atlas_', 'redteam_chain_', 'redteam_coverage_',
       'campaign_', 'trace_',
       'crackmapexec_', 'netexec_', 'impacket_',
@@ -65,8 +65,16 @@ export const RULES = [
     ],
     exceptions: ['attack_plan', 'nday_coverage', 'nday_draft', 'nday_handoff', 'nday_learn'],
     modes: ['code-audit', 'ctf-solver'],
-    source: 'preset/pentest/agent.patch.yml —— RCE 后停止；不做子代理派单、流程矩阵、后渗透或内网工作',
-    note: 'Pentest 仅保留快速侦察、Nday/常规/0day 路径、最小 RCE 验证与结果记录；按需工具包入口由独立规则控制',
+    source: 'preset/pentest/agent.patch.yml —— 按用户的小问题推进，收起无关流程和后渗透工具',
+    note: '常规测试、Nday发现和0Day挖掘共享证据；小任务直接做，确有必要才分派站点子任务',
+  },
+  {
+    id: 'managed-workers',
+    label: '子代理数量与退出控制',
+    prefixes: ['subagent', 'send_message', 'interrupt_agent', 'list_agents', 'list_subagent_models', 'workflow'],
+    modes: ['code-audit', 'ctf-solver', 'standard', ''],
+    source: 'dsh-redteam-results/lib/site-workers.js —— 原生创建、复用、汇报和资源释放',
+    note: 'Pentest仅通过redteam_task管理子代理，防止绕过数量限制或结束后保留活跃子代理',
   },
   {
     id: 'toolPack',

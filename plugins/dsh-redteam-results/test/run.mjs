@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { openStore as atlasOpen, addChainNode as atlasAddNode, listChain as atlasListChain } from "@dsh-external/dsh-attack-atlas/store";
 import { openStore, registerFinding, updateFinding, removeFinding, getFinding, allFindings, listFindings, listFindingsAll, computeStats, computeStatsAll, modeCounts, modeCountsAll, groupByTarget, groupByTargetAll, setMeta, getMeta, ledgerOverviewAll, secondReviewError, secondReviewVerdict, SECOND_RATINGS, RATING_SCALE, REGISTER_STATUSES, MODE_STATUSES } from "../lib/store.js";
-import { verifyMessage, isTrustedRequest, dispatch, checkCsrf, releaseChainRefs, registerFindingWithLink, autoLinkFinding, reconcileChain, renderChainReconcile, apply } from "../lib/index.js";
+import { verifyMessage, findingAdmissionError, isTrustedRequest, dispatch, checkCsrf, releaseChainRefs, registerFindingWithLink, autoLinkFinding, reconcileChain, renderChainReconcile, apply } from "../lib/index.js";
 
 // 二次复核成对参数：verified 是各模式通用的「验证类终态」，首次流转须在同一次调用里
 // 同时给出独立二次评级与足量依据——上游用例原先只流转状态，此处统一以 ...RV 补齐。
@@ -42,6 +42,14 @@ process.on("exit", () => {
 	if (skipped) console.log(`\n本发行版适用：${passed} 通过 / ${skipped} 跳过`);
 });
 const SID = "session-test-1";
+
+ok("成果登记硬门禁：只收 medium/high/critical，弱配置项必须带链与影响", () => {
+	assert.match(findingAdmissionError("pentest", { severity: "low", title: "信息泄露" }), /medium.*high.*critical/);
+	assert.equal(findingAdmissionError("pentest", { severity: "high", title: "SQL 注入", chain: "id=1 → 数据库读取", impact: "可读用户表" }), "");
+	assert.match(findingAdmissionError("pentest", { severity: "medium", title: "CORS 配置错误", summary: "允许任意 Origin" }), /弱配置项/);
+	assert.equal(findingAdmissionError("pentest", { severity: "medium", title: "CORS + 凭据", summary: "跨站读取账户数据", chain: "恶意页 → 带凭据请求 → 读取账户数据", impact: "账户数据泄露" }), "");
+	assert.equal(findingAdmissionError("ctf-solver", { severity: "info", title: "flag" }), "", "CTF 模式不走漏洞级门禁");
+});
 
 ok("register 自增序号且默认值齐备（pending/medium/unknown），行落 SQLite", () => {
 	const st = openStore(":memory:");

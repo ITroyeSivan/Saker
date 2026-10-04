@@ -771,7 +771,7 @@ function matchesStatusFilter(state, filter) {
   if (filter === "disabled") return state === "disabled";
   return state === "mounting" || state === "unreachable" || state === "error";
 }
-function createStudioPage(face, t, pollStatus, diagnose, clearExecutions) {
+function createStudioPage(face, t, pollStatus, diagnose, clearExecutions, refreshSettings) {
   return function McpStudioPage() {
     const state = useStoreState(face.hooks.studio);
     const [openIds, setOpenIds] = (0, import_react3.useState)(() => /* @__PURE__ */ new Set());
@@ -791,6 +791,7 @@ function createStudioPage(face, t, pollStatus, diagnose, clearExecutions) {
     (0, import_react3.useEffect)(() => {
       let alive = true;
       const tick = async () => {
+        if (!state.dirty && !state.saving) await refreshSettings?.();
         const result = await pollStatus();
         if (alive && !("error" in result)) setLive(result);
       };
@@ -802,7 +803,7 @@ function createStudioPage(face, t, pollStatus, diagnose, clearExecutions) {
         alive = false;
         clearInterval(timer);
       };
-    }, [pollStatus]);
+    }, [pollStatus, refreshSettings, state.dirty, state.saving]);
     const toggle = (0, import_react3.useCallback)((id) => {
       setOpenIds((current) => {
         const next = new Set(current);
@@ -1447,6 +1448,7 @@ var StudioScope = class {
   listeners = /* @__PURE__ */ new Set();
   tail = Promise.resolve();
   getSnapshot = () => this.snapshot;
+  refresh = () => this.tail.then(() => this.load());
   subscribe = (listener) => {
     this.listeners.add(listener);
     return () => {
@@ -1485,6 +1487,7 @@ var StudioScope = class {
       return;
     }
     const view = typeof response.value === "object" && response.value !== null ? response.value : {};
+    if (typeof view.revision === "number" && this.snapshot.revision !== void 0 && view.revision <= this.snapshot.revision) return;
     this.publish({
       status: "ready",
       value: view.value,
@@ -1960,7 +1963,7 @@ function apply(ctx) {
     id: "mcp-studio",
     order: 110,
     label: () => t("nav")
-  }, createStudioPage(face, t, () => scope.status(), (id) => scope.diagnose(id), () => scope.clearExecutions())));
+  }, createStudioPage(face, t, () => scope.status(), (id) => scope.diagnose(id), () => scope.clearExecutions(), () => scope.refresh())));
 }
 return module.exports; } });
 //# sourceMappingURL=client.js.map

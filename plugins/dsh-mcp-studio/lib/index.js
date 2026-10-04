@@ -87,7 +87,7 @@ function toMcpClientConfig(server) {
       transport: "stdio",
       command: server.command,
       args: splitArgs(server.argsLine),
-      env: server.env,
+      env: { ...server.env },
       cwd: server.cwd
     };
   }
@@ -95,7 +95,7 @@ function toMcpClientConfig(server) {
     ...base,
     transport: "streamable-http",
     url: server.url,
-    headers: server.headers
+    headers: { ...server.headers }
   };
 }
 function validateSection(value) {
@@ -1216,8 +1216,9 @@ async function apply(ctx, config) {
         }
       );
     }
-    for (const server of serversOf()) {
-      if (!mounts.has(server.id)) tracker.states.delete(server.id);
+    const configuredIds = new Set(enabled.map((server) => server.id));
+    for (const id of tracker.states.keys()) {
+      if (!configuredIds.has(id)) tracker.states.delete(id);
     }
     const wantedPromotions = /* @__PURE__ */ new Set();
     for (const server of enabled) {
@@ -1399,12 +1400,22 @@ async function apply(ctx, config) {
   ctx.on("session/event", ((session, event) => {
     if (event.type === "tool/call") {
       const name2 = typeof event.data.name === "string" ? event.data.name : "";
-      if (!name2.startsWith("mcp__")) return;
+      if (!name2.startsWith("mcp__") && name2 !== META_TOOL_CALL) return;
       const callId = typeof event.data.callId === "string" ? event.data.callId : "";
+      if (!callId) return;
+      let callArguments = event.data.arguments;
+      if (typeof callArguments === "string") {
+        try {
+          callArguments = JSON.parse(callArguments);
+        } catch {
+          callArguments = void 0;
+        }
+      }
+      const args = callArguments !== null && typeof callArguments === "object" ? callArguments : {};
       const sessionId = String(session.id ?? "");
       inflight.set(`${sessionId}:${event.time}:${callId}`, {
-        server: name2.split("__")[1] ?? "",
-        tool: name2,
+        server: name2 === META_TOOL_CALL ? String(args.server ?? "") : name2.split("__")[1] ?? "",
+        tool: name2 === META_TOOL_CALL ? String(args.tool ?? "") : name2,
         at: event.time
       });
       return;
@@ -1417,7 +1428,7 @@ async function apply(ctx, config) {
       for (const [key, entry] of [...inflight]) {
         if (!key.startsWith(`${sessionId}:`) || !key.endsWith(`:${callId}`)) continue;
         inflight.delete(key);
-        const isError = (message.content ?? []).some((block) => block?.isError === true) || event.data.error !== void 0;
+        const isError = message.isError === true || (message.content ?? []).some((block) => block?.isError === true) || event.data.error !== void 0;
         const errorInfo = event.data.error;
         executions.push({
           at: entry.at,

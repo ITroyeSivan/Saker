@@ -9,10 +9,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(ROOT, "scripts", "generate-report-drafts.mjs");
+const PRELOAD = pathToFileURL(join(ROOT, 'scripts', 'test-stub-register.mjs')).href;
 let pass = 0;
 let fail = 0;
 const ok = (label, condition, detail = "") => {
@@ -79,7 +80,7 @@ try {
 }
 
 const run = (extra = []) => spawnSync(process.execPath, [
-	SCRIPT, "--workspace", ws, "--home", home, ...extra,
+	'--import', PRELOAD, SCRIPT, "--workspace", ws, "--home", home, ...extra,
 ], { cwd: ROOT, encoding: "utf8" });
 
 try {
@@ -131,7 +132,7 @@ try {
 	const dryWs = join(sandbox, "ws-dry");
 	mkdirSync(dryWs, { recursive: true });
 	writeFileSync(join(dryWs, "operation-state.json"), JSON.stringify({ intents: [{ id: "i1", summary: "x", status: "open", sessionId: SESSION }] }), "utf8");
-	const dry = spawnSync(process.execPath, [SCRIPT, "--workspace", dryWs, "--home", home, "--dry"], { cwd: ROOT, encoding: "utf8" });
+	const dry = spawnSync(process.execPath, ['--import', PRELOAD, SCRIPT, "--workspace", dryWs, "--home", home, "--dry"], { cwd: ROOT, encoding: "utf8" });
 	ok("--dry 不写盘但报告计划",
 		dry.status === 0 && !existsSync(join(dryWs, "reports")) && /dry-run/.test(dry.stdout || ""));
 } finally {

@@ -1,6 +1,10 @@
+> 2026-10-03入口调整：新任务仅保留渗透测试，其下为常规测试、Nday发现、0Day挖掘。文中旧模式资料仅供历史兼容；当前用法见[使用介绍](saker-improvements-and-plugin-guide-2026-10-02.md)。
+
 # 开发与发布
 
 仓库结构、插件约定、打包安装、测试与发版流程。
+
+> Nday 模式的整体方案、当前进展、rc.2/桌面端待做项见 [Nday 模式开发交接](./nday-development-handoff.md)。
 
 ## 仓库结构
 
@@ -15,7 +19,7 @@ Saker/
 │   ├── refs/                     # 共享参考资料
 │   └── scripts/                  # 工具面辅助脚本
 ├── plugins/                      # 24 个独立功能插件
-├── scripts/                      # 全量打包（pack-all）与安装（install-all）
+├── scripts/                      # 全量打包（pack-all）与桌面安装（install-desktop）
 ├── lib/preset-root.js            # 模式注册入口
 ├── cordis.patch.yml              # bundle 加载配置
 ├── docs/                         # 使用文档、功能说明、发布说明
@@ -31,8 +35,7 @@ Saker/
 
 每个插件是独立 bundle，各有自己的 README、`package.json` 和 `lib/`，互不依赖。
 
-改插件代码时**必须同时升 `package.json` 的版本号**。`install-all.mjs` 按版本号跳过同版本包——
-不升版本 = 不重装 = 改动静默不生效。这是本项目最容易踩的坑，改完请核对一次。
+发布插件改动时**必须更新 `package.json` 的版本号**。桌面开发验证使用不可变摘要产物：`install-desktop.mjs` 对每次打包内容生成独立文件依赖并校验安装字节，因此同版本开发包的内容变动也会重新安装。发布仍须按版本管理，不能用开发验证的摘要代替正式版本。
 
 插件目录结构：
 
@@ -53,26 +56,25 @@ plugins/dsh-<名字>/
 
 ```bash
 node scripts/pack-all.mjs        # 生成根模式包和 24 个插件包
-node scripts/install-all.mjs     # 装进 dsh 的 web profile
+node scripts/install-desktop.mjs --desktop-dir "C:/path/to/DeepSeek Harness"
 ```
 
 可用环境变量：
 
 | 变量 | 用途 |
 |---|---|
-| `SAKER_PROFILE` | 指定安装到哪个 profile，默认 `web` |
-| `DSH_CLI` | `dsh` 不在 PATH 时，指向 CLI 入口（如源码树的 `apps/cli/lib/bin.js`） |
+| `DSH_DESKTOP_DIR` | 官方 Windows 桌面安装目录；可代替 `--desktop-dir` |
 | `DSH_HOME` | 覆盖配置目录 |
 
-脚本会跳过已安装的同版本包、自动升级更高版本，并清理因重新打包而失效的旧 `file:` 依赖，可安全重复执行。
+当前验证基线为官方桌面端 0.2.0-rc.2。先打开应用初始化 desktop profile，再完全退出后安装。安装器校验版本及运行进程，调用应用随附的 CLI 完成整套插件事务，并比对安装后的文件字节；不得通过 npm CLI 或直接编辑 profile 管理桌面插件。`install-all.mjs` 仅保留显式自定义 legacy profile 支持，不再用于网页端或桌面端安装。
 
-> **发布前 `pack-all` 和 `install-all` 都要跑。**
+> **发布前 `pack-all` 和 `install-desktop` 都要跑。**
 > 曾经出现 `pack-all` 22/22 全绿、而安装阶段必崩的情况（变量声明被上一行的注释吞掉）。
 > 打包通过 ≠ 装得上，这是两道工序。
 
 ## 测试
 
-当前完整回归包含 46 套测试（断言数以运行结果为准）。跑单个插件：
+当前完整回归包含 61 套测试（套件及断言数以运行结果为准）。跑单个插件：
 
 ```bash
 cd plugins/<插件目录>
@@ -85,13 +87,10 @@ node --import ../../scripts/test-stub-register.mjs test/run.mjs
 跑全部：
 
 ```bash
-for d in plugins/*/; do
-  [ -f "$d/test/run.mjs" ] || continue
-  ( cd "$d" && node --import ../../scripts/test-stub-register.mjs test/run.mjs )
-done
+node scripts/run-all-tests.mjs
 ```
 
-多数套件需要本机装有对应程序（如 `php`）才能跑回路烟测，缺失时会显式 `skip` 而不是假装通过。
+完整入口还包含根包、交付、共享上下文、任务策略、方法包及桌面专项，并把失败写入退出码。部分套件需要本机装有对应程序（如 `php`）才能跑回路烟测，缺失时会显式 `skip`。
 
 ## 发版
 

@@ -76,7 +76,7 @@ export function apply(ctx, config = {}) {
   // 不一定出现在插件上下文的全局 schemas() 里；全局清单仍用于原有模式规则。
   const visibleTools = (agent) => {
     try {
-      const schemas = agent?.ctx?.tools?.schemas?.()
+      const schemas = agent?.ctx?.tools?.schemas?.(agent)
       if (Array.isArray(schemas)) return schemas.map((s) => s.name)
       return knownTools()
     } catch (error) {
@@ -166,10 +166,10 @@ export function apply(ctx, config = {}) {
   if (enable && packs.length) {
     ctx.tools.register(defineTool({
       name: 'tool_pack',
-      description: '按需加载工具包。action=list 查看；load/unload 切换。pack=active-scan 仅在明确假设需要时开放单项扫描工具；pack=webshell 用于 WebShell 管理。',
+      description: '按需加载工具包，action=list/load/unload。pack=asset-discovery 用于有限目标识别和资产查询；nday 用于公开漏洞与情报源；active-scan 用于明确假设的扫描。加载不扩大权限或范围。',
       parameters: {
         action: { type: 'string', enum: ['list', 'load', 'unload'], required: true, description: 'list/load/unload' },
-        pack: { type: 'string', description: 'active-scan 或 webshell' },
+        pack: { type: 'string', description: 'asset-discovery / nday / active-scan / webshell' },
       },
       output: {
         schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },

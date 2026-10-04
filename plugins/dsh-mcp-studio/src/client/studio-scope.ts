@@ -24,6 +24,8 @@ export class StudioScope implements SettingsScope {
 
   getSnapshot = (): StudioScopeSnapshot => this.snapshot
 
+  refresh = (): Promise<void> => this.tail.then(() => this.load())
+
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener)
     return () => {
@@ -68,6 +70,7 @@ export class StudioScope implements SettingsScope {
       return
     }
     const view = (typeof response.value === 'object' && response.value !== null ? response.value : {}) as DescriptorShape
+    if (typeof view.revision === 'number' && this.snapshot.revision !== undefined && view.revision <= this.snapshot.revision) return
     this.publish({
       status: 'ready',
       value: view.value,
@@ -107,6 +110,6 @@ export class StudioScope implements SettingsScope {
   }
 }
 
-export function createStudioScope(connection: { rpc: { call(channel: string, endpoint: string, payload: unknown): Promise<{ ok: true; value: unknown } | { ok: false; error: { message: string } }> } }): SettingsScope {
+export function createStudioScope(connection: { rpc: { call(channel: string, endpoint: string, payload: unknown): Promise<{ ok: true; value: unknown } | { ok: false; error: { message: string } }> } }): StudioScope {
   return new StudioScope((endpoint, payload) => connection.rpc.call(STUDIO_CHANNEL, endpoint, payload))
 }

@@ -21,11 +21,27 @@ import path from "node:path";
 import crypto from "node:crypto";
 import os from "node:os";
 import fs from "node:fs";
+import { fileURLToPath } from 'node:url';
+import { buildDeliveryFiles, zipDelivery } from './bundle.js';
+import { saveTaskContext, readTaskContext, readTaskRecord, taskContextView } from './task-context.js';
+import { stageMethodPackage, readMethodPackage, methodPackageState, recordMethodReview, activateMethodPackage, listMethodPackages, activeMethodPackage } from './method-packages.js';
+import { createResearch, observeResearch, assessResearch, closeResearch, researchDetail, researchIndex, researchGroups, researchNext, compactResearchResult } from './research.js';
+import { executeRecordedRequest, readExecutionReceipt, executionReceiptSummary } from './execution-receipts.js';
+import { verifyEffect, readEffectVerification } from './effect-verifications.js';
+import { runEffectJob, readEffectJob } from './effect-jobs.js';
+import { startTaskPolicy, updateTaskProgress, taskPolicyStatus, taskExecutionGuard, taskPrompt, taskOverview, chooseTaskMode, pauseTaskPolicy, resumeTaskPolicy, archiveTaskRound } from './task-policy.js';
+import { captureTaskCost, taskCostOverview } from './task-cost.js';
+import { createSiteWorkers, siteWorkerView, siteWorkerRows, siteWorkerParent } from './site-workers.js';
+import { indexBusinessMaterials, businessMaterialView } from './business-materials.js';
+import { runComparisonJob, readComparisonJob, comparisonFindingInput } from './comparison-jobs.js';
+import { recordImpactReview } from './impact-reviews.js';
+import { PROOF_KINDS, parseReproduction, renderReproduction, renderFindingDelivery } from './delivery.js';
 import { defineTool } from "@deepseek-ai/dsh-tools";
+import { saveChecks, readChecks, compactChecks, renderCheckedTsv } from './checked.js';
 import { openStore, registerFinding, updateFinding, removeFinding, getFinding, allFindings, listFindings, listFindingsAll, groupByTarget, groupByTargetAll, computeStats, computeStatsAll, modeCounts, modeCountsAll, ledgerOverview, ledgerOverviewAll, getMeta, setMeta, SEVERITIES, STATUSES, REGISTER_STATUSES, MODE_STATUSES, ALL_STATUSES, EVIDENCE_LEVELS, SOURCE_ORIGINS, SECOND_RATINGS, secondReviewError, secondReviewVerdict, statusesOf } from "./store.js";
 
 const name = "dsh-redteam-results";
-const inject = ["tools", "webServer", "webRuntime", "agentPresets"];
+const inject = ["tools", "webServer", "webRuntime", "agentPresets", "systemPrompt", "sessions", "agents", "subagents"];
 
 const ROUTE_PATH = "/dsh-redteam-results";
 /** 进程级 CSRF token：GET <route>/csrf 由同源页取走（跨源响应不可读），POST 须回带 x-dsh-csrf 头。 */
@@ -36,6 +52,7 @@ export function checkCsrf(req, token) {
 /** 验证按钮防重：sessionId:id → 最近注入时间（10 分钟窗口内不重复 followup，防连点灌多条复核消息）。 */
 const VERIFY_SENT = new Map();
 const VERIFY_WINDOW_MS = 10 * 60 * 1000;
+const workerManagers = new WeakMap();
 
 /** 链路互链（chain 三模式）：反查 AttackAtlas 链路节点对各 finding 的引用——行带 chainNodes
  *  供 Detail 互链显示。atlas 包/库不可用时静默缺省（不阻塞成果读取）。
@@ -201,6 +218,10 @@ export function verifyMessage(finding) {
 			: `等级 ${finding.severity} ｜ 目标 ${finding.target || "（未填）"} ｜ 当前状态 ${finding.status} ｜ 证据等级 ${finding.evidenceLevel}`
 	];
 	if (finding.poc) lines.push(`${finding.mode === "ctf-solver" ? "解题材料（脚本/过程）" : finding.mode === "incident-response" ? "取证过程 / 检测命令" : "复现材料"}：\n${finding.poc}`);
+	if (finding.mode === 'pentest' && finding.reproduction) {
+		try { lines.push('完整复现方法：\n' + renderReproduction(parseReproduction(finding.reproduction))); }
+		catch { lines.push('结构化复现方法不完整，请核对原记录后补齐。'); }
+	}
 	if (finding.requestPkt) lines.push(`完整请求包：\n${finding.requestPkt}`);
 	if (finding.responsePkt) lines.push(`关键响应：\n${finding.responsePkt}`);
 	if (finding.baseline || finding.diffEvidence || finding.markerEcho) lines.push(`对照三件套：基线=${finding.baseline || "缺"} ｜ 差分=${finding.diffEvidence || "缺"} ｜ marker=${finding.markerEcho || "缺"}`);
@@ -255,6 +276,35 @@ export function verifyMessage(finding) {
 			"- fixed=仅当此前已 verified 真实存在、用户修复后本次复测不成功才可标记（须有本次复测记录）。"].join("\n");
 	lines.push(statusGuide);
 	return lines.join("\n");
+}
+
+const FINDING_POLICY_MODES = new Set([
+	"pentest", "code-audit", "redteam", "attack-defense", "cloud-security", "incident-response",
+]);
+const FINDING_POLICY_SEVERITIES = new Set(["medium", "high", "critical"]);
+const WEAK_FINDING_RE = /(^|[^a-z])(tls|ssl|cors|hsts|csp|x-frame-options|security headers?|missing headers?|clickjacking|banner|version disclosure|information disclosure|info disclosure|self-xss|open redirect|rate limit|cookie flags?)([^a-z]|$)/i;
+
+/**
+ * Model-facing admission policy: only medium/high/critical findings enter the
+ * result ledger. Weak configuration findings need a real chain plus impact or
+ * PoC; a header checklist or scanner note is not enough.
+ */
+export function findingAdmissionError(mode, args = {}) {
+	if (!FINDING_POLICY_MODES.has(String(mode || ""))) return "";
+	const severity = String(args.severity || "").toLowerCase();
+	if (!FINDING_POLICY_SEVERITIES.has(severity)) {
+		return "成果等级只接收 medium / high / critical；low / info 不进入成果库。请继续利用链验证，或不要登记。";
+	}
+	const text = [args.title, args.type, args.summary, args.description, args.impact, args.chain, args.note]
+		.filter(Boolean).join(" ");
+	if (!WEAK_FINDING_RE.test(text)) return "";
+	const chain = String(args.chain || "").trim();
+	const impact = String(args.impact || "").trim();
+	const poc = String(args.poc || "").trim();
+	if (!chain || (!impact && !poc)) {
+		return "该条属于 TLS/CORS/安全头/信息泄露等弱配置项，默认不接收。确有利用链时，请补齐 chain（入口→影响）与 impact 或 PoC 后重新登记；否则不要写入成果。";
+	}
+	return "";
 }
 
 function sessionOf(ctx, exec) {
@@ -322,9 +372,126 @@ function readBody(req) {
 	});
 }
 
+function methodAction(st, args, actor) {
+  const parse = () => typeof args.document === 'string' ? JSON.parse(args.document) : args.document;
+  if (args.action === 'list') return listMethodPackages(st, args.offset ?? 0);
+  if (args.action === 'detail') return { ...readMethodPackage(st, args.digest), ...methodPackageState(st, args.digest) };
+  if (args.action === 'active') return { method: activeMethodPackage(st, args.id) };
+  if (args.action === 'stage') return stageMethodPackage(st, parse());
+  if (args.action === 'review' || args.action === 'verify') return recordMethodReview(st, args.digest, args.action === 'review' ? 'review' : 'verification', parse(), actor);
+  if (args.action === 'activate' || args.action === 'rollback') return activateMethodPackage(st, args.digest, args.expectedDigest, actor, args.action === 'rollback');
+  throw new Error('invalid method action');
+}
+
 /** 通道端点分发（纯逻辑，供路由与测试复用）。 */
 export async function dispatch(ctx, st, endpoint, payload) {
-	const p = payload ?? {};
+  const p = payload ?? {};
+  if (endpoint === 'finding.impact-review') {
+    const sid = String(p.sessionId || ''), finding = getFinding(st, sid, String(p.id || ''));
+    if (!finding || finding.mode !== 'pentest') throw new Error('current pentest finding required');
+    st.db.exec('BEGIN IMMEDIATE');
+    try {
+      recordImpactReview(st, sid, finding, p, 'desktop-action');
+      const updated = updateFinding(st, sid, 'pentest', finding.id, { status: 'verified', secondRating: p.secondRating, secondRatingNote: p.note, verifyNote: p.note });
+      st.db.exec('COMMIT');
+      return { ok: true, id: updated.id, review: getFinding(st, sid, finding.id).executionEvidence.effectEvidence };
+    } catch (error) { st.db.exec('ROLLBACK'); throw error; }
+  }
+  if (endpoint === 'workers.findings') {
+    const row = siteWorkerRows(st, String(p.sessionId || '')).find(worker => worker.childId === p.childId);
+    if (!row) throw new Error('子任务不属于当前会话');
+    return { ok: true, childId: row.childId, site: row.site, question: row.question,
+      list: listFindings(st, row.childId, 'pentest', { page: p.page || 1, pageSize: 12, delivery: p.delivery || 'ready' }) };
+  }
+  if (endpoint === 'research.index' || endpoint === 'research.detail') {
+    if (!p.sessionId) throw new Error('sessionId required');
+    return { ok: true, ...(endpoint === 'research.index' ? researchIndex(st, p.sessionId, p.offset) : researchDetail(st, p.sessionId, p.id)) };
+  }
+  if (endpoint === 'methods.action') {
+    const sessionId = String(p.sessionId || '');
+    const session = ctx.sessions?.get(sessionId);
+    if (!session || session.header?.agentPreset !== 'pentest') throw new Error('请选择当前可用的渗透会话');
+    return { ok: true, ...methodAction(st, p, 'desktop-user') };
+  }
+  if (['task.status', 'task.choose', 'task.start', 'task.cancel', 'task.resume', 'task.cleanup', 'task.new-round'].includes(endpoint)) {
+    const sessionId = String(p.sessionId || '');
+    if (!sessionId) throw new Error('sessionId required');
+    let sessions;
+    try { sessions = ctx.sessions || ctx.get?.('sessions'); } catch { /* unavailable */ }
+    const session = sessions?.get(sessionId);
+    if (endpoint !== 'task.status') {
+      if (!session || session.header?.agentPreset !== 'pentest') throw new Error('请选择当前可用的渗透会话');
+      if (typeof ctx.tools?.guard !== 'function') throw new Error('桌面宿主缺少任务预算守卫');
+      if (endpoint === 'task.choose') chooseTaskMode(st, sessionId, p.mode);
+      else if (endpoint === 'task.start') {
+        const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
+        if (typeof agent?.followup !== 'function') throw new Error('当前代理不可用，任务尚未开始；请打开该会话后重试');
+        if (agent.status === 'running') throw new Error('当前模型仍在运行，请先停止或等待完成');
+        const policy = startTaskPolicy(st, sessionId, p.policy);
+        try {
+          // 注入安全：由桌面 task.start RPC 在空闲代理上触发，不在 Session.append 临界区内。
+          agent.followup({ id: `saker-task-${sessionId}-${policy.startedAt}`, role: 'user',
+            content: [{ type: 'text', text: `请开始桌面已经设置的小任务：${policy.question}。沿相关路径推进，使用已有资料、范围和预算；不要重复开始任务或重置预算。缺少关键资料、遇到阻碍或当前路径结束时再向用户说明。` }], source: { kind: 'user' } });
+        } catch (error) {
+          updateTaskProgress(st, sessionId, { cancelled: true });
+          throw new Error(`模型未能开始，已停止本轮，请保留资料后重新选择问题：${error.message}`);
+        }
+      }
+      else if (endpoint === 'task.resume') resumeTaskPolicy(st, sessionId, p.note, 'desktop-user');
+      else if (endpoint === 'task.cancel') {
+        const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
+        if (typeof agent?.cancel !== 'function') throw new Error('当前代理不可用，尚未确认模型停止；请打开该会话后重试');
+        updateTaskProgress(st, sessionId, { cancelled: true });
+        agent.cancel({ kind: 'user' });
+      }
+      else if (endpoint === 'task.new-round') {
+        const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
+        if (agent?.status === 'running') throw new Error('当前模型仍在运行，请先停止或等待完成');
+        archiveTaskRound(st, sessionId, 'desktop-user');
+      }
+      if (endpoint === 'task.cancel' || endpoint === 'task.cleanup') {
+        const manager = workerManagers.get(ctx), agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
+        if (siteWorkerView(st, sessionId).active) {
+          if (!manager || !agent) throw new Error('当前代理不可用；子代理释放尚未确认，请刷新或重启宿主后核对');
+          await manager.cleanup(agent, p.childId, endpoint === 'task.cancel' ? 'desktop-user cancelled' : 'desktop-user cleanup');
+        }
+      }
+    }
+    let workers = siteWorkerView(st, sessionId);
+    const manager = workerManagers.get(ctx), agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
+    if (manager && agent && workers.workers.length) workers = await manager.status(agent);
+    const overview = taskOverview(st, sessionId), cost = taskCostOverview(ctx, st, sessionId);
+    return { ok: true, isPentest: session?.header?.agentPreset === 'pentest', ...overview, ...workers, cost,
+      roundCost: overview.policy ? taskCostOverview(ctx, st, sessionId, overview.policy.startedAt) : null,
+      previousRounds: st.db.prepare('SELECT count(*) AS n FROM task_rounds WHERE session_id=?').get(sessionId).n,
+      elapsedSeconds: overview.policy ? Math.max(0, Math.floor((Math.min(Date.now(), overview.policy.finishedAt ?? Infinity, overview.policy.budget.deadline ?? Infinity) - overview.policy.startedAt) / 1000)) : 0 };
+  }
+  if (endpoint === 'context.index' || endpoint === 'context.detail') {
+    const sessionId = String(p.sessionId || '');
+    if (!sessionId) throw new Error('sessionId required');
+    const context = readTaskContext(st, sessionId);
+    if (endpoint === 'context.detail' && p.version !== undefined && ['request', 'method'].includes(p.kind)) {
+      const field = p.kind === 'request' ? 'requests' : 'methods';
+      if (!context?.[field].some(row => row.id === p.id && (row.revision || row.version) === p.version)) {
+        const item = readTaskRecord(st, sessionId, p.kind, p.id, p.version);
+        if (!item) throw new Error('record not found in current session');
+        return { ok: true, item, historical: true, text: '历史版本，须核对当前身份和基线后使用：\n' + JSON.stringify(item, null, 2) };
+      }
+    }
+    return { ok: true, ...taskContextView(context, endpoint === 'context.index' ? { offset: p.offset } : p) };
+  }
+	if (endpoint === 'delivery.bundle') {
+		const sessionId = String(p.sessionId ?? '');
+		if (!sessionId) throw new Error('sessionId required');
+		const bundle = buildDeliveryFiles(allFindings(st, sessionId, 'pentest'), readChecks(st, sessionId));
+		return { ok: true, filename: 'saker-delivery.zip', archive: zipDelivery(bundle.files).toString('base64'),
+			confirmedFindings: bundle.confirmedFindings, incompleteRecords: bundle.incompleteRecords, checkedCount: bundle.checkedCount };
+	}
+	if (endpoint === 'checks.list' || endpoint === 'checks.export') {
+		const rows = readChecks(st, String(p.sessionId ?? ''));
+		return endpoint === 'checks.list' ? { ok: true, rows: compactChecks(rows) }
+			: { ok: true, text: renderCheckedTsv(rows), filename: 'checked.tsv' };
+	}
 	if (endpoint === "findings.list") {
 		const mode = String(p.mode ?? "redteam");
 		if (p.scope === "all") {
@@ -375,6 +542,13 @@ export async function dispatch(ctx, st, endpoint, payload) {
 		removeFinding(st, sessionId, String(p.id ?? ""));
 		return { ok: true, counts: modeCounts(st, sessionId) };
 	}
+	if (endpoint === 'finding.delivery') {
+		const sessionId = String(p.sessionId ?? '');
+		if (!sessionId) throw new Error('sessionId required');
+		const finding = getFinding(st, sessionId, String(p.id ?? ''));
+		if (!finding || finding.mode !== 'pentest') return { ok: false, error: 'pentest finding not found' };
+		return { ok: true, text: renderFindingDelivery(finding), filename: finding.id + '-reproduction.md' };
+	}
 	if (endpoint === "finding.verify") {
 		const sessionId = String(p.sessionId ?? "");
 		const finding = getFinding(st, sessionId, String(p.id ?? ""));
@@ -421,15 +595,37 @@ export async function dispatch(ctx, st, endpoint, payload) {
 //#region host wiring
 
 function apply(ctx) {
+  ctx.on?.('session/event', (session, event) => {
+    if (session?.header?.agentPreset !== 'pentest' && !siteWorkerParent(theStore(), session?.id || '')) return;
+    captureTaskCost(theStore(), session, event);
+  });
+  const siteWorkers = createSiteWorkers(ctx, theStore);
+  workerManagers.set(ctx, siteWorkers);
+  if (typeof ctx.systemPrompt?.section === 'function') ctx.systemPrompt.section({
+    name: 'saker-pentest-task', order: 470,
+    text: assembly => {
+      const session = sessionOf(ctx, { agent: assembly?.agent });
+      if (!session || session.mode !== 'pentest') return '';
+      try { return taskPrompt(taskPolicyStatus(theStore(), session.id)); }
+      catch { return '本会话任务状态无法读取，停止目标操作并报告原因；不要重建或重置历史。'; }
+    }
+  });
+  const enforcementAvailable = typeof ctx.tools.guard === 'function';
+  if (enforcementAvailable) ctx.tools.guard(exec => {
+    const session = sessionOf(ctx, exec);
+    if (!session || session.mode !== 'pentest') return undefined;
+    try { return taskExecutionGuard(theStore(), session.id, exec.name); }
+    catch (error) { return '任务策略无法读取，停止目标操作：' + error.message; }
+  });
 	// 插件卸载时释放库句柄。句柄悬着会锁住 -wal/-shm —— Windows 上表现为这个库文件
 	// 既删不掉也改不了名（备份/迁移/损坏自愈都要 rename 它）。
 	// 对照 campaign-memory：它一直有这条 ctx.effect，其余插件此前都缺，
 	// 插件重载/HMR 会因此留下永不回收的句柄（实测同进程二次 openStore 会 EBUSY）。
-	ctx.effect(() => () => { try { store?.close?.(); } catch { /* 已关或句柄失效 */ } store = undefined; }, "dsh-redteam-results: store handle");
+	ctx.effect(() => async () => { await siteWorkers.dispose(); workerManagers.delete(ctx); try { store?.close?.(); } catch { /* 已关或句柄失效 */ } store = undefined; }, "dsh-redteam-results: store handle");
 	//#region 模型工具（宿主平面，三种安全模式可见）
 	ctx.tools.register(defineTool({
 		name: "redteam_finding_register",
-		description: "登记一条 finding 到本会话「redteam 成果」页。每条进报告的 finding 必登；完整字段语义、模式词表与填写纪律见 shared/refs/finding-fields.md。子代理登记落入其自身会话库。",
+		description: "登记本会话成果。弱配置须有真实影响和利用链；登记后独立复核才能交付。子代理成果保存在子会话。",
 		parameters: {
 			title: { type: "string", required: true, description: "名称（简短）" },
 			severity: { type: "string", enum: SEVERITIES, description: "等级；漏洞型必填，其他模式可省略（默认 medium）" },
@@ -438,6 +634,9 @@ function apply(ctx) {
 			type: { type: "string", description: "类型标签；按当前模式词表填写，详见 finding-fields.md" },
 			description: { type: "string", description: "描述（影响与成因）" },
 			poc: { type: "string", description: "测试过程+完整 EXP；复杂场景写 exp/<id>.py，简单场景写可直接复现的请求/命令" },
+			proofKind: { type: "string", enum: PROOF_KINDS, description: "证据类型；interaction 不代表 execution" },
+			reproduction: { type: "string", description: "旧完整方法JSON；reviewSteps为字符串。已有对照优先用comparisonId" },
+      comparisonId: { type: 'string', description: 'run-pair的id（pair-…）：自动填回执和方法，保留待复核读取线索' },
 			chain: { type: "string", description: "调用链 entry→sink（审计双链之一，每行一链）" },
 			chainTracer: { type: "string", description: "追踪员独立重追链（双链另一侧）" },
 			chainVerdict: { type: "string", description: "双链结论：一致 / 不一致+差异" },
@@ -483,8 +682,17 @@ function apply(ctx) {
 		async execute(args, exec) {
 			const session = sessionOf(ctx, exec);
 			if (!session) return { ok: false, id: "", error: "无法解析当前会话（工具需在会话内调用）" };
-			const { finding, node } = await registerFindingWithLink(theStore(), session.id, session.mode, args);
-			return { ok: true, id: finding.id, seq: finding.seq, title: finding.title, mode: finding.mode, severity: finding.severity, chainNode: node ? node.id : "" };
+      try {
+        const input = args.comparisonId ? comparisonFindingInput(theStore(), session.id, args) : args;
+        const policyError = findingAdmissionError(session.mode, input);
+        if (policyError) return { ok: false, id: '', error: policyError };
+        if (args.comparisonId) {
+          const saved = allFindings(theStore(), session.id, session.mode).find(row => row.reproduction === input.reproduction);
+          if (saved) return { ok: true, id: saved.id, seq: saved.seq, title: saved.title, mode: saved.mode, severity: saved.severity, reused: true };
+        }
+        const { finding, node } = await registerFindingWithLink(theStore(), session.id, session.mode, input);
+        return { ok: true, id: finding.id, seq: finding.seq, title: finding.title, mode: finding.mode, severity: finding.severity, chainNode: node ? node.id : '' };
+      } catch (error) { return { ok: false, id: '', error: error.message }; }
 		}
 	}));
 
@@ -504,6 +712,8 @@ function apply(ctx) {
 			summary: { type: "string" },
 			description: { type: "string" },
 			poc: { type: "string" },
+			proofKind: { type: "string", enum: PROOF_KINDS },
+			reproduction: { type: "string" },
 			chain: { type: "string" },
 			chainTracer: { type: "string" },
 			chainVerdict: { type: "string" },
@@ -542,15 +752,22 @@ function apply(ctx) {
 				const review = v.secondRating
 					? ` ｜ 二次评级 ${v.secondRating}${v.verdict === "downgrade" ? `（低于首次 ${v.severity}，报告会标注不一致）` : v.verdict === "upgrade" ? `（高于首次 ${v.severity}）` : "（与首次一致）"}`
 					: "";
-				return [{ type: "text", text: `成果已更新：${v.id} → ${v.status ?? "字段修订"}${v.verifyNote ? `（${v.verifyNote}）` : ""}${review}` }];
+				const delivery = v.delivery ? (v.delivery.ready ? ' ｜ 可交付' : ' ｜ 待验证／不可交付：' + v.delivery.gaps.join(', ')) : '';
+				return [{ type: "text", text: `成果已更新：${v.id} → ${v.status ?? "字段修订"}${v.verifyNote ? `（${v.verifyNote}）` : ""}${review}${delivery}` }];
 			}
 		},
 		execute(args, exec) {
 			const session = sessionOf(ctx, exec);
 			if (!session) return Promise.resolve({ ok: false, error: "无法解析当前会话" });
+			if (args.severity !== undefined) {
+				const current = getFinding(theStore(), session.id, args.id);
+				const policyError = findingAdmissionError(session.mode, { ...(current || {}), ...args });
+				if (policyError) return Promise.resolve({ ok: false, error: policyError });
+			}
 			const finding = updateFinding(theStore(), session.id, session.mode, args.id, args);
 			if (finding === undefined) return Promise.resolve({ ok: false, error: `finding ${args.id} 不存在（本会话 ${session.mode} 页）` });
-			return Promise.resolve({ ok: true, id: finding.id, status: finding.status, verifyNote: finding.verifyNote, secondRating: finding.secondRating, severity: finding.severity, verdict: secondReviewVerdict(finding) });
+			return Promise.resolve({ ok: true, id: finding.id, status: finding.status, verifyNote: finding.verifyNote, secondRating: finding.secondRating, severity: finding.severity, verdict: secondReviewVerdict(finding),
+        ...(finding.delivery ? { delivery: { ready: finding.delivery.ready, executionVerified: finding.delivery.executionVerified, gaps: finding.delivery.gaps } } : {}) });
 		}
 	}));
 
@@ -594,6 +811,226 @@ function apply(ctx) {
 	//#endregion
 
 	//#region Web 通道路由（better-sidebar 同款：webServer 自注册 + 同源栅栏）
+  ctx.tools.register(defineTool({
+    name: 'redteam_method',
+    description: '精选方法包：按摘要读取离线资料，暂存固定版本与审阅/正反例证据。激活和回退由成果页明确审阅操作完成。',
+    parameters: {
+      action: { type: 'string', required: true, enum: ['list', 'detail', 'active', 'stage', 'review', 'verify'], description: '方法资料操作，契约见README' },
+      digest: { type: 'string', description: '固定版本SHA256摘要' },
+      id: { type: 'string', description: 'active读取的方法ID' },
+      document: { type: 'string', description: 'stage方法包或review/verify记录的JSON' },
+      offset: { type: 'integer', description: '索引偏移，每页20条' }
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
+      render: (_args, value) => [{ type: 'text', text: value.ok ? JSON.stringify(value, null, 2) : value.error }]
+    },
+    execute(args, exec) {
+      const session = sessionOf(ctx, exec);
+      if (!session || session.mode !== 'pentest') return Promise.resolve({ ok: false, error: '仅当前渗透会话可管理方法资料' });
+      try { return Promise.resolve({ ok: true, ...methodAction(theStore(), args, 'model:' + session.id) }); }
+      catch (error) { return Promise.resolve({ ok: false, error: error.message }); }
+    }
+  }));
+  ctx.tools.register(defineTool({
+    name: 'redteam_execution',
+    description: '执行已存请求。run-pair批次保存正常/异常对照与事实差异；run-effect核对已审阅效果；回执不是漏洞。契约见README。',
+    parameters: {
+      action: { type: 'string', required: true, enum: ['run', 'detail', 'run-pair', 'pair-detail', 'run-effect', 'job-detail', 'verify-effect', 'effect-detail'] },
+      document: { type: 'string', description: 'JSON：run-pair含hypothesisId、normal/probe请求引用；run-effect含methodId/version、roles；verify-effect含rounds，见README' },
+      hypothesisId: { type: 'string', description: 'run：当前验证方向ID' },
+      requestId: { type: 'string', description: 'run：redteam_context中已保存的请求ID' },
+      requestRevision: { type: 'string', description: 'run：已保存请求版本' },
+      purpose: { type: 'string', enum: ['baseline'], description: 'run：用户处理阻碍后复查正常GET/HEAD' },
+      methodId: { type: 'string', description: 'run：用于复现绑定时提供当前已审阅方法ID' },
+      methodVersion: { type: 'string', description: 'run：与methodId同时提供，绑定当前方法版本' },
+      id: { type: 'string', description: 'detail：宿主生成的回执ID' },
+      timeoutMs: { type: 'integer', description: 'run：100到15000，默认5000' },
+      maxBytes: { type: 'integer', description: 'run：响应体上限64到65536，默认65536' }
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
+      render: (args, value) => [{ type: 'text', text: value.ok ? JSON.stringify(args.action === 'run' ? { ok: true, ...executionReceiptSummary(value) } : value) : value.error }]
+    },
+    async execute(args, exec) {
+      const session = sessionOf(ctx, exec);
+      if (!session || session.mode !== 'pentest') return { ok: false, error: '仅当前渗透会话可执行已保存请求' };
+      try {
+        const store = theStore();
+        if (args.action === 'run') return { ok: true, ...await executeRecordedRequest(store, session.id, args, undefined, exec.signal) };
+        if (args.action === 'run-pair') return { ok: true, ...await runComparisonJob(store, session.id, JSON.parse(args.document), exec.signal) };
+        if (args.action === 'pair-detail') return { ok: true, ...readComparisonJob(store, session.id, args.id) };
+        if (args.action === 'detail') return { ok: true, ...readExecutionReceipt(store, session.id, args.id) };
+        if (args.action === 'run-effect') return { ok: true, ...await runEffectJob(store, session.id, JSON.parse(args.document), exec.signal) };
+        if (args.action === 'job-detail') return { ok: true, ...readEffectJob(store, session.id, args.id) };
+        if (args.action === 'verify-effect') return { ok: true, ...verifyEffect(store, session.id, JSON.parse(args.document)) };
+        if (args.action === 'effect-detail') return { ok: true, ...readEffectVerification(store, session.id, args.id) };
+        throw new Error('invalid execution action');
+      } catch (error) { return { ok: false, error: error.message }; }
+    }
+  }));
+  ctx.tools.register(defineTool({
+    name: 'redteam_research',
+    description: '围绕实际输入研究具体问题，自动保留对照证据；无新信息停止当前方向。结论须独立复核，detail读完整记录。',
+    parameters: {
+      action: { type: 'string', required: true, enum: ['groups', 'list', 'detail', 'create', 'observe', 'assess', 'close'], description: '契约见README' },
+      id: { type: 'string', description: 'detail/observe/assess/close必填：验证方向ID；不是观察id' },
+      document: { type: 'string', description: 'create JSON：id/requestId/requestRevision/question/expectedEffect/negativeResult/nextStep。observe绑定两张回执；close写理由。assess旧JSON兼容。' },
+      observationId: { type: 'string', description: 'assess：run-pair返回的观察ID，不重发请求' },
+      outcome: { type: 'string', enum: ['support', 'counterevidence', 'no-information'], description: 'assess：支持/反证/无新信息；difference不能作为结论' },
+      interpretation: { type: 'string', description: 'assess：身份、对象和实际效果如何支持或反驳；回执已保存，不另填阴性台账' },
+      nextInformation: { type: 'string', description: 'assess：下一项必要信息或待独立复核' },
+      restriction: { type: 'string', enum: ['safety-policy', 'tool-policy'], description: '仅close：实际被安全或工具策略中断时填写；记录受限未覆盖，不增加尝试或伪造报文' },
+      offset: { type: 'integer', description: 'list索引偏移，每页20条' }
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
+      render: (args, value) => [{ type: 'text', text: value.ok ? JSON.stringify(args.action === 'detail' ? value : { ok: true, ...compactResearchResult(value) }, null, 2) : value.error }]
+    },
+    execute(args, exec) {
+      const session = sessionOf(ctx, exec);
+      if (!session || session.mode !== 'pentest') return Promise.resolve({ ok: false, error: '仅当前渗透会话可管理研究记录' });
+      try {
+        if (args.restriction !== undefined && args.action !== 'close') throw new Error('restriction is only valid for close');
+        if (['detail', 'observe', 'assess', 'close'].includes(args.action) && !args.id) throw new Error('outer id=<hypothesis ID> is required; assess uses observationId for the comparison ID, observe uses document.id');
+        const store = theStore();
+        let result;
+        if (args.action === 'groups') result = researchGroups(store, session.id);
+        else if (args.action === 'list') result = researchIndex(store, session.id, args.offset);
+        else if (args.action === 'detail') result = researchDetail(store, session.id, args.id);
+        else if (args.action === 'create') result = createResearch(store, session.id, JSON.parse(args.document));
+        else if (args.action === 'observe') result = observeResearch(store, session.id, args.id, JSON.parse(args.document));
+        else if (args.action === 'assess') result = assessResearch(store, session.id, args.id, args.document ? JSON.parse(args.document) : { observationId: args.observationId, outcome: args.outcome, interpretation: args.interpretation, nextInformation: args.nextInformation });
+        else if (args.action === 'close') result = closeResearch(store, session.id, args.id, args.document, args.restriction);
+        else throw new Error('invalid research action');
+        return Promise.resolve({ ok: true, ...result });
+      } catch (error) { return Promise.resolve({ ok: false, error: error.message }); }
+    }
+  }));
+	ctx.tools.register(defineTool({
+		name: 'redteam_task',
+		description: '管理站点问题、共享预算和阻碍。小任务直接做；delegate仅确需深挖。主代理完成用progress {planComplete:true}并cleanup；report仅子代理提交短报告。',
+		parameters: {
+			action: { type: 'string', enum: ['start', 'status', 'next', 'progress', 'cancel', 'pause', 'delegate', 'workers', 'send', 'report', 'cleanup'], required: true },
+			policy: { type: 'string', description: 'start JSON：mode、question、target、budget.toolCalls/minutes/workers(0..2)，0day可加discoveryCalls' },
+			progress: { type: 'string', description: 'progress JSON：planComplete/queueComplete' },
+      planComplete: { type: 'boolean' },
+      queueComplete: { type: 'boolean' },
+      document: { type: 'string', description: 'JSON：delegate site/question/need/reason；send childId/message；report state/summary；pause code/reason/evidence；cleanup childId可选' }
+		},
+		output: {
+			schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
+			render: (_args, value) => [{ type: 'text', text: value.ok ? JSON.stringify(value, null, 2) : value.error }]
+		},
+		async execute(args, exec) {
+			const session = sessionOf(ctx, exec);
+			if (!session || session.mode !== 'pentest') return Promise.resolve({ ok: false, error: '仅当前渗透会话可管理任务策略' });
+			try {
+				if (args.action === 'start') {
+					if (!enforcementAvailable) throw new Error('宿主缺少tools.guard，不能启动有预算保证的任务；请使用受支持桌面版本');
+					startTaskPolicy(theStore(), session.id, JSON.parse(args.policy));
+				} else if (args.action === 'progress') {
+          const progress = args.progress ? JSON.parse(args.progress) : Object.fromEntries(['planComplete', 'queueComplete'].filter(key => args[key] !== undefined).map(key => [key, args[key]]));
+          if (!Object.keys(progress).length) throw new Error('progress requires planComplete or queueComplete boolean');
+          updateTaskProgress(theStore(), session.id, progress);
+        }
+        else if (args.action === 'pause') pauseTaskPolicy(theStore(), session.id, JSON.parse(args.document));
+        else if (args.action === 'delegate') return { ok: true, ...await siteWorkers.delegate(exec.agent, JSON.parse(args.document), exec.signal) };
+        else if (args.action === 'workers') return { ok: true, ...await siteWorkers.status(exec.agent, exec.signal) };
+        else if (args.action === 'send') return { ok: true, ...await siteWorkers.send(exec.agent, JSON.parse(args.document), exec.signal) };
+        else if (args.action === 'report') return { ok: true, ...await siteWorkers.report(exec.agent, JSON.parse(args.document), exec.signal) };
+        else if (args.action === 'cleanup') { const input = args.document ? JSON.parse(args.document) : {}; return { ok: true, ...await siteWorkers.cleanup(exec.agent, input.childId, input.reason || 'task ended') }; }
+				else if (args.action === 'cancel') {
+          updateTaskProgress(theStore(), session.id, { cancelled: true });
+          if (siteWorkerParent(theStore(), session.id)) await siteWorkers.report(exec.agent, { state: 'blocked', summary: '子任务已取消；保留实际证据并释放子代理。' }, exec.signal);
+          else await siteWorkers.cleanup(exec.agent, undefined, 'cancelled');
+        }
+				else if (!['status', 'next'].includes(args.action)) throw new Error('invalid task action');
+				const state = taskPolicyStatus(theStore(), session.id);
+				return Promise.resolve({ ok: true, enforcementAvailable, ...state, ...(args.action === 'next' && state.configured && !state.stopped ? { next: researchNext(theStore(), session.id) } : {}) });
+			} catch (error) { return Promise.resolve({ ok: false, error: error.message }); }
+		}
+	}));
+	ctx.tools.register(defineTool({
+		name: 'redteam_context',
+		description: '保存或读取本渗透会话共享资产、入口条件、请求及方法上下文；供Nday/常规/研究复用。',
+		parameters: {
+			context: { type: 'string', description: '省略读索引；JSON快照assets/checks/requests/methods/maxSupplementAttempts；契约见README。' },
+			kind: { type: 'string', description: 'asset/request/method详情；material读业务材料索引或详情' },
+      materials: { type: 'string', description: 'JSON：site、files[{path,url}]；离线索引选定JS，增量摘要不证明接口可用' },
+			id: { type: 'string', description: '详情记录ID，仅本会话' },
+			version: { type: 'string', description: '请求revision或方法version；多版本时必填' },
+			offset: { type: 'integer', description: '索引偏移，默认0，每次20条' }
+		},
+		output: {
+			schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
+			render: (_args, value) => [{ type: 'text', text: value.ok ? value.text : value.error }]
+		},
+		execute(args, exec) {
+			const session = sessionOf(ctx, exec);
+			if (!session || session.mode !== 'pentest') return Promise.resolve({ ok: false, error: '仅当前渗透会话可读写共享上下文' });
+		try {
+        if (args.materials !== undefined && ([args.context, args.id, args.version].some(value => value !== undefined)
+          || (args.kind !== undefined && args.kind !== 'material') || (args.offset !== undefined && args.offset !== 0)))
+          throw new Error('索引只传materials；可附kind=material和offset=0。不要context/id/version；files需要选定文件的path和url。');
+        if (args.materials === undefined && args.kind === 'material' && [args.context, args.version, args.offset].some(value => value !== undefined)) throw new Error('材料详情不能与快照或版本查询混用');
+        if (args.materials !== undefined) return Promise.resolve({ ok: true, ...indexBusinessMaterials(theStore(), session.id, exec.agent.session.header.cwd, JSON.parse(args.materials)) });
+        if (args.kind === 'material') return Promise.resolve({ ok: true, ...businessMaterialView(theStore(), session.id, { id: args.id }) });
+				if (args.context !== undefined && (args.kind !== undefined || args.id !== undefined || args.version !== undefined)) throw new Error('保存快照与详情查询应分开调用');
+				const context = args.context === undefined ? readTaskContext(theStore(), session.id) : saveTaskContext(theStore(), session.id, JSON.parse(args.context));
+				if (args.version !== undefined && ['request', 'method'].includes(args.kind)) {
+					const field = args.kind === 'request' ? 'requests' : 'methods';
+					if (!context?.[field].some(row => row.id === args.id && (row.revision || row.version) === args.version)) {
+						const item = readTaskRecord(theStore(), session.id, args.kind, args.id, args.version);
+						if (!item) throw new Error('record not found in current session');
+						return Promise.resolve({ ok: true, item, historical: true, text: '历史版本，须核对当前身份和基线后使用：\n' + JSON.stringify(item, null, 2) });
+					}
+				}
+				return Promise.resolve({ ok: true, context, ...taskContextView(context, args) });
+			} catch (error) { return Promise.resolve({ ok: false, error: error.message }); }
+		}
+	}));
+	ctx.tools.register(defineTool({
+		name: 'redteam_delivery',
+		description: '将本会话已复核有效漏洞、完整复现材料、脱敏关键证据和极简已测清单打为ZIP，保存到会话工作目录；不完整成果不计入。',
+		parameters: {},
+		output: {
+			schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
+			render: (_args, value) => [{ type: 'text', text: value.ok ? `交付包：${value.path}；有效漏洞 ${value.confirmedFindings}，检查 ${value.checkedCount}，待补齐 ${value.incompleteRecords}` : value.error }]
+		},
+		execute(_args, exec) {
+			const session = sessionOf(ctx, exec);
+			if (!session || session.mode !== 'pentest') return Promise.resolve({ ok: false, error: '仅当前渗透会话可生成交付包' });
+			try {
+				let cwd = exec.agent.session.header?.cwd;
+				if (typeof cwd !== 'string' || !cwd) throw new Error('会话工作目录缺失');
+				if (cwd.startsWith('file:')) cwd = fileURLToPath(cwd);
+				if (!path.isAbsolute(cwd)) throw new Error('会话工作目录必须为绝对路径');
+				cwd = fs.realpathSync(cwd);
+				const bundle = buildDeliveryFiles(allFindings(theStore(), session.id, 'pentest'), readChecks(theStore(), session.id));
+				const target = path.join(cwd, 'saker-delivery-' + crypto.randomUUID() + '.zip');
+				fs.writeFileSync(target, zipDelivery(bundle.files), { flag: 'wx' });
+				return Promise.resolve({ ok: true, path: target, confirmedFindings: bundle.confirmedFindings, incompleteRecords: bundle.incompleteRecords, checkedCount: bundle.checkedCount });
+			} catch (error) { return Promise.resolve({ ok: false, error: error.message }); }
+		}
+	}));
+	ctx.tools.register(defineTool({
+		name: 'redteam_checks',
+		description: '本会话渗透检查记录：批量保存或读取。未命中需有效请求、观察及执行证据；详细原因留本地，交付仅三列。',
+		parameters: { records: { type: 'string', description: '省略读取；JSON数组，含assetId/entryId/endpoint/methodVersion/authContext/requestRevision、status(not-hit/not-applicable/blocked/not-tested)、executed/requestValid/observationValid、evidenceIds、reason；可附asset/check及supplementAttempts。' } },
+		output: {
+			schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
+			render: (_args, value) => [{ type: 'text', text: value.ok ? value.text : value.error }]
+		},
+		execute(args, exec) {
+			const session = sessionOf(ctx, exec);
+			if (!session || session.mode !== 'pentest') return Promise.resolve({ ok: false, error: '仅当前渗透会话可读写检查记录' });
+			try {
+				const rows = args.records === undefined ? readChecks(theStore(), session.id) : saveChecks(theStore(), session.id, JSON.parse(args.records));
+				return Promise.resolve({ ok: true, rows, text: renderCheckedTsv(rows) });
+			} catch (error) { return Promise.resolve({ ok: false, error: error.message }); }
+		}
+	}));
 	const trustedHosts = () => {
 		try { return ctx.webRuntime?.trustedHosts ?? []; } catch { return []; }
 	};

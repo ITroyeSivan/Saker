@@ -27,7 +27,14 @@ import { bucketGates, recordGate } from '../lib/gate.js'
 import { buildMemshellCliPlan, buildMemshellMcpPlan, classifyActionImpact, executeMemshellCliPlan } from '../lib/memshell-cli.js'
 import { buildAccessPlan, classifyMemoryBackend, renderAccessPlan } from '../lib/post.js'
 import { buildCampaignNdayQueries, buildNdaySearchPlan, campaignIdentityVariants, parseMeasurementHints, probeMeasurementQueries } from '../lib/measurement-query.js'
+import { buildPriorityPlan, entryYear, renderPriorityPlan, scoreEntry } from '../lib/priority.js'
+import { NDAY_SOURCE_REGISTRY, sourceRegistrySummary } from '../lib/source-registry.js'
+import { fetchFreeSource, parseSogouWechat } from '../lib/free-sources.js'
+import { DEFAULT_COLLECTOR_CONFIG, mergeCandidates, readCollectorConfig, runCollector, writeCollectorConfig } from '../lib/source-pipeline.js'
+import { recordFeedbackMetric, recordMatchMetric, recordSearchMetric, summarizeMetrics } from '../lib/metrics.js'
 import { apply, decodeProbeBody, describeTransportError, detectProxyEnv, probeBaseForAsset, probeRequestOptions, summarizeTransportErrors } from '../lib/index.js'
+import { openStore as openResultsStore } from '../../dsh-redteam-results/lib/store.js'
+import { saveTaskContext } from '../../dsh-redteam-results/lib/task-context.js'
 
 let failed = 0
 const expect = (label, condition, detail = '') => {
@@ -35,6 +42,7 @@ const expect = (label, condition, detail = '') => {
   else { failed += 1; console.log(`FAIL ${label} ${detail}`) }
 }
 const TEST_SCOPE = '127.0.0.1, localhost, *.test'
+const jsonResponse = (value) => ({ ok: true, status: 200, text: async () => JSON.stringify(value) })
 const withTestScope = (def) => {
   if (def.name !== 'nday_match') return def
   const execute = def.execute
@@ -149,27 +157,27 @@ const stalePeer = path.join(profileModules, '.pnpm', '@dsh-external+dsh-nday-hun
 // ── 5a. 测绘语法清洗与 FOFA Nday 查询计划 ─────────────────────────────────────
 {
   const title = parseMeasurementHints(['公开测绘语法：title=="U8C"（用友 U8 Cloud 页面标题）'])
-  expect('查询抽取：FOFA 双等号规范成可执行 DSL，丢弃解释性尾文',
-    title.length === 1 && title[0] === 'title:"U8C"', JSON.stringify(title))
+  expect('查询抽取：保留 FOFA 双等号精确语义，丢弃解释性尾文',
+    title.length === 1 && title[0] === 'title=="U8C"', JSON.stringify(title))
   const advanced = parseMeasurementHints(['fofa: body="/fort/login" && product="SANGFOR-OSM" && icon_hash="-320896955"'])
   expect('查询抽取：保留高级 FOFA 正文/产品/图标指纹及明确合取',
-    advanced.length === 1 && advanced[0].includes('body:"/fort/login"')
-    && advanced[0].includes('product:"SANGFOR-OSM"') && advanced[0].includes('icon_hash:"-320896955"'),
+    advanced.length === 1 && advanced[0].includes('body="/fort/login"')
+    && advanced[0].includes('product="SANGFOR-OSM"') && advanced[0].includes('icon_hash="-320896955"'),
     JSON.stringify(advanced))
   const fofaFields = parseMeasurementHints(['fofa: banner="TongWeb" && jarm="abc123" && cert.issuer.org="TongTech" && tls.ja3s="deadbeef" && status_code=200'])
   expect('查询抽取：接受 FOFA banner/JARM/证书/TLS/状态码高级字段',
-    fofaFields.length === 1 && ['banner:', 'jarm:', 'cert.issuer.org:', 'tls.ja3s:', 'status_code:'].every((field) => fofaFields[0].includes(field)),
+    fofaFields.length === 1 && ['banner=', 'jarm=', 'cert.issuer.org=', 'tls.ja3s=', 'status_code='].every((field) => fofaFields[0].includes(field)),
     JSON.stringify(fofaFields))
   const catalog = readCatalog(resolveSakerRoot())
   const realFidEntry = catalog.entries.find((entry) => entry.id === 'nuclei-sangfor-login-rce')
   const realFidQueries = parseMeasurementHints(realFidEntry?.fingerprint?.signals ?? [])
   const realFidPlan = buildNdaySearchPlan(catalog, { entryIds: realFidEntry?.id, focus: 'all', limit: 100 })
   expect('真实 Nday 语料中的转义 FOFA fid 指纹会进入最终查询计划',
-    realFidQueries.includes('fid:"iaytNA57019/kADk8Nev7g=="')
-    && realFidPlan.selected.some((group) => group.query === 'fid:"iaytNA57019/kADk8Nev7g=="'),
+    realFidQueries.includes('fid="iaytNA57019/kADk8Nev7g=="')
+    && realFidPlan.selected.some((group) => group.query === 'fid="iaytNA57019/kADk8Nev7g=="'),
     JSON.stringify({ realFidQueries, selected: realFidPlan.selected.map((group) => group.query) }))
   expect('FOFA category 字段进入 Nday 查询 DSL，错误别名不会被接受',
-    parseMeasurementHints(['fofa: category="服务"']).includes('category:"服务"')
+    parseMeasurementHints(['fofa: category="服务"']).includes('category="服务"')
     && parseMeasurementHints(['fofa: product_category="服务"']).length === 0)
   expect('查询抽取：其他测绘平台原生语法不误发给 FOFA',
     parseMeasurementHints(['shodan-query: ecology_JSessionid']).length === 0)
@@ -190,11 +198,9 @@ const stalePeer = path.join(profileModules, '.pnpm', '@dsh-external+dsh-nday-hun
   expect('查询计划：真实语料能生成有边界的 RCE 查询批次',
     plan.matchedEntries > 0 && plan.queryGroups >= plan.selected.length
     && plan.selected.length <= 100 && plan.selected.every((group) => group.entryIds.length > 0))
-  expect('查询计划：不包含跨平台语法、解释性句子或原始双等号',
-    plan.selected.every((group) => !/shodan|quake|hunter|公开测绘语法/i.test(group.query)
-      && !/(?:^|\s)[a-z][a-z0-9_.]*\s*==(?=\s*(?:"|[A-Za-z0-9_-]))/i.test(group.query)),
-    plan.selected.find((group) => /shodan|quake|hunter|公开测绘语法/i.test(group.query)
-      || /(?:^|\s)[a-z][a-z0-9_.]*\s*==(?=\s*(?:"|[A-Za-z0-9_-]))/i.test(group.query))?.query)
+  expect('查询计划：不包含跨平台语法或解释性句子',
+    plan.selected.every((group) => !/shodan|quake|hunter|公开测绘语法/i.test(group.query)),
+    plan.selected.find((group) => /shodan|quake|hunter|公开测绘语法/i.test(group.query))?.query)
   expect('查询计划：分页游标推进且 unknown ID 明确回报',
     (firstPage.queryGroups > 1 ? firstPage.nextOffset === 1 : firstPage.nextOffset === null)
     && buildNdaySearchPlan(catalog, { entryIds: 'missing-entry', limit: 10 }).unknownEntryIds.includes('missing-entry'))
@@ -213,9 +219,9 @@ const stalePeer = path.join(profileModules, '.pnpm', '@dsh-external+dsh-nday-hun
     && identityVariants.some((item) => item.query.startsWith('cert.subject.org:'))
     && identityVariants.some((item) => item.query.startsWith('cert.subject.cn:'))
     && identityVariants.some((item) => item.query.startsWith('body:'))
-    && campaignQueries.length > 4)
-  expect('机构查询组合 Nday 指纹与单一归属条件，保留候选映射且有查询上限',
-    campaignQueries.every((item) => item.query.includes('app:"Example-Portal"') && item.entryIds.includes('portal-rce') && !item.query.includes('||'))
+    && campaignQueries.length === 1 && campaignQueries[0].query.includes('icp:') && campaignQueries[0].query.includes('cert.subject.org:'))
+  expect('机构查询组合 Nday 指纹与归属条件并集，保留候选映射且有查询上限',
+    campaignQueries.every((item) => item.query.includes('app:"Example-Portal"') && item.entryIds.includes('portal-rce') && item.query.includes('||'))
     && buildCampaignNdayQueries({ selected: Array.from({ length: 30 }, (_, i) => ({ query: 'title:"p' + i + '"', basis: 'probe-signature', entryIds: ['p' + i] })) }, identity).length <= 20)
 
   const syntheticPlan = buildNdaySearchPlan({ updated: '2026-09-26', entries: [
@@ -239,6 +245,164 @@ const stalePeer = path.join(profileModules, '.pnpm', '@dsh-external+dsh-nday-hun
     && syntheticPlan.probeSignatureEntries.includes('probe-rce')
     && syntheticPlan.portRefinedEntries.includes('alias-rce')
     && syntheticPlan.withoutQuery.includes('unsearchable-rce'))
+}
+
+// ── 5a2. Nday 优先级：近期/国产/目标相关/验证成本可解释 ─────────────────────
+{
+  const catalog = {
+    updated: '2026-09-28',
+    entries: [
+      {
+        id: 'tongweb-recent-rce', product: '东方通 TongWeb', vendor: '北京东方通科技股份有限公司',
+        aliases: ['TongWeb'], category: '信创中间件/Java 应用服务器', vulnClass: '未认证反序列化 RCE',
+        ids: { qvd: 'QVD-2025-44295', cve: 'CVE-2025-44295', cnvd: 'CNVD-2025-44295' },
+        publishedAt: '2025-12-01',
+        status: 'normalized', severity: { cvss31: 9.8 }, auth: 'none',
+        fingerprint: { signals: ['fofa: body="TongWeb"'], probes: [{ method: 'GET', path: '/', expect: { bodyContainsAny: ['TongWeb'] } }], ports: [8088] },
+        exploit: { primitives: ['deserialization'], tools: ['ysoserial'] },
+        sources: [{ title: 'CNVD-2025-44295', url: 'https://www.cnvd.org.cn/flaw/show/CNVD-2025-44295' }],
+      },
+      {
+        id: 'old-cve-rce', product: 'Old Product', vendor: 'Legacy Vendor',
+        aliases: ['OldProduct'], category: 'legacy', vulnClass: 'RCE',
+        ids: { cve: 'CVE-2014-0001' }, status: 'legacy-unreviewed', severity: { cvss31: 9.8 }, auth: 'none',
+        fingerprint: { probes: [{ method: 'GET', path: '/', expect: { bodyContainsAny: ['OldProduct'] } }] },
+      },
+    ],
+  }
+  const recent = catalog.entries[0]
+  const old = catalog.entries[1]
+  expect('年份提取可从 CVE/CNVD 编号工作', entryYear(recent) === 2025 && entryYear(old) === 2014)
+  const citedOld = {
+    ...old,
+    sources: [{ title: '2026 年复现文章', url: 'https://example.test/2026/09/28/old-cve-writeup' }],
+  }
+  expect('漏洞年份优先取编号，2026 引用文章不能把 2014 老洞洗成新洞',
+    entryYear(citedOld) === 2014)
+  const genericTarget = scoreEntry(old, { target: '国产 OA 信创 中间件 RCE' })
+  expect('自由文本里的 OA/RCE 等通用词不能冒充目标相关性',
+    !genericTarget.reasons.some((reason) => reason.startsWith('目标相关性')))
+  const explicitTarget = scoreEntry(recent, { targetTerms: 'TongWeb' })
+  expect('显式 targetTerms 才获得目标相关性加权',
+    explicitTarget.reasons.some((reason) => reason.startsWith('目标相关性')))
+  const narrowWindow = scoreEntry(recent, { now: '2026-10-01', policy: { recentDays: 180 } })
+  const wideWindow = scoreEntry(recent, { now: '2026-10-01', policy: { recentDays: 365 } })
+  expect('recentDays 真正参与评分，而不是只写在策略文本里',
+    wideWindow.score > narrowWindow.score
+      && narrowWindow.reasons.some((reason) => reason.includes('超出近 180 天窗口'))
+      && wideWindow.reasons.some((reason) => reason.includes('近 365 天窗口内')))
+  expect('近期国产且目标相关的 Nday 优先于老 CVE',
+    scoreEntry(recent, { target: 'TongWeb', policy: { domesticBoost: 30 } }).score
+      > scoreEntry(old, { target: 'TongWeb', policy: { domesticBoost: 30 } }).score)
+  const plan = buildPriorityPlan(catalog, { target: 'TongWeb', targetTerms: '东方通', maxCandidates: 5, queriesPerNday: 2, concurrency: 4 })
+  const limitedPlan = buildPriorityPlan(catalog, { target: 'TongWeb', maxCandidates: 1, queriesPerNday: 1 })
+  expect('优先级计划包含候选、查询、验证，默认工具批处理不派多个模型',
+    plan.candidates[0].id === 'tongweb-recent-rce'
+    && plan.queries.some((item) => item.entryId === 'tongweb-recent-rce' && /TongWeb|body/.test(item.query))
+    && plan.candidates[0].verification.exp.searchQueries.length === 3
+    && plan.subagentPlan.workers.length === 0 && plan.subagentPlan.strategy === 'single-agent-batched-tools')
+  expect('顶层 maxCandidates/queriesPerNday 与 policy 参数一样生效',
+    limitedPlan.candidates.length === 1 && limitedPlan.candidates[0].queries.length <= 1)
+  expect('指导原则覆盖来源与 FOFA 分层，不把搜索命中当 RCE 结论',
+    plan.guidance.sourcePlaybook.some((item) => item.source === 'CNVD / CNNVD')
+    && plan.guidance.sourceRadar.primary.some((source) => source.includes('CNVD'))
+    && plan.guidance.sourceRadar.enrichment.some((source) => source.includes('微信公众号'))
+    && plan.guidance.sourceRadar.policy.includes('公众号是提前量')
+    && plan.guidance.sourceRadar.discoveryQueries[0].query.includes('{year}')
+    && renderPriorityPlan(plan).includes(String(new Date().getFullYear()))
+    && plan.guidance.fofaTiers.some((item) => item.tier === 'related')
+    && plan.guidance.verificationLadder.some((line) => line.includes('只产生候选')))
+  const qianxin = NDAY_SOURCE_REGISTRY.find((source) => source.id === 'qianxin-cert')
+  const fofaSource = NDAY_SOURCE_REGISTRY.find((source) => source.id === 'fofa')
+  const sourceSummary = sourceRegistrySummary(NDAY_SOURCE_REGISTRY)
+  expect('来源注册表区分已接入 API 与仅提来源名',
+    fofaSource?.implemented === true && fofaSource?.configuredVia.includes('设置 → 资产平台 API')
+    && qianxin?.implemented === false && qianxin?.integration === 'guidance'
+    && sourceSummary.implemented === 9 && sourceSummary.git === 4 && sourceSummary.script === 2 && sourceSummary.guidance === 1
+    && NDAY_SOURCE_REGISTRY.find(source => source.id === 'cve-official')?.implemented === true
+    && !NDAY_SOURCE_REGISTRY.find(source => source.id === 'github-advisories')?.label.includes('PoC'))
+  expect('优先级计划明确提示未接入的 CERT/公众号不能被当成数据源',
+    renderPriorityPlan(plan).includes('奇安信 CERT / CNVD / CNNVD 当前未接入自动抓取 API')
+    && renderPriorityPlan(plan).includes('公众号使用搜狗 search-assisted 适配器')
+    && plan.guidance.sourceRadar.sources.length === NDAY_SOURCE_REGISTRY.length)
+  const cisa = await fetchFreeSource('cisa-kev', { query: 'Apache', limit: 5 }, async () => jsonResponse({
+    vulnerabilities: [{
+      cveID: 'CVE-2026-0001', vendorProject: 'Apache', product: 'HTTP Server',
+      vulnerabilityName: 'Apache HTTP Server RCE', shortDescription: 'Public exploit exists.',
+      dateAdded: '2026-09-01', knownRansomwareCampaignUse: 'Unknown',
+    }],
+  }))
+  expect('免费源 CISA KEV 能归一化公开 JSON',
+    cisa.length === 1 && cisa[0].source === 'cisa-kev' && cisa[0].ids.includes('CVE-2026-0001'))
+  const nvd = await fetchFreeSource('nvd', { query: 'Apache', limit: 2 }, async () => jsonResponse({
+    vulnerabilities: [{ cve: {
+      id: 'CVE-2026-0002', published: '2026-09-02T00:00:00.000',
+      descriptions: [{ lang: 'en', value: 'Apache test vulnerability' }],
+      metrics: { cvssMetricV31: [{ cvssData: { baseScore: 9.8 } }] },
+    } }],
+  }))
+  expect('免费源 NVD 能提取编号、CVSS 与发布日期',
+    nvd.length === 1 && nvd[0].summary.includes('CVSS 9.8') && nvd[0].published.startsWith('2026-09-02'))
+  const github = await fetchFreeSource('github-advisories', { query: 'RCE', limit: 2 }, async () => jsonResponse([{
+    ghsa_id: 'GHSA-test-rce', cve_id: 'CVE-2026-0003', summary: 'Product RCE',
+    description: 'Remote code execution.', published_at: '2026-09-03T00:00:00Z',
+    html_url: 'https://github.com/advisories/GHSA-test-rce',
+    vulnerabilities: [{ package: { ecosystem: 'npm', name: 'example-pkg' } }],
+  }]))
+  expect('免费源 GitHub Advisories 能保留包生态信息',
+    github.length === 1 && github[0].products.includes('npm:example-pkg') && github[0].ids.includes('CVE-2026-0003'))
+  const nuclei = await fetchFreeSource('nuclei', { query: 'tongweb', limit: 2, lastDays: 30 }, async () => ({
+    ok: true,
+    status: 200,
+    text: async () => `<feed xmlns="http://www.w3.org/2005/Atom">
+      <entry>
+        <title>Update http/vulnerabilities/tongtech/tongweb-rce.yaml</title>
+        <link href="https://github.com/projectdiscovery/nuclei-templates/commit/abc1234567890"/>
+        <updated>${new Date(Date.now() - 86400000).toISOString()}</updated>
+        <content type="html">Add a template for TongWeb RCE CVE-2026-0005</content>
+      </entry>
+    </feed>`,
+  }))
+  expect('免费源 nuclei 更新保留提交时间、模板路径与来源链接',
+    nuclei.length === 1 && nuclei[0].source === 'nuclei'
+    && nuclei[0].sourceKind === 'template-update'
+    && nuclei[0].products.includes('tongtech')
+    && nuclei[0].ids.includes('CVE-2026-0005')
+    && nuclei[0].url.includes('/commit/abc1234567890'))
+  const osv = await fetchFreeSource('osv', { id: 'GHSA-test-rce' }, async () => jsonResponse({
+    id: 'GHSA-test-rce', summary: 'OSV test', details: 'Detail',
+    aliases: ['CVE-2026-0004'], published: '2026-09-04T00:00:00Z',
+    affected: [{ package: { ecosystem: 'Maven', name: 'org.example:demo' } }],
+  }))
+  expect('免费源 OSV 能按漏洞编号查询并保留别名',
+    osv.length === 1 && osv[0].ids.includes('CVE-2026-0004') && osv[0].products.includes('Maven:org.example:demo'))
+  const wechatHtml = '<ul class="news-list"><li id="sogou_vr_11002601_box_0"><div class="txt-box"><h3><a href="/link?url=x" id="sogou_vr_11002601_title_0">某 OA RCE 复现</a></h3><p class="txt-info">影响版本与修复建议</p><div class="s-p"><span class="all-time-y2">安全研究</span><span class="s2"><script>document.write(timeConvert(\'1790000000\'))</script></span></div></div></li></ul>'
+  const wechatRows = parseSogouWechat(wechatHtml, '复现', 5)
+  expect('免费源公众号解析保留标题、公众号、日期和跳转链接',
+    wechatRows.length === 1 && wechatRows[0].title.includes('OA RCE') && wechatRows[0].products.includes('安全研究')
+    && wechatRows[0].url.startsWith('https://weixin.sogou.com/link'))
+  let wechatBlocked = false
+  try {
+    await fetchFreeSource('wechat', { query: 'test' }, async () => ({ ok: true, status: 200, text: async () => '<html>请输入验证码</html>' }))
+  } catch (error) {
+    wechatBlocked = /验证码|反爬/.test(String(error?.message || error))
+  }
+  expect('公众号适配器遇到验证码时如实报错，不伪装成零结果', wechatBlocked)
+  {
+    const oldFetch = globalThis.fetch
+    let calls = 0
+    globalThis.fetch = async () => {
+      calls += 1
+      return jsonResponse({ vulnerabilities: [{ cveID: 'CVE-2026-CACHE', vendorProject: 'CacheProbe', product: 'Probe', vulnerabilityName: 'Cache probe', shortDescription: 'x', dateAdded: '2026-09-06' }] })
+    }
+    try {
+      await fetchFreeSource('cisa-kev', { query: 'CacheProbe' })
+      await fetchFreeSource('cisa-kev', { query: 'CacheProbe' })
+      expect('免费源短 TTL 缓存避免重复打公开 API', calls === 1, `calls=${calls}`)
+    } finally {
+      globalThis.fetch = oldFetch
+    }
+  }
 }
 
 // ── 5b. 文档抽取：只出候选，不替人下结论 ─────────────────────────────────────
@@ -318,7 +482,7 @@ const stalePeer = path.join(profileModules, '.pnpm', '@dsh-external+dsh-nday-hun
   ]
   const plan = buildAttackPlan(entries, assets)
   expect('复用率排序把高危害低成本桶排第一', plan.buckets[0].entryId === 'demo-rce', JSON.stringify(plan.buckets))
-  expect('复用分按资产数放大', plan.buckets[0].reuseScore === 9, JSON.stringify(plan.buckets[0]))
+  expect('同产品独立应用分别校准，复用分不按未证实别名放大', plan.buckets.filter(b => b.entryId === 'demo-rce').length === 3 && plan.buckets[0].reuseScore === 3, JSON.stringify(plan.buckets[0]))
   expect('每个资产组固定一个代表资产', plan.buckets[0].representativeAssetId === 'a1')
   expect('无线索条目被放进 clues 而不是执行桶',
     plan.clues.some((item) => item.entryId === 'demo-clue') && !plan.buckets.some((item) => item.entryId === 'demo-clue'))
@@ -456,9 +620,124 @@ const ndayCtx = {
   settings: { get: (ns) => ns === 'sec-config' ? settingsState.value : undefined },
 }
 apply(ndayCtx)
+{
+  const firstEntry = readCatalog(resolveSakerRoot()).entries[0]
+  const check = { assetId: 'fixture', entryId: firstEntry.id, endpoint: 'https://fixture.test/api',
+    methodVersion: 'fixture-v1', authContext: 'anonymous', requestRevision: 'normal-v1',
+    productConfirmed: true, productEvidenceIds: ['product'], conditions: [{ name: 'version', state: 'unknown' }] }
+  const context = { assets: [{ id: 'fixture', url: 'https://fixture.test', inScope: true, reachable: true }], checks: [check] }
+  const callsBefore = mcpCalls.length
+  const result = await toolDefs.get('nday_priority_plan').execute({ verificationContext: JSON.stringify(context), mode: 'regular' })
+  expect('优先计划工具透传实际入口条件并保留外层模式，不发目标请求', result.ok === true
+    && result.plan.task.mode === 'regular' && result.plan.verificationQueue.items[0].action === 'supplement-evidence'
+    && result.text.includes('https://fixture.test/api') && mcpCalls.length === callsBefore, JSON.stringify(result.error))
+  const invalid = await toolDefs.get('nday_priority_plan').execute({ verificationContext: '{invalid' })
+  expect('优先计划工具拒绝坏JSON而不吞掉资产队列', invalid.ok === false && typeof invalid.error === 'string')
+}
 expect('注册了核心 Nday 工具',
-  ['nday_catalog', 'nday_scope_hunt', 'nday_match', 'nday_draft', 'attack_plan', 'attack_gate', 'zday_pattern', 'nday_handoff', 'nday_triage'].every((name) => toolDefs.has(name)),
+  ['nday_catalog', 'nday_priority_plan', 'nday_policy_get', 'nday_policy_set', 'nday_source_fetch', 'nday_scope_hunt', 'nday_match', 'nday_draft', 'attack_plan', 'attack_gate', 'zday_pattern', 'nday_handoff', 'nday_triage'].every((name) => toolDefs.has(name)),
   [...toolDefs.keys()].join(','))
+{
+  const oldFetch = globalThis.fetch
+  globalThis.fetch = async () => jsonResponse({ vulnerabilities: [{
+    cveID: 'CVE-2026-9999', vendorProject: 'Apache', product: 'HTTP Server',
+    vulnerabilityName: 'Apache RCE', shortDescription: 'test', dateAdded: '2026-09-05',
+  }] })
+  try {
+    const result = await toolDefs.get('nday_source_fetch').execute({ source: 'cisa-kev', query: 'Apache', limit: 1 })
+    expect('nday_source_fetch 真调用免费源并标记候选级证据',
+      result.ok === true && result.candidates.length === 1 && result.candidates[0].evidenceLevel === 'candidate',
+      JSON.stringify(result))
+  } catch (error) {
+    expect('nday_source_fetch 真调用免费源并标记候选级证据', false, String(error?.message || error))
+  } finally {
+    globalThis.fetch = oldFetch
+  }
+}
+{
+  const merged = mergeCandidates([
+    { source: 'nvd', id: 'CVE-2026-1111', title: 'A', published: '2026-09-01', url: 'https://nvd.nist.gov/vuln/detail/CVE-2026-1111', ids: ['CVE-2026-1111'], products: ['A'] },
+    { source: 'github', id: 'GHSA-aaaa-bbbb-cccc', title: 'A duplicate', published: '2026-09-10', url: 'https://github.com/advisories/GHSA-aaaa-bbbb-cccc', ids: ['CVE-2026-1111'], products: ['A'] },
+  ])
+  expect('情报候选按编号去重并保留多来源', merged.length === 1 && merged[0].sources.includes('nvd') && merged[0].sources.includes('github'), JSON.stringify(merged))
+  expect('情报候选带可信等级与新鲜度', merged[0].trust !== 'unknown' && merged[0].freshness !== 'unknown', JSON.stringify(merged[0]))
+}
+{
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'nday-collector-'))
+  try {
+    writeCollectorConfig({ ...DEFAULT_COLLECTOR_CONFIG, enabled: true, sources: ['cisa-kev'], limit: 1 }, home)
+    const fakeFetch = async (url) => {
+      if (String(url).includes('known_exploited_vulnerabilities.json')) {
+        return jsonResponse({ vulnerabilities: [{
+          cveID: 'CVE-2026-2222', vendorProject: 'Apache', product: 'HTTP Server',
+          vulnerabilityName: 'Apache collector test', shortDescription: 'collector fixture', dateAdded: '2026-09-20',
+        }] })
+      }
+      throw new Error(`unexpected URL ${url}`)
+    }
+    const collected = await runCollector({}, { home, fetchImpl: fakeFetch, now: Date.parse('2026-09-29T00:00:00Z') })
+    expect('采集器真实执行并持久化来源状态', collected.ok === true && collected.sources[0].ok === true && collected.candidates.length === 1, JSON.stringify(collected))
+    expect('采集器写入下次到期时间', typeof collected.nextDueAt === 'string' && collected.nextDueAt.endsWith('Z'))
+    expect('采集器结果落盘可被 UI/工具读取', readCollectorConfig(home).enabled === true)
+    const priorSourceHome = process.env.DSH_HOME
+    try {
+      process.env.DSH_HOME = home
+      const radar = await toolDefs.get('nday_source_radar').execute({ query: 'CVE-2026-2222' })
+      expect('来源工具从本地索引检索并保持状态响应无正文', radar.ok && radar.matchedCandidates === 1
+        && radar.candidates[0].id === 'CVE-2026-2222' && radar.status.candidates.length === 0 && radar.status.recordCount === 1, JSON.stringify(radar))
+      const badCursor = await toolDefs.get('nday_source_radar').execute({ query: 'CVE-2026-2222', cursor: '{invalid' })
+      expect('来源工具拒绝无效索引游标而不返回空成功', badCursor.ok === false && badCursor.error.includes('cursor'), JSON.stringify(badCursor))
+      const absentBody = await toolDefs.get('nday_source_radar').execute({ record: 'cisa-kev:CVE-2026-2222' })
+      expect('来源工具原文缺失保持明确缺口而不虚构正文', absentBody.ok === false && absentBody.error.includes('unavailable'), JSON.stringify(absentBody))
+      const { attachApiDocument } = await import('../lib/api-source-document.js')
+      const { SourceIndex } = await import('../lib/source-index.js')
+      const { collectorPaths } = await import('../lib/source-pipeline.js')
+      const document = { id: 'OSV-2026-7777', affected: [{ package: { ecosystem: 'npm', name: 'fixture' }, ranges: [{ type: 'SEMVER', events: [{ introduced: '0' }, { fixed: '2.0.0' }] }] }] }
+      const row = attachApiDocument({ id: document.id, source: 'osv', title: 'Fixture', ids: [document.id] }, document, 'osv', home)
+      const sourceIndex = new SourceIndex(collectorPaths(home))
+      try { sourceIndex.commitPage([row], {}, { now: Date.now() }) } finally { sourceIndex.close() }
+      const environment = { packages: [{ name: 'fixture', ecosystem: 'npm', version: '1.5.0', evidenceIds: ['inventory-v1'] }] }
+      const assessed = await toolDefs.get('nday_source_radar').execute({ record: 'osv:' + document.id, environment })
+      expect('真实来源工具渲染固定修订适用性且不冒充漏洞', assessed.ok && assessed.assessment.state === 'satisfied'
+        && assessed.assessment.findingConfirmed === false && assessed.text.includes('inventory-v1') && assessed.text.includes(assessed.assessment.revision), JSON.stringify(assessed))
+      const missingRecord = await toolDefs.get('nday_source_radar').execute({ environment })
+      expect('适用性输入缺少来源记录不能退回状态成功', !missingRecord.ok && missingRecord.error.includes('requires record'), JSON.stringify(missingRecord))
+      const cpe = 'cpe:2.3:a:acme:portal:1.0.0:*:*:*:*:*:*:*'
+      const nvd = { id: 'CVE-2026-6666', configurations: [{ nodes: [{ operator: 'OR', cpeMatch: [{ criteria: cpe, vulnerable: true }] }] }] }
+      const nvdIndex = new SourceIndex(collectorPaths(home))
+      try { nvdIndex.commitPage([attachApiDocument({ id: nvd.id, source: 'nvd', ids: [nvd.id] }, nvd, 'nvd-cve-2.0', home)], nvdIndex.metadata('state', {}), { now: Date.now() }) } finally { nvdIndex.close() }
+      const nvdAssessment = await toolDefs.get('nday_source_radar').execute({ record: 'nvd:' + nvd.id, environment: { assetId: 'fixture-service', assetEvidenceIds: ['service-binding'], cpes: [{ cpe, evidenceIds: ['observed-cpe'] }] } })
+      expect('NVD实际来源工具读取完整配置并渲染资产绑定', nvdAssessment.ok && nvdAssessment.assessment.state === 'satisfied'
+        && nvdAssessment.text.includes('fixture-service') && nvdAssessment.assessment.findingConfirmed === false, JSON.stringify(nvdAssessment))
+      nvd.affected = [{ source: 'fixture-cna', affectedData: [{ vendor: 'Acme', product: 'Portal', versions: [{ version: '1.0.0', status: 'affected' }] }] }]
+      const nativeIndex = new SourceIndex(collectorPaths(home))
+      try { nativeIndex.commitPage([attachApiDocument({ id: nvd.id, source: 'nvd', ids: [nvd.id] }, nvd, 'nvd-cve-2.0', home)], nativeIndex.metadata('state', {}), { now: Date.now() }) } finally { nativeIndex.close() }
+      const nativeAssessment = await toolDefs.get('nday_source_radar').execute({ record: 'nvd:' + nvd.id, environment: {
+        assetId: 'fixture-service', assetEvidenceIds: ['service-binding'], cpes: [{ cpe, evidenceIds: ['observed-cpe'] }],
+        products: [{ vendor: 'Acme', product: 'Portal', version: '1.0.0', evidenceIds: ['native-product-v1'] }] } })
+      expect('NVD真实注册工具同时渲染两类条件及原生产品依据', nativeAssessment.ok && nativeAssessment.assessment.state === 'satisfied'
+        && nativeAssessment.assessment.channels.cpe === 'satisfied' && nativeAssessment.assessment.channels.nativeProduct === 'satisfied'
+        && nativeAssessment.text.includes('native-product-v1') && nativeAssessment.text.includes(nativeAssessment.assessment.revision)
+        && nativeAssessment.assessment.findingConfirmed === false, JSON.stringify(nativeAssessment))
+    } finally { if (priorSourceHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = priorSourceHome }
+    fs.writeFileSync(path.join(home, 'nday-hunter', 'collector.lock'), 'not-a-pid\n0\n', 'utf8')
+    const recovered = await runCollector({}, { home, fetchImpl: fakeFetch, now: Date.parse('2026-09-29T00:00:00Z') })
+    expect('采集器能清理崩溃遗留的无效锁并继续运行', recovered.ok === true && recovered.sources[0].ok === true, JSON.stringify(recovered))
+
+    recordSearchMetric({ runId: 'nday-fixture', candidateCount: 4, apiRequests: 3, queryCount: 2, successfulGroups: 2, startedAt: '2026-09-29T00:00:00Z', finishedAt: '2026-09-29T00:00:03Z', home })
+    recordMatchMetric({ runId: 'nday-fixture', assetCount: 2, hitCount: 1, startedAt: '2026-09-29T00:00:03Z', finishedAt: '2026-09-29T00:00:04Z', home })
+    recordFeedbackMetric({ kind: 'false-positive', runId: 'nday-fixture', count: 1, home })
+    recordFeedbackMetric({ kind: 'confirmed-rce', runId: 'nday-fixture', count: 1, finishedAt: '2026-09-29T00:00:10Z', home })
+    const summary = summarizeMetrics(home)
+    expect('反馈不冒充成果；缺少成果库和独立复核时数量与误报率未知',
+      summary.firstRoundHitRate === 1 && summary.fingerprintFalsePositiveRate === null && summary.averageQueryToRceMs === null
+      && summary.confirmedRce === null && summary.rceFeedbackReports === 1,
+      JSON.stringify(summary))
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+}
+expect('注册了采集器与指标工具', ['nday_source_radar', 'nday_source_collect', 'nday_metrics'].every((name) => toolDefs.has(name)), [...toolDefs.keys()].join(','))
 expect('默认工具表隐藏访问确认和内存马能力', !toolDefs.has('access_confirm') && !toolDefs.has('memshell_cli'), [...toolDefs.keys()].join(','))
 apply(ndayCtx, { enablePostRceTools: true })
 expect('显式 opt-in 才挂载访问确认和内存马工具', toolDefs.has('access_confirm') && toolDefs.has('memshell_cli'))
@@ -468,7 +747,7 @@ const focusedNdayCtx = {
   ...ndayCtx,
   tools: { ...ndayCtx.tools, register: (def) => focusedToolDefs.set(def.name, withTestScope(def)) },
 }
-const pentestNdayTools = ['nday_catalog', 'nday_scope_hunt', 'attack_plan', 'nday_coverage', 'nday_match', 'nday_draft', 'nday_learn', 'zday_pattern', 'oob_probe', 'nday_handoff']
+const pentestNdayTools = ['nday_catalog', 'nday_priority_plan', 'nday_policy_get', 'nday_policy_set', 'nday_source_fetch', 'nday_source_radar', 'nday_source_collect', 'nday_metrics', 'nday_scope_hunt', 'attack_plan', 'nday_coverage', 'nday_match', 'nday_draft', 'nday_learn', 'zday_pattern', 'oob_probe', 'nday_handoff']
 apply(focusedNdayCtx, { enablePostRceTools: false, exposedTools: pentestNdayTools })
 expect('Pentest allowlist 只注册 RCE 主线 Nday 工具',
   JSON.stringify([...focusedToolDefs.keys()].sort()) === JSON.stringify([...pentestNdayTools].sort()),
@@ -500,10 +779,10 @@ expect('nday_match 没有明确授权范围时拒绝发送探针', noScope.ok ==
 {
   const pick = (signals) => expansionQueries({ fingerprint: { signals } })
   expect('测绘语法：普通前缀被剥掉并规范为 FOFA 批量查询可用 DSL',
-    JSON.stringify(pick(['公开测绘语法 app="畅捷通-TPlus"'])) === JSON.stringify(['app:"畅捷通-TPlus"']),
+    JSON.stringify(pick(['公开测绘语法 app="畅捷通-TPlus"'])) === JSON.stringify(['app="畅捷通-TPlus"']),
     JSON.stringify(pick(['公开测绘语法 app="畅捷通-TPlus"'])))
   expect('测绘语法：全角冒号 + 中文说明尾巴也要能取到',
-    (pick(['公开测绘语法：title=="欢迎使用Apusic应用服务器"（Apusic 默认欢迎页标题）'])[0] ?? '') === 'title:"欢迎使用Apusic应用服务器"',
+    (pick(['公开测绘语法：title=="欢迎使用Apusic应用服务器"（Apusic 默认欢迎页标题）'])[0] ?? '') === 'title=="欢迎使用Apusic应用服务器"',
     JSON.stringify(pick(['公开测绘语法：title=="欢迎使用Apusic应用服务器"（Apusic 默认欢迎页标题）'])))
   expect('测绘语法：Shodan 原生语法从 FOFA 查询计划中剔除',
     JSON.stringify(pick(['shodan-query: ecology_JSessionid'])) === JSON.stringify([]),
@@ -514,7 +793,7 @@ expect('nday_match 没有明确授权范围时拒绝发送探针', noScope.ok ==
 
   const withQuery = await catalogTool.execute({ entryId: 'chanjet-tplus-loginmanager-sqli' })
   expect('详情模式给出同类资产扩面查询（复用率交接点）',
-    withQuery.ok && withQuery.text.includes('同类资产扩面') && withQuery.text.includes('app:"畅捷通-TPlus"'),
+    withQuery.ok && withQuery.text.includes('同类资产扩面') && withQuery.text.includes('app="畅捷通-TPlus"'),
     withQuery.text)
   const withoutQuery = await catalogTool.execute({ entryId: 'seeyon-a8-htmlofficeservlet-arbitrary-file-write-rce' })
   expect('没记测绘语法的条目如实说"反查不了"，不编查询',
@@ -619,14 +898,15 @@ expect('nday_match 没有明确授权范围时拒绝发送探针', noScope.ok ==
     JSON.stringify(defaultPlan.graph))
   const out = await planTool.execute({ workspace: planWorkspace, scope: '*.example.com', registerIntents: true })
   expect('attack_plan 生成可执行桶', out.ok && out.plan.buckets.some((bucket) => bucket.entryId === 'weaver-ecology-dubboapi-debug-rce'), out.error)
-  expect('attack_plan 覆盖两个同指纹资产',
-    out.plan.buckets.find((bucket) => bucket.entryId === 'weaver-ecology-dubboapi-debug-rce')?.assetIds.length === 2
+  expect('attack_plan 同指纹但未证实同应用的资产分成两个独立桶',
+    out.plan.buckets.filter((bucket) => bucket.entryId === 'weaver-ecology-dubboapi-debug-rce').length === 2
+    && out.plan.buckets.filter((bucket) => bucket.entryId === 'weaver-ecology-dubboapi-debug-rce').every(bucket => bucket.assetIds.length === 1)
     && out.assetsExcludedByScope === 1)
   expect('attack_plan 落盘机读与人读计划',
     fs.existsSync(path.join(planWorkspace, 'fingerprint-buckets.json')) && fs.existsSync(path.join(planWorkspace, 'attack-plan.md')))
   expect('attack_plan 把桶登记成可追踪任务',
     out.graph.registered >= 1
-    && JSON.parse(fs.readFileSync(path.join(planWorkspace, 'operation-state.json'), 'utf8')).intents.some((intent) => intent.bucketId === 'bucket-weaver-ecology-dubboapi-debug-rce'),
+    && out.plan.buckets.filter(bucket => bucket.entryId === 'weaver-ecology-dubboapi-debug-rce').every(bucket => JSON.parse(fs.readFileSync(path.join(planWorkspace, 'operation-state.json'), 'utf8')).intents.some(intent => intent.bucketId === bucket.bucketId)),
     JSON.stringify(out.graph))
   // 下一跳的收窄引导：不带 entryIds 全量跑会撞上单次 800 次探测的上限，
   // 与其让模型撞墙再回读报错，不如在计划输出里就把「按桶跑」写清楚。
@@ -651,19 +931,29 @@ expect('nday_match 没有明确授权范围时拒绝发送探针', noScope.ok ==
 
 {
   const zday = toolDefs.get('zday_pattern')
-  const refund = await zday.execute({ surface: '退款 并发 幂等键 重复请求' })
+  const researchHome = fs.mkdtempSync(path.join(os.tmpdir(), 'research-pattern-'))
+  const priorHome = process.env.DSH_HOME
+  process.env.DSH_HOME = researchHome
+  const researchStore = openResultsStore(path.join(researchHome, 'redteam-results', 'results.db'))
+  saveTaskContext(researchStore, 'research-pattern', { assets: [{ id: 'a', url: 'https://fixture.test', inScope: true, reachable: true }],
+    requests: [{ id: 'q', endpoint: 'https://fixture.test/api/refund', authContext: 'account-a', revision: 'v1', valid: true,
+      kind: 'api', request: 'POST /api/refund HTTP/1.1', response: 'HTTP/1.1 200 OK', inputs: [{ name: 'amount', location: 'body', evidenceIds: ['q'] }] }] })
+  const exec = { agent: { session: { id: 'research-pattern' } } }
+  try {
+  const refund = await zday.execute({ surface: '退款 并发 幂等键 重复请求' }, exec)
   expect('zday_pattern 匹配退款/幂等模式',
     refund.ok && refund.patterns.some((p) => p.id === 'refund-double-spend' || p.id === 'idempotency-race'),
     JSON.stringify(refund.patterns?.map((p) => p.id)))
   expect('zday_pattern 强制输出先行证伪与最小验证',
     refund.text.includes('先想什么会推翻') && refund.text.includes('最小验证') && refund.text.includes('不是漏洞发现'))
-  const oauth = await zday.execute({ surface: 'OAuth 回调 state redirect_uri' })
+  const oauth = await zday.execute({ surface: 'OAuth 回调 state redirect_uri' }, exec)
   expect('zday_pattern OAuth 面优先命中 OAuth 模式',
     oauth.ok && oauth.patterns[0]?.id === 'oauth-state-redirect',
     JSON.stringify(oauth.patterns?.map((p) => p.id)))
-  const unknown = await zday.execute({ surface: 'zzzz-no-such-surface' })
+  const unknown = await zday.execute({ surface: 'zzzz-no-such-surface' }, exec)
   expect('无精确命中时明确标记 exact=false 并给通用切入点',
     unknown.ok && unknown.exact === false && unknown.patterns.length > 0)
+  } finally { researchStore.close(); process.env.DSH_HOME = priorHome; fs.rmSync(researchHome, { recursive: true, force: true }) }
 }
 
 {
@@ -1126,6 +1416,42 @@ try {
       } finally {
         ndayCtx.tools.execute = originalExecute
       }
+      ndayBatchSearchHandler = async (args) => {
+        if (args.platform === 'fofa') return { ok: false, degraded: true, error: '未配置 FOFA key' }
+        if (args.platform === 'hunter') {
+          return {
+            ok: true,
+            estimatedRequests: args.queries.length,
+            configuredPlatforms: ['hunter'],
+            queryResults: args.queries.map((query) => ({
+              id: query.id,
+              query: query.query,
+              ok: true,
+              platforms: ['hunter'],
+              assets: [],
+              platformErrors: [],
+            })),
+          }
+        }
+        return { ok: false, error: `unexpected platform ${args.platform}` }
+      }
+      const fallback = await scopeHunt.execute({
+        scope: '127.0.0.1',
+        workspace,
+        entryIds: 'ruijie-nbr-guestisup-command-injection-rce',
+        limit: 1,
+        platform: 'auto',
+      })
+      expect('FOFA 不可用时自动降级到 Hunter，并保留降级链',
+        fallback.ok === true && fallback.platform === 'hunter'
+        && fallback.degradedFrom.includes('fofa')
+        && fallback.platformAttempts[0].platform === 'fofa'
+        && fallback.platformAttempts[0].ok === false,
+        JSON.stringify({ error: fallback.error, platform: fallback.platform, degradedFrom: fallback.degradedFrom }))
+      expect('Hunter 降级时标注不支持的测绘字段',
+        fallback.fieldWarnings.some((line) => line.includes('icon_hash'))
+        && fallback.text.includes('字段差异'),
+        JSON.stringify(fallback.fieldWarnings))
     } finally {
       ndayBatchSearchHandler = null
     }
@@ -1379,9 +1705,10 @@ try {
     targets: `http://127.0.0.1:${lookPort}`,
     workspace,
   })
-  expect('不带 entryIds 时仍能跑（只跑有探针的条目）', allEntries.ok, allEntries.error)
-  expect('没有探针的条目被显式报为跳过',
-    allEntries.summary.entriesNotSiftable >= 1 && allEntries.text.includes('跳过'),
+  expect('不带 entryIds 时先识别产品再收窄，禁止隐式全目录探测', allEntries.ok
+    && allEntries.summary.discoveryRequests === 1 && allEntries.summary.entries < candidateEntries(readCatalog(resolveSakerRoot()), []).length, allEntries.error)
+  expect('没有被画像选中的无探针条目不进入探测范围',
+    allEntries.text.includes('不回退全库') && allEntries.summary.entriesNotSiftable === 0,
     JSON.stringify(allEntries.summary))
   expect('跳过的条目不会出现在请求计划里',
     !allEntries.text.includes('seeyon-oa-workflow-importprocess-rce')
@@ -1399,7 +1726,7 @@ try {
     workspace,
   })
   expect('超出单次规模上限时明确拒绝而不是静默截断',
-    tooMany.ok === false && tooMany.error.includes('超过单次上限'), tooMany.error)
+    tooMany.ok === false && tooMany.error.includes('超过请求上限'), tooMany.error)
 
   const noTargets = await matchTool.execute({ targets: '  ', workspace })
   expect('空目标列表报错', noTargets.ok === false)
@@ -1882,7 +2209,10 @@ try {
     const good = await learn.execute({
       entry: JSON.stringify({
         ...base,
-        fingerprint: { paths: ['/demo'], probes: [{ id: 'demo-presence', path: '/demo', method: 'GET', expect: { statusNotIn: [404] }, weight: 'weak', note: '存在性旁证' }] },
+        fingerprint: { paths: ['/demo'], probes: [
+          { id: 'demo-presence', path: '/demo', method: 'GET', expect: { statusNotIn: [404] }, weight: 'weak', note: '存在性旁证' },
+          { id: 'demo-absent-marker', path: '/demo', method: 'GET', expect: { bodyContainsAny: ['not-present-marker'] }, weight: 'strong', note: '独立负例判据' },
+        ] },
       }),
       note: '来源：现场检索到的 GitHub 项目',
     })
@@ -1903,7 +2233,9 @@ try {
     // 关键一环：**学到的条目要真的能被打出来**。只验「catalog 读得到」不够——
     // 若 nday_match 哪天不再走合并语料，「落库了但匹配不到」会静默失效。
     {
+      let actualRequests = 0
       const demoServer = http.createServer((req, res) => {
+        actualRequests++
         if (new URL(req.url ?? '/', 'http://x').pathname === '/demo') { res.writeHead(200); res.end('demo'); return }
         res.writeHead(404, { 'content-type': 'text/plain' }); res.end('not found')
       })
@@ -1920,6 +2252,12 @@ try {
           matched.ok === true && matchedRow !== undefined
           && (matchedRow.evidence ?? []).some((e) => e.probeId === 'demo-presence'),
           JSON.stringify(matched.rows ?? []))
+        expect('生产 match 相同请求仅发送一次并包含随机对照，保留两个独立判据',
+          actualRequests === 2 && matched.summary.requests === 1 && matched.summary.totalRequests === 2
+          && matched.summary.probeEvaluations === 2 && matched.summary.requestsReused === 1,
+          JSON.stringify({ actualRequests, summary: matched.summary }))
+        expect('共享响应不会共享判据命中，负例仍不命中', matchedRow?.strongest === 'weak'
+          && matchedRow.evidence.length === 1 && matchedRow.evidence[0].probeId === 'demo-presence')
       } finally {
         await close(demoServer)
         fs.rmSync(demoWs, { recursive: true, force: true })

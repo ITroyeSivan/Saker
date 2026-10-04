@@ -1,0 +1,31 @@
+{
+  "status": "partial-verification",
+  "rootVersion": "0.4.69",
+  "ndayVersion": "1.5.3",
+  "productionFixture": {
+    "entries": 30, "predicateEvaluations": 60,
+    "physicalProbeRequests": 1, "controlRequests": 1, "reusedRequests": 59,
+    "ledgerRows": 30, "modelDisplayedRows": 12, "negativePredicateHits": 0,
+    "nodeTest": "passed", "officialElectronWithRealDefineTool": "passed"
+  },
+  "reverseTest": {
+    "scenario": "50 consumers with identical transport",
+    "newPhysicalRequests": 1, "legacyPhysicalRequests": 50,
+    "legacyFailsSameCountAssertion": true
+  },
+  "officialInstallation": { "profile": "desktop", "packagesVerified": 25, "byteComparison": "passed" },
+  "desktop": {
+    "runtime": "0.2.0-rc.2", "surface": "dsh-app://app/", "isolatedHome": true,
+    "slotErrors": 0, "modelReasoning": "Off", "promptAccepted": true,
+    "toolCalls": 0, "terminalReason": "error",
+    "error": "deepseek-official route has no configured API key in isolated Desktop",
+    "changedToolFlowVerified": false,
+    "credentialDependentVerification": "paused; user informed; no login or key entry performed"
+  },
+  "limitations": [
+    "Controlled screening fixture is not proof of real vulnerability detection.",
+    "No real model token savings were measured.",
+    "Asset recon integration, adaptive routes and practical benchmark remain pending.",
+    "Desktop UI activation alone does not satisfy changed-flow verification."
+  ]
+}

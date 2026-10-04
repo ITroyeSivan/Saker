@@ -1,10 +1,26 @@
 // 低频工具包：保留核心工具常驻，把只在特定阶段使用的工具大类按需加载。
 // 设计约束：
-//   · 只隐藏「当前模式存在、但通常属于后续阶段」的工具；基础侦察/记录/报告工具不收；
+//   · 记录、对照、结果工具常驻；测绘和情报工具按本轮问题加载；
 //   · 包的可见性仍以插件自身模式门禁为前提，工具包不会越过门禁；
 //   · 默认只影响可见性，不改变工具执行或权限。
 
 export const PACKS = [
+  {
+    id: 'asset-discovery',
+    label: '目标识别与资产查询',
+    prefixes: ['asset_search', 'asset_candidate_search', 'asset_ingest', 'subfinder_enum', 'httpx_probe', 'whatweb_fingerprint', 'wafw00f_detect'],
+    modes: ['pentest'],
+    defaultVisible: false,
+    hint: '只给 URL 需有限识别，或用户明确要求查少量资产时加载；不自动扩大范围',
+  },
+  {
+    id: 'nday',
+    label: '公开漏洞与情报源',
+    prefixes: ['nday_'],
+    modes: ['pentest'],
+    defaultVisible: false,
+    hint: 'Nday发现、核对明确组件或维护情报源时加载；已有业务问题无需先查全库',
+  },
   {
     id: 'active-scan',
     label: '主动扫描器',

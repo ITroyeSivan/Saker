@@ -1,0 +1,188 @@
+{
+  "settings": [
+    {
+      "name": "通用设置",
+      "loaded": true,
+      "loadingRemaining": false,
+      "visibleFailure": false
+    },
+    {
+      "name": "模型",
+      "loaded": true,
+      "loadingRemaining": false,
+      "visibleFailure": false
+    },
+    {
+      "name": "内置插件",
+      "loaded": true,
+      "loadingRemaining": false,
+      "visibleFailure": false
+    },
+    {
+      "name": "Agent 预设",
+      "loaded": true,
+      "loadingRemaining": false,
+      "visibleFailure": false
+    },
+    {
+      "name": "MCP 工作台",
+      "loaded": true,
+      "loadingRemaining": false,
+      "visibleFailure": false
+    },
+    {
+      "name": "安全配置",
+      "loaded": true,
+      "loadingRemaining": false,
+      "visibleFailure": false
+    },
+    {
+      "name": "知识库",
+      "loaded": true,
+      "loadingRemaining": false,
+      "visibleFailure": false
+    },
+    {
+      "name": "资产平台 API",
+      "loaded": true,
+      "loadingRemaining": false,
+      "visibleFailure": false
+    },
+    {
+      "name": "漏洞情报更新",
+      "loaded": true,
+      "loadingRemaining": false,
+      "visibleFailure": false
+    },
+    {
+      "name": "技能",
+      "loaded": true,
+      "loadingRemaining": false,
+      "visibleFailure": false
+    },
+    {
+      "name": "方法编排",
+      "loaded": true,
+      "loadingRemaining": false,
+      "visibleFailure": false
+    },
+    {
+      "name": "WebShell",
+      "loaded": true,
+      "loadingRemaining": false,
+      "visibleFailure": false
+    }
+  ],
+  "tabs": [
+    {
+      "name": "对话",
+      "loaded": true,
+      "loadingRemaining": false,
+      "visibleFailure": false
+    },
+    {
+      "name": "轨迹",
+      "loaded": true,
+      "loadingRemaining": false,
+      "visibleFailure": false
+    },
+    {
+      "name": "战役记忆",
+      "loaded": true,
+      "loadingRemaining": false,
+      "visibleFailure": false
+    },
+    {
+      "name": "AttackAtlas",
+      "loaded": true,
+      "loadingRemaining": false,
+      "visibleFailure": false
+    },
+    {
+      "name": "redteam 成果",
+      "loaded": true,
+      "loadingRemaining": false,
+      "visibleFailure": false
+    },
+    {
+      "name": "项目工作台",
+      "loaded": true,
+      "loadingRemaining": false,
+      "visibleFailure": false
+    },
+    {
+      "name": "hunter 狩猎",
+      "loaded": true,
+      "loadingRemaining": false,
+      "visibleFailure": false
+    },
+    {
+      "name": "webshell 管理",
+      "loaded": true,
+      "loadingRemaining": false,
+      "visibleFailure": false
+    }
+  ],
+  "rpc": [
+    {
+      "channel": "/dsh-sec-config",
+      "endpoint": "settings/get",
+      "http": 200,
+      "ok": true
+    },
+    {
+      "channel": "/dsh-mcp-studio",
+      "endpoint": "status",
+      "http": 200,
+      "ok": true
+    },
+    {
+      "channel": "/dsh-method-stack",
+      "endpoint": "list",
+      "http": 200,
+      "ok": true
+    },
+    {
+      "channel": "/dsh-skill-browse",
+      "endpoint": "list",
+      "http": 200,
+      "ok": true
+    },
+    {
+      "channel": "/dsh-knowledge-hub",
+      "endpoint": "stats",
+      "http": 200,
+      "ok": true
+    },
+    {
+      "channel": "/dsh-knowledge-hub",
+      "endpoint": "packs-status",
+      "http": 200,
+      "ok": true
+    },
+    {
+      "channel": "/dsh-webshell-mgr-rpc",
+      "endpoint": "conn-list",
+      "http": 200,
+      "ok": true
+    },
+    {
+      "channel": "/dsh-campaign-memory",
+      "endpoint": "memory.stats",
+      "http": 200,
+      "ok": true
+    },
+    {
+      "channel": "/dsh-attack-atlas",
+      "endpoint": "taxonomy.get",
+      "http": 200,
+      "ok": true
+    },
+    {
+      "channel": "/dsh-redteam-results",
+      "endpoint": "task.status",
+      "http": 200,
+      "ok": true
+    }
+  ]
+}

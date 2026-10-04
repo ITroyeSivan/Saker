@@ -127,8 +127,9 @@ const row = methodRowBody(src)
 {
   const src = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
   const m = /var PRESETS = \[([\s\S]*?)\n\];/.exec(src)
-  const ids = ['pentest', 'code-audit', 'ctf-solver']
+  const ids = ['pentest']
   ok('client PRESETS 含全部已实装模式', !!m && ids.every((id) => m[1].includes(`'${id}'`)))
+  ok('client不暴露已移除模式', !!m && !m[1].includes('code-audit') && !m[1].includes('ctf-solver'))
 }
 
 // ── 2026-09-13 轮次：默认不启用任何方法 + 「仅此组」必须排他 ────────────────
@@ -184,6 +185,7 @@ const row = methodRowBody(src)
   try {
     const mod = await import(new URL(`../lib/index.js?cache-test=${Date.now()}`, import.meta.url))
     mod.apply({
+      tools: { register() {} },
       connection: {
         rpc: { handle: () => {} },
         register: (_ctx, _channel, fn) => { handler = fn },

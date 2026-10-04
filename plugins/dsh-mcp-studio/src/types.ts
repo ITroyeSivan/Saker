@@ -149,7 +149,7 @@ export function toMcpClientConfig(server: ServerEntry): McpClientConfig {
       transport: 'stdio',
       command: server.command,
       args: splitArgs(server.argsLine),
-      env: server.env,
+      env: { ...server.env },
       cwd: server.cwd,
     }
   }
@@ -157,7 +157,7 @@ export function toMcpClientConfig(server: ServerEntry): McpClientConfig {
     ...base,
     transport: 'streamable-http',
     url: server.url,
-    headers: server.headers,
+    headers: { ...server.headers },
   }
 }
 

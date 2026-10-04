@@ -46,10 +46,11 @@ const readPlugin = (name, file = 'lib/index.js') => {
   // Pentest：保留侦察/漏洞路径/证据工具；收起 CTF、后渗透与通用流程工具。
   const pt = computeDeny('pentest', known, RULES)
   ok('pentest 隐藏 ctf_*（4 个）', pt.includes('ctf_steer') && C === 4)
-  ok(`pentest 示例工具面收起数为 ${C + 20}`, pt.length === C + 20)
+  ok(`pentest 示例工具面收起数为 ${pt.length}（期望 ${C + 20}）`, pt.length === C + 20)
   ok('pentest 隐藏 webshell、保留按需工具包入口', pt.includes('webshell_exec') && !pt.includes('tool_pack'))
-  ok('pentest 隐藏派单、矩阵、后渗透和内网工具',
-    ['operation_goal', 'subagent', 'subagent_fork', 'workflow', 'attack_gate', 'redteam_atlas_target', 'redteam_coverage_mark', 'netexec_scan', 'crackmapexec_scan', 'impacket_suite', 'access_confirm', 'memshell_cli', 'nday_triage', 'campaign_memory_write', 'trace_recent'].every((n) => pt.includes(n))
+  ok('pentest 隐藏矩阵、后渗透和内网工具，并收起绕过管理的子代理工具',
+    ['operation_goal', 'attack_gate', 'redteam_atlas_target', 'redteam_coverage_mark', 'netexec_scan', 'crackmapexec_scan', 'impacket_suite', 'access_confirm', 'memshell_cli', 'nday_triage', 'campaign_memory_write', 'trace_recent'].every((n) => pt.includes(n))
+    && ['subagent', 'subagent_fork', 'workflow'].every((n) => pt.includes(n))
     && !['attack_plan', 'nday_coverage', 'nday_learn', 'nday_draft', 'nday_handoff'].some((n) => pt.includes(n)))
   ok('pentest 保留 RCE 路径、证据记录与核心侦察工具',
     ['nmap_portscan', 'sqlmap_inject', 'nday_catalog', 'nday_match', 'nday_coverage', 'nday_learn', 'nday_draft', 'nday_handoff', 'attack_plan', 'zday_pattern', 'oob_probe', 'redteam_finding_register', 'knowledge_search'].every((n) => !pt.includes(n)))
@@ -121,12 +122,12 @@ const readPlugin = (name, file = 'lib/index.js') => {
   const pt = deferredPackTools('pentest', known, PACKS)
   ok('pentest 默认收起 webshell 全局工具', pt.includes('webshell_connect') && pt.includes('webshell_exec'))
   ok('pentest 默认收起耗时扫描器与爬取工具', ['nmap_portscan', 'dirsearch_dirs', 'ffuf_fuzz', 'nuclei_scan', 'afrog_scan', 'sqlmap_inject', 'katana_crawl', 'gau_urls'].every((n) => pt.includes(n)))
-  ok('快指纹辅助工具仍常驻', !pt.includes('whatweb_fingerprint') && !pt.includes('wafw00f_detect'))
+  ok('指纹工具按需加载，不占每轮声明', pt.includes('whatweb_fingerprint') && pt.includes('wafw00f_detect'))
   ok('AD 工具不属于 webshell 延迟包（由 Pentest 主线规则单独收起）', !pt.includes('impacket_suite') && !pt.includes('netexec_scan'))
   ok('pentest 不收工具包入口', !pt.includes('tool_pack'))
   const ca = deferredPackTools('code-audit', known, PACKS)
   ok('code-audit 不额外收起（基础规则已隐藏 webshell）', ca.length === 0)
-  ok('packsForMode 只返回模式可用包', packsForMode('pentest', PACKS).length === 2 && packsForMode('code-audit', PACKS).length === 0)
+  ok('packsForMode 只返回模式可用包', packsForMode('pentest', PACKS).length === 4 && packsForMode('code-audit', PACKS).length === 0)
   ok('enabledPacks 可按 id 关闭', enabledPacks({ webshell: false }).length === PACKS.length - 1)
   ok('findPack 严格按 id 匹配', findPack('webshell', PACKS)?.id === 'webshell' && findPack('nope', PACKS) === null)
   ok('webshell 包只命中 webshell_*', JSON.stringify(packTools(known, findPack('webshell', PACKS))) === JSON.stringify(['webshell_connect', 'webshell_exec']))
@@ -180,8 +181,11 @@ const readPlugin = (name, file = 'lib/index.js') => {
   // The mode persona is now a separate, user-editable full opening.
   const pentestPrompt = readFileSync(new URL('../preset/pentest/opening.md', PLUGINS), 'utf8')
   ok('Pentest RCE 工具规则存在并排除该模式', !!focus && !focus.modes.includes('pentest'))
-  ok('Pentest 提示明确命中 RCE 后停止且禁止派生会话', /reproducible RCE[\s\S]{0,500}stop/i.test(pentestPrompt) && /Do not spawn subagents, workflows, or side chats/i.test(pentestPrompt))
-  ok('Pentest 规则收起派单、记忆轨迹、内网、后渗透和非主线 Nday 工具', ['webshell_', 'netexec_', 'crackmapexec_', 'impacket_', 'subagent', 'workflow', 'campaign_', 'trace_', 'access_confirm', 'memshell_cli', 'nday_handoff'].every((p) => focus.prefixes.includes(p)))
+  ok('Pentest 按证据委派独立任务，默认不按每个目标/CVE派模型',
+    /never fan out by URL\/CVE/i.test(pentestPrompt)
+    && /Delegate only a clear necessary site task/i.test(pentestPrompt)
+    && /Default finish the agreed task/i.test(pentestPrompt))
+  ok('Pentest 规则收起记忆轨迹、内网、后渗透和非主线 Nday 工具', ['webshell_', 'netexec_', 'crackmapexec_', 'impacket_', 'campaign_', 'trace_', 'access_confirm', 'memshell_cli', 'nday_handoff'].every((p) => focus.prefixes.includes(p)))
   ok('Pentest 主线规则不屏蔽按需工具包入口', !focus.prefixes.includes('tool_pack') && !computeDeny('pentest', ['tool_pack'], RULES).includes('tool_pack'))
   const toolPackRule = RULES.find((r) => r.id === 'toolPack')
   ok('工具包入口只对实际声明工具包的模式开放', JSON.stringify(toolPackRule.modes) === JSON.stringify([...new Set(PACKS.flatMap((p) => p.modes))]))
@@ -193,7 +197,7 @@ const readPlugin = (name, file = 'lib/index.js') => {
     'read', 'nmap_portscan', 'dirsearch_dirs', 'ffuf_fuzz', 'nuclei_scan', 'afrog_scan', 'sqlmap_inject', 'katana_crawl', 'gau_urls', 'whatweb_fingerprint', 'ctf_state',
     'webshell_connect', 'webshell_exec', 'webshell_file',
     'impacket_suite', 'netexec_scan', 'crackmapexec_scan',
-    'tool_pack',
+    'tool_pack', 'nday_catalog', 'nday_match', 'asset_search', 'redteam_context',
   ]
   const handlers = {}
   const registered = []
@@ -218,7 +222,7 @@ const readPlugin = (name, file = 'lib/index.js') => {
     id: 'agent-pack-test',
     ctx: {
       tools: {
-        schemas: () => known.filter((name) => !isDenied(name) && (scannerToolsReady || !deferredScanners.includes(name))).map((name) => ({ name })),
+        schemas: (scope) => scope === agent ? known.filter((name) => !isDenied(name) && (scannerToolsReady || !deferredScanners.includes(name))).map((name) => ({ name })) : [],
         restrict: (filter) => {
           const layerId = ++nextLayerId
           const deny = new Set(filter.deny)
@@ -236,13 +240,23 @@ const readPlugin = (name, file = 'lib/index.js') => {
   scannerToolsReady = true
   handlers['agent/inbox/inserted']({ agent })
   ok('装配后 webshell、内网与派单不可见，工具包入口可见', ['webshell_exec', 'impacket_suite', 'netexec_scan', 'crackmapexec_scan'].every(isDenied) && !isDenied('tool_pack'))
-  ok('Agent 工具视图中的耗时扫描器默认隐藏、快指纹仍可见', deferredScanners.every(isDenied)
-    && !isDenied('whatweb_fingerprint'))
+  ok('Agent 工具视图中的扫描器、指纹、Nday和资产查询默认隐藏', deferredScanners.every(isDenied)
+    && ['whatweb_fingerprint', 'nday_catalog', 'nday_match', 'asset_search'].every(isDenied))
 
   const toolPack = registered.find((tool) => tool.name === 'tool_pack')
   ok('tool_pack 已注册', !!toolPack)
   const list = await toolPack.execute({ action: 'list' }, { agent })
   ok('list 通过 Agent 视图识别 8 个扫描器并显示默认收起', list.ok && list.packs.find((p) => p.id === 'active-scan')?.loaded === false && list.packs.find((p) => p.id === 'active-scan')?.tools === 8)
+  const ndayLoaded = await toolPack.execute({ action: 'load', pack: 'nday' }, { agent })
+  ok('Nday包加载恢复情报工具，保留其他过滤与核心工具', ndayLoaded.ok && !isDenied('nday_catalog') && !isDenied('nday_match') && isDenied('asset_search') && !isDenied('read') && !isDenied('redteam_context'))
+  handlers['agent/inbox/inserted']({ agent })
+  ok('刷新保留已加载Nday包且不扩展其他包', !isDenied('nday_match') && isDenied('whatweb_fingerprint'))
+  await toolPack.execute({ action: 'unload', pack: 'nday' }, { agent })
+  ok('Nday包卸载后恢复隐藏', isDenied('nday_catalog') && isDenied('nday_match'))
+  const assetLoaded = await toolPack.execute({ action: 'load', pack: 'asset-discovery' }, { agent })
+  ok('目标识别包按需恢复资产查询和指纹', assetLoaded.ok && !isDenied('asset_search') && !isDenied('whatweb_fingerprint') && isDenied('nday_match'))
+  await toolPack.execute({ action: 'unload', pack: 'asset-discovery' }, { agent })
+  ok('目标识别包卸载后仍保留核心记录工具', isDenied('asset_search') && isDenied('whatweb_fingerprint') && !isDenied('redteam_context'))
   const scansLoaded = await toolPack.execute({ action: 'load', pack: 'active-scan' }, { agent })
   ok('常规模式可按需加载主动扫描器包', scansLoaded.ok && !isDenied('nmap_portscan') && !isDenied('nuclei_scan'))
   handlers['agent/inbox/inserted']({ agent })

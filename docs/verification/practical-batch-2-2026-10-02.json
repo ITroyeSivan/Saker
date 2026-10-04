@@ -1,0 +1,20 @@
+{
+  "status": "partial-verification",
+  "rootVersion": "0.4.70",
+  "ndayVersion": "1.5.4",
+  "productionScenarios": {
+    "knownProductFromBaseline": { "discoveryRequests": 1, "probeRequests": 1, "controlRequests": 1, "unrelatedProbeRequests": 0 },
+    "unknownProductWithInput": { "requests": 1, "probeRequests": 0, "observedInput": true, "gapRetained": true },
+    "branded403": { "requests": 1, "probeRequests": 0, "state": "access-blocked" },
+    "sharedIpDistinctVirtualHosts": { "servicesRetained": 2, "requests": 4, "discoveryRequests": 0, "entryIds": ["fixture-a", "fixture-b"] },
+    "hotUnrelatedVersusColdRelevant": { "selected": "fixture-a", "unrelatedSelected": 0 },
+    "genericStackOrVendorOrDomain": { "selectedProducts": 0 },
+    "unknownServicesOverBudget": { "services": 33, "requests": 0, "rejectedBeforeBaseline": true }
+  },
+  "tests": { "productionRouting": 7, "isolatedReverseMutations": 4, "officialElectronRealDefineTool": 7,
+    "planning": 19, "serviceGroups": 5, "sharedVerification": 10, "ndayPluginSuite": "passed" },
+  "desktopChangedFlowVerified": false,
+  "desktopVerification": "credential-dependent path remains paused after batch 1; no login performed",
+  "limitations": ["Controlled screening is not vulnerability detection evidence.", "Generic input routes are recorded but not yet autonomously executed.",
+    "Adaptive production scheduling and actual token comparison remain pending.", "Runtime contract checks do not replace Desktop changed-flow verification."]
+}

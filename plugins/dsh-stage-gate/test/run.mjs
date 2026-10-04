@@ -620,7 +620,7 @@ import os from "node:os";
 		const idx = fs.readFileSync(`${P}/${p}/lib/index.js`, "utf8");
 		// 两种正确写法都认：模块级 closeStore() 或 store 单例上的 .close()
 		expect(`${p}: 有库句柄释放钩子`,
-			/ctx\.effect\(\(\) => \(\) => \{[\s\S]{0,140}?(store\?\.close\?\.\(\)|closeStore\(\))/.test(idx) && idx.includes(': store handle"'));
+			/ctx\.effect\(\(\) => (?:async )?\(\) => \{[\s\S]{0,240}?(store\?\.close\?\.\(\)|closeStore\(\))/.test(idx) && idx.includes(': store handle"'));
 		// 钩子必须在 apply 内（放模块顶层会 ReferenceError: ctx is not defined）
 		expect(`${p}: 释放钩子在 apply() 内`, idx.search(/^function apply\(/m) < idx.indexOf(': store handle"'));
 	}

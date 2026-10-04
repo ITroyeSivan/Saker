@@ -199,8 +199,11 @@ export async function apply(ctx: Context, config: StudioConfig): Promise<void> {
         },
       )
     }
-    for (const server of serversOf()) {
-      if (!mounts.has(server.id)) tracker.states.delete(server.id)
+    // Keep a synchronous mount error visible until the row changes or is removed.
+    // A failed mount is deliberately absent from mounts, so that is not a cleanup signal.
+    const configuredIds = new Set(enabled.map(server => server.id))
+    for (const id of tracker.states.keys()) {
+      if (!configuredIds.has(id)) tracker.states.delete(id)
     }
 
     // 3) Hybrid promotions: a proxied row may keep a few tools as first-class entries.
@@ -384,18 +387,26 @@ export async function apply(ctx: Context, config: StudioConfig): Promise<void> {
   ctx.on('session/event', ((session: unknown, event: { type: string; time: number; data: Record<string, unknown> }) => {
     if (event.type === 'tool/call') {
       const name = typeof event.data.name === 'string' ? event.data.name : ''
-      if (!name.startsWith('mcp__')) return
+      if (!name.startsWith('mcp__') && name !== META_TOOL_CALL) return
       const callId = typeof event.data.callId === 'string' ? event.data.callId : ''
+      if (!callId) return
+      let callArguments = event.data.arguments
+      if (typeof callArguments === 'string') {
+        try { callArguments = JSON.parse(callArguments) } catch { callArguments = undefined }
+      }
+      const args = callArguments !== null && typeof callArguments === 'object'
+        ? callArguments as Record<string, unknown> : {}
       const sessionId = String((session as { id?: unknown }).id ?? '')
       inflight.set(`${sessionId}:${event.time}:${callId}`, {
-        server: name.split('__')[1] ?? '',
-        tool: name,
+        server: name === META_TOOL_CALL ? String(args.server ?? '') : name.split('__')[1] ?? '',
+        tool: name === META_TOOL_CALL ? String(args.tool ?? '') : name,
         at: event.time,
       })
       return
     }
     if (event.type === 'tool/result') {
       const message = (event.data.message ?? {}) as {
+        isError?: boolean
         source?: { kind?: unknown; callId?: unknown }
         content?: ReadonlyArray<{ type?: unknown; toolCallId?: unknown; isError?: unknown }>
       }
@@ -407,7 +418,7 @@ export async function apply(ctx: Context, config: StudioConfig): Promise<void> {
       for (const [key, entry] of [...inflight]) {
         if (!key.startsWith(`${sessionId}:`) || !key.endsWith(`:${callId}`)) continue
         inflight.delete(key)
-        const isError = (message.content ?? []).some(block => block?.isError === true) || event.data.error !== undefined
+        const isError = message.isError === true || (message.content ?? []).some(block => block?.isError === true) || event.data.error !== undefined
         const errorInfo = event.data.error
         executions.push({
           at: entry.at,
