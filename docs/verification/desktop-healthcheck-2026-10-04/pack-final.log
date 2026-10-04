@@ -1,0 +1,27 @@
+OK   root dsh-saker
+OK   dsh-attack-atlas
+OK   dsh-auto-advance
+OK   dsh-campaign-memory
+OK   dsh-ctf-observer
+OK   dsh-hunter
+OK   dsh-knowledge-hub
+OK   dsh-mcp-studio
+OK   dsh-method-stack
+OK   dsh-mode-group
+OK   dsh-nday-hunter
+OK   dsh-product-subagents
+OK   dsh-redteam-results
+OK   dsh-refusal-guard
+OK   dsh-route-boost
+OK   dsh-scanner-tools
+OK   dsh-sec-config
+OK   dsh-sec-enforce
+OK   dsh-semgrep-audit
+OK   dsh-session-pulse
+OK   dsh-skill-browse
+OK   dsh-stage-gate
+OK   dsh-tool-scope
+OK   dsh-trace-vault
+OK   dsh-webshell-mgr
+
+packed ok=25 fail=0

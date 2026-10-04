@@ -17,6 +17,8 @@ settings.yaml
 Thumbs.db
 .DS_Store
 *.log
+# Sanitized, curated verification evidence referenced by public documentation.
+!docs/verification/**/*.log
 smoke/
 .idea/
 .vscode/

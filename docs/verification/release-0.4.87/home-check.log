@@ -1,0 +1,24 @@
+── $DSH_HOME 跟随 ──
+ok   扫到插件 24 个，其中涉及平台数据根的 18 个
+ok   没有任何插件再把 .dsh 硬拼在 homedir/HOME 之后
+ok   用了 DSH_HOME 的文件都写了定义
+ok   DSH_HOME 定义一律采用规范形态
+ok   route-boost 记账路径直接跟随 DSH_HOME
+
+── 原生阻塞对话框（硬断言：弹窗会阻塞渲染进程，Agent 驱动整页卡死）──
+ok   没有任何插件使用原生 alert/confirm/prompt
+
+── useState 风格一致（硬断言：混用会让整块面板空白且不报错）──
+ok   没有「解构声明 + 元组读取」的 useState 混用
+
+── 注入点必须在 Session.append 临界区之外（硬断言：同步注入会被重入拒绝且极易被吞掉）──
+ok   每个 agent.followup/steer 调用点都已延后或已声明注入安全
+ok   声明为投递体的文件都仍有 setTimeout 延后机制
+
+── 无注释的空 catch（硬断言：静默吞错是本轮三次「功能从未生效」的共同形态）──
+ok   没有既无注释又完全空白的 catch 块
+
+── 构建链一致性（硬断言：lib 必须是 src 的产物，不能手工编辑）──
+ok   带 src/ 的插件，其 lib 产物都带构建标记（// src/ 或 loader banner）
+
+all 11 tests passed
