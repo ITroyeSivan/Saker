@@ -15,20 +15,20 @@ PAD = 40          # 画布外边距
 GAP = 14          # 卡片水平间距
 ROW_GAP = 14      # 行间距
 CANVAS_W = 1600
-MAX_ROW_H = 340   # 单行最大高度，避免偏方的图把行撑得过高
+MAX_ROW_H = 440   # 设置页接近方形，保留足够高度显示正文
 RADIUS = 10
 
 # 同一行放**宽高比接近**的图，各行宽度才均衡；混着放会出现一行里一窄两宽。
 ROWS = [
-    [("02-modes.png", "三种模式"),
-     ("03-attack-atlas.png", "攻击面覆盖"),
-     ("09-findings.png", "成果与证据")],
-    [("06-skills.png", "技能可自定义"),
-     ("07-tools1.png", "工具可自定义"),
-     ("08-tools2.png", "MCP 可接入")],
-    [("04-method-stack1.png", "提示词可编排"),
-     ("11-webshell1.png", "WebShell 管理"),
-     ("13-knowledge1.png", "知识库随包")],
+    [("desktop-modes.png", "三个测试模式"),
+     ("desktop-tasks.png", "测试任务"),
+     ("desktop-results.png", "成果与证据（本地夹具）")],
+    [("desktop-skills.png", "技能管理"),
+     ("desktop-tools.png", "本机工具"),
+     ("desktop-mcp.png", "MCP 工作台")],
+    [("desktop-methods.png", "方法编排"),
+     ("desktop-nday.png", "漏洞情报更新"),
+     ("desktop-knowledge.png", "知识库")],
 ]
 
 CONTENT_W = CANVAS_W - 2 * PAD

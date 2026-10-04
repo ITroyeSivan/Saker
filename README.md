@@ -1,55 +1,59 @@
 # Saker · 猎隼
 
-基于 [DeepSeek Harness Desktop](https://github.com/deepseek-ai/deepseek-harness) 的渗透测试工作台。你提供目标、账号和已有线索，AI 围绕具体问题查资料、分析请求、验证结果，并整理复现材料。
+Saker 是 [DeepSeek Harness Desktop](https://github.com/deepseek-ai/deepseek-harness) 的安全测试插件集，包含常规测试、Nday 发现、0Day 挖掘，以及工具管理、MCP、漏洞情报和知识库。
 
-![Saker：目标与资料、三个测试方向、验证与交付](docs/images/00-saker-desktop-overview.svg)
+![Saker 桌面端功能截图](docs/images/00-hero-collage.png)
 
-[下载最新版](https://github.com/ITroyeSivan/Saker/releases/latest) · [安装说明](docs/getting-started.md) · [插件清单](docs/plugin-list.md) · [反馈问题](https://github.com/ITroyeSivan/Saker/issues)
+[查看单张截图](docs/images/desktop-screenshots-2026-10-04.md)
 
-## 三个测试方向
+[下载](https://github.com/ITroyeSivan/Saker/releases/latest) · [安装说明](docs/getting-started.md) · [插件清单](docs/plugin-list.md) · [问题反馈](https://github.com/ITroyeSivan/Saker/issues)
 
-新任务统一从「渗透测试」进入，再选择本轮重点。代码审计、CTF 已退出新任务菜单，历史会话仍可读取。
+## 测试模式
 
-| 方向 | 适合做什么 | 开始前提供什么 |
-|---|---|---|
-| 常规测试 | 沿着一个接口或业务流程检查权限、输入和实际影响 | 目标、测试账号、请求样本、你关心的问题 |
-| Nday 发现 | 根据产品与版本查已公开漏洞，核对适用条件后验证 | 目标范围、产品线索、版本或已有扫描结果 |
-| 0Day 挖掘 | 深入一个站的页面、JS、接口和业务关系，验证新的问题 | 一个站、角色与业务说明、已有疑点或流量 |
+新建会话选择「Saker 渗透测试」，支持以下三种模式：
 
-例如：**“这个人员查询接口，普通账号能否读取其他部门的数据？”** 把正常请求、两类测试账号和可操作的对象交给 AI，让它沿这条路径比较权限和结果。
+| 模式 | 用途 |
+|---|---|
+| 常规测试 | 检查接口、权限和业务流程中的常见漏洞 |
+| Nday 发现 | 查询产品的已公开漏洞，检查版本和触发条件 |
+| 0Day 挖掘 | 分析页面、JS、请求和业务逻辑，查找新的漏洞 |
 
-只有 URL 时，AI 会先做有限观察，再与你确定方向。相关线索可以连续验证；缺少账号、方向需要调整、IP 被封或正常访问失效时，会停下来说明原因。小任务直接完成，确有需要才分派站点子任务，同站复用，最多两个，结束后回收。
+支持导入请求、流量、JS 和已有扫描结果。测试过程中保存分析记录、复现步骤和证据；遇到封禁、账号失效等阻碍会停止并说明原因。子代理按需创建，同站复用，最多两个，结束后释放。
 
-## 工作台能做什么
+代码审计和 CTF 不再作为独立模式，历史会话仍可查看。
 
-- **漏洞情报更新**：在设置中选源、保存并后台更新；查看各源进度，失败的源可单独重试。已移除 SRC 范围策略。
-- **资料与工具**：本机工具路径、资产平台 API、MCP、知识库、技能和测试方法集中配置。扫描工具按需加载；已有导出结果可以直接导入。
-- **站点分析**：整理页面、JS、接口、角色和请求之间的关系，保存材料，减少重复读取与重复请求。
-- **过程记录**：查看当前问题、预算、操作记录和子任务，保存中断原因与下一步所需资料。
-- **成果交付**：区分疑点与已确认问题，保存正常/异常请求、响应和实际影响，整理复现步骤并导出报告与材料包。
+## 功能
 
-Saker 包含 **24 个独立插件**和一个根包。知识库、MCP、WebShell 管理等功能按需使用，具体配置见[插件清单](docs/plugin-list.md)。外部服务和本机工具需自行安装、启动并配置。
+- **工具管理**：配置本机工具路径，按需调用扫描和分析工具。
+- **MCP 工作台**：管理 MCP 服务，查看连接状态、工具列表和调用日志。
+- **漏洞情报**：选择数据源并更新，查看各源进度，单独重试失败的源。
+- **知识库**：随包提供安全资料，支持检索和导入资料。
+- **技能与方法**：编辑技能、提示词和测试方法，调整调用顺序。
+- **任务与成果**：查看任务进度、操作记录和子任务，保存漏洞证据，导出报告及附件。
+- **WebShell 管理**：管理脚本、连接和文件操作。
 
-## 安装与启动
+共 24 个功能插件和一个根包，可按需安装。外部工具及 MCP 服务需要单独安装、配置和启动，见[插件清单](docs/plugin-list.md)。
 
-当前 Saker **0.4.87** 已在 Windows 官方 Desktop **0.2.0-rc.2** 上验证。请先安装该桌面版本并配置可用模型；其他宿主版本的兼容性尚未验证。
+## 安装
 
-1. 从 [Release](https://github.com/ITroyeSivan/Saker/releases/latest) 下载 `Saker-0.4.87-desktop.zip` 并解压到长期保留的目录。
-2. 打开官方 Desktop 完成首次初始化，再完全退出应用。
-3. 在解压目录运行下面的命令，将路径换成官方应用的实际安装目录：
+当前版本 **0.4.87**，已在 Windows 的官方 Desktop **0.2.0-rc.2** 上测试。其他宿主版本尚未验证。
+
+1. 安装官方 Desktop，完成首次初始化并配置模型，然后完全退出应用。
+2. 下载 [Saker-0.4.87-desktop.zip](https://github.com/ITroyeSivan/Saker/releases/download/v0.4.87/Saker-0.4.87-desktop.zip)，解压到长期保留的目录。
+3. 在解压目录执行，将路径替换为 Desktop 的实际安装目录：
 
 ```powershell
 node scripts/install-desktop.mjs --desktop-dir "C:/实际安装目录/DeepSeek Harness"
 ```
 
-脚本调用应用自带的官方插件命令，安装并检查全部 25 个包，创建或刷新桌面的 **Saker (dsh Desktop)** 快捷方式。以后双击它启动。更新应用目录时继续使用原来的用户数据目录；请保留解压目录中的 `dist/desktop`，已安装插件会引用其中的文件。
+安装脚本会检查全部 25 个包，并创建或刷新桌面的 **Saker (dsh Desktop)** 快捷方式。安装后双击快捷方式启动；更新时沿用原来的用户数据目录。
 
-也可在官方「插件」页安装压缩包里的 tgz：先功能插件，最后根包。应用内安装无需另装 Node；脚本安装需要 Node.js ≥22.5。源码打包另外需要 pnpm，见[快速开始](docs/getting-started.md)。
+请保留解压目录中的 `dist/desktop`，已安装插件会引用其中的文件。脚本需要 Node.js ≥22.5；也可在应用的「插件」页手动安装 tgz，先安装功能插件，最后安装根包。源码构建步骤见[安装说明](docs/getting-started.md)。
 
-## 实测情况
+## 测试记录
 
-已完成桌面的任务流程、设置页、插件激活、成果导出和无害 MCP 调用验证；安装后也核对了文件内容与重启后的配置。详见[框架实测](docs/verification/framework-desktop-2026-10-03.md)、[功能复测](docs/verification/desktop-healthcheck-2026-10-04.md)及[本版发布检查](docs/verification/release-0.4.87.md)。
+桌面测试覆盖任务流程、设置页、插件加载、成果导出和 MCP 调用。记录：[框架测试](docs/verification/framework-desktop-2026-10-03.md)、[功能复测](docs/verification/desktop-healthcheck-2026-10-04.md)、[0.4.87 发布检查](docs/verification/release-0.4.87.md)。
 
-受控对照中，部分任务减少了 token，Nday 任务的用量反而增加。现有测试不能证明真实站点检出率提高，也不保证每个任务更省成本。扫描命中和响应差异仍需验证实际影响。
+目前的测试不能证明真实目标的漏洞检出率提高。Token 用量随任务变化，Nday 对照测试中用量有所增加。
 
-Saker 自有代码采用 [MIT](LICENSE)；随附资料的许可见 [第三方说明](THIRD_PARTY_NOTICES.md)。
+Saker 自有代码采用 [MIT](LICENSE)，随附资料的许可见[第三方说明](THIRD_PARTY_NOTICES.md)。
