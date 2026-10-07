@@ -1,6 +1,6 @@
 // Desktop-only preferences and prompt drafts. Drafts never enter model context
 // until the user places one in the native composer and sends it.
-import { normalizeInteraction } from './interaction.js';
+import { normalizeInteraction, reportingFor, MAX_SITE_WORKERS } from './interaction.js';
 
 export const CHAT_SETUP_SCHEMA = `
 CREATE TABLE IF NOT EXISTS chat_defaults (id INTEGER PRIMARY KEY CHECK(id=1), record TEXT NOT NULL);
@@ -12,8 +12,8 @@ export function chatDefaults(store) {
   return row ? JSON.parse(row.record) : null;
 }
 export function saveChatDefaults(store, input) {
-  if (!Number.isInteger(input.workers) || input.workers < 0 || input.workers > 2) throw Error('子代理上限应为0、1或2');
-  const record = { interaction: normalizeInteraction(input.interaction), workers: input.workers };
+  if (!Number.isInteger(input.workers) || input.workers < 0 || input.workers > MAX_SITE_WORKERS) throw Error('子代理上限应为0–'+MAX_SITE_WORKERS+'的整数');
+  const record = { interaction: normalizeInteraction(input.interaction), reporting: reportingFor(input), workers: input.workers };
   store.db.prepare('INSERT INTO chat_defaults(id,record) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET record=excluded.record').run(JSON.stringify(record));
   return record;
 }

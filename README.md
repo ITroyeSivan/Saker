@@ -18,9 +18,9 @@ Saker 是 [DeepSeek Harness Desktop](https://github.com/deepseek-ai/deepseek-har
 | Nday 发现 | 查询产品的已公开漏洞，检查版本和触发条件 |
 | 0Day 挖掘 | 分析页面、JS、请求和业务逻辑，查找新的漏洞 |
 
-支持导入请求、流量、JS 和已有扫描结果。测试过程中保存分析记录、复现步骤和证据；遇到封禁、账号失效等阻碍会停止并说明原因。子代理按需创建，同站复用，最多两个，结束后释放。
+支持导入请求、流量、JS和已有扫描结果。测试过程中保存分析记录、复现步骤和证据；遇到封禁、账号失效等阻碍会停止并说明原因。子代理上限支持0–16，按需创建、同站复用，结束后释放。
 
-聊天输入框上方可直接设置交互频率和子代理人数，开始聊天后入口仍保留。点击「写提示词」可选示例、填空、自由编辑，再插入输入框或复制；草稿自动保存，个人模板可跨会话选用。阶段确认也直接在聊天中完成。常规与 Nday 的安排放在「更多设置」中，两方向共用资料、操作额度与截止时间。[查看设计与实际桌面截图](docs/chat-setup-design-2026-10-07.md)。
+聊天输入框上方直接选择共同研判、关键节点确认或自主推进；进度汇报单独设置。紧凑入口保持常驻，提示词可选示例、填空、自由编辑、插入或复制，个人模板跨会话复用。共同研判时可在等待节点补充业务怀疑，再按这个思路继续。常规与Nday安排在「设置」中，两方向共用资料、操作额度和截止时间。[查看设计依据与实际截图](docs/chat-cooperation-design-2026-10-07.md)。
 
 代码审计和 CTF 不再作为独立模式，历史会话仍可查看。
 
@@ -38,10 +38,10 @@ Saker 是 [DeepSeek Harness Desktop](https://github.com/deepseek-ai/deepseek-har
 
 ## 安装
 
-当前版本 **0.4.89**，已在 Windows 的官方 Desktop **0.2.0-rc.2** 上测试。其他宿主版本尚未验证。
+当前版本 **0.4.90**，已在 Windows 的官方 Desktop **0.2.0-rc.2** 上测试。其他宿主版本尚未验证。
 
 1. 安装官方 Desktop，完成首次初始化并配置模型，然后完全退出应用。
-2. 下载 [Saker-0.4.89-desktop.zip](https://github.com/ITroyeSivan/Saker/releases/download/v0.4.89/Saker-0.4.89-desktop.zip)，解压到长期保留的目录。
+2. 下载 [Saker-0.4.90-desktop.zip](https://github.com/ITroyeSivan/Saker/releases/download/v0.4.90/Saker-0.4.90-desktop.zip)，解压到长期保留的目录。
 3. 在解压目录执行，将路径替换为 Desktop 的实际安装目录：
 
 ```powershell
@@ -54,7 +54,7 @@ node scripts/install-desktop.mjs --desktop-dir "C:/实际安装目录/DeepSeek H
 
 ## 测试记录
 
-本轮桌面测试覆盖聊天设置、提示词准备与阶段续接，记录见 [聊天设置验收](docs/verification/chat-setup-2026-10-07.md)。MCP 配置保留，Burp/Yakit 服务当前未连接，未验证其业务调用。此前功能记录：[框架测试](docs/verification/framework-desktop-2026-10-03.md)、[功能复测](docs/verification/desktop-healthcheck-2026-10-04.md)、[0.4.88 发布检查](docs/verification/release-0.4.88.md)。
+本轮桌面测试覆盖协作与汇报分离、补充思路续接和更高子代理上限，记录见 [协作设置验收](docs/verification/chat-cooperation-2026-10-07.md)。MCP配置保留，Burp/Yakit服务当前未连接，未验证其业务调用。此前记录：[0.4.89聊天设置](docs/verification/chat-setup-2026-10-07.md)、[框架测试](docs/verification/framework-desktop-2026-10-03.md)、[功能复测](docs/verification/desktop-healthcheck-2026-10-04.md)。
 
 目前的测试不能证明真实目标的漏洞检出率提高。Token 用量随任务变化，Nday 对照测试中用量有所增加。
 

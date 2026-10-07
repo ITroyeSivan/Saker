@@ -7,6 +7,7 @@ import { runInNewContext } from 'node:vm';
 import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
 import { readTaskPolicy, updateTaskProgress, checkpointTask, chosenTaskOptions } from '../plugins/dsh-redteam-results/lib/task-policy.js';
 import { saveTaskContext } from '../plugins/dsh-redteam-results/lib/task-context.js';
+import { siteWorkerView } from '../plugins/dsh-redteam-results/lib/site-workers.js';
 import { createResearch } from '../plugins/dsh-redteam-results/lib/research.js';
 import { captureTaskCost, taskCostOverview } from '../plugins/dsh-redteam-results/lib/task-cost.js';
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-task-ui-'));
@@ -42,8 +43,8 @@ try {
   await test('Desktop interaction control saves preferences, confirms a real checkpoint and preserves policy on failed delivery',async()=>{
     const id='interaction-ui';
     const control=harness('InteractionControl',id);
-    const select=control.find(n=>n.type==='select'&&n.props['aria-label']==='交互频率');
-    assert.equal(select.children.length,3);
+    const select=control.find(n=>n.type==='select'&&n.props['aria-label']==='协作方式');
+    assert.equal(select.children.flat().length,3);
     await results.dispatch(ctx,store,'task.choose',{sessionId:id,mode:'regular',workflow:'regular-to-nday',workers:0,interaction:'confirm'});
     await results.dispatch(ctx,store,'task.start',{sessionId:id,policy:{mode:'regular',budget:{toolCalls:5,minutes:10}}});
     const before=readTaskPolicy(store,id);
@@ -255,7 +256,7 @@ try {
     await results.dispatch(ctx,store,'task.start',{sessionId:id,policy:{mode:'regular',question:'Offline chat fixture',budget:{toolCalls:8,minutes:10}}});
     const before=readTaskPolicy(store,id),ui=harness('ChatSetup',id);ui.render();ui.state[0]=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
     assert(ui.find(n=>n.props['aria-label']==='任务方向').props.disabled);
-    await ui.find(n=>n.props['aria-label']==='聊天交互频率').props.onChange({target:{value:'confirm'}});
+    await ui.find(n=>n.props['aria-label']==='聊天协作方式').props.onChange({target:{value:'confirm'}});
     assert.equal(readTaskPolicy(store,id).interaction,'confirm');
     await ui.find(n=>n.props['aria-label']==='聊天子代理上限').props.onChange({target:{value:'2'}});
     assert.equal(readTaskPolicy(store,id).workerLimit,2);
@@ -273,6 +274,56 @@ try {
     updateTaskProgress(store,id,{planComplete:true});ui.state[0]=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
     await ui.button('保留资料，设置下一轮').props.onClick();
     assert.equal(readTaskPolicy(store,id),null);assert.equal(chosenTaskOptions(store,id).workers,2);assert.equal(chosenTaskOptions(store,id).interaction,'confirm');
+  });
+  await test('cooperation and progress reporting are independent, and guided decisions remain guarded',async()=>{
+    for(const interaction of ['guided','confirm','continuous'])for(const reporting of ['summary','milestone']){
+      const id='cooperate-'+interaction+'-'+reporting;sessionMap.set(id,{id,header:{agentPreset:'pentest'}});
+      await results.dispatch(ctx,store,'task.choose',{sessionId:id,mode:'regular',workers:4,interaction,reporting});
+      await assert.rejects(results.dispatch(ctx,store,'task.start',{sessionId:id,policy:{mode:'regular',reporting:reporting==='summary'?'milestone':'summary',budget:{toolCalls:6}}}),/reporting differs/);
+      await results.dispatch(ctx,store,'task.start',{sessionId:id,policy:{mode:'regular',budget:{toolCalls:6,minutes:10}}});
+      const before=readTaskPolicy(store,id);assert.equal(before.reporting,reporting);assert.equal(before.workerLimit,4);
+      assert.match(sections[0].text({agent:{session:sessionMap.get(id)}}),reporting==='summary'?/结束时集中汇总/:/每个有实际结果的阶段/);
+      assert.match(sections[0].text({agent:{session:sessionMap.get(id)}}),/记录已审与未审、支持与反证/);
+      checkpointTask(store,id,'当前线索已梳理，请判断下一步');
+      assert.equal(!!readTaskPolicy(store,id).awaitingConfirmation,interaction!=='continuous');
+      await results.dispatch(ctx,store,'task.interaction',{sessionId:id,interaction,reporting:reporting==='summary'?'milestone':'summary'});
+      assert.equal(!!readTaskPolicy(store,id).awaitingConfirmation,interaction!=='continuous');
+      for(const key of ['budget','used','startedAt'])assert.deepEqual(readTaskPolicy(store,id)[key],before[key]);
+      if(interaction==='guided'){
+        const ui=harness('ChatSetup',id);ui.render();ui.state[0]=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
+        ui.find(n=>n.props['aria-label']==='补充你的思路').props.onChange({target:{value:'离线新怀疑：界面角色和数据归属可能不一致'}});
+        await ui.button('按当前思路继续').props.onClick();
+        assert.match(queued.at(-1).message.content[0].text,/用户补充思路：离线新怀疑/);
+        assert.equal(readTaskPolicy(store,id).awaitingConfirmation,undefined);
+      }
+    }
+  });
+  await test('custom worker ceilings admit 3 through 16, reject invalid input, and preserve budget',async()=>{
+    const id='custom-workers';sessionMap.set(id,{id,header:{agentPreset:'pentest'}});
+    await results.dispatch(ctx,store,'task.choose',{sessionId:id,mode:'regular',workers:1,interaction:'continuous'});
+    const ui=harness('ChatSetup',id);ui.render();ui.state[0]=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
+    await ui.find(n=>n.props['aria-label']==='聊天子代理上限').props.onChange({target:{value:'custom'}});
+    for(const value of ['3','16']){
+      ui.find(n=>n.props['aria-label']==='自定义子代理上限').props.onChange({target:{value}});
+      await ui.button('应用人数').props.onClick();assert.equal(chosenTaskOptions(store,id).workers,Number(value));
+    }
+    for(const value of ['','-1','2.5','17']){
+      ui.find(n=>n.props['aria-label']==='自定义子代理上限').props.onChange({target:{value}});
+      await ui.button('应用人数').props.onClick();assert.equal(chosenTaskOptions(store,id).workers,16);assert(ui.find(n=>n.props.role==='alert'));
+    }
+    await assert.rejects(results.dispatch(ctx,store,'task.choose',{sessionId:id,mode:'regular',workers:17}),/0 and 16/);
+    await results.dispatch(ctx,store,'task.start',{sessionId:id,policy:{mode:'regular',budget:{toolCalls:7,minutes:10}}});
+    const before=readTaskPolicy(store,id);await results.dispatch(ctx,store,'task.workers',{sessionId:id,workers:12});
+    for(const key of ['used','startedAt'])assert.deepEqual(readTaskPolicy(store,id)[key],before[key]);
+    for(const key of ['toolCalls','deadline'])assert.equal(readTaskPolicy(store,id).budget[key],before.budget[key]);
+    await assert.rejects(results.dispatch(ctx,store,'chat.defaults',{sessionId:id,interaction:'guided',workers:17}),/0–16/);
+  });
+  await test('all occupied workers remain visible beyond eight, including idle and cleanup failures',()=>{
+    const id='visible-workers';
+    for(let n=0;n<16;n++)store.db.prepare('INSERT INTO site_workers(parent_session,child_id,site,record) VALUES(?,?,?,?)').run(id,'visible-'+n,'https://fixture-'+n+'.test',JSON.stringify({childId:'visible-'+n,parentId:id,site:'https://fixture-'+n+'.test',state:n===0?'idle':n===15?'cleanup-failed':'running'}));
+    for(let n=0;n<10;n++)store.db.prepare('INSERT INTO site_workers(parent_session,child_id,site,record) VALUES(?,?,?,?)').run(id,'released-'+n,'https://released-'+n+'.test',JSON.stringify({childId:'released-'+n,parentId:id,site:'https://released-'+n+'.test',state:'released'}));
+    const view=siteWorkerView(store,id);assert.equal(view.active,16);assert.equal(view.workers.filter(w=>w.state!=='released').length,16);assert.equal(view.more,2);
+    assert(view.workers.some(w=>w.childId==='visible-0'));assert(view.workers.some(w=>w.childId==='visible-15'));
   });
   await test('visible initial defaults are persisted before editing, without starting a task or model',async()=>{
     const id='chat-initial';sessionMap.set(id,{id,header:{agentPreset:'pentest'}});let boot;

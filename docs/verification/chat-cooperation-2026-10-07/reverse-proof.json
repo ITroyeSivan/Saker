@@ -1,0 +1,24 @@
+[
+  {
+    "name": "guided-decision-gate",
+    "status": 1,
+    "failure": [
+      "FAIL cooperation and progress reporting are independent, and guided decisions remain guarded: Expected values to be strictly equal:"
+    ]
+  },
+  {
+    "name": "worker-ceiling",
+    "status": 1,
+    "failure": [
+      "FAIL cooperation and progress reporting are independent, and guided decisions remain guarded: workers must be an integer between 0 and 2",
+      "FAIL custom worker ceilings admit 3 through 16, reject invalid input, and preserve budget: Expected values to be strictly equal:"
+    ]
+  },
+  {
+    "name": "worker-visibility",
+    "status": 1,
+    "failure": [
+      "FAIL all occupied workers remain visible beyond eight, including idle and cleanup failures: Expected values to be strictly equal:"
+    ]
+  }
+]

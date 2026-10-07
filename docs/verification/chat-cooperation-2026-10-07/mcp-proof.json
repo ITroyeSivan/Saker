@@ -1,0 +1,12 @@
+{
+  "servers": 2,
+  "enabled": 2,
+  "connected": 0,
+  "tools": 0,
+  "burpPresent": true,
+  "yakitPresent": true,
+  "burpBridge": true,
+  "burpAddress": true,
+  "yakitAddress": true,
+  "errors": 0
+}

@@ -18,18 +18,18 @@ let failed=0;
 async function test(name,fn){try{await fn();console.log('ok   '+name);}catch(error){failed++;console.log('FAIL '+name+': '+error.stack);}}
 try {
   await test('interaction preferences persist before start, enter actual prompts and cannot be replaced by a model',()=>{
-    for(const interaction of ['continuous','milestone','confirm']){
+    for(const interaction of ['continuous','milestone','confirm','guided']){
       const id='frequency-'+interaction;
       chooseTaskMode(store,id,'regular',{interaction,workflow:'regular-to-nday',workers:0});
       const selected=taskPolicyStatus(store,id);assert.equal(selected.options.interaction,interaction);
-      assert.match(taskPrompt(selected),/交互频率/);
+      assert.match(taskPrompt(selected),/协作方式/);
       assert.throws(()=>startTaskPolicy(store,id,{mode:'regular',interaction:interaction==='confirm'?'continuous':'confirm',budget:{toolCalls:5}}),/interaction differs/);
       const policy=startTaskPolicy(store,id,{mode:'regular',budget:{toolCalls:5,minutes:10}});
       assert.equal(policy.interaction,interaction);
       assert.equal(taskExecutionGuard(store,id,'fixture_http'),undefined);
       updateTaskProgress(store,id,{regularComplete:true});
-      assert.equal(taskPolicyStatus(store,id).stopped,interaction==='confirm');
-      assert.equal(!!takeTaskContinuation(store,id),interaction!=='confirm');
+      assert.equal(taskPolicyStatus(store,id).stopped,['confirm','guided'].includes(interaction));
+      assert.equal(!!takeTaskContinuation(store,id),!['confirm','guided'].includes(interaction));
       assert.match(taskPrompt(taskPolicyStatus(store,id)),interaction==='continuous'?/不要求用户反复说继续/:interaction==='milestone'?/汇报后继续/:/等待桌面确认/);
     }
     assert.throws(()=>chooseTaskMode(store,'invalid-frequency','nday',{interaction:'never-stop'}),/invalid interaction/);
@@ -72,7 +72,8 @@ try {
     assert.equal(policy.flow.kind,'regular-to-nday');assert.equal(policy.workerLimit,0);
     assert.throws(()=>chooseTaskMode(store,'selected','nday'),/不能切换/);
     assert.throws(()=>chooseTaskMode(store,'invalid','nday',{workflow:'regular-with-nday'}),/只能从常规/);
-    assert.throws(()=>start('over-limit','regular-with-nday',3),/0 and 2/);
+    assert.equal(start('higher-limit','regular-with-nday',16).workerLimit,16);
+    assert.throws(()=>start('over-limit','regular-with-nday',17),/0 and 16/);
   });
   await test('regular completion advances the actual mode without resetting time, operations, question, scope or materials',()=>{
     const first=start('sequential','regular-to-nday');
@@ -149,13 +150,13 @@ try {
     runInNewContext(snippet+';this.examples=exampleTemplates;this.component=ChatPromptEditor;',sandbox);
     const nodes=node=>!node||typeof node!=='object'?[]:[node,...node.children.flat(Infinity).flatMap(nodes)];
     for(const mode of ['regular','nday','0day']){
-      const rows=sandbox.examples(mode);assert.equal(rows.length,3);assert.equal(new Set(rows.map(x=>x.text)).size,3);
+      const rows=sandbox.examples(mode);assert.equal(rows.length,4);assert.equal(new Set(rows.map(x=>x.text)).size,4);
       cursor=0;sandbox.component({mode,open:true});values[6]=true;
       for(const row of rows){values[0]=row.text;cursor=0;await nodes(sandbox.component({mode,open:true})).find(n=>n.children.includes('复制提示词')).props.onClick();}
       assert.equal(clipboard.at(-1),rows.at(-1).text);
     }
     fail=true;cursor=0;await nodes(sandbox.component({mode:'regular',open:true})).find(n=>n.children.includes('复制提示词')).props.onClick();
-    assert.match(values[8],/复制失败/);assert.equal(clipboard.length,9);
+    assert.match(values[8],/复制失败/);assert.equal(clipboard.length,12);
     assert.equal(readTaskPolicy(store,'copy-only'),null);
   });
 } finally { for(const dispose of disposers.reverse())await dispose();store.close(); }

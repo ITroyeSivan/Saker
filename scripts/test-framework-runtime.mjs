@@ -7,6 +7,8 @@ import { openStore, registerFinding, getFinding } from '../plugins/dsh-redteam-r
 import { saveTaskContext, readTaskContext } from '../plugins/dsh-redteam-results/lib/task-context.js';
 import { startTaskPolicy, readTaskPolicy, taskPolicyStatus, taskExecutionGuard, pauseTaskPolicy, resumeTaskPolicy, updateTaskProgress, archiveTaskRound } from '../plugins/dsh-redteam-results/lib/task-policy.js';
 import { createSiteWorkers, siteWorkerRows, siteWorkerView } from '../plugins/dsh-redteam-results/lib/site-workers.js';
+import { saveChatDefaults } from '../plugins/dsh-redteam-results/lib/chat-setup.js';
+import { setTaskInteraction } from '../plugins/dsh-redteam-results/lib/task-policy.js';
 import { indexBusinessMaterials, businessMaterialView } from '../plugins/dsh-redteam-results/lib/business-materials.js';
 import { createResearch, researchDetail, assessResearch } from '../plugins/dsh-redteam-results/lib/research.js';
 import { runComparisonJob, comparisonFindingInput } from '../plugins/dsh-redteam-results/lib/comparison-jobs.js';
@@ -269,6 +271,22 @@ try{
     const timer=setTimeout(()=>controller.abort(),80);const result=await pending;clearTimeout(timer);
     assert.equal(result.state,'interrupted');assert.equal(result.attemptedRequests,2);assert.equal(readExecutionReceipt(store,'abort',result.steps[1].receiptId).outcome,'interrupted');
     const before=requests;assert.equal((await runComparisonJob(store,'abort',pair)).cached,true);assert.equal(requests,before);
+  });
+  await test('three native worker admissions inherit parent decisions, share operations and refuse a fourth',async()=>{
+    const p=parent('three-workers',3);setTaskInteraction(store,'three-workers','guided','desktop-user','milestone');
+    const sites=['https://first.test','https://second.test','https://third.test','https://fourth.test'];
+    saveTaskContext(store,'three-workers',{assets:sites.map((url,n)=>({id:'fixture-'+n,url,inScope:true,reachable:true}))});
+    saveChatDefaults(store,{interaction:'continuous',reporting:'summary',workers:16});
+    try{
+      const children=[];
+      for(const site of sites.slice(0,3))children.push((await delegateManager.delegate(p,{...delegate,site})).childId);
+      assert.equal(siteWorkerView(store,'three-workers').active,3);
+      for(const child of children){const policy=readTaskPolicy(store,child);assert.equal(policy.interaction,'guided');assert.equal(policy.reporting,'milestone');assert.equal(policy.workerLimit,0);assert.equal(policy.parentSession,'three-workers');}
+      await assert.rejects(delegateManager.delegate(p,{...delegate,site:sites[3]}),/worker limit/);
+      for(const child of children)assert.equal(taskExecutionGuard(store,child,'fetch'),undefined);
+      assert.equal(readTaskPolicy(store,'three-workers').used.toolCalls,3);
+      await delegateManager.cleanup(p);assert.equal(siteWorkerView(store,'three-workers').active,0);
+    }finally{store.db.prepare('DELETE FROM chat_defaults').run();}
   });
   await test('enabled method catalog stays compact while selected current user methods are fetched exactly on demand',async()=>{
     const stack=await import('../plugins/dsh-method-stack/lib/index.js'),catalog=stack.fullCatalog(),all=catalog.flatMap(group=>group.methods.map(method=>group.group+'/'+method.id));

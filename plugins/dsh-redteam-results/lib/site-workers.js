@@ -7,7 +7,7 @@ import { copySiteMaterials } from './business-materials.js';
 export const SITE_WORKER_SCHEMA = `CREATE TABLE IF NOT EXISTS site_workers (
  parent_session TEXT NOT NULL, child_id TEXT PRIMARY KEY, site TEXT NOT NULL,
  record TEXT NOT NULL, UNIQUE(parent_session,site));`;
-const activeStates = new Set(['starting', 'running', 'closing', 'cleanup-failed']);
+const activeStates = new Set(['starting', 'running', 'idle', 'closing', 'cleanup-failed']);
 const text = (value, label, max = 1000) => {
   if (typeof value !== 'string' || !value.trim() || value.length > max) throw new Error(label + ' must be bounded nonempty text');
   return value.trim();
@@ -29,9 +29,9 @@ function save(store, row) {
 }
 export function siteWorkerView(store, parentId) {
   const rows = siteWorkerRows(store, parentId);
-  return { active: rows.filter(row => activeStates.has(row.state)).length,
-    workers: rows.slice(-8).map(({ childId, site, question, focus, state, report, error }) => ({ childId, site, question, focus, state,
-      ...(report === undefined ? {} : { report }), ...(error === undefined ? {} : { error }) })), more: Math.max(0, rows.length - 8) };
+  return { active: rows.filter(row => row.state !== 'released').length,
+    workers: rows.filter(row => row.state !== 'released').concat(rows.filter(row => row.state === 'released').slice(-8)).map(({ childId, site, question, focus, state, report, error }) => ({ childId, site, question, focus, state,
+      ...(report === undefined ? {} : { report }), ...(error === undefined ? {} : { error }) })), more: Math.max(0, rows.filter(row => row.state === 'released').length - 8) };
 }
 export function createSiteWorkers(ctx, getStore) {
   const service = key => ctx[key] || ctx.get?.(key), parents = new Map(), locks = new Set(), closing = new Map(), reportTimers = new Map();

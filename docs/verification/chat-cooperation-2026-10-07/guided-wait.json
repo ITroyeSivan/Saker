@@ -1,0 +1,56 @@
+{
+  "ok": true,
+  "configured": true,
+  "stopped": true,
+  "reason": "interaction_confirmation_required",
+  "policy": {
+    "mode": "nday",
+    "flow": {
+      "kind": "regular-to-nday",
+      "phase": "nday",
+      "completed": {
+        "regular": true,
+        "nday": false
+      },
+      "history": [
+        {
+          "from": "regular",
+          "to": "nday",
+          "at": 1791374257325,
+          "note": "当前离线事实已梳理，等待人补充思路"
+        }
+      ],
+      "needsContinuation": true
+    },
+    "interaction": "guided",
+    "reporting": "summary",
+    "stop": "budget",
+    "question": "离线合成协作验收",
+    "target": "",
+    "workerLimit": 0,
+    "budget": {
+      "toolCalls": 6,
+      "discoveryCalls": 0,
+      "deadline": 1791375453329
+    },
+    "used": {
+      "toolCalls": 0,
+      "discoveryCalls": 0
+    },
+    "startedAt": 1791374253329,
+    "cancelled": false,
+    "planComplete": false,
+    "queueComplete": false,
+    "awaitingConfirmation": {
+      "at": 1791374257325,
+      "note": "当前离线事实已梳理，等待人补充思路",
+      "phase": "nday"
+    }
+  },
+  "researchReady": false,
+  "observationExhausted": false,
+  "reviewedReproducedFindings": 0,
+  "active": 0,
+  "defaults": null,
+  "agentRunning": false
+}

@@ -434,10 +434,11 @@ export async function dispatch(ctx, st, endpoint, payload) {
     if (endpoint !== 'task.status') {
       if (!session || session.header?.agentPreset !== 'pentest') throw new Error('请选择当前可用的渗透会话');
       if (typeof ctx.tools?.guard !== 'function') throw new Error('桌面宿主缺少任务预算守卫');
-      if (endpoint === 'task.choose') chooseTaskMode(st, sessionId, p.mode, { workflow: p.workflow, workers: p.workers, interaction: p.interaction });
-      else if (endpoint === 'task.interaction') setTaskInteraction(st, sessionId, p.interaction, 'desktop-user');
+      if (endpoint === 'task.choose') chooseTaskMode(st, sessionId, p.mode, { workflow: p.workflow, workers: p.workers, interaction: p.interaction, reporting: p.reporting });
+      else if (endpoint === 'task.interaction') setTaskInteraction(st, sessionId, p.interaction, 'desktop-user', p.reporting);
       else if (endpoint === 'task.workers') setTaskWorkers(st, sessionId, p.workers, 'desktop-user');
       else if (endpoint === 'task.continue') {
+        if (p.note !== undefined && (typeof p.note !== 'string' || p.note.length > 2000)) throw Error('补充思路应为2000字以内文本');
         const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
         if (typeof agent?.followup !== 'function' || agent.status === 'running') throw new Error('请先等待当前回合结束，再确认继续');
         const before = taskPolicyStatus(st, sessionId).policy;
@@ -445,7 +446,7 @@ export async function dispatch(ctx, st, endpoint, payload) {
         try {
           // 注入安全：桌面确认 RPC 在空闲代理上追加，不在 Session.append 临界区内。
           agent.followup({ id: `saker-confirm-${sessionId}-${before.awaitingConfirmation.at}`, role: 'user', source: { kind: 'user' },
-            content: [{ type: 'text', text: '[Saker 用户确认继续] '+taskPrompt(taskPolicyStatus(st, sessionId))+'继续下一阶段，沿用原预算与资料。' }] });
+            content: [{ type: 'text', text: '[Saker 用户确认继续] '+taskPrompt(taskPolicyStatus(st, sessionId))+(p.note?.trim()?'\n用户补充思路：'+p.note.trim()+'\n':'')+'沿用户指定的思路继续，保留原预算与资料。' }] });
         } catch (error) {
           st.db.prepare('UPDATE task_policy SET record=? WHERE session_id=?').run(JSON.stringify({ ...policy, awaitingConfirmation: before.awaitingConfirmation }), sessionId);
           throw new Error('未能投递继续消息，仍等待确认：'+error.message);
