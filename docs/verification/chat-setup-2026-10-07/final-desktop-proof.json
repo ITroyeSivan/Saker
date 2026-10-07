@@ -1,0 +1,133 @@
+{
+  "initial": {
+    "ok": true,
+    "configured": false,
+    "choice": "regular",
+    "options": {
+      "workflow": "single",
+      "interaction": "continuous",
+      "workers": 1
+    },
+    "stopped": false,
+    "reason": "task_policy_missing",
+    "active": 0,
+    "defaults": null,
+    "agentRunning": false
+  },
+  "rapidDraft": {
+    "visible": "快速切换验收：常规最新草稿 A",
+    "regular": {
+      "text": "快速切换验收：常规最新草稿 A",
+      "template": "built-in:2",
+      "mode": "regular",
+      "editedAt": 1791370439758
+    },
+    "nday": {
+      "text": "快速切换验收：Nday 独立草稿 B",
+      "template": "built-in:2",
+      "mode": "nday",
+      "editedAt": 1791370448287
+    }
+  },
+  "nextRound": {
+    "settings": {
+      "ok": true,
+      "configured": false,
+      "choice": "regular",
+      "options": {
+        "workflow": "regular-to-nday",
+        "interaction": "milestone",
+        "workers": 0
+      },
+      "stopped": false,
+      "reason": "task_policy_missing",
+      "active": 0,
+      "defaults": null,
+      "agentRunning": false
+    },
+    "chatStillHasTwoRounds": true,
+    "originalResponsePreserved": true,
+    "notice": "方向 \n常规测试\nNday发现\n0Day挖掘\n交互 \n仅必要时询问\n阶段汇报，自动继续\n阶段完成后等我确认\n子代理 \n不使用\n最多1个\n最多2个\n写提示词\n更多设置\n阶段结束汇报进展，无需回复。\n已保留资料，下一轮将沿用当前交互和人数设置；请写下一轮问题",
+    "archived": [
+      {
+        "mode": "nday",
+        "flow": {
+          "kind": "regular-to-nday",
+          "phase": "done",
+          "completed": {
+            "regular": true,
+            "nday": true
+          },
+          "history": [
+            {
+              "from": "regular",
+              "to": "nday",
+              "at": 1791368628826,
+              "note": "离线合成第一阶段完成，等待用户确认"
+            },
+            {
+              "from": "nday",
+              "to": "done",
+              "at": 1791368733089,
+              "note": "离线合成第二阶段完成"
+            }
+          ],
+          "needsContinuation": false
+        },
+        "interaction": "milestone",
+        "stop": "budget",
+        "question": "离线聊天设置与阶段确认验收",
+        "target": "",
+        "workerLimit": 0,
+        "budget": {
+          "toolCalls": 5,
+          "discoveryCalls": 0,
+          "deadline": 1791369827177,
+          "workers": 0
+        },
+        "used": {
+          "toolCalls": 0,
+          "discoveryCalls": 0
+        },
+        "startedAt": 1791368627177,
+        "cancelled": false,
+        "planComplete": true,
+        "queueComplete": true,
+        "finishedAt": 1791368733089,
+        "endedAt": 1791370483233,
+        "source": "desktop-user"
+      }
+    ]
+  },
+  "settingsRejection": {
+    "probe": "One synthetic task.choose rejection; chat.settings polls use production endpoint",
+    "error": "合成验收：设置被拒绝，原选项保持",
+    "originalWorkers": "1"
+  },
+  "plugins": {
+    "saker": {
+      "version": "0.4.89",
+      "components": 2,
+      "running": 2
+    },
+    "results": {
+      "version": "1.0.40",
+      "activationText": "包含的组件\n共 1 个 · 1 运行中\n@dsh-external/dsh-redteam-results\n桌面渗透测试任务、按需站点子代理、共享证据、实际请求对照和成果复核。\ndsh-redteam-results\n运行中"
+    },
+    "modeGroup": {
+      "version": "1.0.6",
+      "activationText": "包含的组件\n共 1 个 · 1 运行中\n@dsh-external/dsh-mode-group\n桌面新会话保留渗透测试专业入口，历史模式保留解析。\ndsh-mode-group\n运行中"
+    }
+  },
+  "mcp": {
+    "servers": 2,
+    "enabled": 2,
+    "connected": 0,
+    "tools": 0,
+    "burpPresent": true,
+    "yakitPresent": true,
+    "bridgePreserved": true,
+    "originalAddresses": true,
+    "businessToolsTested": false
+  }
+}

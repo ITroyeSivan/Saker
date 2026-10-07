@@ -29,7 +29,8 @@ import { createResearch, observeResearch, assessResearch, closeResearch, researc
 import { executeRecordedRequest, readExecutionReceipt, executionReceiptSummary } from './execution-receipts.js';
 import { verifyEffect, readEffectVerification } from './effect-verifications.js';
 import { runEffectJob, readEffectJob } from './effect-jobs.js';
-import { startTaskPolicy, updateTaskProgress, taskPolicyStatus, taskExecutionGuard, taskPrompt, taskOverview, chooseTaskMode, pauseTaskPolicy, resumeTaskPolicy, archiveTaskRound, takeTaskContinuation, checkpointTask, setTaskInteraction, confirmTaskCheckpoint } from './task-policy.js';
+import { startTaskPolicy, updateTaskProgress, taskPolicyStatus, taskExecutionGuard, taskPrompt, taskOverview, chooseTaskMode, pauseTaskPolicy, resumeTaskPolicy, archiveTaskRound, takeTaskContinuation, checkpointTask, setTaskInteraction, setTaskWorkers, confirmTaskCheckpoint } from './task-policy.js';
+import { chatDefaults, saveChatDefaults, promptDraft, promptTemplates } from './chat-setup.js';
 import { captureTaskCost, taskCostOverview } from './task-cost.js';
 import { createSiteWorkers, siteWorkerView, siteWorkerRows, siteWorkerParent } from './site-workers.js';
 import { indexBusinessMaterials, businessMaterialView } from './business-materials.js';
@@ -413,7 +414,18 @@ export async function dispatch(ctx, st, endpoint, payload) {
     if (!session || session.header?.agentPreset !== 'pentest') throw new Error('请选择当前可用的渗透会话');
     return { ok: true, ...methodAction(st, p, 'desktop-user') };
   }
-  if (['task.status', 'task.choose', 'task.start', 'task.cancel', 'task.resume', 'task.cleanup', 'task.new-round', 'task.interaction', 'task.continue'].includes(endpoint)) {
+  if (['chat.settings', 'chat.defaults', 'chat.draft', 'chat.templates'].includes(endpoint)) {
+    const sessionId = String(p.sessionId || '');
+    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
+    if (endpoint === 'chat.draft') return { ok: true, draft: promptDraft(st, sessionId, p.mode, p.draft) };
+    if (endpoint === 'chat.templates') return { ok: true, templates: promptTemplates(st, p.template) };
+    if (endpoint === 'chat.defaults') return { ok: true, defaults: saveChatDefaults(st, p) };
+    const state = taskPolicyStatus(st, sessionId), workers = siteWorkerView(st, sessionId);
+    return { ok: true, ...state, active: workers.active, defaults: chatDefaults(st),
+      agentRunning: (ctx.agents || ctx.get?.('agents'))?.get(sessionId)?.status === 'running' };
+  }
+  if (['task.status', 'task.choose', 'task.start', 'task.cancel', 'task.resume', 'task.cleanup', 'task.new-round', 'task.interaction', 'task.workers', 'task.continue'].includes(endpoint)) {
     const sessionId = String(p.sessionId || '');
     if (!sessionId) throw new Error('sessionId required');
     let sessions;
@@ -424,6 +436,7 @@ export async function dispatch(ctx, st, endpoint, payload) {
       if (typeof ctx.tools?.guard !== 'function') throw new Error('桌面宿主缺少任务预算守卫');
       if (endpoint === 'task.choose') chooseTaskMode(st, sessionId, p.mode, { workflow: p.workflow, workers: p.workers, interaction: p.interaction });
       else if (endpoint === 'task.interaction') setTaskInteraction(st, sessionId, p.interaction, 'desktop-user');
+      else if (endpoint === 'task.workers') setTaskWorkers(st, sessionId, p.workers, 'desktop-user');
       else if (endpoint === 'task.continue') {
         const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
         if (typeof agent?.followup !== 'function' || agent.status === 'running') throw new Error('请先等待当前回合结束，再确认继续');

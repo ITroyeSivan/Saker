@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-mode-group",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "桌面新会话保留渗透测试专业入口，历史模式保留解析。",
   "files": [
     "lib",

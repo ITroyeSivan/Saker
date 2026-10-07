@@ -1,0 +1,11 @@
+{
+  "sessionId": "session-29ad098c-fc63-4054-a12a-74d3700a4b99",
+  "defaults": {
+    "interaction": "confirm",
+    "workers": 0,
+    "workflow": "single"
+  },
+  "templateVisible": true,
+  "templateRestored": true,
+  "distinctFrom": "session-68a1e9b3-3a30-4d0e-9982-f40f79ec12a0"
+}

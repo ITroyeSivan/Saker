@@ -20,6 +20,7 @@ import { SITE_WORKER_SCHEMA } from './site-workers.js';
 import { BUSINESS_MATERIAL_SCHEMA } from './business-materials.js';
 import { IMPACT_REVIEW_SCHEMA } from './impact-reviews.js';
 import { TASK_COST_SCHEMA } from './task-cost.js';
+import { CHAT_SETUP_SCHEMA } from './chat-setup.js';
 
 const SEVERITIES = ["critical", "high", "medium", "low"];
 const STATUSES = ["pending", "code-reviewed", "suspect", "verified", "false-positive", "fixed"];
@@ -75,6 +76,7 @@ ${SITE_WORKER_SCHEMA}
 ${BUSINESS_MATERIAL_SCHEMA}
 ${IMPACT_REVIEW_SCHEMA}
 ${TASK_COST_SCHEMA}
+${CHAT_SETUP_SCHEMA}
 CREATE TABLE IF NOT EXISTS task_rounds (
  session_id TEXT NOT NULL, started_at INTEGER NOT NULL, record TEXT NOT NULL,
  PRIMARY KEY(session_id,started_at)

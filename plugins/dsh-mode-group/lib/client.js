@@ -63,13 +63,8 @@ function createController(api, currentSession, onApplied) {
 }
 
 function TaskChoices(props) {
-  if (props.current !== 'pentest') return null;
-  var session = props.ctl.currentSession();
-  if (!session || !session.id || session.agentPreset !== 'pentest') return null;
-  try {
-    var Selector = require('@dsh-external/dsh-redteam-results').WorkflowSelector;
-    return Selector ? React.createElement(Selector, { key: session.id, sessionId: session.id }) : null;
-  } catch { return null; }
+  // Task controls live in the resident composer, including after the hero closes.
+  return null;
 }
 
 // —— 视口自适应弹层定位 ——

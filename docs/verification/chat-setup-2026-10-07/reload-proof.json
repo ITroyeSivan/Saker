@@ -1,0 +1,22 @@
+{
+  "settings": {
+    "ok": true,
+    "configured": false,
+    "choice": "regular",
+    "options": {
+      "workflow": "regular-to-nday",
+      "interaction": "confirm",
+      "workers": 0
+    },
+    "stopped": false,
+    "reason": "task_policy_missing",
+    "active": 0,
+    "defaults": {
+      "interaction": "confirm",
+      "workers": 0
+    },
+    "agentRunning": false
+  },
+  "draftRestored": true,
+  "composerPreserved": true
+}

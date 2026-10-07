@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
-import { readTaskPolicy, updateTaskProgress, checkpointTask } from '../plugins/dsh-redteam-results/lib/task-policy.js';
+import { readTaskPolicy, updateTaskProgress, checkpointTask, chosenTaskOptions } from '../plugins/dsh-redteam-results/lib/task-policy.js';
 import { saveTaskContext } from '../plugins/dsh-redteam-results/lib/task-context.js';
 import { createResearch } from '../plugins/dsh-redteam-results/lib/research.js';
 import { captureTaskCost, taskCostOverview } from '../plugins/dsh-redteam-results/lib/task-cost.js';
@@ -25,13 +25,14 @@ const ctx = { sessions: { get: id => sessionMap.get(id) }, systemPrompt: { secti
 results.apply(ctx);
 const source = fs.readFileSync(new URL('../plugins/dsh-redteam-results/lib/client.js', import.meta.url), 'utf8');
 const componentSource = source.slice(source.indexOf('function exampleTemplates('), source.indexOf('function CheckedList('));
-function harness(name, sessionId) {
+function harness(name, sessionId, props = {}, extras = {}) {
   const state = [], calls = []; let cursor = 0;
   const sandbox = { useState: value => { const index = cursor++; if (!(index in state)) state[index] = value; return [state[index], next => { state[index] = typeof next === 'function' ? next(state[index]) : next; }]; },
-    useEffect: () => {}, Btn: 'button', React: { createElement: (type, props, ...children) => ({ type, props: props || {}, children }) },
+    useEffect: () => {}, useRef: initial => { const index=cursor++; if (!(index in state))state[index]={current:initial};return state[index]; }, Btn: 'button', React: { createElement: (type, props, ...children) => ({ type, props: props || {}, children }) },
     api: async (endpoint, payload) => { calls.push([endpoint, payload]); try { return await results.dispatch(ctx, store, endpoint, payload); } catch (error) { return { ok: false, error: error.message }; } } };
+  Object.assign(sandbox, extras);
   runInNewContext(componentSource + '; this.component = ' + name, sandbox);
-  function render() { cursor = 0; return sandbox.component({ sessionId }); }
+  function render() { cursor = 0; return sandbox.component({ sessionId, ...props }); }
   function nodes(node) { if (!node || typeof node !== 'object') return []; return [node, ...node.children.flat(Infinity).flatMap(nodes)]; }
   return { state, calls, render, find: predicate => nodes(render()).find(predicate), button: label => nodes(render()).find(node => node.type === 'button' && node.children.includes(label)) };
 }
@@ -60,7 +61,7 @@ try {
     assert.deepEqual(readTaskPolicy(store,id).budget,before.budget);
   });
   await test('Desktop effect comparison stays collapsed and displays host summary rather than inventing proof for missing data', () => {
-    const start = source.indexOf('function EffectEvidenceView('), end = source.indexOf('function WorkflowSelector(', start);
+    const start = source.indexOf('function EffectEvidenceView('), end = source.indexOf('function chatError(', start);
     const sandbox = { useState: value => [value, () => {}], React: { createElement: (type, props, ...children) => ({ type, props: props || {}, children }) } };
     runInNewContext(source.slice(start, end) + ';this.component=EffectEvidenceView;', sandbox);
     assert.equal(sandbox.component({ finding: {} }), null);
@@ -70,7 +71,7 @@ try {
     assert(source.includes('React.createElement(EffectEvidenceView, { finding: f, onReviewed: props.onEffectReview })'));
   });
   await test('a successful Desktop impact review refreshes its parent while a rejected review keeps the form', async () => {
-    const start=source.indexOf('function EffectEvidenceView('),end=source.indexOf('function WorkflowSelector(',start);
+    const start=source.indexOf('function EffectEvidenceView('),end=source.indexOf('function chatError(',start);
     const values=[null,'Independent controlled fixture role and actual object review', 'normal,probe',true,true,false,'high','',false];let cursor=0,refreshes=0,accepted=true;
     const sandbox={useState:initial=>{const i=cursor++;return [i in values?values[i]:initial,v=>{values[i]=v}]},React:{createElement:(type,props,...children)=>({type,props:props||{},children})},Btn:'button',api:async()=>accepted?{ok:true,review:{source:'desktop-impact-review'}}:{ok:false,error:'not enough effect evidence'}};
     runInNewContext(source.slice(start,end)+';this.component=EffectEvidenceView;',sandbox);
@@ -169,13 +170,13 @@ try {
     assert.equal(taskCostOverview(realShape,store,'missing').unavailableSessions,1);
   });
   await test('chat workflow selector persists choice without starting budgets or exposing task details', async () => {
-    const ui = harness('WorkflowSelector', 'hero');
-    for (const label of ['Nday发现', '常规测试', '0Day挖掘']) assert(ui.button(label));
+    const ui = harness('ChatSetup', 'hero');ui.render();ui.state[0]=await results.dispatch(ctx,store,'chat.settings',{sessionId:'hero'});
+    assert(ui.find(n=>n.props['aria-label']==='任务方向'));
     assert(!ui.button('开始这个小任务')); assert(!ui.button('刷新状态'));
-    await ui.button('常规测试').props.onClick();
+    await ui.find(n=>n.props['aria-label']==='任务方向').props.onChange({target:{value:'regular'}});
     assert.equal(readTaskPolicy(store, 'hero'), null);
     assert.equal((await results.dispatch(ctx, store, 'task.status', { sessionId: 'hero' })).choice, 'regular');
-    assert.equal(ui.button('常规测试').props['aria-pressed'], true);
+    assert.equal(ui.find(n=>n.props['aria-label']==='任务方向').props.value, 'regular');
     assert.match(sections[0].text({ agent: { session: sessionMap.get('hero') } }), /用户选择了\/pentest-regular/);
     await assert.rejects(results.dispatch(ctx, store, 'task.start', { sessionId: 'hero', policy: { mode: 'nday', budget: { toolCalls: 20 } } }), /differs/);
     await results.dispatch(ctx, store, 'task.start', { sessionId: 'hero', policy: { mode: 'regular', budget: { toolCalls: 20 } } });
@@ -214,7 +215,7 @@ try {
     assert.equal(ui.state[0].total, 1); assert(!JSON.stringify(ui.state[0]).includes('private fixture baseline'));
     await ui.button('查看假设').props.onClick(); assert.equal(ui.state[1].binding.authContext, 'fixture-user');
     assert(ui.find(node => node.type === 'details' && node.children.some(child => child?.type === 'summary' && child.children.includes('正常对照、观察与公开解释'))));
-    const hero = harness('WorkflowSelector', 'hero'); assert(!hero.button('读取研究记录'));
+    const hero = harness('ChatSetup', 'hero'); assert(!hero.button('读取研究记录'));
   });
   await test('actual materials tool accepts an unambiguous material kind and distinguishes indexing from reading',async()=>{
     fs.writeFileSync(path.join(home,'selected.js'),'fetch("/api");');
@@ -226,15 +227,101 @@ try {
     const conflict=await execute({materials,context:'{}'},exec);assert.equal(conflict.ok,false);assert.match(conflict.error,/只传materials/);
     const empty=await execute({materials:JSON.stringify({site:'https://fixture.test',files:[]})},exec);assert.equal(empty.ok,false);assert.match(empty.error,/1\.\.30/);
   });
-  await test('new-session hero renders the same task selector only for selected pentest session', () => {
+  await test('new-session hero does not duplicate task controls owned by the resident composer', () => {
     const modeSource = fs.readFileSync(new URL('../plugins/dsh-mode-group/lib/client.js', import.meta.url), 'utf8');
     const helper = modeSource.slice(modeSource.indexOf('function TaskChoices('), modeSource.indexOf('// —— 视口'));
     const sandbox = { require: () => ({ WorkflowSelector: 'WorkflowSelector' }), React: { createElement: (type, props) => ({ type, props }) } };
     runInNewContext(helper + '; this.component = TaskChoices;', sandbox);
     const ctl = { currentSession: () => ({ id: 'ui', agentPreset: 'pentest' }) };
-    assert.equal(sandbox.component({ ctl, current: 'pentest' }).props.sessionId, 'ui');
+    assert.equal(sandbox.component({ ctl, current: 'pentest' }), null);
     assert.equal(sandbox.component({ ctl, current: 'code-audit' }), null);
     assert.equal(sandbox.component({ ctl: { currentSession: () => ({ id: 'audit', agentPreset: 'code-audit' }) }, current: 'pentest' }), null);
+  });
+  await test('resident composer registers chat settings for both blank and existing pentest sessions only', () => {
+    const start=source.indexOf('function ChatSetupEntry('),end=source.indexOf('function installChatSetupStyles(',start);
+    const sandbox={React:{createElement:(type,props)=>({type,props})},ChatSetup:'ChatSetup'};
+    runInNewContext(source.slice(start,end)+';this.component=ChatSetupEntry;',sandbox);
+    for(const blank of [true,false]) assert.equal(sandbox.component({sessionId:'ui',blank,useProjection:()=> 'pentest'}).props.sessionId,'ui');
+    assert.equal(sandbox.component({sessionId:'audit',useProjection:()=> 'code-audit'}),null);
+    const injects=[], slots=[];
+    const scope={effect(){},slots:{inject:(name,fn)=>{injects.push(name);if(name==='conversation.input.dock')fn();},register:(options,component)=>{slots.push({options,component});}}};
+    const applySource=source.slice(source.lastIndexOf('function apply(ctx)'),source.indexOf('module.exports =',source.lastIndexOf('function apply(ctx)')));
+    const apply=runInNewContext(applySource+';this.apply=apply;', {...sandbox,installStyles(){},installChatSetupStyles(){},injectVisibleConversationView(){}});apply(scope);
+    assert(injects.includes('conversation.input.dock'));assert.equal(slots[0].options.id,'saker-chat-setup');
+  });
+  await test('chat quick settings change real in-flight preferences without resetting consumed budget or deadline',async()=>{
+    const id='chat-live';sessionMap.set(id,{id,header:{agentPreset:'pentest'}});
+    await results.dispatch(ctx,store,'task.choose',{sessionId:id,mode:'regular',workers:1,interaction:'continuous'});
+    await results.dispatch(ctx,store,'task.start',{sessionId:id,policy:{mode:'regular',question:'Offline chat fixture',budget:{toolCalls:8,minutes:10}}});
+    const before=readTaskPolicy(store,id),ui=harness('ChatSetup',id);ui.render();ui.state[0]=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
+    assert(ui.find(n=>n.props['aria-label']==='任务方向').props.disabled);
+    await ui.find(n=>n.props['aria-label']==='聊天交互频率').props.onChange({target:{value:'confirm'}});
+    assert.equal(readTaskPolicy(store,id).interaction,'confirm');
+    await ui.find(n=>n.props['aria-label']==='聊天子代理上限').props.onChange({target:{value:'2'}});
+    assert.equal(readTaskPolicy(store,id).workerLimit,2);
+    for(const key of ['used','startedAt'])assert.deepEqual(readTaskPolicy(store,id)[key],before[key]);
+    for(const key of ['toolCalls','deadline'])assert.equal(readTaskPolicy(store,id).budget[key],before.budget[key]);
+    const child={childId:'chat-child',parentId:id,site:'https://fixture.test',state:'cleanup-failed'};
+    store.db.prepare('INSERT INTO site_workers(parent_session,child_id,site,record) VALUES(?,?,?,?)').run(id,child.childId,child.site,JSON.stringify(child));
+    await assert.rejects(results.dispatch(ctx,store,'task.workers',{sessionId:id,workers:0}),/先关闭/);
+    await ui.find(n=>n.props['aria-label']==='聊天子代理上限').props.onChange({target:{value:'0'}});
+    assert(ui.find(n=>n.props.role==='alert'&&n.children.some(value=>String(value).includes('先关闭'))));
+    assert.equal(readTaskPolicy(store,id).workerLimit,2);store.db.prepare('DELETE FROM site_workers WHERE child_id=?').run(child.childId);
+    checkpointTask(store,id,'Offline checkpoint');ui.state[0]=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
+    assert(!ui.button('保留资料，设置下一轮'));
+    await ui.button('确认并继续').props.onClick();
+    updateTaskProgress(store,id,{planComplete:true});ui.state[0]=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
+    await ui.button('保留资料，设置下一轮').props.onClick();
+    assert.equal(readTaskPolicy(store,id),null);assert.equal(chosenTaskOptions(store,id).workers,2);assert.equal(chosenTaskOptions(store,id).interaction,'confirm');
+  });
+  await test('visible initial defaults are persisted before editing, without starting a task or model',async()=>{
+    const id='chat-initial';sessionMap.set(id,{id,header:{agentPreset:'pentest'}});let boot;
+    const before=queued.length,ui=harness('ChatSetup',id,{}, {useEffect:fn=>{boot=fn;},setInterval:()=>0,clearInterval(){}});
+    ui.render();const unmount=boot();
+    for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
+    const value=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
+    assert.equal(value.choice,'regular');assert.equal(value.options.workers,1);assert.equal(value.options.interaction,'continuous');
+    assert.equal(value.configured,false);assert.equal(queued.length,before);unmount();
+  });
+  await test('editable prompt inserts through native revision-guarded composer API and copies exact edits without sending',async()=>{
+    let clipboard='',inserted='',admit=true,captured=0;
+    const ui=harness('ChatPromptEditor','hero',{mode:'regular',open:true,inputActions:{captureInsertion:()=>{captured++;return {revision:1};},insertText:(text,span)=>{assert.equal(span.revision,1);if(admit)inserted+=text;return admit;}}},{navigator:{clipboard:{writeText:async text=>{clipboard=text;}}}});
+    ui.render();ui.state[6]=true;
+    ui.find(n=>n.props['aria-label']==='提示词全文').props.onChange({target:{value:'My edited offline task only'}});
+    await ui.button('复制提示词').props.onClick();assert.equal(clipboard,'My edited offline task only');
+    await ui.button('插入到输入框').props.onClick();assert.equal(inserted,clipboard);assert.equal(captured,1);
+    admit=false;await ui.button('插入到输入框').props.onClick();assert.equal(inserted,clipboard);assert.match(ui.state[8],/正在变化/);
+    assert.equal(ui.state[0],clipboard);assert.equal(ui.calls.length,0);
+    ui.find(n=>n.props['aria-label']==='模板名称').props.onChange({target:{value:'My fixture prompt'}});
+    await ui.button('保存个人模板').props.onClick();assert.equal(ui.state[2].at(-1).text,clipboard);
+  });
+  await test('prompt drafts are isolated by session and direction, personal templates persist, and nothing injects drafts',async()=>{
+    const draft={text:'Unsent controlled fixture draft',template:'',mode:'regular'};
+    await results.dispatch(ctx,store,'chat.draft',{sessionId:'hero',mode:'regular',draft});
+    assert.equal((await results.dispatch(ctx,store,'chat.draft',{sessionId:'hero',mode:'regular'})).draft.text,draft.text);
+    for(const [sessionId,mode] of [['ui','regular'],['hero','nday']])assert.equal((await results.dispatch(ctx,store,'chat.draft',{sessionId,mode})).draft,null);
+    assert((await results.dispatch(ctx,store,'chat.templates',{sessionId:'ui'})).templates.some(row=>row.title==='My fixture prompt'));
+    assert(!sections[0].text({agent:{session:sessionMap.get('hero')}}).includes(draft.text));
+    await assert.rejects(results.dispatch(ctx,store,'chat.draft',{sessionId:'audit',mode:'regular',draft}),/渗透会话/);
+    const editedAt=Date.now()+100;
+    await results.dispatch(ctx,store,'chat.draft',{sessionId:'hero',mode:'regular',draft:{...draft,text:'Newest edit',editedAt}});
+    await results.dispatch(ctx,store,'chat.draft',{sessionId:'hero',mode:'regular',draft:{...draft,text:'Delayed obsolete save',editedAt:editedAt-1}});
+    assert.equal((await results.dispatch(ctx,store,'chat.draft',{sessionId:'hero',mode:'regular'})).draft.text,'Newest edit');
+  });
+  await test('new-session defaults preserve already chosen sessions and running tasks',async()=>{
+    const running='chat-default-running';sessionMap.set(running,{id:running,header:{agentPreset:'pentest'}});
+    await results.dispatch(ctx,store,'task.choose',{sessionId:running,mode:'regular',workers:1,interaction:'continuous'});
+    await results.dispatch(ctx,store,'task.start',{sessionId:running,policy:{mode:'regular',question:'Preserve active preferences',budget:{toolCalls:4,minutes:10}}});
+    const original=readTaskPolicy(store,running);assert(original&&!original.planComplete);
+    await results.dispatch(ctx,store,'chat.defaults',{sessionId:'chat-live',interaction:'milestone',workers:0});
+    const id='new-default';sessionMap.set(id,{id,header:{agentPreset:'pentest'}});
+    const newState=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
+    assert.equal(newState.options.interaction,'milestone');assert.equal(newState.options.workers,0);
+    assert.match(sections[0].text({agent:{session:sessionMap.get(id)}}),/子代理上限=0/);
+    assert.equal(chosenTaskOptions(store,'hero').workers,1);
+    assert.deepEqual(readTaskPolicy(store,running),original);
+    await results.dispatch(ctx,store,'task.start',{sessionId:id,policy:{mode:'regular',budget:{toolCalls:3}}});
+    assert.equal(readTaskPolicy(store,id).interaction,'milestone');assert.equal(readTaskPolicy(store,id).workerLimit,0);
   });
   await test('Desktop row and export labels do not call incomplete verified records usable findings', () => {
     const sandbox = { STATUS_LABEL: { verified: '已验证' } };

@@ -1,0 +1,59 @@
+{
+  "ok": true,
+  "configured": true,
+  "stopped": true,
+  "reason": "interaction_confirmation_required",
+  "policy": {
+    "mode": "nday",
+    "flow": {
+      "kind": "regular-to-nday",
+      "phase": "nday",
+      "completed": {
+        "regular": true,
+        "nday": false
+      },
+      "history": [
+        {
+          "from": "regular",
+          "to": "nday",
+          "at": 1791368628826,
+          "note": "离线合成第一阶段完成，等待用户确认"
+        }
+      ],
+      "needsContinuation": true
+    },
+    "interaction": "milestone",
+    "stop": "budget",
+    "question": "离线聊天设置与阶段确认验收",
+    "target": "",
+    "workerLimit": 0,
+    "budget": {
+      "toolCalls": 5,
+      "discoveryCalls": 0,
+      "deadline": 1791369827177,
+      "workers": 0
+    },
+    "used": {
+      "toolCalls": 0,
+      "discoveryCalls": 0
+    },
+    "startedAt": 1791368627177,
+    "cancelled": false,
+    "planComplete": false,
+    "queueComplete": false,
+    "awaitingConfirmation": {
+      "at": 1791368628826,
+      "note": "离线合成第一阶段完成，等待用户确认",
+      "phase": "nday"
+    }
+  },
+  "researchReady": false,
+  "observationExhausted": false,
+  "reviewedReproducedFindings": 0,
+  "active": 0,
+  "defaults": {
+    "interaction": "confirm",
+    "workers": 0
+  },
+  "agentRunning": false
+}

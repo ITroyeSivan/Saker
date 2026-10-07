@@ -1429,7 +1429,7 @@ function EffectEvidenceView(props) {
     React.createElement(Btn,{onClick:submit,disabled:busy[0]},busy[0]?'正在保存':'保存人工复核'),notice[0]?React.createElement('div',{role:'alert'},notice[0]):null);
 }
 function exampleTemplates(mode) {
-  var shared = '\n只在明确允许测试的范围内操作。相关线索连续检查，不逐个疑点打断；缺关键资料、正常访问失败或IP被封时停止并说明原因。沿用桌面已选择的流程、操作预算和子代理上限，同站复用，结束后释放。';
+  var shared = '\n只在明确允许测试的范围内操作，按聊天中选择的交互频率推进。缺关键资料、正常访问失败或IP被封时停止并说明原因。沿用已选择的流程、操作预算和子代理上限，同站复用，结束后释放。';
   var examples = {
     regular: [
       ['机构入口整理', '机构：[机构名称]。先从公开资料确认官网、业务系统入口和资产归属。我没有资产清单，请自行整理，最多给出3个值得继续检查的系统和依据。归属或可测范围不明确的，只整理资料，集中向我确认一次后再测试。'],
@@ -1449,25 +1449,6 @@ function exampleTemplates(mode) {
   };
   return (examples[mode] || []).map(function (row) { return { title: row[0], text: row[1] + shared }; });
 }
-function PromptExamples(props) {
-  var copied=useState('');
-  function copy(example) {
-    copied[1]('');
-    return Promise.resolve().then(function(){return navigator.clipboard.writeText(example.text);})
-      .then(function(){copied[1]('已复制：'+example.title);})
-      .catch(function(){copied[1]('复制失败，请展开示例后选中文本复制。');});
-  }
-  return React.createElement('section',{'aria-label':'模式示例与流程'},
-    props.onClose?React.createElement('button',{type:'button',onClick:props.onClose,style:{float:'right'}},'关闭示例'):null,
-    React.createElement('h3',null,({regular:'常规测试',nday:'Nday发现','0day':'0Day挖掘'}[props.mode]||'测试')+'示例'),
-    React.createElement('p',null,'复制后替换方括号中的名称或地址。复制不会开始测试。'),
-    props.controls || null,
-    exampleTemplates(props.mode).map(function(example){return React.createElement('div',{key:example.title,style:{margin:'10px 0',padding:8,border:'1px solid var(--dsw-alias-border-l1,#ddd)',borderRadius:8}},
-      React.createElement('details',null,React.createElement('summary',null,example.title),
-      React.createElement('textarea',{'aria-label':example.title+'示例',readOnly:true,value:example.text,style:{display:'block',width:'100%',height:110,margin:'8px 0'}})),
-      React.createElement('button',{type:'button',onClick:function(){return copy(example);}},'复制'+example.title+'示例'));}),
-    React.createElement('div',{role:'status'},copied[0]));
-}
 function InteractionControl(props) {
   return React.createElement('div',{style:{marginTop:10}},
     React.createElement('label',null,'交互频率 ',React.createElement('select',{'aria-label':'交互频率',value:props.interaction||'continuous',disabled:props.disabled,onChange:function(e){return props.onChange(e.target.value);}},
@@ -1483,41 +1464,138 @@ function FlowControls(props) {
     React.createElement(InteractionControl,{interaction:props.interaction,disabled:props.disabled,onChange:function(value){return props.onChange({interaction:value});}}),
     React.createElement('p',null,'两个方向共用资料、操作预算和时间。上限包含空闲及关闭失败的代理，不按模式分别增加。'));
 }
-function WorkflowSelector(props) {
-  var state = useState(null), busy = useState(false), error = useState(''), examples = useState(false);
-  useEffect(function () {
-    var active = true;
-    api('task.status', { sessionId: props.sessionId }).then(function (result) {
-      if (!result.ok) throw new Error(result.error || '读取流程失败');
-      if (active) state[1](result);
-    }).catch(function (failure) { if (active) error[1](failure.message || String(failure)); });
-    return function () { active = false; };
-  }, [props.sessionId]);
-  function choose(mode, patch) {
-    busy[1](true); error[1]('');
-    var options=state[0]&&state[0].options||{};
-    return api('task.choose', Object.assign({ sessionId: props.sessionId, mode: mode, workflow:mode==='regular'?(options.workflow||'single'):'single',workers:options.workers??1,interaction:options.interaction||'continuous' },patch||{})).then(function (result) {
-      if (!result.ok) throw new Error(result.error || '选择流程失败');
-      state[1](result);
-      examples[1](true);
-    }).catch(function (failure) { error[1](failure.message || String(failure)); }).finally(function () { busy[1](false); });
+function chatError(value) { return typeof value==='string'?value:(value&&value.message)||'操作失败，请重试'; }
+function promptFields(text) {
+  return Array.from(new Set((text.match(/\[[^\]\n]{1,60}\]/g)||[]).map(function(value){return value.slice(1,-1);}))).slice(0,12);
+}
+function fillPrompt(template, fields) {
+  return template.replace(/\[([^\]\n]{1,60})\]/g,function(token,key){return fields[key]&&fields[key].trim()?fields[key].trim():token;});
+}
+var chatDraftClock=0;
+function ChatPromptEditor(props) {
+  var draft=useState(''), selected=useState(''), templates=useState([]), base=useState(''), fields=useState({}), manual=useState(false);
+  var loaded=useState(false), saved=useState(''), notice=useState(''), title=useState(''), busy=useState(false);
+  var dirty=useState(false);
+  var latest=useRef(null), pending=useRef(Promise.resolve()), alive=useRef(true);
+  function persist(value) {
+    pending.current=pending.current.catch(function(){}).then(function(){return api('chat.draft',{sessionId:props.sessionId,mode:props.mode,draft:value});}).then(function(result){
+      if(!result.ok)throw Error(chatError(result.error));
+      if(alive.current&&latest.current===value)saved[1](result.draft.text===value.text?'草稿已保存':'其他窗口已有较新草稿，请刷新后检查');
+    }).catch(function(error){if(alive.current)saved[1]('草稿保存失败：'+error.message);});
+    return pending.current;
   }
-  function configuredAction(endpoint,payload) {
-    busy[1](true);error[1]('');return api(endpoint,Object.assign({sessionId:props.sessionId},payload||{})).then(function(result){if(!result.ok)throw Error(result.error);state[1](result);}).catch(function(e){error[1](e.message);}).finally(function(){busy[1](false);});
+  useEffect(function(){
+    alive.current=true;var active=true;
+    Promise.all([api('chat.draft',{sessionId:props.sessionId,mode:props.mode}),api('chat.templates',{sessionId:props.sessionId})]).then(function(values){
+      if(!values[0].ok||!values[1].ok)throw Error(chatError((!values[0].ok?values[0]:values[1]).error));
+      if(!active)return;
+      templates[1](values[1].templates);
+      var value=values[0].draft, first=exampleTemplates(props.mode)[0];
+      if(value){draft[1](value.text);selected[1](value.template);manual[1](true);saved[1]('已恢复本会话草稿');}
+      else if(first){draft[1](first.text);base[1](first.text);selected[1]('built-in:0');}
+      loaded[1](true);
+    }).catch(function(error){if(active)notice[1](error.message);});
+    return function(){active=false;alive.current=false;if(latest.current)persist(latest.current);};
+  },[props.sessionId]);
+  useEffect(function(){
+    if(!loaded[0]||!dirty[0])return;
+    chatDraftClock=Math.max(Date.now(),chatDraftClock+1);
+    var value={text:draft[0],template:selected[0],mode:props.mode,editedAt:chatDraftClock};latest.current=value;saved[1]('正在保存草稿…');
+    var timer=setTimeout(function(){persist(value);},500);
+    return function(){clearTimeout(timer);};
+  },[loaded[0],dirty[0],draft[0],selected[0],props.mode]);
+  var builtins=exampleTemplates(props.mode), mine=templates[0].filter(function(row){return row.mode===props.mode;});
+  function select(value) {
+    var example=value.indexOf('built-in:')===0?builtins[Number(value.slice(9))]:mine.find(function(row){return row.id===value;});
+    selected[1](value);fields[1]({});manual[1](false);base[1](example?example.text:'');draft[1](example?example.text:'');dirty[1](true);notice[1]('');
   }
-  var current = state[0], chosen = current && (current.configured ? current.policy.mode : current.choice);
-  return React.createElement('div', { 'aria-label': '测试流程', style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 } },
-    ['nday', 'regular', '0day'].map(function (mode) {
-      return React.createElement('button', { key: mode, type: 'button', 'aria-pressed': chosen === mode, disabled: busy[0] || !!(current && current.configured),
-        onClick: function () { return choose(mode); },
-        style: { fontSize: 12, padding: '5px 9px', borderRadius: 7, cursor: 'pointer',
-          border: '1px solid ' + (chosen === mode ? 'var(--dsw-alias-state-business-primary,#4c6ef5)' : 'var(--dsw-alias-border-l1,#e9e9ec)'),
-          color: 'var(--dsw-alias-label-primary,#1a1a1a)', background: chosen === mode ? 'var(--dsw-alias-bg-active,#eef2ff)' : 'var(--dsw-alias-bg-base,#fff)' }
-      }, { nday: 'Nday发现', regular: '常规测试', '0day': '0Day挖掘' }[mode]); }),
-    React.createElement('button',{type:'button',onClick:function(){examples[1](!examples[0]);return api('task.status',{sessionId:props.sessionId}).then(function(result){if(result.ok)state[1](result);else error[1](result.error);}).catch(function(e){error[1](e.message);});}},'示例与流程'),
-    examples[0]?React.createElement('div',{role:'dialog','aria-label':'模式示例与流程',style:{position:'fixed',zIndex:500,left:'50%',top:'12%',transform:'translateX(-50%)',width:'min(680px,calc(100vw - 32px))',maxHeight:'72vh',overflow:'auto',padding:16,borderRadius:12,border:'1px solid var(--dsw-alias-border-l1,#ddd)',background:'var(--dsw-alias-bg-base,#fff)',boxShadow:'0 8px 40px #0003',textAlign:'left'}},
-      React.createElement(PromptExamples,{key:chosen||'regular',mode:chosen||'regular',onClose:function(){examples[1](false);},controls:current&&!current.configured?React.createElement(FlowControls,{mode:chosen||'regular',workflow:current.options&&current.options.workflow,workers:current.options&&current.options.workers,interaction:current.options&&current.options.interaction,disabled:busy[0],onChange:function(patch){return choose(chosen||'regular',patch);}}):current?React.createElement('div',null,React.createElement(InteractionControl,{interaction:current.policy.interaction,disabled:busy[0],onChange:function(value){return configuredAction('task.interaction',{interaction:value});}}),current.policy.awaitingConfirmation?React.createElement('div',null,React.createElement('p',null,'等待阶段确认：'+current.policy.awaitingConfirmation.note),React.createElement('button',{type:'button',disabled:busy[0]||current.reason!=='interaction_confirmation_required',onClick:function(){return configuredAction('task.continue');}},'确认并继续')):null):null})):null,
-    error[0] ? React.createElement('span', { role: 'alert', style: { fontSize: 12 } }, error[0]) : null);
+  function copy(){return Promise.resolve().then(function(){return navigator.clipboard.writeText(draft[0]);}).then(function(){notice[1]('已复制编辑后的提示词');}).catch(function(){notice[1]('复制失败，请在下方编辑框选中文本后手工复制。');});}
+  function insert(){try{
+    if(!props.inputActions||typeof props.inputActions.insertText!=='function')throw Error('输入框暂不可用，请复制后粘贴');
+    var span=props.inputActions.captureInsertion();
+    if(!props.inputActions.insertText(draft[0],span))throw Error('输入框正在变化，请稍后重试；编辑内容仍保留');
+    notice[1]('已插入聊天输入框，请检查后自行发送');
+  }catch(error){notice[1](error.message);}}
+  function saveTemplate(){busy[1](true);notice[1]('');var existing=mine.find(function(row){return row.title===title[0].trim();});
+    return api('chat.templates',{sessionId:props.sessionId,template:{id:existing&&existing.id,title:title[0].trim(),text:draft[0],mode:props.mode}}).then(function(result){
+      if(!result.ok)throw Error(chatError(result.error));templates[1](result.templates);notice[1]('个人模板已保存，可在其他会话选用');
+    }).catch(function(error){notice[1](error.message);}).finally(function(){busy[1](false);});
+  }
+  return React.createElement('section',{'aria-label':'提示词编辑器',className:'dsh-chat-prompt',hidden:!props.open},
+    React.createElement('div',{className:'dsh-chat-panel-head'},React.createElement('strong',null,'准备这次任务'),React.createElement('button',{type:'button',onClick:props.onClose,'aria-label':'关闭提示词编辑器'},'关闭')),
+    React.createElement('p',null,'选一个示例，填入信息或直接修改全文。插入到输入框光标处，检查后自行发送。'),
+    React.createElement('label',null,'起点模板 ',React.createElement('select',{'aria-label':'起点模板',disabled:!loaded[0]||busy[0],value:selected[0],onChange:function(event){select(event.target.value);}},
+      React.createElement('option',{value:''},'从空白开始'),builtins.map(function(row,i){return React.createElement('option',{key:i,value:'built-in:'+i},row.title);}),mine.map(function(row){return React.createElement('option',{key:row.id,value:row.id},'我的模板：'+row.title);}))),
+    React.createElement('small',null,'选择其他模板会替换编辑区内容，聊天输入框不受影响。'),
+    !manual[0]?React.createElement('div',{className:'dsh-chat-fields'},promptFields(base[0]).map(function(key){return React.createElement('label',{key:key},key,React.createElement('input',{'aria-label':'填写'+key,value:fields[0][key]||'',placeholder:key,onChange:function(event){var next=Object.assign({},fields[0]);next[key]=event.target.value;fields[1](next);draft[1](fillPrompt(base[0],next));dirty[1](true);}}));})):null,
+    React.createElement('label',{className:'dsh-chat-full-prompt'},'提示词全文（可自由编辑）',React.createElement('textarea',{'aria-label':'提示词全文',value:draft[0],disabled:!loaded[0],maxLength:16000,rows:7,onChange:function(event){draft[1](event.target.value);manual[1](true);dirty[1](true);notice[1]('');}})),
+    React.createElement('div',{className:'dsh-chat-actions'},React.createElement('button',{type:'button',disabled:!loaded[0]||!draft[0].trim(),onClick:insert},'插入到输入框'),
+      React.createElement('button',{type:'button',disabled:!loaded[0]||!draft[0].trim(),onClick:copy},'复制提示词'),React.createElement('span',{role:'status'},saved[0])),
+    promptFields(draft[0]).length?React.createElement('small',null,'还有方括号占位内容，请在发送前补充。'):null,
+    React.createElement('details',null,React.createElement('summary',null,'保存为我的模板'),React.createElement('label',null,'模板名称 ',React.createElement('input',{'aria-label':'模板名称',value:title[0],maxLength:60,onChange:function(event){title[1](event.target.value);}})),
+      React.createElement('button',{type:'button',disabled:busy[0]||!title[0].trim()||!draft[0].trim(),onClick:saveTemplate},'保存个人模板'),React.createElement('small',null,'同模式、同名称会更新原模板。最多30个，保存在本机。')),
+    notice[0]?React.createElement('p',{role:'status'},notice[0]):null);
+}
+function ChatSetup(props) {
+  var state=useState(null), busy=useState(false), notice=useState(''), error=useState(''), open=useState(false), more=useState(false);
+  var readError=useState('');
+  var request=useRef(0), mounted=useRef(true), saving=useRef(false), openButton=useRef(null);
+  function load(){var revision=++request.current;return api('chat.settings',{sessionId:props.sessionId}).then(function(result){
+    if(!result.ok)throw Error(chatError(result.error));
+    if(!mounted.current||request.current!==revision||saving.current)return result;
+    // Make the visible default controls real before admitting edits. This only
+    // saves preferences: no task, operation budget, tool or model is started.
+    if(!result.configured&&!result.choice){var initial=result.options||{};return api('task.choose',{sessionId:props.sessionId,mode:'regular',workflow:'single',workers:initial.workers??1,interaction:initial.interaction||'continuous'}).then(function(value){if(!value.ok)throw Error(chatError(value.error));return api('chat.settings',{sessionId:props.sessionId});});}
+    return result;
+  }).then(function(result){
+    if(!result.ok)throw Error(chatError(result.error));if(mounted.current&&request.current===revision&&!saving.current){state[1](result);readError[1]('');}
+  }).catch(function(failure){if(mounted.current&&request.current===revision)readError[1](failure.message);});}
+  useEffect(function(){mounted.current=true;load();var timer=setInterval(load,3000);return function(){mounted.current=false;request.current++;clearInterval(timer);};},[props.sessionId]);
+  function run(endpoint,payload){saving.current=true;request.current++;busy[1](true);error[1]('');notice[1]('');
+    return api(endpoint,Object.assign({sessionId:props.sessionId},payload||{})).then(function(result){if(!result.ok)throw Error(chatError(result.error));
+      if(endpoint==='task.new-round')return api('task.choose',Object.assign({sessionId:props.sessionId},payload.preferences)).then(function(value){if(!value.ok)throw Error(chatError(value.error));notice[1]('已保留资料，下一轮将沿用当前交互和人数设置；请写下一轮问题');});
+      notice[1](({'task.continue':'已确认，正在继续','task.cancel':'已停止本轮','chat.defaults':'已保存为新会话默认'}[endpoint])||'设置已保存');})
+      .catch(function(failure){error[1](failure.message);}).finally(function(){saving.current=false;busy[1](false);return load();});
+  }
+  var current=state[0], policy=current&&current.policy, options=current&&current.options||{}, mode=policy?policy.mode:current&&current.choice||'regular';
+  var interaction=policy?policy.interaction:options.interaction||'continuous', workers=policy?policy.workerLimit:options.workers??1;
+  var labels={regular:'常规测试',nday:'Nday发现','0day':'0Day挖掘'};
+  function change(patch){if(policy){if(patch.interaction!==undefined)return run('task.interaction',{interaction:patch.interaction});return run('task.workers',{workers:patch.workers});}
+    var next=Object.assign({mode:mode,workflow:mode==='regular'?(options.workflow||'single'):'single',workers:workers,interaction:interaction},patch);
+    if(next.mode!=='regular')next.workflow='single';return run('task.choose',next);
+  }
+  function close(){open[1](false);if(openButton.current)openButton.current.focus();}
+  return React.createElement('section',{'aria-label':'聊天任务设置',className:'dsh-chat-setup',onKeyDown:function(event){if(event.key==='Escape'&&open[0]){event.stopPropagation();close();}}},
+    React.createElement('div',{className:'dsh-chat-settings-row'},
+      React.createElement('label',null,'方向 ',React.createElement('select',{'aria-label':'任务方向',value:mode,disabled:busy[0]||!current||!!policy,onChange:function(event){return change({mode:event.target.value});}},['regular','nday','0day'].map(function(value){return React.createElement('option',{key:value,value:value},labels[value]);}))),
+      React.createElement('label',null,'交互 ',React.createElement('select',{'aria-label':'聊天交互频率',value:interaction,disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){return change({interaction:event.target.value});}},
+        React.createElement('option',{value:'continuous'},'仅必要时询问'),React.createElement('option',{value:'milestone'},'阶段汇报，自动继续'),React.createElement('option',{value:'confirm'},'阶段完成后等我确认'))),
+      React.createElement('label',null,'子代理 ',React.createElement('select',{'aria-label':'聊天子代理上限',value:String(workers),disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){return change({workers:Number(event.target.value)});}},[0,1,2].map(function(value){return React.createElement('option',{key:value,value:String(value)},value===0?'不使用':'最多'+value+'个');}))),
+      React.createElement('button',{ref:openButton,type:'button','aria-expanded':open[0],onClick:function(){open[1](!open[0]);}},'写提示词'),
+      React.createElement('button',{type:'button','aria-expanded':more[0],onClick:function(){more[1](!more[0]);}},'更多设置')),
+    React.createElement('div',{className:'dsh-chat-setting-hint'},policy?'本轮方向已固定；调整交互与人数不会增加操作额度或延长截止时间。':({'continuous':'在约定范围和预算内推进，完成后集中汇总。','milestone':'阶段结束汇报进展，无需回复。','confirm':'阶段结束暂停，由你确认下一步。'}[interaction])),
+    more[0]?React.createElement('div',{className:'dsh-chat-more'},mode==='regular'?React.createElement('label',null,'测试安排 ',React.createElement('select',{'aria-label':'聊天测试安排',value:policy?policy.flow.kind:options.workflow||'single',disabled:busy[0]||!current||!!policy,onChange:function(event){return change({workflow:event.target.value});}},
+      React.createElement('option',{value:'single'},'只做当前方向'),React.createElement('option',{value:'regular-to-nday'},'常规收集后接 Nday'),React.createElement('option',{value:'regular-with-nday'},'常规与 Nday 一起推进'))):null,
+      React.createElement('p',null,'子代理按需分派，共用本轮预算；0表示主代理完成。增加人数可能增加模型用量。缺资料、需要登录或访问受阻时，任何频率都暂停说明。'),
+      React.createElement('button',{type:'button',disabled:busy[0]||!current||!!(policy&&policy.parentSession),onClick:function(){return run('chat.defaults',{interaction:interaction,workers:workers});}},'设为新会话默认'),
+      React.createElement('small',null,'保存交互频率和人数，新会话自动采用；已保存设置和运行中的任务不受影响。')):null,
+    policy&&policy.awaitingConfirmation?React.createElement('div',{className:'dsh-chat-checkpoint','aria-label':'聊天阶段确认'},React.createElement('strong',null,'需要你确认下一步'),React.createElement('p',null,policy.awaitingConfirmation.note),
+      current.reason!=='interaction_confirmation_required'?React.createElement('p',null,({'time_budget_exhausted':'原时间上限已到，不能继续本轮。','tool_budget_exhausted':'原操作额度已用完，不能继续本轮。'}[current.reason])||'本轮还有未处理的停止原因，请在任务详情查看。'):null,
+      React.createElement('button',{type:'button',disabled:busy[0]||current.agentRunning||current.reason!=='interaction_confirmation_required',onClick:function(){return run('task.continue');}},current.agentRunning?'正在收尾，请稍候':'确认并继续'),
+      React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){return run('task.cancel');}},'停止本轮'),React.createElement('small',null,'改交互频率不会解除当前等待；原截止时间仍有效。')):null,
+    policy&&!policy.awaitingConfirmation?React.createElement('small',null,'子代理占用 '+(current.active||0)+'/'+workers+'；详细预算与成果在「redteam 成果」。'):null,
+    policy&&current.stopped&&!policy.awaitingConfirmation&&!policy.blocker&&!policy.parentSession?React.createElement('div',null,React.createElement('span',null,current.reason==='plan_complete'?'本轮已完成。':'本轮已停止。'),React.createElement('button',{type:'button',disabled:busy[0]||current.agentRunning||(current.active||0)>0,onClick:function(){return run('task.new-round',{preferences:{mode:policy.flow.kind==='single'?policy.mode:'regular',workflow:policy.flow.kind,interaction:policy.interaction,workers:policy.workerLimit}});}},'保留资料，设置下一轮')):null,
+    current?React.createElement(ChatPromptEditor,{key:props.sessionId+'-'+mode,sessionId:props.sessionId,mode:mode,open:open[0],onClose:close,inputActions:props.inputActions}):null,
+    error[0]||readError[0]?React.createElement('p',{role:'alert'},error[0]||readError[0]):notice[0]?React.createElement('span',{role:'status'},notice[0]):null);
+}
+function ChatSetupEntry(props) {
+  var preset=props.useProjection('agentPreset');
+  return preset==='pentest'?React.createElement(ChatSetup,{key:props.sessionId,sessionId:props.sessionId,inputActions:props.inputActions}):null;
+}
+function installChatSetupStyles() {
+  var style=document.createElement('style');style.id='saker-chat-setup-style';
+  style.textContent='.dsh-chat-setup{width:100%;min-width:0;text-align:left;font-size:12px;color:var(--dsw-alias-label-primary,#222)}.dsh-chat-settings-row,.dsh-chat-actions,.dsh-chat-panel-head{display:flex;align-items:center;flex-wrap:wrap;gap:8px}.dsh-chat-settings-row{padding:7px 0}.dsh-chat-setup button,.dsh-chat-setup select,.dsh-chat-setup input,.dsh-chat-setup textarea{font:inherit;color:inherit;border:1px solid var(--dsw-alias-border-l1,#ddd);background:var(--dsw-alias-bg-base,#fff);border-radius:7px;padding:6px 8px;max-width:100%;box-sizing:border-box}.dsh-chat-setup button{cursor:pointer}.dsh-chat-setup button:disabled,.dsh-chat-setup select:disabled{opacity:.55;cursor:default}.dsh-chat-setup :focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4c6ef5);outline-offset:2px}.dsh-chat-setting-hint,.dsh-chat-setup small{color:var(--dsw-alias-label-secondary,#666);font-size:11px}.dsh-chat-setup small{display:block;margin:6px 0}.dsh-chat-more,.dsh-chat-checkpoint,.dsh-chat-prompt{padding:12px;margin:6px 0;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:10px;background:var(--dsw-alias-bg-base,#fff)}.dsh-chat-prompt{max-height:min(460px,48vh);overflow:auto;overscroll-behavior:contain}.dsh-chat-prompt[hidden]{display:none}.dsh-chat-panel-head{justify-content:space-between}.dsh-chat-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:8px;margin:10px 0}.dsh-chat-fields input{display:block;width:100%;margin-top:4px}.dsh-chat-full-prompt{display:block;margin:10px 0}.dsh-chat-full-prompt textarea{display:block;width:100%;resize:vertical;min-height:120px;margin-top:5px;line-height:1.6}.dsh-chat-checkpoint{border-color:var(--dsw-alias-state-business-primary,#4c6ef5)}.dsh-chat-checkpoint button{margin-right:8px}';
+  document.head.appendChild(style);return function(){style.remove();};
 }
 
 function WorkerFindings(props) {
@@ -1564,7 +1642,7 @@ function TaskPanel(props) {
       React.createElement('p',null,selected[0]==='regular'?'围绕已选功能检查正常行为、权限和业务流程。':selected[0]==='nday'?'从少量资产与产品线索选择相关公开漏洞，核对条件后验证。':'围绕一个业务疑点追查页面、JS、身份、请求和实际效果。'),
       current&&current.previousRounds?React.createElement('p',null,'已有 '+current.previousRounds+' 轮结束记录；资产、请求、材料、证据和累计成本继续保留。'):null,
       React.createElement(FlowControls,{mode:selected[0],workflow:flow[0],workers:Number(workers[0]),interaction:interaction[0],disabled:busy[0],onChange:function(patch){return run('task.choose',{mode:selected[0],workflow:patch.workflow||flow[0],workers:patch.workers!==undefined?patch.workers:Number(workers[0]),interaction:patch.interaction||interaction[0]}).then(function(value){if(value&&value.options){flow[1](value.options.workflow);workers[1](String(value.options.workers));interaction[1](value.options.interaction||'continuous');}});}}),
-      React.createElement('details',null,React.createElement('summary',null,'可复制的示例'),React.createElement(PromptExamples,{mode:selected[0]})),
+      React.createElement('p',null,'在聊天输入框上方点击“写提示词”，可编辑、插入或复制；这里用于任务详情和预算。'),
       input('这一轮要查什么',question),input('目标站点（已有聊天范围可留空）',target),
       React.createElement('details',null,React.createElement('summary',null,'本轮预算'),input('操作预算',calls,'number'),input('时间上限（分钟）',minutes,'number'),selected[0]==='0day'?input('初步观察预算',discovery,'number'):null),
       React.createElement(Btn,{primary:true,disabled:busy[0]||!question[0].trim(),onClick:start},'开始这个小任务')),
@@ -2471,6 +2549,8 @@ function injectVisibleConversationView(ctx, field, register) {
 
 function apply(ctx) {
 	ctx.effect(function () { return installStyles(); }, "dsh-redteam-results: styles");
+	ctx.effect(function () { return installChatSetupStyles(); }, "dsh-redteam-results: chat setup styles");
+	ctx.slots.inject('conversation.input.dock',function(){return ctx.slots.register({name:'conversation.input.dock',id:'saker-chat-setup',order:-20},ChatSetupEntry);});
 	injectVisibleConversationView(ctx, "showRedteamResults", function () {
 		return ctx.slots.register({
 			name: "conversation.view",
@@ -2483,5 +2563,5 @@ function apply(ctx) {
 	});
 }
 
-module.exports = { name: "dsh-redteam-results-client", inject: ["slots", "configForms"], apply: apply, WorkflowSelector: WorkflowSelector };
+module.exports = { name: "dsh-redteam-results-client", inject: ["slots", "configForms"], apply: apply, ChatSetup: ChatSetup };
 return module.exports; } });

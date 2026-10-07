@@ -143,19 +143,19 @@ try {
   });
   await test('all modes expose multiple usable copy examples; clipboard errors are visible and copying never starts a task',async()=>{
     const source=fs.readFileSync(new URL('../plugins/dsh-redteam-results/lib/client.js',import.meta.url),'utf8');
-    const snippet=source.slice(source.indexOf('function exampleTemplates('),source.indexOf('function WorkflowSelector('));
+    const snippet=source.slice(source.indexOf('function exampleTemplates('),source.indexOf('function ChatSetup('));
     const clipboard=[],values=[];let cursor=0,fail=false;
-    const sandbox={useState:initial=>{const i=cursor++;if(!(i in values))values[i]=initial;return[values[i],v=>values[i]=v]},React:{createElement:(type,props,...children)=>({type,props:props||{},children})},navigator:{clipboard:{writeText:text=>{if(fail)throw Error('offline clipboard denial');clipboard.push(text)}}}};
-    runInNewContext(snippet+';this.examples=exampleTemplates;this.component=PromptExamples;',sandbox);
+    const sandbox={useState:initial=>{const i=cursor++;if(!(i in values))values[i]=initial;return[values[i],v=>values[i]=v]},useRef:initial=>{const i=cursor++;if(!(i in values))values[i]={current:initial};return values[i]},useEffect(){},React:{createElement:(type,props,...children)=>({type,props:props||{},children})},navigator:{clipboard:{writeText:text=>{if(fail)throw Error('offline clipboard denial');clipboard.push(text)}}}};
+    runInNewContext(snippet+';this.examples=exampleTemplates;this.component=ChatPromptEditor;',sandbox);
     const nodes=node=>!node||typeof node!=='object'?[]:[node,...node.children.flat(Infinity).flatMap(nodes)];
     for(const mode of ['regular','nday','0day']){
       const rows=sandbox.examples(mode);assert.equal(rows.length,3);assert.equal(new Set(rows.map(x=>x.text)).size,3);
-      cursor=0;const buttons=nodes(sandbox.component({mode})).filter(n=>n.type==='button');assert.equal(buttons.length,3);
-      for(const button of buttons)await button.props.onClick();
+      cursor=0;sandbox.component({mode,open:true});values[6]=true;
+      for(const row of rows){values[0]=row.text;cursor=0;await nodes(sandbox.component({mode,open:true})).find(n=>n.children.includes('复制提示词')).props.onClick();}
       assert.equal(clipboard.at(-1),rows.at(-1).text);
     }
-    fail=true;cursor=0;await nodes(sandbox.component({mode:'regular'})).find(n=>n.type==='button').props.onClick();
-    assert.match(values[0],/复制失败/);assert.equal(clipboard.length,9);
+    fail=true;cursor=0;await nodes(sandbox.component({mode:'regular',open:true})).find(n=>n.children.includes('复制提示词')).props.onClick();
+    assert.match(values[8],/复制失败/);assert.equal(clipboard.length,9);
     assert.equal(readTaskPolicy(store,'copy-only'),null);
   });
 } finally { for(const dispose of disposers.reverse())await dispose();store.close(); }

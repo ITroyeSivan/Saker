@@ -8,6 +8,7 @@ import { readChecks } from './checked.js';
 import { researchOperationBlock, hasResearch, researchNext } from './research.js';
 import { normalizeTaskFlow, advanceTaskFlow, taskFlowPrompt } from './task-flow.js';
 import { normalizeInteraction, interactionPrompt } from './interaction.js';
+import { chatDefaults } from './chat-setup.js';
 
 const modes = new Set(['nday', 'regular', '0day']);
 const stops = new Set(['first-high', 'first-rce', 'queue', 'budget']);
@@ -61,7 +62,8 @@ export function readTaskPolicy(store, sessionId) {
 }
 export function chosenTaskOptions(store, sessionId) {
   const row = store.db.prepare('SELECT record FROM task_flow_choice WHERE session_id=?').get(sessionId);
-  return row ? JSON.parse(row.record) : null;
+  const defaults = chatDefaults(store);
+  return row ? JSON.parse(row.record) : defaults ? { ...defaults, workflow: 'single' } : null;
 }
 export function chooseTaskMode(store, sessionId, mode, options) {
   if (!modes.has(mode)) throw new Error('invalid task mode');
@@ -187,6 +189,16 @@ export function setTaskInteraction(store, sessionId, interaction, source) {
   if (!policy || policy.parentSession) throw new Error('only a main task can change interaction frequency');
   return write(store, sessionId, { ...policy, interaction: normalizeInteraction(interaction) });
 }
+export function setTaskWorkers(store, sessionId, workers, source) {
+  if (source !== 'desktop-user') throw Error('worker preference requires Desktop user action');
+  const policy = readTaskPolicy(store, sessionId);
+  if (!policy || policy.parentSession) throw Error('only a main task can change worker limits');
+  const limit = integer(workers, 'workers', 0, 2);
+  const active = store.db.prepare('SELECT record FROM site_workers WHERE parent_session=?').all(sessionId)
+    .filter(row => JSON.parse(row.record).state !== 'released').length;
+  if (limit < active) throw Error('当前有'+active+'个子代理占用名额，请在任务详情中先关闭，再降低上限');
+  return write(store, sessionId, { ...policy, workerLimit: limit, budget: { ...policy.budget, workers: limit } });
+}
 export function confirmTaskCheckpoint(store, sessionId, source) {
   if (source !== 'desktop-user') throw new Error('checkpoint requires Desktop user confirmation');
   const policy = readTaskPolicy(store, sessionId);
@@ -245,7 +257,7 @@ export function takeTaskContinuation(store, sessionId) {
   } catch (error) { store.db.exec('ROLLBACK'); throw error; }
 }
 export function taskPrompt(state) {
-  if (!state.configured) return (state.choice ? '用户选择了/pentest-'+state.choice+'。围绕给定站点和具体问题设置有限预算；选择菜单没有开始测试。'+(state.options?'必须沿用桌面选择workflow='+state.options.workflow+'，子代理上限='+state.options.workers+'，不能自行增加。':'') : '渗透测试：先明确本轮站点和小问题；用户已给则直接推进，只有URL先有限观察并建议方向。')+interactionPrompt(state.options?.interaction);
+  if (!state.configured) return (state.choice ? '用户选择了/pentest-'+state.choice+'。围绕给定站点和具体问题设置有限预算；选择菜单没有开始测试。' : '渗透测试：先明确本轮站点和小问题；用户已给则直接推进，只有URL先有限观察并建议方向。')+(state.options?'必须沿用桌面选择workflow='+state.options.workflow+'，子代理上限='+state.options.workers+'，不能自行增加。':'')+interactionPrompt(state.options?.interaction);
   const policy=state.policy;
   return interactionPrompt(policy.interaction, !!policy.parentSession)+taskFlowPrompt(policy)+'本轮问题：'+policy.question+'；站点：'+(policy.target||'按已给授权范围，不能自行扩大')+'；重点='+policy.mode+'；操作='+policy.used.toolCalls+'/'+policy.budget.toolCalls+'；停止规则='+policy.stop+'。不要重置预算。无关线索待办。小任务直接做，确需站点深入才delegate，结束或等待资料report/cleanup；子代理不能再派代理。'+(state.stopped?'目标操作已停止：'+state.reason+'。'+(policy.awaitingConfirmation?'等待桌面确认并继续；不能自行解除。':policy.blocker?policy.blocker.reason+'；先向用户汇报，不能自动绕行或自行解除。':'只整理证据与交付。'):policy.needsBaselineRecheck?'用户已处理阻碍，先用redteam_execution run purpose=baseline复查已存正常GET/HEAD请求，然后继续原问题。':state.observationExhausted?'观察额度已用完。继续分析已有请求和相关材料，形成具体假设后再验证；没有有效入口才向用户说明缺少的资料。':'使用实际正常对照和影响证据；回执不等于漏洞，0Day材料研究不要求先有后台接口。');
 }

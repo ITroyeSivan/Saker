@@ -1,0 +1,63 @@
+{
+  "rows": [
+    {
+      "mode": "regular",
+      "title": "机构入口整理",
+      "equivalent": true,
+      "length": 184
+    },
+    {
+      "mode": "regular",
+      "title": "单站常规测试",
+      "equivalent": true,
+      "length": 174
+    },
+    {
+      "mode": "regular",
+      "title": "已有请求检查",
+      "equivalent": true,
+      "length": 175
+    },
+    {
+      "mode": "nday",
+      "title": "已有产品检查",
+      "equivalent": true,
+      "length": 177
+    },
+    {
+      "mode": "nday",
+      "title": "接着已有资料检查",
+      "equivalent": true,
+      "length": 159
+    },
+    {
+      "mode": "nday",
+      "title": "核对扫描结果",
+      "equivalent": true,
+      "length": 163
+    },
+    {
+      "mode": "0day",
+      "title": "深入一个业务功能",
+      "equivalent": true,
+      "length": 186
+    },
+    {
+      "mode": "0day",
+      "title": "从页面与JS开始",
+      "equivalent": true,
+      "length": 179
+    },
+    {
+      "mode": "0day",
+      "title": "追查一个异常",
+      "equivalent": true,
+      "length": 173
+    }
+  ],
+  "uniqueExamples": 9,
+  "lineEndingNormalization": "CRLF to LF",
+  "noTaskStarted": true,
+  "modelCalls": 0,
+  "toolCalls": 0
+}

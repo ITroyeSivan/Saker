@@ -35,6 +35,10 @@ for (const file of ['scripts/install-desktop.mjs', 'scripts/update-desktop-short
 }
 cpSync(join(root, 'docs', 'verification'), join(payload, 'docs', 'verification'), { recursive: true })
 cpSync(join(root, 'docs', 'images'), join(payload, 'docs', 'images'), { recursive: true })
+// README and the usage guide link to design/progress documents as well.
+for (const file of readdirSync(join(root, 'docs')).filter(name => name.endsWith('.md'))) {
+  copyFileSync(join(root, 'docs', file), join(payload, 'docs', file))
+}
 writeFileSync(join(payload, 'packages.json'), JSON.stringify(manifest, null, 2) + '\n')
 const zip = payload + '.zip'
 const quote = x => "'" + x.replaceAll("'", "''") + "'"
