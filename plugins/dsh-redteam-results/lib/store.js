@@ -155,6 +155,10 @@ CREATE TABLE IF NOT EXISTS task_choice (
  session_id TEXT NOT NULL PRIMARY KEY,
  mode TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS task_flow_choice (
+ session_id TEXT NOT NULL PRIMARY KEY,
+ record TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS task_context_records (
  session_id TEXT NOT NULL,
  kind TEXT NOT NULL,

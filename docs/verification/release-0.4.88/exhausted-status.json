@@ -1,0 +1,123 @@
+{
+  "ok": true,
+  "isPentest": true,
+  "configured": true,
+  "stopped": true,
+  "reason": "tool_budget_exhausted",
+  "policy": {
+    "mode": "nday",
+    "flow": {
+      "kind": "regular-to-nday",
+      "phase": "nday",
+      "completed": {
+        "regular": true,
+        "nday": false
+      },
+      "history": [
+        {
+          "from": "regular",
+          "to": "nday",
+          "at": 1791357409768,
+          "note": "Controlled Desktop fixture: synthetic metadata already collected."
+        }
+      ],
+      "needsContinuation": false
+    },
+    "interaction": "continuous",
+    "stop": "budget",
+    "question": "只整理本消息的虚构产品资料；无网络请求。",
+    "target": "https://fixture.test",
+    "workerLimit": 0,
+    "budget": {
+      "toolCalls": 1,
+      "discoveryCalls": 0,
+      "deadline": 1791358009759
+    },
+    "used": {
+      "toolCalls": 1,
+      "discoveryCalls": 0
+    },
+    "startedAt": 1791357409759,
+    "cancelled": false,
+    "planComplete": false,
+    "queueComplete": false
+  },
+  "researchReady": false,
+  "observationExhausted": false,
+  "reviewedReproducedFindings": 0,
+  "counts": {
+    "assets": 1,
+    "requests": 0,
+    "methods": 0,
+    "checks": 0,
+    "blocked": 0,
+    "notTested": 0
+  },
+  "gaps": [],
+  "moreGaps": 0,
+  "active": 0,
+  "workers": [],
+  "more": 0,
+  "cost": {
+    "source": "official-session-events",
+    "scope": "session-and-owned-children",
+    "sessions": [
+      {
+        "sessionId": "session-087710f0-be2d-4b08-b450-7730b33c6f30",
+        "role": "main",
+        "available": true,
+        "modelCalls": 2,
+        "toolCalls": 1,
+        "unknownUsageCalls": 0,
+        "inputTokens": 16762,
+        "outputTokens": 619,
+        "cacheReadTokens": 18304,
+        "cacheWriteTokens": 0,
+        "totalTokens": 35685
+      }
+    ],
+    "unavailableSessions": 0,
+    "elapsedModelMs": 7254,
+    "modelCalls": 2,
+    "toolCalls": 1,
+    "unknownUsageCalls": 0,
+    "inputTokens": 16762,
+    "outputTokens": 619,
+    "cacheReadTokens": 18304,
+    "cacheWriteTokens": 0,
+    "totalTokens": 35685,
+    "limit": "Token sums include cache. Unknown usage and unavailable sessions remain visible. Background title requests and monetary prices are not included."
+  },
+  "roundCost": {
+    "source": "official-session-events",
+    "scope": "current-round",
+    "sessions": [
+      {
+        "sessionId": "session-087710f0-be2d-4b08-b450-7730b33c6f30",
+        "role": "main",
+        "available": true,
+        "modelCalls": 2,
+        "toolCalls": 1,
+        "unknownUsageCalls": 0,
+        "inputTokens": 16762,
+        "outputTokens": 619,
+        "cacheReadTokens": 18304,
+        "cacheWriteTokens": 0,
+        "totalTokens": 35685
+      }
+    ],
+    "unavailableSessions": 0,
+    "elapsedModelMs": 7254,
+    "modelCalls": 2,
+    "toolCalls": 1,
+    "unknownUsageCalls": 0,
+    "inputTokens": 16762,
+    "outputTokens": 619,
+    "cacheReadTokens": 18304,
+    "cacheWriteTokens": 0,
+    "totalTokens": 35685,
+    "limit": "Token sums include cache. Unknown usage and unavailable sessions remain visible. Background title requests and monetary prices are not included."
+  },
+  "previousRounds": 0,
+  "elapsedSeconds": 51
+}

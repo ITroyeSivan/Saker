@@ -438,6 +438,7 @@ for (const [suiteName, runner] of [
   ['effect-verifications-reverse', join(root, 'scripts', 'test-effect-verifications-reverse.mjs')],
   ['effect-jobs-reverse', join(root, 'scripts', 'test-effect-jobs-reverse.mjs')],
   ['framework-runtime', join(root, 'scripts', 'test-framework-runtime.mjs')],
+  ['task-flow', join(root, 'scripts', 'test-task-flow.mjs')],
   ['execution-receipts-reverse', join(root, 'scripts', 'test-execution-receipts-reverse.mjs')],
   ['adaptive-execution-reverse', join(root, 'scripts', 'test-adaptive-execution-reverse.mjs')],
   ['verification-basis-reverse', join(root, 'scripts', 'test-verification-basis-reverse.mjs')],

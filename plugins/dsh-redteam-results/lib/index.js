@@ -29,7 +29,7 @@ import { createResearch, observeResearch, assessResearch, closeResearch, researc
 import { executeRecordedRequest, readExecutionReceipt, executionReceiptSummary } from './execution-receipts.js';
 import { verifyEffect, readEffectVerification } from './effect-verifications.js';
 import { runEffectJob, readEffectJob } from './effect-jobs.js';
-import { startTaskPolicy, updateTaskProgress, taskPolicyStatus, taskExecutionGuard, taskPrompt, taskOverview, chooseTaskMode, pauseTaskPolicy, resumeTaskPolicy, archiveTaskRound } from './task-policy.js';
+import { startTaskPolicy, updateTaskProgress, taskPolicyStatus, taskExecutionGuard, taskPrompt, taskOverview, chooseTaskMode, pauseTaskPolicy, resumeTaskPolicy, archiveTaskRound, takeTaskContinuation, checkpointTask, setTaskInteraction, confirmTaskCheckpoint } from './task-policy.js';
 import { captureTaskCost, taskCostOverview } from './task-cost.js';
 import { createSiteWorkers, siteWorkerView, siteWorkerRows, siteWorkerParent } from './site-workers.js';
 import { indexBusinessMaterials, businessMaterialView } from './business-materials.js';
@@ -413,7 +413,7 @@ export async function dispatch(ctx, st, endpoint, payload) {
     if (!session || session.header?.agentPreset !== 'pentest') throw new Error('请选择当前可用的渗透会话');
     return { ok: true, ...methodAction(st, p, 'desktop-user') };
   }
-  if (['task.status', 'task.choose', 'task.start', 'task.cancel', 'task.resume', 'task.cleanup', 'task.new-round'].includes(endpoint)) {
+  if (['task.status', 'task.choose', 'task.start', 'task.cancel', 'task.resume', 'task.cleanup', 'task.new-round', 'task.interaction', 'task.continue'].includes(endpoint)) {
     const sessionId = String(p.sessionId || '');
     if (!sessionId) throw new Error('sessionId required');
     let sessions;
@@ -422,7 +422,22 @@ export async function dispatch(ctx, st, endpoint, payload) {
     if (endpoint !== 'task.status') {
       if (!session || session.header?.agentPreset !== 'pentest') throw new Error('请选择当前可用的渗透会话');
       if (typeof ctx.tools?.guard !== 'function') throw new Error('桌面宿主缺少任务预算守卫');
-      if (endpoint === 'task.choose') chooseTaskMode(st, sessionId, p.mode);
+      if (endpoint === 'task.choose') chooseTaskMode(st, sessionId, p.mode, { workflow: p.workflow, workers: p.workers, interaction: p.interaction });
+      else if (endpoint === 'task.interaction') setTaskInteraction(st, sessionId, p.interaction, 'desktop-user');
+      else if (endpoint === 'task.continue') {
+        const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
+        if (typeof agent?.followup !== 'function' || agent.status === 'running') throw new Error('请先等待当前回合结束，再确认继续');
+        const before = taskPolicyStatus(st, sessionId).policy;
+        const policy = confirmTaskCheckpoint(st, sessionId, 'desktop-user');
+        try {
+          // 注入安全：桌面确认 RPC 在空闲代理上追加，不在 Session.append 临界区内。
+          agent.followup({ id: `saker-confirm-${sessionId}-${before.awaitingConfirmation.at}`, role: 'user', source: { kind: 'user' },
+            content: [{ type: 'text', text: '[Saker 用户确认继续] '+taskPrompt(taskPolicyStatus(st, sessionId))+'继续下一阶段，沿用原预算与资料。' }] });
+        } catch (error) {
+          st.db.prepare('UPDATE task_policy SET record=? WHERE session_id=?').run(JSON.stringify({ ...policy, awaitingConfirmation: before.awaitingConfirmation }), sessionId);
+          throw new Error('未能投递继续消息，仍等待确认：'+error.message);
+        }
+      }
       else if (endpoint === 'task.start') {
         const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
         if (typeof agent?.followup !== 'function') throw new Error('当前代理不可用，任务尚未开始；请打开该会话后重试');
@@ -599,6 +614,16 @@ function apply(ctx) {
     if (session?.header?.agentPreset !== 'pentest' && !siteWorkerParent(theStore(), session?.id || '')) return;
     captureTaskCost(theStore(), session, event);
   });
+  ctx.on?.('agent/turn-stopping', ({ agent, signal }) => {
+    const session = sessionOf(ctx, { agent });
+    if (!session || session.mode !== 'pentest' || signal?.aborted || typeof agent.steer !== 'function') return;
+    const message = takeTaskContinuation(theStore(), session.id);
+    if (message) {
+      // 注入安全：agent/turn-stopping 在回合停止检查中派发，不在 Session.append 发布临界区内；steer 使宿主继续当前回合。
+      try { agent.steer(message); }
+      catch (error) { pauseTaskPolicy(theStore(), session.id, { code: 'needs-user', reason: '自动衔接未能继续', evidence: String(error.message || error) }, 'host-continuation-failure'); }
+    }
+  });
   const siteWorkers = createSiteWorkers(ctx, theStore);
   workerManagers.set(ctx, siteWorkers);
   if (typeof ctx.systemPrompt?.section === 'function') ctx.systemPrompt.section({
@@ -664,7 +689,7 @@ function apply(ctx) {
 			identity: { type: "string", description: "利用身份（云）" },
 			permission: { type: "string", description: "权限（云）" },
 			resource: { type: "string", description: "目标资源（云）" },
-			status: { type: "string", enum: REGISTER_STATUSES, description: "默认 pending。登记只收发现态：verified 是独立复核终态、登记时必被拒——先登记 pending，再用 redteam_finding_update 同一次给 secondRating + ≥40 字 secondRatingNote 流转；fixed 仅 redteam 台账模式（已路由）可登记。完整规则见 finding-fields.md" },
+			status: { type: "string", enum: REGISTER_STATUSES, description: "默认pending，登记拒绝verified；复核用finding_update同时给secondRating及≥40字secondRatingNote。fixed仅redteam模式，详见finding-fields.md" },
 			evidenceLevel: { type: "string", enum: EVIDENCE_LEVELS, description: "impact / confirmed / partial / unknown；语义见 finding-fields.md" },
 			auditMode: { type: "string", enum: ["static", "dynamic"], description: "代码审计必填：static=静态，dynamic=动态复现成功" }
 		},
@@ -909,14 +934,16 @@ function apply(ctx) {
   }));
 	ctx.tools.register(defineTool({
 		name: 'redteam_task',
-		description: '管理站点问题、共享预算和阻碍。小任务直接做；delegate仅确需深挖。主代理完成用progress {planComplete:true}并cleanup；report仅子代理提交短报告。',
+		description: '站点任务共用预算；progress用regularComplete/ndayComplete衔接，checkpoint按已选频率等阶段确认。delegate说明必要性，结束cleanup，report仅子代理。',
 		parameters: {
-			action: { type: 'string', enum: ['start', 'status', 'next', 'progress', 'cancel', 'pause', 'delegate', 'workers', 'send', 'report', 'cleanup'], required: true },
-			policy: { type: 'string', description: 'start JSON：mode、question、target、budget.toolCalls/minutes/workers(0..2)，0day可加discoveryCalls' },
-			progress: { type: 'string', description: 'progress JSON：planComplete/queueComplete' },
+			action: { type: 'string', enum: ['start', 'status', 'next', 'progress', 'checkpoint', 'cancel', 'pause', 'delegate', 'workers', 'send', 'report', 'cleanup'], required: true },
+			policy: { type: 'string', description: 'start JSON：mode/question/target/workflow，budget.toolCalls/minutes/workers；沿用桌面流程与人数' },
+			progress: { type: 'string', description: 'progress JSON：planComplete/queueComplete或regularComplete/ndayComplete，note说明已做内容和缺口' },
       planComplete: { type: 'boolean' },
       queueComplete: { type: 'boolean' },
-      document: { type: 'string', description: 'JSON：delegate site/question/need/reason；send childId/message；report state/summary；pause code/reason/evidence；cleanup childId可选' }
+      regularComplete: { type: 'boolean' },
+      ndayComplete: { type: 'boolean' },
+      document: { type: 'string', description: 'JSON：delegate site/question/need/reason/focus；send childId/message；report state/summary；pause code/reason/evidence；checkpoint note；cleanup可选childId' }
 		},
 		output: {
 			schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
@@ -930,10 +957,11 @@ function apply(ctx) {
 					if (!enforcementAvailable) throw new Error('宿主缺少tools.guard，不能启动有预算保证的任务；请使用受支持桌面版本');
 					startTaskPolicy(theStore(), session.id, JSON.parse(args.policy));
 				} else if (args.action === 'progress') {
-          const progress = args.progress ? JSON.parse(args.progress) : Object.fromEntries(['planComplete', 'queueComplete'].filter(key => args[key] !== undefined).map(key => [key, args[key]]));
+          const progress = args.progress ? JSON.parse(args.progress) : Object.fromEntries(['planComplete', 'queueComplete', 'regularComplete', 'ndayComplete'].filter(key => args[key] !== undefined).map(key => [key, args[key]]));
           if (!Object.keys(progress).length) throw new Error('progress requires planComplete or queueComplete boolean');
           updateTaskProgress(theStore(), session.id, progress);
         }
+        else if (args.action === 'checkpoint') checkpointTask(theStore(), session.id, JSON.parse(args.document).note);
         else if (args.action === 'pause') pauseTaskPolicy(theStore(), session.id, JSON.parse(args.document));
         else if (args.action === 'delegate') return { ok: true, ...await siteWorkers.delegate(exec.agent, JSON.parse(args.document), exec.signal) };
         else if (args.action === 'workers') return { ok: true, ...await siteWorkers.status(exec.agent, exec.signal) };

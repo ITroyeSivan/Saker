@@ -2,6 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { readTaskContext, saveTaskContext } from './task-context.js';
 import { startTaskPolicy, taskPolicyStatus, readTaskPolicy, archiveTaskRound } from './task-policy.js';
+import { normalizeTaskFlow } from './task-flow.js';
 import { copySiteMaterials } from './business-materials.js';
 export const SITE_WORKER_SCHEMA = `CREATE TABLE IF NOT EXISTS site_workers (
  parent_session TEXT NOT NULL, child_id TEXT PRIMARY KEY, site TEXT NOT NULL,
@@ -29,7 +30,7 @@ function save(store, row) {
 export function siteWorkerView(store, parentId) {
   const rows = siteWorkerRows(store, parentId);
   return { active: rows.filter(row => activeStates.has(row.state)).length,
-    workers: rows.slice(-8).map(({ childId, site, question, state, report, error }) => ({ childId, site, question, state,
+    workers: rows.slice(-8).map(({ childId, site, question, focus, state, report, error }) => ({ childId, site, question, focus, state,
       ...(report === undefined ? {} : { report }), ...(error === undefined ? {} : { error }) })), more: Math.max(0, rows.length - 8) };
 }
 export function createSiteWorkers(ctx, getStore) {
@@ -92,6 +93,8 @@ export function createSiteWorkers(ctx, getStore) {
     try {
       const { subagents, agents } = runtime(), store = getStore(), state = taskPolicyStatus(store, parentId);
       if (!state.configured || state.stopped) throw new Error('an active bounded task is required');
+      const focus = input.focus ?? state.policy.mode;
+      if (focus !== state.policy.mode && !(state.policy.flow?.kind === 'regular-with-nday' && ['regular', 'nday'].includes(focus))) throw new Error('子代理方向必须属于当前已选择流程');
       const site = origin(input.site), question = text(input.question, 'question', 600), reason = text(input.reason, 'necessity', 600);
       if (!['large-site-materials', 'independent-site-research'].includes(input.need)) throw new Error('specific delegation need required');
       const context = readTaskContext(store, parentId);
@@ -102,24 +105,29 @@ export function createSiteWorkers(ctx, getStore) {
       if (inventory.count >= (state.policy.workerLimit ?? 1)) throw new Error('worker limit reached, including idle and failed-cleanup workers');
       const childId = randomUUID(), remaining = state.policy.budget.toolCalls - state.policy.used.toolCalls;
       const available = agent.ctx.tools.schemas(agent).map(row => row.name);
+      const needsNday = focus === 'nday' || state.policy.flow?.kind === 'regular-to-nday' || state.policy.flow?.kind === 'regular-with-nday';
+      if (needsNday && available.includes('tool_pack') && ['nday_catalog', 'nday_match', 'nday_policy_get'].some(name => !available.includes(name)))
+        throw new Error('首次分派前请 tool_pack load nday，再重试；子会话会保存原工具清单，事后加载无法补齐');
       const nested = name => /^(?:subagent(?:_|$)|send_message$|interrupt_agent$|list_agents$|list_subagent_models$|workflow$)/.test(name);
       const deny = available.filter(nested);
       if (input.tools !== undefined && (!Array.isArray(input.tools) || input.tools.length > 12
         || input.tools.some(name => typeof name !== 'string' || !available.includes(name) || nested(name)))) throw new Error('select at most 12 available non-delegating tools');
-      const needed = name => /^(?:read|glob|grep|skill|redteam_(?:task|context|research|execution|method|finding_register|finding_update|checks)|saker_method|knowledge_(?:search|read))$/.test(name);
+      // Native cold resume restores the original tool filter. Approved Nday
+      // handoff must retain its local catalog tools from the initial admission.
+      const needed = name => /^(?:read|glob|grep|skill|redteam_(?:task|context|research|execution|method|finding_register|finding_update|checks)|saker_method|knowledge_(?:search|read))$/.test(name) || (needsNday && /^(?:tool_pack|nday_catalog|nday_match|nday_policy_get)$/.test(name));
       const allow = [...new Set([...available.filter(needed), ...(input.tools || [])])];
-      const row = { parentId, childId, site, question, reason, state: 'starting', createdAt: Date.now(), runnerPid: process.pid };
+      const row = { parentId, childId, site, focus, question, reason, state: 'starting', createdAt: Date.now(), runnerPid: process.pid };
       save(store, row); parents.set(parentId, agent);
       try {
       const belongs = endpoint => { try { return origin(endpoint) === site; } catch { return false; } };
       saveTaskContext(store, childId, { ...context, assets: context.assets.filter(asset => belongs(asset.url)), requests: context.requests.filter(request => belongs(request.endpoint)), checks: context.checks.filter(check => belongs(check.endpoint)) });
       copySiteMaterials(store, parentId, childId, site);
-      startTaskPolicy(store, childId, { mode: state.policy.mode, question, target: site, stop: 'budget', parentSession: parentId,
+      startTaskPolicy(store, childId, { mode: focus, question, target: site, stop: 'budget', parentSession: parentId,
         budget: { toolCalls: remaining, minutes: 15, discoveryCalls: Math.min(remaining, Math.max(0, state.policy.budget.discoveryCalls - state.policy.used.discoveryCalls)), workers: 0 } });
       const childPolicy = readTaskPolicy(store, childId);
       childPolicy.budget.deadline = Math.min(childPolicy.budget.deadline, state.policy.budget.deadline ?? Infinity);
       store.db.prepare('UPDATE task_policy SET record=? WHERE session_id=?').run(JSON.stringify(childPolicy), childId);
-      const prompt = `Work only on ${site}. Question: ${question}. Need: ${reason}. Reuse saved redteam_context and task policy; never start/reset budgets or delegate. Follow relevant evidence continuously; save unrelated leads without expanding. IP blocking or broken normal access: stop affected requests and report, no repeated workarounds. Before ending/waiting call redteam_task report with document {state:"completed"|"blocked"|"needs-user",summary:"facts, effects, missing conditions, next step"}. Evidence stays in this child session. HTTP 200 and callbacks alone do not prove impact.`;
+      const prompt = `Work only on ${site}. Focus: ${focus}. Question: ${question}. Need: ${reason}. Reuse saved redteam_context and task policy; never start/reset budgets or delegate.${needsNday ? ' Before using Nday tools, load the local nday pack via tool_pack; this does not contact the target or expand the saved filter.' : ''} Follow relevant evidence continuously; save unrelated leads without expanding. IP blocking or broken normal access: stop affected requests and report, no repeated workarounds. Before ending/waiting call redteam_task report with document {state:"completed"|"blocked"|"needs-user",summary:"facts, effects, missing conditions, next step"}. Evidence stays in this child session. HTTP 200 and callbacks alone do not prove impact.`;
         await subagents.startContinuable({ provider: 'spawn', childId, label: question.slice(0, 70), signal,
           request: { parent: agent, maxDepth: 1, toolFilter: { allow, deny }, prompt: [{ type: 'text', text: prompt }] } });
         const latest = siteWorkerRows(store, parentId).find(item => item.childId === childId);
@@ -151,9 +159,16 @@ export function createSiteWorkers(ctx, getStore) {
       archiveTaskRound(store, row.childId, 'parent-round-continuation');
       saveTaskContext(store, row.childId, { ...context, assets: context.assets.filter(asset => belongs(asset.url)), requests: context.requests.filter(request => belongs(request.endpoint)), checks: context.checks.filter(check => belongs(check.endpoint)) });
       copySiteMaterials(store, parentId, row.childId, row.site);
-      startTaskPolicy(store, row.childId, { mode: state.policy.mode, question: text(input.message, 'continuation', 4000).slice(0,600), target: row.site, stop: 'budget', parentSession: parentId,
+      row.focus = state.policy.flow?.kind === 'regular-with-nday' ? (row.focus || state.policy.mode) : state.policy.mode;
+      startTaskPolicy(store, row.childId, { mode: row.focus, question: text(input.message, 'continuation', 4000).slice(0,600), target: row.site, stop: 'budget', parentSession: parentId,
         budget: { toolCalls: state.policy.budget.toolCalls-state.policy.used.toolCalls, minutes: 15, discoveryCalls: Math.min(state.policy.budget.toolCalls-state.policy.used.toolCalls, Math.max(0, state.policy.budget.discoveryCalls-state.policy.used.discoveryCalls)), workers: 0 } });
       const next = readTaskPolicy(store, row.childId); next.budget.deadline = Math.min(next.budget.deadline, state.policy.budget.deadline ?? Infinity);
+      store.db.prepare('UPDATE task_policy SET record=? WHERE session_id=?').run(JSON.stringify(next), row.childId);
+    }
+    if (previousPolicy?.parentRound === state.policy.startedAt && previousPolicy.mode !== state.policy.mode && state.policy.flow?.kind === 'regular-to-nday' && state.policy.flow.phase === 'nday') {
+      if (row.state !== 'released' || agents.get(row.childId) || previousPolicy.blocker || previousPolicy.cancelled) throw new Error('先释放并处理子任务阻碍，再继续Nday');
+      const next = { ...previousPolicy, mode: 'nday', flow: normalizeTaskFlow('single', 'nday'), planComplete: false, queueComplete: false };
+      delete next.finishedAt; row.focus = 'nday';
       store.db.prepare('UPDATE task_policy SET record=? WHERE session_id=?').run(JSON.stringify(next), row.childId);
     }
     if (taskPolicyStatus(store, row.childId).stopped) throw new Error('child blocked or exhausted; reconcile before continuation');

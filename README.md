@@ -20,6 +20,8 @@ Saker 是 [DeepSeek Harness Desktop](https://github.com/deepseek-ai/deepseek-har
 
 支持导入请求、流量、JS 和已有扫描结果。测试过程中保存分析记录、复现步骤和证据；遇到封禁、账号失效等阻碍会停止并说明原因。子代理按需创建，同站复用，最多两个，结束后释放。
 
+三个模式各有三个可复制示例。常规测试可选择「只做当前模式」「收集后自动接 Nday」「常规与 Nday 同时进行」，子代理上限可选 0、1、2。交互频率可选「仅必要时询问」「阶段汇报，自动继续」「阶段完成后等我确认」，任务开始后也可调整。两方向共用资料、操作预算与截止时间。[查看实际桌面界面与验收](docs/verification/release-0.4.88.md)。
+
 代码审计和 CTF 不再作为独立模式，历史会话仍可查看。
 
 ## 功能
@@ -36,10 +38,10 @@ Saker 是 [DeepSeek Harness Desktop](https://github.com/deepseek-ai/deepseek-har
 
 ## 安装
 
-当前版本 **0.4.87**，已在 Windows 的官方 Desktop **0.2.0-rc.2** 上测试。其他宿主版本尚未验证。
+当前版本 **0.4.88**，已在 Windows 的官方 Desktop **0.2.0-rc.2** 上测试。其他宿主版本尚未验证。
 
 1. 安装官方 Desktop，完成首次初始化并配置模型，然后完全退出应用。
-2. 下载 [Saker-0.4.87-desktop.zip](https://github.com/ITroyeSivan/Saker/releases/download/v0.4.87/Saker-0.4.87-desktop.zip)，解压到长期保留的目录。
+2. 下载 [Saker-0.4.88-desktop.zip](https://github.com/ITroyeSivan/Saker/releases/download/v0.4.88/Saker-0.4.88-desktop.zip)，解压到长期保留的目录。
 3. 在解压目录执行，将路径替换为 Desktop 的实际安装目录：
 
 ```powershell
@@ -52,7 +54,7 @@ node scripts/install-desktop.mjs --desktop-dir "C:/实际安装目录/DeepSeek H
 
 ## 测试记录
 
-桌面测试覆盖任务流程、设置页、插件加载、成果导出和 MCP 调用。记录：[框架测试](docs/verification/framework-desktop-2026-10-03.md)、[功能复测](docs/verification/desktop-healthcheck-2026-10-04.md)、[0.4.87 发布检查](docs/verification/release-0.4.87.md)。
+桌面测试覆盖任务流程、设置页、插件加载、成果导出和 MCP 调用。记录：[框架测试](docs/verification/framework-desktop-2026-10-03.md)、[功能复测](docs/verification/desktop-healthcheck-2026-10-04.md)、[0.4.88 发布检查](docs/verification/release-0.4.88.md)。
 
 目前的测试不能证明真实目标的漏洞检出率提高。Token 用量随任务变化，Nday 对照测试中用量有所增加。
 

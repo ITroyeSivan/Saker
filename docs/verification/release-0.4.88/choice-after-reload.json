@@ -1,0 +1,59 @@
+{
+  "ok": true,
+  "isPentest": true,
+  "configured": false,
+  "choice": "regular",
+  "options": {
+    "workflow": "regular-to-nday",
+    "interaction": "confirm",
+    "workers": 0
+  },
+  "stopped": false,
+  "reason": "task_policy_missing",
+  "counts": {
+    "assets": 0,
+    "requests": 0,
+    "methods": 0,
+    "checks": 0,
+    "blocked": 0,
+    "notTested": 0
+  },
+  "gaps": [],
+  "moreGaps": 0,
+  "active": 0,
+  "workers": [],
+  "more": 0,
+  "cost": {
+    "source": "official-session-events",
+    "scope": "session-and-owned-children",
+    "sessions": [
+      {
+        "sessionId": "session-2f2d3017-cf3b-4290-9833-3e2bddc75fa9",
+        "role": "main",
+        "available": true,
+        "modelCalls": 0,
+        "toolCalls": 0,
+        "unknownUsageCalls": 0,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheReadTokens": null,
+        "cacheWriteTokens": null,
+        "totalTokens": null
+      }
+    ],
+    "unavailableSessions": 0,
+    "elapsedModelMs": null,
+    "modelCalls": 0,
+    "toolCalls": 0,
+    "unknownUsageCalls": 0,
+    "inputTokens": null,
+    "outputTokens": null,
+    "cacheReadTokens": null,
+    "cacheWriteTokens": null,
+    "totalTokens": null,
+    "limit": "Token sums include cache. Unknown usage and unavailable sessions remain visible. Background title requests and monetary prices are not included."
+  },
+  "roundCost": null,
+  "previousRounds": 0,
+  "elapsedSeconds": 0
+}

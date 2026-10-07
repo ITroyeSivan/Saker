@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
-import { readTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy.js';
+import { readTaskPolicy, updateTaskProgress, checkpointTask } from '../plugins/dsh-redteam-results/lib/task-policy.js';
 import { saveTaskContext } from '../plugins/dsh-redteam-results/lib/task-context.js';
 import { createResearch } from '../plugins/dsh-redteam-results/lib/research.js';
 import { captureTaskCost, taskCostOverview } from '../plugins/dsh-redteam-results/lib/task-cost.js';
@@ -14,7 +14,7 @@ process.env.DSH_HOME = home;
 const results = await import('../plugins/dsh-redteam-results/lib/index.js');
 const store = openStore(path.join(home, 'redteam-results', 'results.db'));
 const sections = [], disposers = [], registeredTools = new Map();
-const sessionMap = new Map(['ui', 'hero', 'nday', 'regular', '0day', 'records'].map(id => [id, { id, header: { agentPreset: 'pentest' } }]));
+const sessionMap = new Map(['ui', 'hero', 'nday', 'regular', '0day', 'records', 'interaction-ui'].map(id => [id, { id, header: { agentPreset: 'pentest' } }]));
 sessionMap.set('audit', { id: 'audit', header: { agentPreset: 'code-audit' } });
 const queued = [], cancellations = [];
 const agents = { get: id => sessionMap.has(id) ? { session: sessionMap.get(id), status: 'idle', followup: message => queued.push({ id, message }), cancel: cause => cancellations.push({ id, cause }) } : undefined };
@@ -24,7 +24,7 @@ const ctx = { sessions: { get: id => sessionMap.get(id) }, systemPrompt: { secti
   webServer: { register: () => () => {} } };
 results.apply(ctx);
 const source = fs.readFileSync(new URL('../plugins/dsh-redteam-results/lib/client.js', import.meta.url), 'utf8');
-const componentSource = source.slice(source.indexOf('function WorkflowSelector('), source.indexOf('function CheckedList('));
+const componentSource = source.slice(source.indexOf('function exampleTemplates('), source.indexOf('function CheckedList('));
 function harness(name, sessionId) {
   const state = [], calls = []; let cursor = 0;
   const sandbox = { useState: value => { const index = cursor++; if (!(index in state)) state[index] = value; return [state[index], next => { state[index] = typeof next === 'function' ? next(state[index]) : next; }]; },
@@ -38,6 +38,27 @@ function harness(name, sessionId) {
 let failed = 0;
 async function test(name, fn) { try { await fn(); console.log('ok   ' + name); } catch (error) { failed++; console.log('FAIL ' + name + ': ' + error.message); } }
 try {
+  await test('Desktop interaction control saves preferences, confirms a real checkpoint and preserves policy on failed delivery',async()=>{
+    const id='interaction-ui';
+    const control=harness('InteractionControl',id);
+    const select=control.find(n=>n.type==='select'&&n.props['aria-label']==='交互频率');
+    assert.equal(select.children.length,3);
+    await results.dispatch(ctx,store,'task.choose',{sessionId:id,mode:'regular',workflow:'regular-to-nday',workers:0,interaction:'confirm'});
+    await results.dispatch(ctx,store,'task.start',{sessionId:id,policy:{mode:'regular',budget:{toolCalls:5,minutes:10}}});
+    const before=readTaskPolicy(store,id);
+    updateTaskProgress(store,id,{regularComplete:true,note:'Offline stage finished'});
+    const ui=harness('TaskPanel',id);await ui.button('刷新状态').props.onClick();assert(ui.button('确认并继续'));
+    const broken={...ctx,agents:{get:()=>({status:'idle',followup(){throw Error('fixture enqueue failed')}})}};
+    await results.dispatch(ctx,store,'task.interaction',{sessionId:id,interaction:'continuous'});
+    await assert.rejects(results.dispatch(broken,store,'task.continue',{sessionId:id}),/仍等待确认/);
+    assert(readTaskPolicy(store,id).awaitingConfirmation);
+    await ui.button('确认并继续').props.onClick();assert.equal(readTaskPolicy(store,id).awaitingConfirmation,undefined);
+    assert.match(queued.at(-1).message.content[0].text,/用户确认继续/);
+    for(const key of ['budget','used','startedAt'])assert.deepEqual(readTaskPolicy(store,id)[key],before[key]);
+    await results.dispatch(ctx,store,'task.interaction',{sessionId:id,interaction:'milestone'});
+    assert.equal(readTaskPolicy(store,id).interaction,'milestone');
+    assert.deepEqual(readTaskPolicy(store,id).budget,before.budget);
+  });
   await test('Desktop effect comparison stays collapsed and displays host summary rather than inventing proof for missing data', () => {
     const start = source.indexOf('function EffectEvidenceView('), end = source.indexOf('function WorkflowSelector(', start);
     const sandbox = { useState: value => [value, () => {}], React: { createElement: (type, props, ...children) => ({ type, props: props || {}, children }) } };
@@ -75,8 +96,8 @@ try {
     assert.equal(readTaskPolicy(store, 'ui').mode, '0day');
     assert.equal(readTaskPolicy(store, 'ui').budget.toolCalls, 40);
     assert.equal(readTaskPolicy(store, 'ui').budget.discoveryCalls, 7);
-    assert.equal(queued.length, 1);
-    assert.match(queued[0].message.content[0].text, /Inspect the controlled fixture permission only/);
+    const uiQueued=queued.filter(row=>row.id==='ui');assert.equal(uiQueued.length, 1);
+    assert.match(uiQueued[0].message.content[0].text, /Inspect the controlled fixture permission only/);
     assert.equal(ui.calls.at(-1)[1].sessionId, 'ui');
     assert(!ui.button('开始这个小任务'));
     await ui.button('停止本轮与子代理').props.onClick();

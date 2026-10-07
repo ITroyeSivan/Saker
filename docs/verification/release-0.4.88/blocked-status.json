@@ -1,0 +1,131 @@
+{
+  "ok": true,
+  "isPentest": true,
+  "configured": true,
+  "stopped": true,
+  "reason": "paused:ip-blocked",
+  "policy": {
+    "mode": "nday",
+    "flow": {
+      "kind": "regular-to-nday",
+      "phase": "nday",
+      "completed": {
+        "regular": true,
+        "nday": false
+      },
+      "history": [
+        {
+          "from": "regular",
+          "to": "nday",
+          "at": 1791357345891,
+          "note": "Controlled Desktop fixture: synthetic metadata already collected."
+        }
+      ],
+      "needsContinuation": true
+    },
+    "interaction": "continuous",
+    "stop": "budget",
+    "question": "只整理本消息的虚构产品资料；无网络请求。",
+    "target": "https://fixture.test",
+    "workerLimit": 0,
+    "budget": {
+      "toolCalls": 5,
+      "discoveryCalls": 0,
+      "deadline": 1791357945883
+    },
+    "used": {
+      "toolCalls": 0,
+      "discoveryCalls": 0
+    },
+    "startedAt": 1791357345883,
+    "cancelled": false,
+    "planComplete": false,
+    "queueComplete": false,
+    "blocker": {
+      "code": "ip-blocked",
+      "reason": "Synthetic fixture interruption, no target request",
+      "evidence": "Offline verification fixture only",
+      "source": "submitted-interruption-report",
+      "recordedAt": 1791357345894,
+      "conclusion": "unknown; stop affected requests"
+    }
+  },
+  "researchReady": false,
+  "observationExhausted": false,
+  "reviewedReproducedFindings": 0,
+  "counts": {
+    "assets": 1,
+    "requests": 0,
+    "methods": 0,
+    "checks": 0,
+    "blocked": 0,
+    "notTested": 0
+  },
+  "gaps": [],
+  "moreGaps": 0,
+  "active": 0,
+  "workers": [],
+  "more": 0,
+  "cost": {
+    "source": "official-session-events",
+    "scope": "session-and-owned-children",
+    "sessions": [
+      {
+        "sessionId": "session-8fd7d666-1624-4b05-ba98-fcb3c91fb31b",
+        "role": "main",
+        "available": true,
+        "modelCalls": 2,
+        "toolCalls": 1,
+        "unknownUsageCalls": 0,
+        "inputTokens": 16946,
+        "outputTokens": 797,
+        "cacheReadTokens": 18176,
+        "cacheWriteTokens": 0,
+        "totalTokens": 35919
+      }
+    ],
+    "unavailableSessions": 0,
+    "elapsedModelMs": 9130,
+    "modelCalls": 2,
+    "toolCalls": 1,
+    "unknownUsageCalls": 0,
+    "inputTokens": 16946,
+    "outputTokens": 797,
+    "cacheReadTokens": 18176,
+    "cacheWriteTokens": 0,
+    "totalTokens": 35919,
+    "limit": "Token sums include cache. Unknown usage and unavailable sessions remain visible. Background title requests and monetary prices are not included."
+  },
+  "roundCost": {
+    "source": "official-session-events",
+    "scope": "current-round",
+    "sessions": [
+      {
+        "sessionId": "session-8fd7d666-1624-4b05-ba98-fcb3c91fb31b",
+        "role": "main",
+        "available": true,
+        "modelCalls": 2,
+        "toolCalls": 1,
+        "unknownUsageCalls": 0,
+        "inputTokens": 16946,
+        "outputTokens": 797,
+        "cacheReadTokens": 18176,
+        "cacheWriteTokens": 0,
+        "totalTokens": 35919
+      }
+    ],
+    "unavailableSessions": 0,
+    "elapsedModelMs": 9130,
+    "modelCalls": 2,
+    "toolCalls": 1,
+    "unknownUsageCalls": 0,
+    "inputTokens": 16946,
+    "outputTokens": 797,
+    "cacheReadTokens": 18176,
+    "cacheWriteTokens": 0,
+    "totalTokens": 35919,
+    "limit": "Token sums include cache. Unknown usage and unavailable sessions remain visible. Background title requests and monetary prices are not included."
+  },
+  "previousRounds": 0,
+  "elapsedSeconds": 62
+}

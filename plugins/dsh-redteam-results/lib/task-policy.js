@@ -6,6 +6,8 @@ import { findingDeliveryState } from './delivery.js';
 import { readTaskContext } from './task-context.js';
 import { readChecks } from './checked.js';
 import { researchOperationBlock, hasResearch, researchNext } from './research.js';
+import { normalizeTaskFlow, advanceTaskFlow, taskFlowPrompt } from './task-flow.js';
+import { normalizeInteraction, interactionPrompt } from './interaction.js';
 
 const modes = new Set(['nday', 'regular', '0day']);
 const stops = new Set(['first-high', 'first-rce', 'queue', 'budget']);
@@ -57,10 +59,24 @@ export function readTaskPolicy(store, sessionId) {
   const row = store.db.prepare('SELECT record FROM task_policy WHERE session_id=?').get(sessionId);
   return row ? JSON.parse(row.record) : null;
 }
-export function chooseTaskMode(store, sessionId, mode) {
+export function chosenTaskOptions(store, sessionId) {
+  const row = store.db.prepare('SELECT record FROM task_flow_choice WHERE session_id=?').get(sessionId);
+  return row ? JSON.parse(row.record) : null;
+}
+export function chooseTaskMode(store, sessionId, mode, options) {
   if (!modes.has(mode)) throw new Error('invalid task mode');
   if (readTaskPolicy(store, sessionId)) throw new Error('任务已开始，不能切换流程或重置预算');
+  const previous = chosenTaskOptions(store, sessionId);
+  const choice = { workflow: options?.workflow ?? (mode === 'regular' ? previous?.workflow : 'single') ?? 'single',
+    interaction: normalizeInteraction(options?.interaction ?? previous?.interaction),
+    workers: integer(options?.workers ?? previous?.workers ?? 1, 'workers', 0, 2) };
+  normalizeTaskFlow(choice.workflow, mode);
+  store.db.exec('BEGIN IMMEDIATE');
+  try {
   store.db.prepare('INSERT INTO task_choice (session_id,mode) VALUES (?,?) ON CONFLICT(session_id) DO UPDATE SET mode=excluded.mode').run(sessionId, mode);
+  store.db.prepare('INSERT INTO task_flow_choice(session_id,record) VALUES(?,?) ON CONFLICT(session_id) DO UPDATE SET record=excluded.record').run(sessionId, JSON.stringify(choice));
+  store.db.exec('COMMIT');
+  } catch (error) { store.db.exec('ROLLBACK'); throw error; }
   return mode;
 }
 export function chosenTaskMode(store, sessionId) {
@@ -70,6 +86,7 @@ export function archiveTaskRound(store, sessionId, source, now = Date.now()) {
   if (!['desktop-user', 'parent-round-continuation'].includes(source)) throw new Error('new round requires an explicit Desktop action');
   const current = readTaskPolicy(store, sessionId);
   if (!current) throw new Error('no previous round');
+  if (current.awaitingConfirmation && !current.cancelled) throw new Error('阶段确认不是任务结束；先确认继续或停止本轮');
   if (current.blocker || (source === 'desktop-user' && current.parentSession)) throw new Error('受阻任务或子任务不能自行开启新一轮');
   if (source === 'desktop-user' && (!taskPolicyStatus(store, sessionId, now).stopped || current.blocker))
     throw new Error('先结束当前任务；访问阻碍必须先处理，不能通过新一轮绕过');
@@ -86,6 +103,7 @@ export function archiveTaskRound(store, sessionId, source, now = Date.now()) {
     }
     store.db.prepare('DELETE FROM task_policy WHERE session_id=?').run(sessionId);
     store.db.prepare('DELETE FROM task_choice WHERE session_id=?').run(sessionId);
+    store.db.prepare('DELETE FROM task_flow_choice WHERE session_id=?').run(sessionId);
     store.db.exec('COMMIT');
   } catch (error) { store.db.exec('ROLLBACK'); throw error; }
   return { archived: true, previousStartedAt: current.startedAt };
@@ -102,6 +120,12 @@ export function startTaskPolicy(store, sessionId, input, now = Date.now()) {
   const stop = input.stop || 'budget';
   if (!modes.has(mode) || !stops.has(stop)) throw new Error('invalid task mode or stop policy');
   const chosen = chosenTaskMode(store, sessionId);
+  const choice = chosenTaskOptions(store, sessionId);
+  const parentId = store.db.prepare('SELECT parent_session FROM site_workers WHERE child_id=?').get(sessionId)?.parent_session;
+  const interaction = normalizeInteraction(input.interaction ?? choice?.interaction ?? (parentId ? readTaskPolicy(store, parentId)?.interaction : undefined));
+  if (choice && interaction !== normalizeInteraction(choice.interaction)) throw new Error('interaction differs from the selected Desktop preference');
+  const flow = normalizeTaskFlow(input.workflow ?? choice?.workflow ?? 'single', mode);
+  if (choice && flow.kind !== choice.workflow) throw new Error('workflow differs from the selected Desktop workflow');
   if (chosen && chosen !== mode) throw new Error('mode differs from the selected Desktop workflow');
   if (readTaskPolicy(store, sessionId)) throw new Error('task already started; budgets cannot be reset in this session');
   const toolCalls = integer(input.budget?.toolCalls, 'budget.toolCalls', 1, 10000);
@@ -109,23 +133,67 @@ export function startTaskPolicy(store, sessionId, input, now = Date.now()) {
   const minutes = input.budget?.minutes === undefined ? null : integer(input.budget.minutes, 'budget.minutes', 1, 10080);
   const question = input.question === undefined ? '有限观察已有目标，向用户建议具体研究问题' : boundedText(input.question, 'question', 600);
   const target = input.target === undefined ? '' : siteOrigin(input.target);
-  const workerLimit = integer(input.budget?.workers ?? 1, 'budget.workers', 0, 2);
+  const workerLimit = integer(input.budget?.workers ?? choice?.workers ?? 1, 'budget.workers', 0, 2);
+  if (choice && workerLimit > choice.workers) throw new Error('不能提高桌面已选择的子代理上限');
   const parentSession = store.db.prepare('SELECT parent_session FROM site_workers WHERE child_id=?').get(sessionId)?.parent_session;
   if (input.parentSession && input.parentSession !== parentSession) throw new Error('unowned worker parent');
-  return write(store, sessionId, { mode, stop, question, target, workerLimit, ...(parentSession ? { parentSession } : {}),
+  if (parentSession && flow.kind !== 'single') throw new Error('子代理不能开启独立衔接流程');
+  return write(store, sessionId, { mode, flow, interaction, stop, question, target, workerLimit, ...(parentSession ? { parentSession } : {}),
     ...(parentSession ? { parentRound: readTaskPolicy(store, parentSession)?.startedAt } : {}),
     budget: { toolCalls, discoveryCalls, deadline: minutes === null ? null : now + minutes * 60000 },
     used: { toolCalls: 0, discoveryCalls: 0 }, startedAt: now, cancelled: false, planComplete: false, queueComplete: false });
 }
 export function updateTaskProgress(store, sessionId, input) {
+  store.db.exec('BEGIN IMMEDIATE');
+  try {
   const current = readTaskPolicy(store, sessionId);
   if (!current) throw new Error('task policy missing');
+  if (current.awaitingConfirmation && !input.cancelled) throw new Error('等待桌面确认，不能自行完成下一阶段');
   for (const key of Object.keys(input)) {
-    if (!['cancelled', 'planComplete', 'queueComplete'].includes(key) || typeof input[key] !== 'boolean') throw new Error('progress accepts only boolean completion/cancellation fields');
+    if (key === 'note') continue;
+    if (!['cancelled', 'planComplete', 'queueComplete', 'regularComplete', 'ndayComplete'].includes(key) || typeof input[key] !== 'boolean') throw new Error('progress accepts only boolean completion/cancellation fields and a note');
     if (current[key] && !input[key]) throw new Error('finished task state cannot be reopened');
   }
-  return write(store, sessionId, { ...current, ...input,
-    ...(!current.finishedAt && (input.cancelled || input.planComplete || input.queueComplete) ? { finishedAt: Date.now() } : {}) });
+  const now = Date.now();
+  if (current.flow?.kind !== 'single' && current.flow && !input.cancelled) {
+    if (taskPolicyStatus(store, sessionId, now).stopped) throw new Error('任务已停止，不能借模式衔接恢复');
+    if (current.needsBaselineRecheck) throw new Error('先复查正常访问，再继续模式衔接');
+    if (current.flow.kind === 'regular-to-nday' && current.flow.phase === 'regular' && (input.regularComplete || input.planComplete || input.queueComplete)
+      && store.db.prepare('SELECT record FROM site_workers WHERE parent_session=?').all(sessionId).some(row => JSON.parse(row.record).state !== 'released'))
+      throw new Error('先释放全部站点子代理，再自动接 Nday；预算与资料保留');
+  }
+  const next = advanceTaskFlow(current, input, now);
+  if (next.cancelled) delete next.awaitingConfirmation;
+  if (!current.parentSession && current.interaction === 'confirm' && !next.planComplete && !next.cancelled
+    && (input.regularComplete || input.ndayComplete || input.planComplete || input.queueComplete))
+    next.awaitingConfirmation = { at: now, note: input.note || '本阶段已完成，请确认下一阶段', phase: next.flow.phase };
+  const saved = write(store, sessionId, { ...next,
+    ...(!current.finishedAt && (next.cancelled || next.planComplete || next.queueComplete) ? { finishedAt: now } : {}) });
+  store.db.exec('COMMIT'); return saved;
+  } catch (error) { store.db.exec('ROLLBACK'); throw error; }
+}
+export function checkpointTask(store, sessionId, note) {
+  const state = taskPolicyStatus(store, sessionId);
+  if (!state.configured || state.stopped || state.policy.parentSession) throw new Error('only an active main task can checkpoint');
+  const summary = boundedText(note, 'checkpoint note', 1000);
+  if (state.policy.interaction !== 'confirm') return state.policy;
+  if (store.db.prepare('SELECT record FROM site_workers WHERE parent_session=?').all(sessionId).some(row => JSON.parse(row.record).state !== 'released'))
+    throw new Error('阶段确认前先释放全部子代理');
+  return write(store, sessionId, { ...state.policy, awaitingConfirmation: { at: Date.now(), note: summary, phase: state.policy.flow.phase } });
+}
+export function setTaskInteraction(store, sessionId, interaction, source) {
+  if (source !== 'desktop-user') throw new Error('interaction preference requires Desktop user action');
+  const policy = readTaskPolicy(store, sessionId);
+  if (!policy || policy.parentSession) throw new Error('only a main task can change interaction frequency');
+  return write(store, sessionId, { ...policy, interaction: normalizeInteraction(interaction) });
+}
+export function confirmTaskCheckpoint(store, sessionId, source) {
+  if (source !== 'desktop-user') throw new Error('checkpoint requires Desktop user confirmation');
+  const policy = readTaskPolicy(store, sessionId);
+  if (!policy?.awaitingConfirmation || policy.parentSession) throw new Error('no main task checkpoint awaiting confirmation');
+  if (taskPolicyStatus(store, sessionId).reason !== 'interaction_confirmation_required') throw new Error('task stopped for another reason');
+  const { awaitingConfirmation, ...next } = policy;
+  return write(store, sessionId, next);
 }
 export function researchReady(context) {
   // Input gate is also enforced by zday_pattern against the selected baseline.
@@ -136,7 +204,7 @@ export function researchReady(context) {
 }
 export function taskPolicyStatus(store, sessionId, now = Date.now()) {
   const policy = readTaskPolicy(store, sessionId);
-  if (!policy) return { configured: false, choice: chosenTaskMode(store, sessionId), stopped: false, reason: 'task_policy_missing' };
+  if (!policy) return { configured: false, choice: chosenTaskMode(store, sessionId), options: chosenTaskOptions(store, sessionId), stopped: false, reason: 'task_policy_missing' };
   const findings = allFindings(store, sessionId, 'pentest').filter(finding => {
     const state = findingDeliveryState(finding);
     return state.ready && state.reproductionVerified;
@@ -144,12 +212,14 @@ export function taskPolicyStatus(store, sessionId, now = Date.now()) {
   let reason = '';
   if (policy.blocker) reason = 'paused:' + policy.blocker.code;
   else if (policy.cancelled) reason = 'cancelled';
+  else if (policy.flow?.phase === 'done') reason = 'plan_complete';
   else if (policy.stop === 'queue' && policy.queueComplete) reason = 'queue_complete';
   else if (policy.stop === 'budget' && policy.planComplete) reason = 'plan_complete';
   else if (policy.budget.deadline !== null && now >= policy.budget.deadline) reason = 'time_budget_exhausted';
   else if (policy.used.toolCalls >= policy.budget.toolCalls) reason = 'tool_budget_exhausted';
   else if (policy.stop === 'first-rce' && findings.some(finding => finding.proofKind === 'execution')) reason = 'first_verified_rce';
   else if (policy.stop === 'first-high' && findings.some(finding => ['high', 'critical'].includes(finding.secondRating))) reason = 'first_verified_high';
+  else if (policy.awaitingConfirmation) reason = 'interaction_confirmation_required';
   const ready = policy.mode === '0day' ? researchReady(readTaskContext(store, sessionId)) : false;
   if (!reason && policy.parentSession) {
     const parent = taskPolicyStatus(store, policy.parentSession, now);
@@ -159,10 +229,25 @@ export function taskPolicyStatus(store, sessionId, now = Date.now()) {
     observationExhausted: policy.mode === '0day' && !ready && policy.used.discoveryCalls >= policy.budget.discoveryCalls,
     reviewedReproducedFindings: findings.length };
 }
+export function takeTaskContinuation(store, sessionId) {
+  store.db.exec('BEGIN IMMEDIATE');
+  try {
+    const state = taskPolicyStatus(store, sessionId);
+    if (!state.configured || state.stopped || state.policy.parentSession || state.policy.needsBaselineRecheck
+      || !state.policy.flow?.needsContinuation
+      || store.db.prepare('SELECT record FROM site_workers WHERE parent_session=?').all(sessionId).some(row => JSON.parse(row.record).state !== 'released')) {
+      store.db.exec('COMMIT'); return null;
+    }
+    const next = { ...state.policy, flow: { ...state.policy.flow, needsContinuation: false } };
+    write(store, sessionId, next); store.db.exec('COMMIT');
+    return { id: 'saker-flow-'+sessionId+'-'+next.startedAt+'-'+next.flow.history.length,
+      role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '[Saker 自动衔接，来自已选流程] '+interactionPrompt(next.interaction)+taskFlowPrompt(next)+'继续尚未完成的步骤，不重建任务、不重置预算。' }] };
+  } catch (error) { store.db.exec('ROLLBACK'); throw error; }
+}
 export function taskPrompt(state) {
-  if (!state.configured) return state.choice ? '用户选择了/pentest-'+state.choice+'。围绕给定站点和具体问题设置有限预算；选择菜单没有开始测试。' : '渗透测试：先明确本轮站点和小问题；用户已给则直接推进，只有URL先有限观察并建议方向。';
+  if (!state.configured) return (state.choice ? '用户选择了/pentest-'+state.choice+'。围绕给定站点和具体问题设置有限预算；选择菜单没有开始测试。'+(state.options?'必须沿用桌面选择workflow='+state.options.workflow+'，子代理上限='+state.options.workers+'，不能自行增加。':'') : '渗透测试：先明确本轮站点和小问题；用户已给则直接推进，只有URL先有限观察并建议方向。')+interactionPrompt(state.options?.interaction);
   const policy=state.policy;
-  return '本轮问题：'+policy.question+'；站点：'+(policy.target||'按已给授权范围，不能自行扩大')+'；重点='+policy.mode+'；操作='+policy.used.toolCalls+'/'+policy.budget.toolCalls+'；停止规则='+policy.stop+'。不要重置预算。相关线索连续推进，无关线索待办；缺关键资料、有效路径走不通或任务完成才集中讨论。小任务直接做，确需站点深入才delegate，结束或等待资料report/cleanup；子代理不能再派代理。'+(state.stopped?'目标操作已停止：'+state.reason+'。'+(policy.blocker?policy.blocker.reason+'；先向用户汇报，不能自动绕行或自行解除。':'只整理证据与交付。'):policy.needsBaselineRecheck?'用户已处理阻碍，先用redteam_execution run purpose=baseline复查已存正常GET/HEAD请求，然后继续原问题。':state.observationExhausted?'观察额度已用完。继续分析已有请求和相关材料，形成具体假设后再验证；没有有效入口才向用户说明缺少的资料。':'使用实际正常对照和影响证据；回执不等于漏洞，0Day材料研究不要求先有后台接口。');
+  return interactionPrompt(policy.interaction, !!policy.parentSession)+taskFlowPrompt(policy)+'本轮问题：'+policy.question+'；站点：'+(policy.target||'按已给授权范围，不能自行扩大')+'；重点='+policy.mode+'；操作='+policy.used.toolCalls+'/'+policy.budget.toolCalls+'；停止规则='+policy.stop+'。不要重置预算。无关线索待办。小任务直接做，确需站点深入才delegate，结束或等待资料report/cleanup；子代理不能再派代理。'+(state.stopped?'目标操作已停止：'+state.reason+'。'+(policy.awaitingConfirmation?'等待桌面确认并继续；不能自行解除。':policy.blocker?policy.blocker.reason+'；先向用户汇报，不能自动绕行或自行解除。':'只整理证据与交付。'):policy.needsBaselineRecheck?'用户已处理阻碍，先用redteam_execution run purpose=baseline复查已存正常GET/HEAD请求，然后继续原问题。':state.observationExhausted?'观察额度已用完。继续分析已有请求和相关材料，形成具体假设后再验证；没有有效入口才向用户说明缺少的资料。':'使用实际正常对照和影响证据；回执不等于漏洞，0Day材料研究不要求先有后台接口。');
 }
 export function taskOverview(store, sessionId) {
   const state = taskPolicyStatus(store, sessionId);
@@ -202,6 +287,7 @@ export function taskExecutionGuard(store, sessionId, name, now = Date.now(), { o
     }
     if (!reason && state.configured && !state.stopped) {
       const policy = state.policy;
+      if (policy.flow?.needsContinuation) policy.flow.needsContinuation = false;
       policy.used.toolCalls++;
       if (policy.mode === '0day' && !state.researchReady) policy.used.discoveryCalls++;
       write(store, sessionId, policy);

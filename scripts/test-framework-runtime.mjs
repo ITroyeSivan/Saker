@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { openStore, registerFinding, getFinding } from '../plugins/dsh-redteam-results/lib/store.js';
-import { saveTaskContext } from '../plugins/dsh-redteam-results/lib/task-context.js';
+import { saveTaskContext, readTaskContext } from '../plugins/dsh-redteam-results/lib/task-context.js';
 import { startTaskPolicy, readTaskPolicy, taskPolicyStatus, taskExecutionGuard, pauseTaskPolicy, resumeTaskPolicy, updateTaskProgress, archiveTaskRound } from '../plugins/dsh-redteam-results/lib/task-policy.js';
 import { createSiteWorkers, siteWorkerRows, siteWorkerView } from '../plugins/dsh-redteam-results/lib/site-workers.js';
 import { indexBusinessMaterials, businessMaterialView } from '../plugins/dsh-redteam-results/lib/business-materials.js';
@@ -21,9 +21,9 @@ const ctx={agents:{get:id=>live.get(id)},on:(name,fn)=>hooks.set(name,fn),logger
   async sendMessage(sender,id,content){messages.push({sender:sender.session.id,id,content});if(!live.has(id))live.set(id,{session:{id,header:{parentSession:sender.session.id,agentPreset:'pentest',cwd:home},events:[]},inbox:{hasPending:false}});return 'message-'+messages.length;},
   async drainContinuableChildren(parent,ids){if(failCleanup)throw Error('fixture native release failure');for(const id of ids){const agent=live.get(id);live.delete(id);if(agent)await hooks.get('agent/disposed')?.({agent});}}
 }};
-const root=id=>({session:{id,header:{agentPreset:'pentest',cwd:home}},ctx:{tools:{schemas:scope=>{assert.equal(scope.session.id,id,'inventory must use the actual parent scope');return ['subagent_spawn','send_message','read'].map(name=>({name}));}}}});
+const root=id=>({session:{id,header:{agentPreset:'pentest',cwd:home}},ctx:{tools:{schemas:scope=>{assert.equal(scope.session.id,id,'inventory must use the actual parent scope');return ['subagent_spawn','send_message','read','nday_catalog','nday_match','nday_policy_get'].map(name=>({name}));}}}});
 const site='https://fixture.test', assets=[{id:'a',url:site,inScope:true,reachable:true},{id:'b',url:'https://second.test',inScope:true,reachable:true}];
-function parent(id,workers=1,target){const agent=root(id);live.set(id,agent);startTaskPolicy(store,id,{mode:'regular',question:'Only the controlled document permission',...(target?{target}:{}),budget:{toolCalls:20,workers,minutes:10}});saveTaskContext(store,id,{assets});return agent;}
+function parent(id,workers=1,target,workflow='single'){const agent=root(id);live.set(id,agent);startTaskPolicy(store,id,{mode:'regular',workflow,question:'Only the controlled document permission',...(target?{target}:{}),budget:{toolCalls:20,workers,minutes:10}});saveTaskContext(store,id,{assets});return agent;}
 const delegate={site,question:'Inspect related controlled document calls',need:'large-site-materials',reason:'Separate a substantial selected bundle and its request paths'};
 const settle=()=>new Promise(resolve=>setTimeout(resolve,30));
 async function test(label,fn){try{await fn();console.log('ok   '+label);}catch(error){failed++;console.log('FAIL '+label+': '+error.stack);}}
@@ -99,6 +99,63 @@ try{
     assert.match(taskExecutionGuard(store,id,'fetch'),/observation_budget_exhausted/);assert.equal(readTaskPolicy(store,p.session.id).used.toolCalls,0);
     await delegateManager.cleanup(p);assert(!live.has(id));
   });
+  await test('same-round regular to Nday reuses the released child and preserves consumed operations, deadline, materials and reports',async()=>{
+    const p=parent('sequential-worker',1,site,'regular-to-nday');
+    const file=path.join(home,'sequential.js');fs.writeFileSync(file,'fetch("./fixture");');
+    indexBusinessMaterials(store,p.session.id,home,{site,files:[{path:file,url:site+'/fixture.js'}]});
+    const id=(await delegateManager.delegate(p,delegate)).childId;
+    for(const name of ['nday_catalog','nday_match','nday_policy_get'])assert(starts.at(-1).request.toolFilter.allow.includes(name),'persisted filter must support the approved next phase: '+name);
+    assert.equal(taskExecutionGuard(store,id,'fixture_http'),undefined);
+    await delegateManager.report(live.get(id),{state:'completed',summary:'Synthetic product and selected material recorded for the next phase.'});
+    await hooks.get('agent/turn-stopping')({agent:live.get(id),turn:1});await settle();
+    const childBefore=readTaskPolicy(store,id),parentBefore=readTaskPolicy(store,p.session.id);
+    const contextBefore=readTaskContext(store,id),materialsBefore=businessMaterialView(store,id);
+    const startsBefore=starts.length;
+    updateTaskProgress(store,p.session.id,{regularComplete:true,note:'Continue related public product metadata only'});
+    const reused=await delegateManager.delegate(p,delegate);assert.equal(reused.childId,id);assert(reused.reused);
+    await delegateManager.send(p,{childId:id,message:'Reuse saved synthetic product metadata for Nday prerequisites.'});
+    const childAfter=readTaskPolicy(store,id),parentAfter=readTaskPolicy(store,p.session.id);
+    assert.equal(starts.length,startsBefore,'continuation must use the retained native session');
+    assert.equal(childAfter.mode,'nday');assert.equal(childAfter.flow.kind,'single');
+    for(const field of ['budget','used','startedAt','parentRound','parentSession','workerLimit'])assert.deepEqual(childAfter[field],childBefore[field],field);
+    for(const field of ['budget','used','startedAt','target','question','workerLimit'])assert.deepEqual(parentAfter[field],parentBefore[field],field);
+    assert.deepEqual(readTaskContext(store,id),contextBefore);assert.deepEqual(businessMaterialView(store,id),materialsBefore);
+    assert.equal(siteWorkerRows(store,p.session.id)[0].reports.length,1);
+    assert.equal(siteWorkerRows(store,p.session.id)[0].focus,'nday');
+    assert.equal(taskPolicyStatus(store,id).stopped,false);
+    assert.equal(taskExecutionGuard(store,id,'fixture_http'),undefined);
+    assert.equal(readTaskPolicy(store,id).used.toolCalls,2);assert.equal(readTaskPolicy(store,p.session.id).used.toolCalls,2);
+    await delegateManager.report(live.get(id),{state:'completed',summary:'Synthetic Nday prerequisites reviewed; no real target was contacted.'});
+    await hooks.get('agent/turn-stopping')({agent:live.get(id),turn:2});await settle();
+    assert.equal(siteWorkerView(store,p.session.id).active,0);
+    updateTaskProgress(store,p.session.id,{ndayComplete:true});assert.equal(taskPolicyStatus(store,p.session.id).reason,'plan_complete');
+  });
+  await test('same-round Nday cannot revive a blocked or cancelled child or reset its exhausted budget',async()=>{
+    for(const kind of ['blocked','cancelled','exhausted']){
+      const p=parent('sequential-refusal-'+kind,1,site,'regular-to-nday'),id=(await delegateManager.delegate(p,delegate)).childId;
+      if(kind==='blocked')pauseTaskPolicy(store,id,{code:'needs-user',reason:'Missing synthetic metadata',evidence:'offline fixture'});
+      else if(kind==='cancelled')updateTaskProgress(store,id,{cancelled:true});
+      else {const policy=readTaskPolicy(store,id);policy.used.toolCalls=policy.budget.toolCalls;store.db.prepare('UPDATE task_policy SET record=? WHERE session_id=?').run(JSON.stringify(policy),id);}
+      await delegateManager.cleanup(p);updateTaskProgress(store,p.session.id,{regularComplete:true});
+      const before=readTaskPolicy(store,id),messagesBefore=messages.length;
+      await assert.rejects(delegateManager.send(p,{childId:id,message:'Continue saved metadata'}),/阻碍|blocked or exhausted/);
+      assert.equal(messages.length,messagesBefore);assert.deepEqual(readTaskPolicy(store,id).budget,before.budget);assert.deepEqual(readTaskPolicy(store,id).used,before.used);
+      assert.equal(siteWorkerView(store,p.session.id).active,0);
+    }
+  });
+  await test('a deferred Nday pack refuses initial delegation before saving an incomplete native filter',async()=>{
+    const p=parent('deferred-nday',1,site,'regular-to-nday');
+    let loaded=false;
+    p.ctx.tools.schemas=scope=>{assert.equal(scope,p);return ['read','tool_pack',...(loaded?['nday_catalog','nday_match','nday_policy_get']:[])].map(name=>({name}));};
+    const before=starts.length;
+    await assert.rejects(delegateManager.delegate(p,delegate),/tool_pack load nday/);
+    assert.equal(starts.length,before);assert.equal(siteWorkerRows(store,p.session.id).length,0);
+    loaded=true;
+    const id=(await delegateManager.delegate(p,delegate)).childId;
+    for(const name of ['tool_pack','nday_catalog','nday_match','nday_policy_get'])assert(starts.at(-1).request.toolFilter.allow.includes(name));
+    assert.match(starts.at(-1).request.prompt[0].text,/load the local nday pack/);
+    await delegateManager.cleanup(p);assert(!live.has(id));
+  });
   await test('a newly delegated child inherits only the parent remaining observation allowance',async()=>{
     const p=root('remaining-observation');live.set(p.session.id,p);saveTaskContext(store,p.session.id,{assets});
     startTaskPolicy(store,p.session.id,{mode:'0day',question:'Inspect only this site prerequisite',target:site,budget:{toolCalls:8,workers:1,discoveryCalls:2}});
@@ -136,6 +193,19 @@ try{
     assert.match(taskExecutionGuard(store,id,'fetch'),/worker_reported_finished/);
     await hooks.get('agent/turn-stopping')({agent,turn:1});await settle();
     assert(!live.has(id));assert.equal(siteWorkerView(store,p.session.id).active,0);
+  });
+  await test('parallel Nday helper inherits the shared ceiling, cannot nest, reuses one site and charges the same parent',async()=>{
+    const p=parent('parallel-worker',1,site,'regular-with-nday');
+    const id=(await delegateManager.delegate(p,{...delegate,focus:'nday'})).childId;
+    assert.equal(readTaskPolicy(store,id).mode,'nday');assert.equal(readTaskPolicy(store,id).workerLimit,0);
+    assert.equal(readTaskPolicy(store,id).flow.kind,'single');
+    assert.equal((await delegateManager.delegate(p,{...delegate,focus:'regular'})).childId,id);
+    assert.equal(siteWorkerView(store,'parallel-worker').active,1);
+    await assert.rejects(delegateManager.delegate(live.get(id),delegate),/only the main/);
+    assert.equal(taskExecutionGuard(store,id,'fetch'),undefined);assert.equal(readTaskPolicy(store,'parallel-worker').used.toolCalls,1);
+    pauseTaskPolicy(store,'parallel-worker',{code:'ip-blocked',reason:'Synthetic fixture pause',evidence:'offline control'});
+    assert.match(taskExecutionGuard(store,id,'fetch'),/parent_task_stopped/);
+    await delegateManager.cleanup(p);assert.equal(siteWorkerView(store,'parallel-worker').active,0);
   });
   await test('offline materials reuse unchanged contents, rebase a second source, redact secrets and preserve uncovered dynamic calls',()=>{
     parent('materials',1,site);const one=path.join(home,'one.js'),two=path.join(home,'two.js');

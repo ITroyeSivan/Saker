@@ -1,0 +1,11 @@
+{
+  "zipSha256": "9cfdbeba9121cde97d40a93377343d967cdd0f548c48fd26c5eefbec9670f55f",
+  "allPackageDigestsMatch": true,
+  "entries": 2674,
+  "packages": 25,
+  "bytes": 20288160,
+  "readmeImagesIncluded": [
+    "docs/images/00-hero-collage.png"
+  ],
+  "version": "0.4.88"
+}

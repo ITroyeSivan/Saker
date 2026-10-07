@@ -1,0 +1,170 @@
+{
+  "ok": true,
+  "isPentest": true,
+  "configured": true,
+  "stopped": true,
+  "reason": "plan_complete",
+  "policy": {
+    "mode": "nday",
+    "flow": {
+      "kind": "regular-to-nday",
+      "phase": "done",
+      "completed": {
+        "regular": true,
+        "nday": true
+      },
+      "history": [
+        {
+          "from": "regular",
+          "to": "nday",
+          "at": 1791357121637,
+          "note": "常规方向结束：原childId=76fcefb5-d4fd-4a03-a101-8a205f4d5845（released，active=0）。事实：仅1个资产fixture-synthetic-2（inScope/reachable/product=Synthetic Fixture 1.0），入口检查0、请求0、方法0，material索引indexed=0/files=0（空集）；未联系目标、未发请求，无实测结论。缺口：材料索引为空，需site+files[{path,url}]。"
+        },
+        {
+          "from": "nday",
+          "to": "done",
+          "at": 1791357285970,
+          "note": "Nday方向结束：同一原childId=76fcefb5-d4fd-4a03-a101-8a205f4d5845（released，active=0）。事实：tool_pack load nday成功；nday_policy_get=recentDays 730/domesticBoost 30/maxCandidates 12/concurrency 4（本地策略）；product=Synthetic Fixture 1.0为虚构产品，无真实CVE/QVD关联，缺版本/模块/身份前置条件。未发网络请求、未调用nday_match/nday_catalog。结论：无有依据的Nday路径，未做全目录匹配；负向不代表目标安全。"
+        }
+      ],
+      "needsContinuation": false
+    },
+    "interaction": "continuous",
+    "stop": "budget",
+    "question": "仅读redteam_context，核对合成材料常规摘要",
+    "target": "https://fixture.test",
+    "workerLimit": 1,
+    "budget": {
+      "toolCalls": 5,
+      "discoveryCalls": 0,
+      "deadline": 1791357685096
+    },
+    "used": {
+      "toolCalls": 0,
+      "discoveryCalls": 0
+    },
+    "startedAt": 1791357085096,
+    "cancelled": false,
+    "planComplete": true,
+    "queueComplete": true,
+    "finishedAt": 1791357285970
+  },
+  "researchReady": false,
+  "observationExhausted": false,
+  "reviewedReproducedFindings": 0,
+  "counts": {
+    "assets": 1,
+    "requests": 0,
+    "methods": 0,
+    "checks": 0,
+    "blocked": 0,
+    "notTested": 0
+  },
+  "gaps": [],
+  "moreGaps": 0,
+  "active": 0,
+  "workers": [
+    {
+      "childId": "76fcefb5-d4fd-4a03-a101-8a205f4d5845",
+      "site": "https://fixture.test",
+      "question": "仅读redteam_context，核对合成材料常规摘要",
+      "focus": "nday",
+      "state": "released",
+      "report": {
+        "state": "completed",
+        "summary": "按 focus=nday 执行完毕，全程未发网络请求、未调用 nday_match/nday_catalog、未派子代理。（1）tool_pack load nday 成功，nday 包已加载。（2）nday_policy_get 返回排序与请求限制：recentDays=730，domesticBoost=30，trendKeywords=[信创,国产化,护网,攻防演练]，excludeVendors=[]，maxCandidates=12，queriesPerNday=2，concurrency=4，默认超时 6000ms；这是本地策略，不接触目标。（3）复读已存 redteam_context：资产 1 个 fixture-synthetic-2（url=https://fixture.test/）与详情 product=Synthetic Fixture 1.0，inScope=true、reachable=true（均为已保存属性，本轮未实测）；入口检查 0、请求 0、方法 0；kind=material 索引仍为 0 文件。结论：product=\"Synthetic Fixture 1.0\" 是合成/虚构产品名，不对应任何真实厂商、产品线或版本号，因此无法在 Nday 语料中建立真实的 CVE/QVD 关联，也不存在可核对的前置条件（版本、模块、身份）——本资产在当前信息下没有有依据的 Nday 路径，不得按名称相似度做全目录式匹配或凭猜测升级为漏洞。缺失条件：真实产品与版本指纹（或授权对目标做轻量指纹识别的许可），以及该指纹对应的实际组件/模块与访问身份。下一步（需主代理/用户提供）：提供真实产品与版本信息或明确允许对 https://fixture.test/ 做只读指纹识别，届时再按 nday 流程做先验知识匹配与条件验证；在此之前该方向无可执行输入，不应继续消耗预算。无关线索：无新增；预算未重置。",
+        "at": 1791357150909,
+        "source": "submitted-worker-report, not a verified finding"
+      }
+    }
+  ],
+  "more": 0,
+  "cost": {
+    "source": "official-session-events",
+    "scope": "session-and-owned-children",
+    "sessions": [
+      {
+        "sessionId": "session-881b4518-234e-47eb-aab9-7435bb990134",
+        "role": "main",
+        "available": true,
+        "modelCalls": 28,
+        "toolCalls": 25,
+        "unknownUsageCalls": 2,
+        "inputTokens": 37105,
+        "outputTokens": 4205,
+        "cacheReadTokens": 694784,
+        "cacheWriteTokens": 0,
+        "totalTokens": 736094
+      },
+      {
+        "sessionId": "76fcefb5-d4fd-4a03-a101-8a205f4d5845",
+        "role": "child",
+        "available": true,
+        "modelCalls": 9,
+        "toolCalls": 10,
+        "unknownUsageCalls": 0,
+        "inputTokens": 16723,
+        "outputTokens": 4233,
+        "cacheReadTokens": 128256,
+        "cacheWriteTokens": 0,
+        "totalTokens": 149212
+      }
+    ],
+    "unavailableSessions": 0,
+    "elapsedModelMs": 215079,
+    "modelCalls": 37,
+    "toolCalls": 35,
+    "unknownUsageCalls": 2,
+    "inputTokens": 53828,
+    "outputTokens": 8438,
+    "cacheReadTokens": 823040,
+    "cacheWriteTokens": 0,
+    "totalTokens": 885306,
+    "limit": "Token sums include cache. Unknown usage and unavailable sessions remain visible. Background title requests and monetary prices are not included."
+  },
+  "roundCost": {
+    "source": "official-session-events",
+    "scope": "current-round",
+    "sessions": [
+      {
+        "sessionId": "session-881b4518-234e-47eb-aab9-7435bb990134",
+        "role": "main",
+        "available": true,
+        "modelCalls": 27,
+        "toolCalls": 24,
+        "unknownUsageCalls": 2,
+        "inputTokens": 20349,
+        "outputTokens": 3949,
+        "cacheReadTokens": 694144,
+        "cacheWriteTokens": 0,
+        "totalTokens": 718442
+      },
+      {
+        "sessionId": "76fcefb5-d4fd-4a03-a101-8a205f4d5845",
+        "role": "child",
+        "available": true,
+        "modelCalls": 9,
+        "toolCalls": 10,
+        "unknownUsageCalls": 0,
+        "inputTokens": 16723,
+        "outputTokens": 4233,
+        "cacheReadTokens": 128256,
+        "cacheWriteTokens": 0,
+        "totalTokens": 149212
+      }
+    ],
+    "unavailableSessions": 0,
+    "elapsedModelMs": 209433,
+    "modelCalls": 36,
+    "toolCalls": 34,
+    "unknownUsageCalls": 2,
+    "inputTokens": 37072,
+    "outputTokens": 8182,
+    "cacheReadTokens": 822400,
+    "cacheWriteTokens": 0,
+    "totalTokens": 867654,
+    "limit": "Token sums include cache. Unknown usage and unavailable sessions remain visible. Background title requests and monetary prices are not included."
+  },
+  "previousRounds": 0,
+  "elapsedSeconds": 200
+}

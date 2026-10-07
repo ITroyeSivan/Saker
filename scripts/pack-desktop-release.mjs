@@ -28,12 +28,13 @@ for (const dir of dirs) {
   copyFileSync(artifact, join(destination, name))
   manifest.push({ name: pkg.name, version: pkg.version, artifact: dir === root ? name : `plugins/${dir.split(/[\\/]/).at(-1)}/${name}`, sha256: createHash('sha256').update(readFileSync(artifact)).digest('hex') })
 }
-for (const file of ['scripts/install-desktop.mjs', 'scripts/update-desktop-shortcut.mjs', 'scripts/lib/desktop-artifacts.mjs', 'scripts/lib/desktop-shortcut.mjs', 'scripts/lib/desktop-launch.ps1', 'docs/getting-started.md', 'docs/plugin-list.md', `docs/release-v${version}.md`, 'docs/images/00-saker-desktop-overview.svg']) {
+for (const file of ['scripts/install-desktop.mjs', 'scripts/update-desktop-shortcut.mjs', 'scripts/lib/desktop-artifacts.mjs', 'scripts/lib/desktop-shortcut.mjs', 'scripts/lib/desktop-launch.ps1', 'docs/getting-started.md', 'docs/plugin-list.md', `docs/release-v${version}.md`]) {
   const destination = join(payload, file)
   mkdirSync(dirname(destination), { recursive: true })
   copyFileSync(join(root, file), destination)
 }
 cpSync(join(root, 'docs', 'verification'), join(payload, 'docs', 'verification'), { recursive: true })
+cpSync(join(root, 'docs', 'images'), join(payload, 'docs', 'images'), { recursive: true })
 writeFileSync(join(payload, 'packages.json'), JSON.stringify(manifest, null, 2) + '\n')
 const zip = payload + '.zip'
 const quote = x => "'" + x.replaceAll("'", "''") + "'"
