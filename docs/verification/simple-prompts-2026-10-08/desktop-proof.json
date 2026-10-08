@@ -1,0 +1,88 @@
+{
+  "observations": [
+    {
+      "mode": "regular",
+      "sample": "我有一条请求",
+      "visible": [
+        "78 组合框 (settable, string) 起点模板 Value: 我有一条请求",
+        "93 文本 适合已经抓到请求，不知道是否有问题。",
+        "95 编辑 (settable, string) 填写想检查的问题 Description: 想检查的问题",
+        "80 编辑 (settable, string) 提示词全文 Value: 我已附上请求和响应。 想检查：[想检查的问题]。 请解释这条请求在做什么，再核查这个问题。"
+      ]
+    },
+    {
+      "mode": "nday",
+      "sample": "我知道产品名称",
+      "visible": [
+        "57 组合框 (settable, string) 任务方向 Value: Nday发现",
+        "106 按钮 关闭提示词编辑器",
+        "109 组合框 (settable, string) 起点模板 Value: 我知道产品名称",
+        "110 文本 适合知道系统用了什么产品，例如某个CMS。",
+        "112 编辑 (settable, string) 填写网站地址 Description: 网站地址",
+        "114 编辑 (settable, string) 填写产品名称及版本，不知道版本可写未知 Description: 产品名称及版本，不知道版本可写未知",
+        "116 编辑 (settable, string) 提示词全文 Value: 网站：[网站地址]。 产品和版本：[产品名称及版本，不知道版本可写未知]。 请查相关公开漏洞，先判断是否适用，再在已确认的范围内验证。"
+      ]
+    },
+    {
+      "mode": "0day",
+      "sample": "深入检查一个功能",
+      "visible": [
+        "57 组合框 (settable, string) 任务方向 Value: 0Day挖掘",
+        "131 按钮 关闭提示词编辑器",
+        "134 组合框 (settable, string) 起点模板 Value: 深入检查一个功能",
+        "135 文本 适合已经选定一个功能，想继续深入。",
+        "137 编辑 (settable, string) 填写网站地址 Description: 网站地址",
+        "139 编辑 (settable, string) 填写功能名称，例如导出或审批 Description: 功能名称，例如导出或审批",
+        "141 编辑 (settable, string) 提示词全文 Value: 网站：[网站地址]。 想检查的功能：[功能名称，例如导出或审批]。 请先说明正常流程，再在已确认的范围内检查权限和业务逻辑。"
+      ]
+    }
+  ],
+  "insert": {
+    "visible": [
+      "80 编辑 (settable, string) 提示词全文 Value: 我已附上请求和响应。 想检查：这条离线合成请求是否检查了数据归属。 请解释这条请求在做什么，再核查这个问题。",
+      "98 文本 已插入聊天输入框，请检查后自行发送",
+      "65 编辑 (settable, string) 描述你想要构建的内容, / 调用指令, @ 文件或对话 Value: 我已附上请求和响应。 想检查：这条离线合成请求是否检查了数据归属。 请解释这条请求在做什么，再核查这个问题。",
+      "69 按钮 发送消息"
+    ],
+    "autoSent": false
+  },
+  "copy": {
+    "success": true,
+    "autoSent": false
+  },
+  "restoredDirection": true,
+  "composerCleared": true,
+  "activation": {
+    "rootVersion": "0.4.91",
+    "rootRunning": 2,
+    "rootTotal": 2,
+    "visibleError": false
+  },
+  "mcp": {
+    "visible": [
+      "527 文本 每个启用的服务器实时挂载，并以 mcp__<名称>__<工具> 的形式向模型暴露工具。保存后即时生效，无需重启。",
+      "536 文本 已启用",
+      "538 文本 已连接",
+      "540 文本 工具",
+      "544 切换按钮 已连接",
+      "545 切换按钮 未连接",
+      "547 按钮 burp STDIO E:/工作/WorkBuddy/WebSec/dsh/_ref/dsh-src-0.2.0-rc.2/desktop-runtime/DeepSeek Harness.exe \"C:/Users/12201/.dsh/profiles/desktop/node_modules/@dsh-external/dsh-sec-config/tools/burp-sse-bridge.mjs\" --sse-url http://127.0.0.1:9876 未连接 启用 删除服务器 Description: burp · E:/工作/WorkBuddy/WebSec/dsh/_ref/dsh-src-0.2.0-rc.2/desktop-runtime/DeepSeek Harness.exe \"C:/Users/12201/.dsh/profiles/desktop/node_modules/@dsh-external/dsh-sec-config/tools/burp-sse-bridge.mjs\" --sse-url http://127.0.0.1:9876",
+      "551 按钮 yakit HTTP http://127.0.0.1:11432/mcp 未连接 启用 删除服务器 Description: yakit · http://127.0.0.1:11432/mcp"
+    ],
+    "countLines": [
+      "534 文本 服务器",
+      "535 文本 2",
+      "536 文本 已启用",
+      "537 文本 2",
+      "538 文本 已连接",
+      "539 文本 0",
+      "540 文本 工具",
+      "541 文本 0"
+    ]
+  },
+  "final": {
+    "regular": true,
+    "blankComposer": true,
+    "loginRequired": false
+  }
+}

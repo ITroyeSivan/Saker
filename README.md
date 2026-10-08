@@ -38,10 +38,10 @@ Saker 是 [DeepSeek Harness Desktop](https://github.com/deepseek-ai/deepseek-har
 
 ## 安装
 
-当前版本 **0.4.90**，已在 Windows 的官方 Desktop **0.2.0-rc.2** 上测试。其他宿主版本尚未验证。
+当前版本 **0.4.91**，已在 Windows 的官方 Desktop **0.2.0-rc.2** 上测试。其他宿主版本尚未验证。
 
 1. 安装官方 Desktop，完成首次初始化并配置模型，然后完全退出应用。
-2. 下载 [Saker-0.4.90-desktop.zip](https://github.com/ITroyeSivan/Saker/releases/download/v0.4.90/Saker-0.4.90-desktop.zip)，解压到长期保留的目录。
+2. 下载 [Saker-0.4.91-desktop.zip](https://github.com/ITroyeSivan/Saker/releases/download/v0.4.91/Saker-0.4.91-desktop.zip)，解压到长期保留的目录。
 3. 在解压目录执行，将路径替换为 Desktop 的实际安装目录：
 
 ```powershell
@@ -54,7 +54,7 @@ node scripts/install-desktop.mjs --desktop-dir "C:/实际安装目录/DeepSeek H
 
 ## 测试记录
 
-本轮桌面测试覆盖协作与汇报分离、补充思路续接和更高子代理上限，记录见 [协作设置验收](docs/verification/chat-cooperation-2026-10-07.md)。MCP配置保留，Burp/Yakit服务当前未连接，未验证其业务调用。此前记录：[0.4.89聊天设置](docs/verification/chat-setup-2026-10-07.md)、[框架测试](docs/verification/framework-desktop-2026-10-03.md)、[功能复测](docs/verification/desktop-healthcheck-2026-10-04.md)。
+本轮简化了提示词示例和选择说明，实际桌面结果见[简短示例验收](docs/verification/simple-prompts-2026-10-08.md)。此前记录：[协作设置验收](docs/verification/chat-cooperation-2026-10-07.md)、[0.4.89聊天设置](docs/verification/chat-setup-2026-10-07.md)、[框架测试](docs/verification/framework-desktop-2026-10-03.md)、[功能复测](docs/verification/desktop-healthcheck-2026-10-04.md)。
 
 目前的测试不能证明真实目标的漏洞检出率提高。Token 用量随任务变化，Nday 对照测试中用量有所增加。
 

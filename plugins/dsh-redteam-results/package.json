@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-redteam-results",
-  "version": "1.0.41",
+  "version": "1.0.42",
   "description": "桌面渗透测试任务、按需站点子代理、共享证据、实际请求对照和成果复核。",
   "files": [
     "lib",

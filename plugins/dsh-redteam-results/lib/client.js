@@ -1429,25 +1429,24 @@ function EffectEvidenceView(props) {
     React.createElement(Btn,{onClick:submit,disabled:busy[0]},busy[0]?'正在保存':'保存人工复核'),notice[0]?React.createElement('div',{role:'alert'},notice[0]):null);
 }
 function exampleTemplates(mode) {
-  var shared = '\n按聊天中选择的协作方式与汇报偏好推进。围绕具体问题反复核对，记录已审与未审、支持与反证；第一遍未发现问题不代表全站安全。沿用已选择的范围、流程、预算和子代理上限，同站复用，结束后释放。缺关键资料或正常访问受阻时说明原因。';
   var examples = {
     regular: [
-      ['机构入口整理', '机构：[机构名称]。先从公开资料确认官网、业务系统入口和资产归属。我没有资产清单，请自行整理，最多给出3个值得继续检查的系统和依据。归属或可测范围不明确的，只整理资料，集中向我确认一次后再测试。'],
-      ['单站常规测试', '目标：[站点URL]，允许测试的范围：[范围]。先理解实际功能，选择最值得检查的接口或业务流程，检查权限和输入处理。复用已取得的页面、JS和请求，保存正常对照与实际影响证据。'],
-      ['已有请求检查', '目标：[站点URL]，范围：[范围]。附件是正常请求和响应，测试身份：[角色]。围绕这个功能检查对象归属、权限和业务步骤；缺账号或业务含义时说明，不把状态码差异直接认定为漏洞。']
+      ['我只有机构名称', '机构：[机构名称]。\n请先找出官网和主要业务入口，告诉我从哪里开始。测试前先确认范围。', '适合还没有网站清单，先整理入口。'],
+      ['我有一个网站', '网站：[网站地址]。\n允许测试的范围：[测试范围]。\n请先了解主要功能，再检查可能的安全问题。', '适合已经知道要检查哪个网站。'],
+      ['我有一条请求', '我已附上请求和响应。\n想检查：[想检查的问题]。\n请解释这条请求在做什么，再核查这个问题。', '适合已经抓到请求，不知道是否有问题。']
     ],
     nday: [
-      ['已有产品检查', '目标：[站点URL]，范围：[范围]。产品：[名称]，版本：[版本或未知]。查少量相关公开漏洞，先核对产品、版本和触发条件，再选择适用的方法验证。版本未知就先补证，不盲跑全部模板。'],
-      ['接着已有资料检查', '对本会话已经确认的范围内资产做Nday检查，复用产品线索、正常请求和已测记录，不重新测绘整个机构。只验证条件成立的候选；其余记录缺口，最后汇总。'],
-      ['核对扫描结果', '目标：[站点URL]，范围：[范围]。附件是已有扫描结果。先去重并核对产品与条件，再复核实际影响；扫描命中作为线索，已确认问题保存请求、响应和复现步骤。']
+      ['我知道产品名称', '网站：[网站地址]。\n产品和版本：[产品名称及版本，不知道版本可写未知]。\n请查相关公开漏洞，先判断是否适用，再在已确认的范围内验证。', '适合知道系统用了什么产品，例如某个CMS。'],
+      ['接着已有资料检查', '请继续使用本会话已有的资料，检查相关公开漏洞。\n先确认漏洞是否适用，再验证；缺什么资料就告诉我。', '适合此前已经整理过网站或产品，不用重新填写。'],
+      ['我有扫描结果', '我已附上扫描结果。\n请帮我核实哪些确实有问题，哪些可能是误报，并说明依据。', '适合复核扫描器给出的结果。']
     ],
     '0day': [
-      ['深入一个业务功能', '目标：[站点URL]，范围：[范围]。重点功能：[查询、导出、审批等]，测试身份：[角色]。沿这个功能分析页面、JS和真实请求，比较角色、对象和业务步骤；先解释正常行为，再检查可能的权限或逻辑缺陷。'],
-      ['从页面与JS开始', '目标：[站点URL]，范围：[范围]。附件是相关页面和JS。分段审计并记录覆盖，关注隐藏接口、硬编码凭据、鉴权规则、签名逻辑、路由与chunk加载。找出与业务不匹配的功能，形成具体假设再核对真实请求；按新证据回查遗漏，不把菜单显隐或公开客户端Key当漏洞。'],
-      ['追查一个异常', '目标：[站点URL]，范围：[范围]。异常：[简述]。附件有正常和异常请求。先核对身份、对象和服务器实际处理结果，寻找支持与反证，验证影响；无公开编号也不自动称为首次发现。']
+      ['深入检查一个功能', '网站：[网站地址]。\n想检查的功能：[功能名称，例如导出或审批]。\n请先说明正常流程，再在已确认的范围内检查权限和业务逻辑。', '适合已经选定一个功能，想继续深入。'],
+      ['我有页面或JS文件', '我已附上页面或JS文件。\n请分段分析，找出值得继续核查的接口或功能，并说明理由。\n需要实际请求时告诉我。', '适合从已有页面或前端代码寻找线索。'],
+      ['我发现一个异常', '异常现象：[发生了什么]。\n我已附上相关材料。\n请先解释可能的原因，再核实是否真的存在安全问题。', '适合追查意外返回、权限差异或业务异常。']
     ]
   };
-  return (examples[mode] || []).concat([['补充我的思路','观察事实：[观察事实]。业务背景：[业务背景]。我的怀疑：[怀疑点]。请优先围绕这个问题分析已有页面、JS或请求，列出支持与反证，提出最小验证方法；当前方向没有结果时说明已审覆盖与缺口，再据新证据迭代。']]).map(function (row) { return { title: row[0], text: row[1] + shared }; });
+  return (examples[mode] || []).concat([['补充我的思路','我的问题或怀疑：[用自己的话描述]。\n请结合已有资料帮我核查，告诉我哪些事实支持或不支持这个判断。','适合补充你观察到的现象、业务背景或怀疑。']]).map(function (row) { return { title: row[0], text: row[1], hint: row[2] }; });
 }
 function chatReporting(value) { return value.reporting || (value.interaction==='milestone'?'milestone':'summary'); }
 function cooperationValue(value) { return value==='milestone'?'continuous':value||'continuous'; }
@@ -1530,12 +1529,12 @@ function ChatPromptEditor(props) {
   }
   return React.createElement('section',{'aria-label':'提示词编辑器',className:'dsh-chat-prompt',hidden:!props.open},
     React.createElement('div',{className:'dsh-chat-panel-head'},React.createElement('strong',null,'准备这次任务'),React.createElement('button',{type:'button',onClick:props.onClose,'aria-label':'关闭提示词编辑器'},'关闭')),
-    React.createElement('p',null,'选一个示例，填入信息或直接修改全文。插入到输入框光标处，检查后自行发送。'),
-    React.createElement('label',null,'起点模板 ',React.createElement('select',{'aria-label':'起点模板',disabled:!loaded[0]||busy[0],value:selected[0],onChange:function(event){select(event.target.value);}},
+    React.createElement('p',null,'选一个符合你情况的示例，填好后插入聊天。也可以直接改写。'),
+    React.createElement('label',null,'你现在有什么？ ',React.createElement('select',{'aria-label':'起点模板',disabled:!loaded[0]||busy[0],value:selected[0],onChange:function(event){select(event.target.value);}},
       React.createElement('option',{value:''},'从空白开始'),builtins.map(function(row,i){return React.createElement('option',{key:i,value:'built-in:'+i},row.title);}),mine.map(function(row){return React.createElement('option',{key:row.id,value:row.id},'我的模板：'+row.title);}))),
-    React.createElement('small',null,'选择其他模板会替换编辑区内容，聊天输入框不受影响。'),
+    selected[0].indexOf('built-in:')===0&&builtins[Number(selected[0].slice(9))]?React.createElement('p',{className:'dsh-chat-template-hint'},builtins[Number(selected[0].slice(9))].hint):null,
     !manual[0]?React.createElement('div',{className:'dsh-chat-fields'},promptFields(base[0]).map(function(key){return React.createElement('label',{key:key},key,React.createElement('input',{'aria-label':'填写'+key,value:fields[0][key]||'',placeholder:key,onChange:function(event){var next=Object.assign({},fields[0]);next[key]=event.target.value;fields[1](next);draft[1](fillPrompt(base[0],next));dirty[1](true);}}));})):null,
-    React.createElement('label',{className:'dsh-chat-full-prompt'},'提示词全文',React.createElement('textarea',{'aria-label':'提示词全文',value:draft[0],disabled:!loaded[0],maxLength:16000,rows:5,onChange:function(event){draft[1](event.target.value);manual[1](true);dirty[1](true);notice[1]('');}})),
+    React.createElement('label',{className:'dsh-chat-full-prompt'},'发给AI的话（可修改）',React.createElement('textarea',{'aria-label':'提示词全文',value:draft[0],disabled:!loaded[0],maxLength:16000,rows:3,onChange:function(event){draft[1](event.target.value);manual[1](true);dirty[1](true);notice[1]('');}})),
     React.createElement('div',{className:'dsh-chat-actions'},React.createElement('button',{type:'button',disabled:!loaded[0]||!draft[0].trim(),onClick:insert},'插入到输入框'),
       React.createElement('button',{type:'button',disabled:!loaded[0]||!draft[0].trim(),onClick:copy},'复制提示词'),React.createElement('span',{role:'status'},saved[0])),
     promptFields(draft[0]).length?React.createElement('small',null,'还有方括号占位内容，请在发送前补充。'):null,
