@@ -145,7 +145,9 @@
 
 ## 桌面问题与站点子任务
 
-`redteam_task start` policy含mode、question、可选target、budget.toolCalls/minutes/workers(0..2)。默认按预算完成小任务，不在首个高危时结束。无已给问题先有限观察，再讨论方向。
+`redteam_task start` 直接传 `mode`（regular/nday/0day）、`question`、`target` 和 `toolCalls`，可选 `minutes`、`workers`（0..16，不能超过桌面选择）。小任务用0个子代理；省略workflow沿用桌面选择。旧policy JSON仍兼容，但不能与独立字段混用。默认按预算完成小任务，不在首个高危时结束。已有任务不能通过再次start重置预算。
+
+单模式完成用 `action=progress, planComplete=true`；衔接流程按阶段用regularComplete/ndayComplete。可附 `progress` JSON保存note；JSON与独立字段中的同名标记必须一致，冲突时拒绝更新。完成标记不会因为同时提交note而丢失。
 
 `delegate` document含site、question、need(large-site-materials或independent-site-research)、reason；必须是已保存范围内站点。同站返回原childId；`send`含childId/message续接同会话。`report`仅子代理可用，含state(completed/blocked/needs-user)、summary；报告不是漏洞证明，保存后宿主释放。`workers`核对实际数量，`cleanup`关闭本任务子代理，不能处理其他父任务。默认不创建，空闲、关闭中和关闭失败均占名额；创建失败不另起替代代理。
 

@@ -5,6 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { apply } from '../plugins/dsh-stage-gate/lib/index.js';
+import { apply as resultsApply } from '../plugins/dsh-redteam-results/lib/index.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const desktop = process.env.DSH_DESKTOP_DIR || resolve(root, '../_ref/dsh-src-0.2.0-rc.2/desktop-runtime');
@@ -15,6 +16,7 @@ if (process.platform !== 'win32' || !existsSync(executable)) {
 }
 const tools = [];
 apply({ tools: { register: tool => tools.push({ name: tool.name, parameters: tool.parameters, output: tool.output?.schema }) } });
+resultsApply({ tools: { register: tool => tools.push({ name: tool.name, parameters: tool.parameters, output: tool.output?.schema }) }, effect: () => {}, webServer: { register: () => () => {} } });
 const native = `
 const {createRequire}=require('node:module');
 const fs=require('node:fs');
@@ -39,5 +41,6 @@ assert.equal(run.status, 0, run.stderr || String(run.error));
 const result = JSON.parse(run.stdout.trim());
 assert.equal(result.compiled.length, tools.length);
 assert(result.compiled.includes('operation_task') && result.caughtMissingOpenness);
-console.log(`ok official Desktop compiler accepts ${tools.length} task/gate tool schemas`);
+assert(result.compiled.includes('redteam_task'));
+console.log(`ok official Desktop compiler accepts ${tools.length} task/gate/results tool schemas`);
 console.log('ok official Desktop compiler rejects the previous activation-breaking schema');

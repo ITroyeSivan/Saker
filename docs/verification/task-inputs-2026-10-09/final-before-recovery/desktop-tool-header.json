@@ -1,0 +1,1639 @@
+{
+  "config": {
+    "provider": "deepseek-official",
+    "model": "deepseek-flash",
+    "reasoningEffort": "low",
+    "maxTokens": 256000
+  },
+  "adapterDefaults": {
+    "maxTokens": true
+  },
+  "tools": [
+    {
+      "name": "ask_user_question",
+      "description": "Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "questions": {
+            "type": "array",
+            "description": "Questions to ask the user before continuing.",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Stable id for this question; echoed in the answer."
+                },
+                "question": {
+                  "type": "string",
+                  "description": "The specific question to ask the user."
+                },
+                "header": {
+                  "type": "string",
+                  "description": "Optional short heading for the question, such as \"Confirm\" or \"Choose Mode\"."
+                },
+                "options": {
+                  "type": "array",
+                  "description": "Optional choices to show the user. If you recommend one, put it first and append \"(Recommended)\" to that label.",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                      "label": {
+                        "type": "string",
+                        "description": "Short user-facing option label."
+                      },
+                      "description": {
+                        "type": "string",
+                        "description": "One sentence explaining the tradeoff or impact."
+                      }
+                    },
+                    "required": [
+                      "label"
+                    ]
+                  }
+                },
+                "multi_select": {
+                  "type": "boolean",
+                  "description": "Whether the user may select more than one option. Defaults to false."
+                }
+              },
+              "required": [
+                "id",
+                "question"
+              ]
+            }
+          }
+        },
+        "required": [
+          "questions"
+        ]
+      }
+    },
+    {
+      "name": "attack_plan",
+      "description": "Group in-scope inventory by fingerprint and write a ranked attack plan.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "workspace": {
+            "type": "string",
+            "description": "Workspace containing asset-inventory.json"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Exact domains/IPs/CIDRs; other assets are excluded."
+          },
+          "entryIds": {
+            "type": "string",
+            "description": "Optional catalog IDs"
+          },
+          "minAssets": {
+            "type": "integer",
+            "description": "Minimum assets per bucket (default 1)"
+          },
+          "maxBuckets": {
+            "type": "integer",
+            "description": "Maximum buckets (default 50, cap 200)"
+          },
+          "registerIntents": {
+            "type": "boolean",
+            "description": "Register tasks (default false)"
+          }
+        },
+        "required": [
+          "workspace",
+          "scope"
+        ]
+      }
+    },
+    {
+      "name": "create_goal",
+      "description": "Create a persisted goal that keeps this session working across automatic continuation rounds. Use it when the direct human request is a long-running objective, even if the user did not say \"goal\"; not for single-turn work.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "objective": {
+            "type": "string",
+            "description": "The concrete completion objective inferred from the direct human request."
+          },
+          "max_goal_rounds": {
+            "type": "number",
+            "description": "Optional positive safe-integer limit on automatic continuation rounds."
+          }
+        },
+        "required": [
+          "objective"
+        ]
+      }
+    },
+    {
+      "name": "edit",
+      "description": "Edit an existing UTF-8 text file by replacing literal text.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Path to edit, resolved by the filesystem backend."
+          },
+          "old_string": {
+            "type": "string",
+            "description": "Literal text to replace."
+          },
+          "new_string": {
+            "type": "string",
+            "description": "Literal replacement text. Use an empty string to delete the match."
+          },
+          "replace_all": {
+            "type": "boolean",
+            "description": "Replace all matches. Defaults to false; when false, old_string must appear exactly once."
+          },
+          "sandbox_permissions": {
+            "type": "string",
+            "description": "The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval.",
+            "enum": [
+              "workspace-write",
+              "danger-full-access"
+            ]
+          },
+          "justification": {
+            "type": "string",
+            "description": "Required with sandbox_permissions: one sentence for the user explaining why this exact file operation needs the wider access. Use the language of the user’s current request."
+          }
+        },
+        "required": [
+          "file_path",
+          "old_string",
+          "new_string"
+        ]
+      }
+    },
+    {
+      "name": "exit_plan_mode",
+      "description": "Use only in plan mode. Present your plan for the user's review and, on approval, leave plan mode. The user may approve (carry out the plan from your next step) or keep planning — their feedback comes back in the tool result; revise and present again.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "plan": {
+            "type": "string",
+            "description": "The complete plan, as markdown, starting with a # heading that names it."
+          }
+        },
+        "required": [
+          "plan"
+        ]
+      }
+    },
+    {
+      "name": "gates_list",
+      "description": "列出各模式的门禁：规范文件名、每个文件必须出现的标记字面量、表格行列下限、file 参数要求和人工复核项。工作区创建后或调用 stage_gate 前先读——照 requirements 写就能一次过门。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "description": "Omit to list every mode",
+            "enum": [
+              "pentest",
+              "code-audit",
+              "binary-analysis",
+              "attack-defense",
+              "av-evasion",
+              "incident-response",
+              "cloud-security",
+              "ctf-solver"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "get_goal",
+      "description": "Read the current session goal, including the id and revision that update_goal requires.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "glob",
+      "description": "Find files, not directories, whose paths match a glob pattern, including hidden and ignored files. Returns up to 100 paths in modification-time order; a larger result keeps the first paths and reports where the complete list was saved.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Glob pattern to match file paths against (e.g. \"**/*.ts\", \"src/**/*.test.js\"). A pattern with no \"/\" matches the basename at any depth, so \"*\" and \"*.ts\" both search the whole tree; include a separator to anchor the depth."
+          },
+          "path": {
+            "type": "string",
+            "description": "Directory to search in. Defaults to the session workspace; a relative path resolves against it."
+          }
+        },
+        "required": [
+          "pattern"
+        ]
+      }
+    },
+    {
+      "name": "grep",
+      "description": "Search file contents with a ripgrep regular expression. Returns matching lines with line numbers, grouped by file. Returns up to 250 matches; a larger result reports where the complete match list was saved.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Regular expression to search for (ripgrep syntax)."
+          },
+          "path": {
+            "type": "string",
+            "description": "File or directory to search. Defaults to the session workspace; a relative path resolves against it."
+          },
+          "include": {
+            "type": "string",
+            "description": "One glob filter for which files to search (e.g. \"*.ts\", \"*.{js,jsx}\"). Not a list; negation is not supported."
+          }
+        },
+        "required": [
+          "pattern"
+        ]
+      }
+    },
+    {
+      "name": "job_kill",
+      "description": "Request cancellation of a running background job.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "Job id returned by the tool that started the background work."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Optional short reason, recorded in the log and forwarded to the job."
+          }
+        },
+        "required": [
+          "job_id"
+        ]
+      }
+    },
+    {
+      "name": "job_list",
+      "description": "List your background jobs (running and finished) with their ids, kinds, and statuses.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "job_output",
+      "description": "Read a background job: output since the previous read for stream jobs, or the result of a finished final-output job.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "Job id returned by the tool that started the background work."
+          },
+          "wait": {
+            "type": "boolean",
+            "description": "Block until the job finishes or the timeout expires; a timed-out wait leaves the job running. Defaults to false."
+          },
+          "timeout_ms": {
+            "type": "number",
+            "description": "Max wait in milliseconds with wait: true. Defaults to and is capped by configuration."
+          }
+        },
+        "required": [
+          "job_id"
+        ]
+      }
+    },
+    {
+      "name": "knowledge_list",
+      "description": "列出知识包、同步/索引状态与知识库目录，先确认有什么再检索。离线混合 RAG：随包手册/PATT + 用户积累 + 自动同步的知识包。先 knowledge_search 定位，再 knowledge_read 精读；不必整库载入上下文。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "description": "pentest / code-audit / ctf-solver（缺省 pentest）",
+            "enum": [
+              "pentest",
+              "code-audit",
+              "ctf-solver"
+            ]
+          },
+          "area": {
+            "type": "string",
+            "description": "查看区域（缺省 all）",
+            "enum": [
+              "patt",
+              "user",
+              "import",
+              "packs",
+              "index",
+              "all"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "knowledge_read",
+      "description": "按 chunkId 精读知识片段，或按 source+path 读取指定行段。离线混合 RAG：随包手册/PATT + 用户积累 + 自动同步的知识包。先 knowledge_search 定位，再 knowledge_read 精读；不必整库载入上下文。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "hitId": {
+            "type": "string",
+            "description": "knowledge_search 返回的 chunkId（优先）"
+          },
+          "source": {
+            "type": "string",
+            "description": "来源层（未给 hitId 时必填）",
+            "enum": [
+              "bundle",
+              "patt",
+              "user",
+              "import"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "description": "bundle/user 层需要",
+            "enum": [
+              "pentest",
+              "code-audit",
+              "ctf-solver"
+            ]
+          },
+          "path": {
+            "type": "string",
+            "description": "相对路径（/ 分隔；未给 hitId 时必填）"
+          },
+          "offset": {
+            "type": "number",
+            "description": "起始行（1 起）"
+          },
+          "limit": {
+            "type": "number",
+            "description": "读多少行（默认 80，最大 240）"
+          }
+        }
+      }
+    },
+    {
+      "name": "knowledge_search",
+      "description": "检索知识库并返回少量高相关片段与 chunkId（再用 knowledge_read 精读）。离线混合 RAG：随包手册/PATT + 用户积累 + 自动同步的知识包。先 knowledge_search 定位，再 knowledge_read 精读；不必整库载入上下文。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "关键词、CVE/EDB-ID 或自然语言问题"
+          },
+          "mode": {
+            "type": "string",
+            "description": "预设模式（缺省 pentest）",
+            "enum": [
+              "pentest",
+              "code-audit",
+              "ctf-solver"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "description": "限定来源层（缺省全部）",
+            "enum": [
+              "bundle",
+              "patt",
+              "user",
+              "import"
+            ]
+          },
+          "limit": {
+            "type": "number",
+            "description": "返回条数（默认 8，最大 20）"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "load_workspace_dependencies",
+      "description": "Get absolute paths to bundled Python and library directories, plus bundled Python distribution versions. Node.js and pnpm paths are included when the payload provides them. Python includes numpy, pandas, python-docx, python-pptx, openpyxl, Pillow, lxml, and XlsxWriter. Use these libraries for Office files unless the user or workspace instructions select another environment. When Node.js and pnpm paths are returned, run pnpm with that Node executable and pnpm script path. This does not change PATH or package-manager settings.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "oob_probe",
+      "description": "DNSLog callbacks: create, batch, or check labels; callback proves reachability only.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Create, batch, or check callbacks",
+            "enum": [
+              "new",
+              "batch",
+              "check"
+            ]
+          },
+          "label": {
+            "type": "string",
+            "description": "Label returned by new/batch"
+          },
+          "assets": {
+            "type": "string",
+            "description": "Assets for batch action"
+          },
+          "workspace": {
+            "type": "string",
+            "description": "Workspace for attribution records"
+          },
+          "waitMs": {
+            "type": "integer",
+            "description": "Poll duration (default 0, max 60000)"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "present",
+      "description": "Declare existing files as final deliverables for the user. Use it when the user needs a separate file, especially Office documents, spreadsheets, and slide decks; prefer your final response when that suffices. The user opens the current files; their contents are not copied.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "files": {
+            "type": "array",
+            "description": "Usually the 1-2 most important deliverables; at most 4 per call.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Path of an existing regular file. Relative paths use the Session working directory."
+                },
+                "description": {
+                  "type": "string",
+                  "description": "Brief description for the user."
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        },
+        "required": [
+          "files"
+        ]
+      }
+    },
+    {
+      "name": "pwsh",
+      "description": "Execute a PowerShell command (`pwsh -Command`) and return its stdout/stderr. Each call runs in a fresh pwsh process; pass `workdir` instead of using `cd`. Paths use native Windows form (`C:\\...`); read environment variables with `$env:NAME`. Managed `$env:DSH_*` variables expose current harness environment facts. Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. On Windows a force-killed command settles as `[exit code: 1]` without a signal marker — treat it as an interruption, not a command failure. Before any delete or move, verify that the resolved absolute target path is the intended one; never run it against a computed path you have not checked. Do not assign to automatic variables such as `$HOME`; variable names are case-insensitive, so `$home` is the same read-only variable. Commands may run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]`, a policy denial: do not retry another way. Under the Windows sandbox, read-only pwsh runs in PowerShell ConstrainedLanguage mode, while workspace-write stays in FullLanguage unless host policy says otherwise. In read-only, prefer cmdlets and core types (`[string]`, `[datetime]`, `[regex]`, `[guid]`); .NET static calls (`[System.IO.*]::`, `[math]::`), `Add-Type`, COM objects, and reflection fail with \"only core types\" errors. `-f` formatting, property access, and core cmdlets work. In both confined modes, programs cannot open named pipes, so a command that captures another program's output through piped stdio (Node.js `child_process.spawn`/`exec` with the default `stdio: 'pipe'`) fails with EPERM, while `stdio: 'inherit'` and `stdio: 'ignore'` spawns work and PowerShell's own pipelines are unaffected. That EPERM is the documented boundary: do not retry the command another way — escalate the exact command once or restructure it to avoid capturing output.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "The PowerShell command to execute."
+          },
+          "description": {
+            "type": "string",
+            "description": "Clear, concise description of what this command does in active voice, 5-10 words (shown in the UI). Examples: \"ls\" → \"List files in current directory\"; \"git status\" → \"Show working tree status\"; \"Get-Process\" → \"List running processes\"."
+          },
+          "timeoutMs": {
+            "type": "number",
+            "description": "Timeout in milliseconds. The executor applies its configured default and cap; on expiry the command moves to the background as a job instead of being killed."
+          },
+          "workdir": {
+            "type": "string",
+            "description": "Working directory for this command. Defaults to the session workspace; a relative path is resolved against it."
+          },
+          "run_in_background": {
+            "type": "boolean",
+            "description": "Run in the background and return a job id immediately (collect with job_output, stop with job_kill). No timeout applies."
+          },
+          "sandbox_permissions": {
+            "type": "string",
+            "description": "The narrowest wider sandbox mode for a one-shot retry of the exact command the sandbox just denied; the retry asks the user for approval.",
+            "enum": [
+              "workspace-write",
+              "danger-full-access"
+            ]
+          },
+          "justification": {
+            "type": "string",
+            "description": "Required with sandbox_permissions: one sentence for the user explaining why this exact command needs the wider access. Use the language of the user’s current request."
+          }
+        },
+        "required": [
+          "command",
+          "description"
+        ]
+      }
+    },
+    {
+      "name": "read",
+      "description": "Read a UTF-8 text file and return line-numbered content.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Path to read, resolved by the filesystem backend."
+          },
+          "offset": {
+            "type": "number",
+            "description": "1-based first line to return. Defaults to 1."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum number of lines to return. Defaults to 2000."
+          }
+        },
+        "required": [
+          "file_path"
+        ]
+      }
+    },
+    {
+      "name": "read_image",
+      "description": "Read a PNG/JPEG/WebP/GIF file and return the image itself. Large images are downscaled automatically; do not install image libraries or create thumbnails to inspect an image.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Path to the image file, resolved by the filesystem backend."
+          }
+        },
+        "required": [
+          "file_path"
+        ]
+      }
+    },
+    {
+      "name": "redteam_checks",
+      "description": "本会话渗透检查记录：批量保存或读取。未命中需有效请求、观察及执行证据；详细原因留本地，交付仅三列。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "records": {
+            "type": "string",
+            "description": "省略读取；JSON数组，含assetId/entryId/endpoint/methodVersion/authContext/requestRevision、status(not-hit/not-applicable/blocked/not-tested)、executed/requestValid/observationValid、evidenceIds、reason；可附asset/check及supplementAttempts。"
+          }
+        }
+      }
+    },
+    {
+      "name": "redteam_context",
+      "description": "保存或读取本渗透会话共享资产、入口条件、请求及方法上下文；供Nday/常规/研究复用。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "type": "string",
+            "description": "省略读索引；JSON快照assets/checks/requests/methods/maxSupplementAttempts；契约见README。"
+          },
+          "kind": {
+            "type": "string",
+            "description": "asset/request/method详情；material读业务材料索引或详情"
+          },
+          "materials": {
+            "type": "string",
+            "description": "JSON：site、files[{path,url}]；离线索引选定JS，增量摘要不证明接口可用"
+          },
+          "id": {
+            "type": "string",
+            "description": "详情记录ID，仅本会话"
+          },
+          "version": {
+            "type": "string",
+            "description": "请求revision或方法version；多版本时必填"
+          },
+          "offset": {
+            "type": "integer",
+            "description": "索引偏移，默认0，每次20条"
+          }
+        }
+      }
+    },
+    {
+      "name": "redteam_delivery",
+      "description": "将本会话已复核有效漏洞、完整复现材料、脱敏关键证据和极简已测清单打为ZIP，保存到会话工作目录；不完整成果不计入。",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "redteam_execution",
+      "description": "执行已存请求。run-pair批次保存正常/异常对照与事实差异；run-effect核对已审阅效果；回执不是漏洞。契约见README。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "run",
+              "detail",
+              "run-pair",
+              "pair-detail",
+              "run-effect",
+              "job-detail",
+              "verify-effect",
+              "effect-detail"
+            ]
+          },
+          "document": {
+            "type": "string",
+            "description": "JSON：run-pair含hypothesisId、normal/probe请求引用；run-effect含methodId/version、roles；verify-effect含rounds，见README"
+          },
+          "hypothesisId": {
+            "type": "string",
+            "description": "run：当前验证方向ID"
+          },
+          "requestId": {
+            "type": "string",
+            "description": "run：redteam_context中已保存的请求ID"
+          },
+          "requestRevision": {
+            "type": "string",
+            "description": "run：已保存请求版本"
+          },
+          "purpose": {
+            "type": "string",
+            "description": "run：用户处理阻碍后复查正常GET/HEAD",
+            "enum": [
+              "baseline"
+            ]
+          },
+          "methodId": {
+            "type": "string",
+            "description": "run：用于复现绑定时提供当前已审阅方法ID"
+          },
+          "methodVersion": {
+            "type": "string",
+            "description": "run：与methodId同时提供，绑定当前方法版本"
+          },
+          "id": {
+            "type": "string",
+            "description": "detail：宿主生成的回执ID"
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "description": "run：100到15000，默认5000"
+          },
+          "maxBytes": {
+            "type": "integer",
+            "description": "run：响应体上限64到65536，默认65536"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "redteam_finding_delete",
+      "description": "按 id 删除本会话「redteam 成果」页的一条 finding（直接删除数据库行，统计同步更新）。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "finding id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "redteam_finding_register",
+      "description": "登记本会话成果。弱配置须有真实影响和利用链；登记后独立复核才能交付。子代理成果保存在子会话。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "名称（简短）"
+          },
+          "severity": {
+            "type": "string",
+            "description": "等级；漏洞型必填，其他模式可省略（默认 medium）",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "target": {
+            "type": "string",
+            "description": "地址/目标/位置"
+          },
+          "summary": {
+            "type": "string",
+            "description": "一句话简介"
+          },
+          "type": {
+            "type": "string",
+            "description": "类型标签；按当前模式词表填写，详见 finding-fields.md"
+          },
+          "description": {
+            "type": "string",
+            "description": "描述（影响与成因）"
+          },
+          "poc": {
+            "type": "string",
+            "description": "测试过程+完整 EXP；复杂场景写 exp/<id>.py，简单场景写可直接复现的请求/命令"
+          },
+          "proofKind": {
+            "type": "string",
+            "description": "证据类型；interaction 不代表 execution",
+            "enum": [
+              "fingerprint",
+              "interaction",
+              "execution",
+              "access",
+              "write",
+              "other-impact"
+            ]
+          },
+          "reproduction": {
+            "type": "string",
+            "description": "旧完整方法JSON；reviewSteps为字符串。已有对照优先用comparisonId"
+          },
+          "comparisonId": {
+            "type": "string",
+            "description": "run-pair的id（pair-…）：自动填回执和方法，保留待复核读取线索"
+          },
+          "chain": {
+            "type": "string",
+            "description": "调用链 entry→sink（审计双链之一，每行一链）"
+          },
+          "chainTracer": {
+            "type": "string",
+            "description": "追踪员独立重追链（双链另一侧）"
+          },
+          "chainVerdict": {
+            "type": "string",
+            "description": "双链结论：一致 / 不一致+差异"
+          },
+          "snippetEntry": {
+            "type": "string",
+            "description": "entry 关键代码片段"
+          },
+          "snippetSink": {
+            "type": "string",
+            "description": "sink 关键代码片段"
+          },
+          "cwe": {
+            "type": "string",
+            "description": "CWE 编号"
+          },
+          "patch": {
+            "type": "string",
+            "description": "修复 diff 建议（可选）"
+          },
+          "sourceOrigin": {
+            "type": "string",
+            "description": "来源：manual / scan-confirmed / scan-false-positive",
+            "enum": [
+              "manual",
+              "scan-confirmed",
+              "scan-false-positive"
+            ]
+          },
+          "sampleHash": {
+            "type": "string",
+            "description": "样本 SHA256（二进制）"
+          },
+          "family": {
+            "type": "string",
+            "description": "家族/变种（二进制）"
+          },
+          "packer": {
+            "type": "string",
+            "description": "壳/保护（二进制）"
+          },
+          "iocs": {
+            "type": "string",
+            "description": "IOC 清单（二进制）"
+          },
+          "detectionRule": {
+            "type": "string",
+            "description": "检测规则（二进制）"
+          },
+          "baseline": {
+            "type": "string",
+            "description": "对照三件套①基线"
+          },
+          "diffEvidence": {
+            "type": "string",
+            "description": "对照三件套②差分"
+          },
+          "markerEcho": {
+            "type": "string",
+            "description": "对照三件套③marker 回显"
+          },
+          "impact": {
+            "type": "string",
+            "description": "影响证明"
+          },
+          "cvss": {
+            "type": "string",
+            "description": "CVSS 向量+评分"
+          },
+          "requestPkt": {
+            "type": "string",
+            "description": "完整请求包（渗透）"
+          },
+          "responsePkt": {
+            "type": "string",
+            "description": "关键响应（渗透）"
+          },
+          "evidence": {
+            "type": "string",
+            "description": "证据引用（编号/产物路径）"
+          },
+          "fix": {
+            "type": "string",
+            "description": "修复建议（每条 finding 必填）"
+          },
+          "timelineAt": {
+            "type": "string",
+            "description": "时间节点（应急）"
+          },
+          "entry": {
+            "type": "string",
+            "description": "入口身份（云）"
+          },
+          "identity": {
+            "type": "string",
+            "description": "利用身份（云）"
+          },
+          "permission": {
+            "type": "string",
+            "description": "权限（云）"
+          },
+          "resource": {
+            "type": "string",
+            "description": "目标资源（云）"
+          },
+          "status": {
+            "type": "string",
+            "description": "默认pending，登记拒绝verified；复核用finding_update同时给secondRating及≥40字secondRatingNote。fixed仅redteam模式，详见finding-fields.md",
+            "enum": [
+              "pending",
+              "code-reviewed",
+              "suspect",
+              "false-positive",
+              "fixed"
+            ]
+          },
+          "evidenceLevel": {
+            "type": "string",
+            "description": "impact / confirmed / partial / unknown；语义见 finding-fields.md",
+            "enum": [
+              "impact",
+              "confirmed",
+              "partial",
+              "unknown"
+            ]
+          },
+          "auditMode": {
+            "type": "string",
+            "description": "代码审计必填：static=静态，dynamic=动态复现成功",
+            "enum": [
+              "static",
+              "dynamic"
+            ]
+          }
+        },
+        "required": [
+          "title",
+          "target",
+          "summary"
+        ]
+      }
+    },
+    {
+      "name": "redteam_finding_update",
+      "description": "按 id 更新 finding：状态流转、字段修订、复核/复测注记。首次流转 verified 时必须同时给 secondRating 与至少 40 字的 secondRatingNote；完整语义见 shared/refs/finding-fields.md。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "finding id（如 pentest-3）"
+          },
+          "status": {
+            "type": "string",
+            "description": "新状态；按当前模式终态规则，详见 finding-fields.md",
+            "enum": [
+              "pending",
+              "code-reviewed",
+              "suspect",
+              "verified",
+              "false-positive",
+              "fixed",
+              "detected",
+              "stuck"
+            ]
+          },
+          "verifyNote": {
+            "type": "string",
+            "description": "复核注记（结论+依据，简短）"
+          },
+          "secondRating": {
+            "type": "string",
+            "description": "复核独立给出的二次评级；首次流转 verified 时必填",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low",
+              "info"
+            ]
+          },
+          "secondRatingNote": {
+            "type": "string",
+            "description": "二次评级依据（≥40 字）：复核方式与观察现象"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "poc": {
+            "type": "string"
+          },
+          "proofKind": {
+            "type": "string",
+            "enum": [
+              "fingerprint",
+              "interaction",
+              "execution",
+              "access",
+              "write",
+              "other-impact"
+            ]
+          },
+          "reproduction": {
+            "type": "string"
+          },
+          "chain": {
+            "type": "string"
+          },
+          "chainTracer": {
+            "type": "string"
+          },
+          "chainVerdict": {
+            "type": "string"
+          },
+          "snippetEntry": {
+            "type": "string"
+          },
+          "snippetSink": {
+            "type": "string"
+          },
+          "cwe": {
+            "type": "string"
+          },
+          "patch": {
+            "type": "string"
+          },
+          "sourceOrigin": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "scan-confirmed",
+              "scan-false-positive"
+            ]
+          },
+          "sampleHash": {
+            "type": "string"
+          },
+          "family": {
+            "type": "string"
+          },
+          "packer": {
+            "type": "string"
+          },
+          "iocs": {
+            "type": "string"
+          },
+          "detectionRule": {
+            "type": "string"
+          },
+          "baseline": {
+            "type": "string"
+          },
+          "diffEvidence": {
+            "type": "string"
+          },
+          "markerEcho": {
+            "type": "string"
+          },
+          "impact": {
+            "type": "string"
+          },
+          "cvss": {
+            "type": "string"
+          },
+          "requestPkt": {
+            "type": "string"
+          },
+          "responsePkt": {
+            "type": "string"
+          },
+          "retestNote": {
+            "type": "string",
+            "description": "复测注记（修复后复测结论+依据）"
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "fix": {
+            "type": "string"
+          },
+          "timelineAt": {
+            "type": "string",
+            "description": "攻击时间节点（ISO 或 YYYY-MM-DD HH:MM）"
+          },
+          "entry": {
+            "type": "string"
+          },
+          "identity": {
+            "type": "string"
+          },
+          "permission": {
+            "type": "string"
+          },
+          "resource": {
+            "type": "string"
+          },
+          "evidenceLevel": {
+            "type": "string",
+            "enum": [
+              "impact",
+              "confirmed",
+              "partial",
+              "unknown"
+            ]
+          },
+          "auditMode": {
+            "type": "string",
+            "enum": [
+              "static",
+              "dynamic"
+            ]
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "redteam_method",
+      "description": "精选方法包：按摘要读取离线资料，暂存固定版本与审阅/正反例证据。激活和回退由成果页明确审阅操作完成。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "方法资料操作，契约见README",
+            "enum": [
+              "list",
+              "detail",
+              "active",
+              "stage",
+              "review",
+              "verify"
+            ]
+          },
+          "digest": {
+            "type": "string",
+            "description": "固定版本SHA256摘要"
+          },
+          "id": {
+            "type": "string",
+            "description": "active读取的方法ID"
+          },
+          "document": {
+            "type": "string",
+            "description": "stage方法包或review/verify记录的JSON"
+          },
+          "offset": {
+            "type": "integer",
+            "description": "索引偏移，每页20条"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "redteam_research",
+      "description": "围绕实际输入研究具体问题，自动保留对照证据；无新信息停止当前方向。结论须独立复核，detail读完整记录。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "契约见README",
+            "enum": [
+              "groups",
+              "list",
+              "detail",
+              "create",
+              "observe",
+              "assess",
+              "close"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "description": "detail/observe/assess/close必填：验证方向ID；不是观察id"
+          },
+          "document": {
+            "type": "string",
+            "description": "create JSON：id/requestId/requestRevision/question/expectedEffect/negativeResult/nextStep。observe绑定两张回执；close写理由。assess旧JSON兼容。"
+          },
+          "observationId": {
+            "type": "string",
+            "description": "assess：run-pair返回的观察ID，不重发请求"
+          },
+          "outcome": {
+            "type": "string",
+            "description": "assess：支持/反证/无新信息；difference不能作为结论",
+            "enum": [
+              "support",
+              "counterevidence",
+              "no-information"
+            ]
+          },
+          "interpretation": {
+            "type": "string",
+            "description": "assess：身份、对象和实际效果如何支持或反驳；回执已保存，不另填阴性台账"
+          },
+          "nextInformation": {
+            "type": "string",
+            "description": "assess：下一项必要信息或待独立复核"
+          },
+          "restriction": {
+            "type": "string",
+            "description": "仅close：实际被安全或工具策略中断时填写；记录受限未覆盖，不增加尝试或伪造报文",
+            "enum": [
+              "safety-policy",
+              "tool-policy"
+            ]
+          },
+          "offset": {
+            "type": "integer",
+            "description": "list索引偏移，每页20条"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "redteam_task",
+      "description": "start用独立字段。progress：单模式planComplete，衔接regularComplete/ndayComplete。checkpoint按频率等待；delegate说明必要性，结束cleanup。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "start",
+              "status",
+              "next",
+              "progress",
+              "checkpoint",
+              "cancel",
+              "pause",
+              "delegate",
+              "workers",
+              "send",
+              "report",
+              "cleanup"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "regular",
+              "nday",
+              "0day"
+            ]
+          },
+          "target": {
+            "type": "string"
+          },
+          "question": {
+            "type": "string",
+            "description": "问题≤600字"
+          },
+          "toolCalls": {
+            "type": "integer",
+            "description": "整轮共享工具上限1–10000"
+          },
+          "minutes": {
+            "type": "integer",
+            "description": "时间上限1–10080分钟"
+          },
+          "workers": {
+            "type": "integer",
+            "description": "子代理0–16，≤桌面上限；小任务0"
+          },
+          "discoveryCalls": {
+            "type": "integer",
+            "description": "0day探路额度0至toolCalls"
+          },
+          "workflow": {
+            "type": "string",
+            "description": "省略沿用桌面；衔接限regular",
+            "enum": [
+              "single",
+              "regular-to-nday",
+              "regular-with-nday"
+            ]
+          },
+          "stop": {
+            "type": "string",
+            "enum": [
+              "budget",
+              "queue",
+              "first-high",
+              "first-rce"
+            ]
+          },
+          "policy": {
+            "type": "string",
+            "description": "旧JSON，与独立字段互斥"
+          },
+          "progress": {
+            "type": "string",
+            "description": "进度JSON：完成标记和note"
+          },
+          "planComplete": {
+            "type": "boolean"
+          },
+          "queueComplete": {
+            "type": "boolean"
+          },
+          "regularComplete": {
+            "type": "boolean"
+          },
+          "ndayComplete": {
+            "type": "boolean"
+          },
+          "document": {
+            "type": "string",
+            "description": "JSON：delegate site/question/need/reason/focus；send childId/message；report state/summary；pause code/reason/evidence；checkpoint note；cleanup可选childId"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "saker_method",
+      "description": "读取当前启用的测试方法，按具体问题选用；不执行请求。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "read"
+            ]
+          },
+          "key": {
+            "type": "string",
+            "description": "read: group/id"
+          },
+          "offset": {
+            "type": "integer",
+            "description": "list偏移，默认0"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "skill",
+      "description": "Load the full instructions for a skill. Call it before acting on a task that names or clearly matches a skill in the session skill catalog.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The exact skill name from the available skills list."
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "stage_gate",
+      "description": "校验阶段产物是否满足当前模式的结构门禁，判定写入 gate-log.md。进入下一阶段或接受 finding/报告前调用；结构 PASS 不等于语义全过，manual 项仍需复核。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "description": "Preset mode",
+            "enum": [
+              "pentest",
+              "code-audit",
+              "binary-analysis",
+              "attack-defense",
+              "av-evasion",
+              "incident-response",
+              "cloud-security",
+              "ctf-solver"
+            ]
+          },
+          "stage": {
+            "type": "string",
+            "description": "Gate id: pentest P1/P2/P3 · code-audit A1/A2/A3 · binary-analysis B0/B1/B2 · attack-defense recon/breach/lateral/persistence/report · av-evasion V1..V4 · incident-response I1..I5 · cloud-security C1..C7 · ctf-solver board/flag"
+          },
+          "workspace": {
+            "type": "string",
+            "description": "Task workspace root (absolute, or relative to cwd)"
+          },
+          "file": {
+            "type": "string",
+            "description": "Gate-scoped file path (report / chain / verdict log / plan) — required by per-finding gates; a relative path resolves against the workspace"
+          }
+        },
+        "required": [
+          "mode",
+          "stage",
+          "workspace"
+        ]
+      }
+    },
+    {
+      "name": "todo_write",
+      "description": "Record and update a task list to plan multi-step work and show progress; skip it for trivial single-step tasks. Add one todo per concrete step before you start. While work remains, keep the todos being worked on `in_progress`, several only when work runs in parallel. Mark each todo `completed` as soon as it is done.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "todos": {
+            "type": "array",
+            "description": "The COMPLETE task list, replacing any previous list.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "content": {
+                  "type": "string",
+                  "description": "What the task is — a short imperative line."
+                },
+                "status": {
+                  "type": "string",
+                  "description": "pending (not started) | in_progress (now) | completed (done).",
+                  "enum": [
+                    "pending",
+                    "in_progress",
+                    "completed"
+                  ]
+                }
+              },
+              "required": [
+                "content",
+                "status"
+              ]
+            }
+          }
+        },
+        "required": [
+          "todos"
+        ]
+      }
+    },
+    {
+      "name": "tool_pack",
+      "description": "按需加载工具包，action=list/load/unload。task-workflow 提供依赖任务登记、就绪查询和恢复；asset-discovery 用于有限目标识别；nday 用于公开漏洞与情报源；active-scan 用于明确假设的扫描。加载不扩大权限或范围。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "list/load/unload",
+            "enum": [
+              "list",
+              "load",
+              "unload"
+            ]
+          },
+          "pack": {
+            "type": "string",
+            "description": "task-workflow / asset-discovery / nday / active-scan / webshell"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "update_goal",
+      "description": "Update the current goal.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "goal_id": {
+            "type": "string",
+            "description": "Exact id returned by get_goal."
+          },
+          "revision": {
+            "type": "number",
+            "description": "Exact positive revision returned by get_goal."
+          },
+          "action": {
+            "type": "string",
+            "description": "edit, pause, and resume require a direct top-level human request. complete and blocked are also allowed during an automatic continuation of this goal; blocked is rejected before the configured minimum round count.",
+            "enum": [
+              "edit",
+              "pause",
+              "resume",
+              "complete",
+              "blocked"
+            ]
+          },
+          "objective": {
+            "type": "string",
+            "description": "Replacement objective; valid only with action edit."
+          },
+          "max_goal_rounds": {
+            "type": "number",
+            "description": "Replacement cap; valid only with action edit."
+          },
+          "blocked_reason": {
+            "type": "string",
+            "description": "Required only with action blocked: the concrete condition that persisted across rounds and blocks progress."
+          }
+        },
+        "required": [
+          "goal_id",
+          "revision",
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "web_fetch",
+      "description": "Fetch the content of a specific HTTP(S) URL and return it decoded to text.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The HTTP(S) URL to fetch."
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "web_search",
+      "description": "Search the web for current information. Returns an optional summary answer and a list of source URLs.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "queries": {
+            "type": "array",
+            "description": "1–4 search queries; their results are merged.",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "queries"
+        ]
+      }
+    },
+    {
+      "name": "write",
+      "description": "Create or fully replace a UTF-8 text file.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Path to write, resolved by the filesystem backend."
+          },
+          "content": {
+            "type": "string",
+            "description": "Full UTF-8 text content to write."
+          },
+          "sandbox_permissions": {
+            "type": "string",
+            "description": "The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval.",
+            "enum": [
+              "workspace-write",
+              "danger-full-access"
+            ]
+          },
+          "justification": {
+            "type": "string",
+            "description": "Required with sandbox_permissions: one sentence for the user explaining why this exact file operation needs the wider access. Use the language of the user’s current request."
+          }
+        },
+        "required": [
+          "file_path",
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "zday_pattern",
+      "description": "Match a surface to zero-day patterns with a falsifiable, minimal-impact check.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "surface": {
+            "type": "string",
+            "description": "Product feature or attack surface"
+          },
+          "tech": {
+            "type": "string",
+            "description": "Optional language/framework"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Patterns to return (default 5, max 12)"
+          },
+          "requestId": {
+            "type": "string",
+            "description": "Baseline ID"
+          },
+          "requestRevision": {
+            "type": "string",
+            "description": "Revision"
+          }
+        },
+        "required": [
+          "surface"
+        ]
+      }
+    }
+  ]
+}

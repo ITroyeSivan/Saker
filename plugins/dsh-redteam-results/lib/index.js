@@ -30,6 +30,7 @@ import { executeRecordedRequest, readExecutionReceipt, executionReceiptSummary }
 import { verifyEffect, readEffectVerification } from './effect-verifications.js';
 import { runEffectJob, readEffectJob } from './effect-jobs.js';
 import { startTaskPolicy, updateTaskProgress, taskPolicyStatus, taskExecutionGuard, taskPrompt, taskOverview, chooseTaskMode, pauseTaskPolicy, resumeTaskPolicy, archiveTaskRound, takeTaskContinuation, checkpointTask, setTaskInteraction, setTaskWorkers, confirmTaskCheckpoint } from './task-policy.js';
+import { taskStartInput, taskProgressInput } from './task-inputs.js';
 import { chatDefaults, saveChatDefaults, promptDraft, promptTemplates } from './chat-setup.js';
 import { captureTaskCost, taskCostOverview } from './task-cost.js';
 import { createSiteWorkers, siteWorkerView, siteWorkerRows, siteWorkerParent } from './site-workers.js';
@@ -716,7 +717,7 @@ function apply(ctx) {
 					id: { type: "string", required: true }
 				}
 			},
-			render: (_a, v) => [{ type: "text", text: v.ok ? `已登记成果 #${v.seq} ${v.title}（${v.mode}，${v.severity}）——本会话「redteam 成果」页可见${v.chainNode ? `，并已在攻击图补节点 ${v.chainNode}` : ""}` : `登记失败：${v.error}` }]
+			render: (_a, v) => [{ type: "text", text: v.ok ? `已登记成果 #${v.seq} ${v.title}（${v.mode}，${v.severity}）——本会话「redteam 成果」页可见${v.chainNode ? `，并已在攻击图补节点 ${v.chainNode}` : ""}` : `登记失败：${v.error}${v.recovery ? '\n' + v.recovery : ''}` }]
 		},
 		async execute(args, exec) {
 			const session = sessionOf(ctx, exec);
@@ -725,6 +726,11 @@ function apply(ctx) {
         const input = args.comparisonId ? comparisonFindingInput(theStore(), session.id, args) : args;
         const policyError = findingAdmissionError(session.mode, input);
         if (policyError) return { ok: false, id: '', error: policyError };
+        if (input.reproduction) {
+          try { parseReproduction(input.reproduction); }
+          catch (error) { return { ok: false, id: '', error: error.message,
+            recovery: 'reproduction须为JSON方法对象，不能填编号文本。一次补齐：kind="method"；mechanism/methodVersion/endpoint/successCriterion/reviewSteps/recovery为非空字符串；prerequisites/dependencies/parameters/steps为字符串数组（steps须含实际可操作步骤）；verification为嵌套对象，含status="verified"或"not-run"及evidenceIds字符串数组。verified必须有实际复现依据，不得补造；宿主执行及独立影响复核仍另行校验。普通步骤文本放poc；已有run-pair用comparisonId。无法补齐时保留原始依据并停止登记重试。' }; }
+        }
         if (args.comparisonId) {
           const saved = allFindings(theStore(), session.id, session.mode).find(row => row.reproduction === input.reproduction);
           if (saved) return { ok: true, id: saved.id, seq: saved.seq, title: saved.title, mode: saved.mode, severity: saved.severity, reused: true };
@@ -948,11 +954,20 @@ function apply(ctx) {
   }));
 	ctx.tools.register(defineTool({
 		name: 'redteam_task',
-		description: '站点任务共用预算；progress用regularComplete/ndayComplete衔接，checkpoint按已选频率等阶段确认。delegate说明必要性，结束cleanup，report仅子代理。',
+		description: 'start用独立字段。progress：单模式planComplete，衔接regularComplete/ndayComplete。checkpoint按频率等待；delegate说明必要性，结束cleanup。',
 		parameters: {
 			action: { type: 'string', enum: ['start', 'status', 'next', 'progress', 'checkpoint', 'cancel', 'pause', 'delegate', 'workers', 'send', 'report', 'cleanup'], required: true },
-			policy: { type: 'string', description: 'start JSON：mode/question/target/workflow，budget.toolCalls/minutes/workers；沿用桌面流程与人数' },
-			progress: { type: 'string', description: 'progress JSON：planComplete/queueComplete或regularComplete/ndayComplete，note说明已做内容和缺口' },
+			mode: { type: 'string', enum: ['regular', 'nday', '0day'] },
+			target: { type: 'string' },
+			question: { type: 'string', description: '问题≤600字' },
+			toolCalls: { type: 'integer', description: '整轮共享工具上限1–10000' },
+			minutes: { type: 'integer', description: '时间上限1–10080分钟' },
+			workers: { type: 'integer', description: '子代理0–16，≤桌面上限；小任务0' },
+			discoveryCalls: { type: 'integer', description: '0day探路额度0至toolCalls' },
+			workflow: { type: 'string', enum: ['single', 'regular-to-nday', 'regular-with-nday'], description: '省略沿用桌面；衔接限regular' },
+			stop: { type: 'string', enum: ['budget', 'queue', 'first-high', 'first-rce'] },
+			policy: { type: 'string', description: '旧JSON，与独立字段互斥' },
+			progress: { type: 'string', description: '进度JSON：完成标记和note' },
       planComplete: { type: 'boolean' },
       queueComplete: { type: 'boolean' },
       regularComplete: { type: 'boolean' },
@@ -961,7 +976,7 @@ function apply(ctx) {
 		},
 		output: {
 			schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
-			render: (_args, value) => [{ type: 'text', text: value.ok ? JSON.stringify(value, null, 2) : value.error }]
+			render: (_args, value) => [{ type: 'text', text: value.ok ? JSON.stringify(value, null, 2) : `错误：${value.error}${value.recovery ? '\n' + value.recovery : ''}` }]
 		},
 		async execute(args, exec) {
 			const session = sessionOf(ctx, exec);
@@ -969,11 +984,9 @@ function apply(ctx) {
 			try {
 				if (args.action === 'start') {
 					if (!enforcementAvailable) throw new Error('宿主缺少tools.guard，不能启动有预算保证的任务；请使用受支持桌面版本');
-					startTaskPolicy(theStore(), session.id, JSON.parse(args.policy));
+					startTaskPolicy(theStore(), session.id, taskStartInput(args));
 				} else if (args.action === 'progress') {
-          const progress = args.progress ? JSON.parse(args.progress) : Object.fromEntries(['planComplete', 'queueComplete', 'regularComplete', 'ndayComplete'].filter(key => args[key] !== undefined).map(key => [key, args[key]]));
-          if (!Object.keys(progress).length) throw new Error('progress requires planComplete or queueComplete boolean');
-          updateTaskProgress(theStore(), session.id, progress);
+          updateTaskProgress(theStore(), session.id, taskProgressInput(args));
         }
         else if (args.action === 'checkpoint') checkpointTask(theStore(), session.id, JSON.parse(args.document).note);
         else if (args.action === 'pause') pauseTaskPolicy(theStore(), session.id, JSON.parse(args.document));
@@ -990,7 +1003,8 @@ function apply(ctx) {
 				else if (!['status', 'next'].includes(args.action)) throw new Error('invalid task action');
 				const state = taskPolicyStatus(theStore(), session.id);
 				return Promise.resolve({ ok: true, enforcementAvailable, ...state, ...(args.action === 'next' && state.configured && !state.stopped ? { next: researchNext(theStore(), session.id) } : {}) });
-			} catch (error) { return Promise.resolve({ ok: false, error: error.message }); }
+			} catch (error) { return Promise.resolve({ ok: false, error: error.message,
+        ...(args.action === 'start' ? { recovery: '使用start独立字段：mode=regular/nday/0day，target=实际URL，question=当前问题，toolCalls=有限额度；workflow通常省略，人数沿用桌面上限。已有任务不能重启或重置预算。' } : {}) }); }
 		}
 	}));
 	ctx.tools.register(defineTool({

@@ -66,7 +66,8 @@ const SECOND_REVIEW_MIN_NOTE = 40;
 const DEFAULT_PAGE_SIZE = 10;
 const MODES = ["pentest", "code-audit", "ctf-solver"];
 
-const SCHEMA = `
+// Build after module initialization: execution/policy/store references form a cycle.
+function schema() { return `
 ${METHOD_PACKAGE_SCHEMA}
 ${RESEARCH_SCHEMA}
 ${EXECUTION_RECEIPT_SCHEMA}
@@ -182,7 +183,7 @@ CREATE TABLE IF NOT EXISTS session_meta (
 	scope      TEXT NOT NULL DEFAULT '',
 	updated_at TEXT NOT NULL
 );
-`;
+`; }
 
 const COLS = "session_id,id,seq,mode,title,severity,status,evidence_level,type,target,summary,description,poc,chain,evidence,fix,verify_note,created_at,updated_at,verified_at,baseline,diff_evidence,marker_echo,impact,cvss,retest_note,retest_at,request_pkt,response_pkt,snippet_entry,snippet_sink,chain_tracer,chain_verdict,cwe,patch,source_origin,sample_hash,family,packer,iocs,detection_rule,timeline_at,entry,identity,permission,resource,audit_mode,second_rating,second_rating_note,proof_kind,reproduction";
 const N_COLS = COLS.split(",").length;
@@ -264,7 +265,7 @@ export function openStore(dbPath) {
 	}
 
 	const db = openDatabase(); // busy_timeout/WAL 已就绪；首开会与其他实例竞争
-	db.exec(SCHEMA);
+	db.exec(schema());
 	for (const col of MIGRATION_COLUMNS) {
 	try { db.exec(`ALTER TABLE findings ADD COLUMN ${col} TEXT NOT NULL DEFAULT ''`); } catch { /* 列已存在 */ }
 	}
