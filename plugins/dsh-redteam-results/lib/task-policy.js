@@ -16,6 +16,9 @@ const localTools = new Set(['redteam_task', 'redteam_context', 'redteam_checks',
   'redteam_method', 'redteam_research', 'redteam_execution',
   'redteam_finding_register', 'redteam_finding_update', 'redteam_finding_delete', 'redteam_chain_reconcile',
   'read', 'write', 'edit', 'glob', 'grep', 'run_code', 'skill', 'tool_pack', 'saker_method',
+  // Persistent local bookkeeping does not execute its named worker or contact targets.
+  'operation_goal', 'operation_scope', 'operation_intent', 'operation_task',
+  'operation_progress', 'operation_constraints', 'operation_conclude', 'stage_gate', 'gates_list',
   // Local catalog/status reads do not contact a target and need no invented scope.
   'nday_catalog', 'nday_policy_get', 'nday_metrics']);
 function integer(value, label, min, max) {

@@ -46,10 +46,10 @@ const readPlugin = (name, file = 'lib/index.js') => {
   // Pentest：保留侦察/漏洞路径/证据工具；收起 CTF、后渗透与通用流程工具。
   const pt = computeDeny('pentest', known, RULES)
   ok('pentest 隐藏 ctf_*（4 个）', pt.includes('ctf_steer') && C === 4)
-  ok(`pentest 示例工具面收起数为 ${pt.length}（期望 ${C + 20}）`, pt.length === C + 20)
+  ok(`pentest 基础规则收起数为 ${pt.length}（期望 ${C + 19}，任务工具另按包收起）`, pt.length === C + 19)
   ok('pentest 隐藏 webshell、保留按需工具包入口', pt.includes('webshell_exec') && !pt.includes('tool_pack'))
   ok('pentest 隐藏矩阵、后渗透和内网工具，并收起绕过管理的子代理工具',
-    ['operation_goal', 'attack_gate', 'redteam_atlas_target', 'redteam_coverage_mark', 'netexec_scan', 'crackmapexec_scan', 'impacket_suite', 'access_confirm', 'memshell_cli', 'nday_triage', 'campaign_memory_write', 'trace_recent'].every((n) => pt.includes(n))
+    ['attack_gate', 'redteam_atlas_target', 'redteam_coverage_mark', 'netexec_scan', 'crackmapexec_scan', 'impacket_suite', 'access_confirm', 'memshell_cli', 'nday_triage', 'campaign_memory_write', 'trace_recent'].every((n) => pt.includes(n))
     && ['subagent', 'subagent_fork', 'workflow'].every((n) => pt.includes(n))
     && !['attack_plan', 'nday_coverage', 'nday_learn', 'nday_draft', 'nday_handoff'].some((n) => pt.includes(n)))
   ok('pentest 保留 RCE 路径、证据记录与核心侦察工具',
@@ -127,7 +127,7 @@ const readPlugin = (name, file = 'lib/index.js') => {
   ok('pentest 不收工具包入口', !pt.includes('tool_pack'))
   const ca = deferredPackTools('code-audit', known, PACKS)
   ok('code-audit 不额外收起（基础规则已隐藏 webshell）', ca.length === 0)
-  ok('packsForMode 只返回模式可用包', packsForMode('pentest', PACKS).length === 4 && packsForMode('code-audit', PACKS).length === 0)
+  ok('packsForMode 只返回模式可用包', packsForMode('pentest', PACKS).length === 5 && packsForMode('code-audit', PACKS).length === 0)
   ok('enabledPacks 可按 id 关闭', enabledPacks({ webshell: false }).length === PACKS.length - 1)
   ok('findPack 严格按 id 匹配', findPack('webshell', PACKS)?.id === 'webshell' && findPack('nope', PACKS) === null)
   ok('webshell 包只命中 webshell_*', JSON.stringify(packTools(known, findPack('webshell', PACKS))) === JSON.stringify(['webshell_connect', 'webshell_exec']))
@@ -198,6 +198,8 @@ const readPlugin = (name, file = 'lib/index.js') => {
     'webshell_connect', 'webshell_exec', 'webshell_file',
     'impacket_suite', 'netexec_scan', 'crackmapexec_scan',
     'tool_pack', 'nday_catalog', 'nday_match', 'asset_search', 'redteam_context',
+    'operation_goal', 'operation_scope', 'operation_intent', 'operation_task',
+    'operation_progress', 'operation_constraints', 'operation_conclude',
   ]
   const handlers = {}
   const registered = []
@@ -245,6 +247,15 @@ const readPlugin = (name, file = 'lib/index.js') => {
 
   const toolPack = registered.find((tool) => tool.name === 'tool_pack')
   ok('tool_pack 已注册', !!toolPack)
+  const taskTools = known.filter((name) => name.startsWith('operation_'))
+  ok('任务工作流默认收起，不占小问题的工具声明', taskTools.length === 7 && taskTools.every(isDenied))
+  const tasksLoaded = await toolPack.execute({ action: 'load', pack: 'task-workflow' }, { agent })
+  ok('依赖任务包加载后七个实际任务工具全部可见', tasksLoaded.ok && taskTools.every((name) => !isDenied(name)))
+  handlers['agent/inbox/inserted']({ agent })
+  ok('后续消息保持任务包可见且不自动加载扫描器', taskTools.every((name) => !isDenied(name)) && deferredScanners.every(isDenied))
+  await toolPack.execute({ action: 'unload', pack: 'task-workflow' }, { agent })
+  ok('任务包卸载恢复隐藏并保留工具包入口', taskTools.every(isDenied) && !isDenied('tool_pack'))
+  ok('任务包不会给默认或未知模式开放任务工具', ['', 'unknown-mode'].every((mode) => taskTools.every((name) => computeDeny(mode, taskTools, RULES).includes(name))))
   const list = await toolPack.execute({ action: 'list' }, { agent })
   ok('list 通过 Agent 视图识别 8 个扫描器并显示默认收起', list.ok && list.packs.find((p) => p.id === 'active-scan')?.loaded === false && list.packs.find((p) => p.id === 'active-scan')?.tools === 8)
   const ndayLoaded = await toolPack.execute({ action: 'load', pack: 'nday' }, { agent })

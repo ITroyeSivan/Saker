@@ -75,6 +75,13 @@ export function dispatchProject(endpoint, payload) {
 	return { ok: true, snapshot: projectSnapshot(workspace) };
 }
 
+/** Desktop and web share the host's authenticated connection transport. */
+export function registerProjectRpc(ctx, connection) {
+	return connection.register(ctx, ROUTE_PATH, async (endpoint, payload) => ({
+		ok: true, value: dispatchProject(endpoint, payload),
+	}), { authority: "loopback" });
+}
+
 /** 生成 webServer 路由处理器。 */
 export function createProjectHandler({ trustedHosts = () => [], token = CSRF_TOKEN } = {}) {
 	return async (req, res) => {

@@ -5,7 +5,7 @@ import url from "node:url";
 import vm from "node:vm";
 import { runGate, listGates, checkRequirement, GATES, tableRows, setGoal, updateProgress, setScope, markTested, coverageCheck, syncOperationState, registerIntent, intentSummary, taskTransition, validateAnchor, setConstraints, constraintSummary, deriveScopeDraft, DECOMPOSITION, conclusionVerdict, apply, isSubagentTool, summarizeToolResult, subagentOwnerAlias, startSubagentTask, finishSubagentTask, taskToolAliases, readOperationState as ros } from "../lib/index.js";
 import { projectSnapshot } from "../lib/project-snapshot.mjs";
-import { CSRF_TOKEN, ROUTE_PATH, checkCsrf, dispatchProject, isTrustedRequest } from "../lib/project-channel.mjs";
+import { CSRF_TOKEN, ROUTE_PATH, checkCsrf, dispatchProject, isTrustedRequest, registerProjectRpc } from "../lib/project-channel.mjs";
 
 const F = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), "fixture");
 let failed = 0;
@@ -28,6 +28,21 @@ vm.runInNewContext(clientSource, {
 expect("browser title labels active stage", stageGateClient?.progressTitleLabel({
 	running: true, snapshot: { flow: { current: "S1" }, flowLabel: "快速摸底" },
 }) === "进行中 · S1 快速摸底");
+{
+	let route, handler, authority;
+	registerProjectRpc({}, { register(_ctx, name, fn, options) { route = name; handler = fn; authority = options.authority; } });
+	const connection = { rpc: { call: async (name, endpoint, payload) => {
+		if (name !== route) throw new Error("wrong project route");
+		return handler(endpoint, payload);
+	} } };
+	const status = await stageGateClient.api(connection, "status", { workspace: F });
+	expect("Desktop project RPC reaches the real snapshot dispatcher", status.ok && !!status.snapshot && authority === "loopback");
+	const bad = await stageGateClient.api(connection, "status", { workspace: "relative" });
+	expect("Desktop project RPC preserves workspace validation", !bad.ok && bad.error.includes("绝对路径"));
+	const transport = await stageGateClient.api({ rpc: { call: async () => ({ ok: false, error: { code: "NOT_READY", message: "host not ready" } }) } }, "status", {});
+	expect("Desktop project RPC turns structured errors into visible text", !transport.ok && transport.error === "host not ready");
+	expect("Desktop project client requires host connection injection", stageGateClient.inject.includes("connection"));
+}
 expect("browser title labels request failures", stageGateClient?.progressTitleLabel({ error: "401 Invalid API key" }) === "失败");
 expect("browser title keeps durable turn failures ahead of user-wait state", stageGateClient?.progressTitleLabel({ failedTurn: true, pending: true }) === "失败");
 expect("browser title labels failed gate", stageGateClient?.progressTitleLabel({ snapshot: { artifacts: { gateLine: "| pentest/P1 | FAIL | 缺证据 |" } } }) === "失败");
@@ -1030,8 +1045,10 @@ import os from "node:os";
 		setGoal(ws, "接线探针", "复核完成");
 		const handlers = {};
 		const tools = [];
+		let projectRpcHandler;
 		apply({
 			tools: { register: (t) => tools.push(t) },
+			inject: (services, fn) => { if (services.includes('connection')) fn({connection: {register(_ctx, _route, handler) {projectRpcHandler = handler;}}}); },
 			agentPresets: { composedPreset: () => "pentest" },
 			on: (event, fn) => { handlers[event] = fn; },
 		});
@@ -1039,6 +1056,7 @@ import os from "node:os";
 			typeof handlers["agent/created"] === "function" && typeof handlers["agent/disposed"] === "function"
 			&& typeof handlers["agent/inbox/inserted"] === "function");
 		expect("apply 仍注册原有工具", tools.length >= 9);
+		expect("apply wires the Desktop project RPC into the host lifecycle", (await projectRpcHandler?.('status', {workspace: ws}))?.value?.ok === true);
 		expect("apply 不再直接监听作用域事件（subagent/start 由 agent 作用域挂）",
 			handlers["subagent/start"] === undefined && handlers["subagent/end"] === undefined);
 

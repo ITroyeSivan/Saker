@@ -6,6 +6,14 @@
 
 export const PACKS = [
   {
+    id: 'task-workflow',
+    label: '依赖任务与恢复',
+    prefixes: ['operation_'],
+    modes: ['pentest'],
+    defaultVisible: false,
+    hint: '多步任务需要前置条件、持久队列或中断恢复时加载；复用现有任务账本，小问题无需加载',
+  },
+  {
     id: 'asset-discovery',
     label: '目标识别与资产查询',
     prefixes: ['asset_search', 'asset_candidate_search', 'asset_ingest', 'subfinder_enum', 'httpx_probe', 'whatweb_fingerprint', 'wafw00f_detect'],

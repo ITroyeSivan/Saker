@@ -64,6 +64,7 @@ export const RULES = [
       'nday_coverage', 'nday_triage', 'nday_learn', 'nday_draft', 'nday_handoff',
     ],
     exceptions: ['attack_plan', 'nday_coverage', 'nday_draft', 'nday_handoff', 'nday_learn'],
+    modeExceptions: { pentest: ['operation_goal', 'operation_scope', 'operation_intent', 'operation_task', 'operation_progress', 'operation_constraints', 'operation_conclude'] },
     modes: ['code-audit', 'ctf-solver'],
     source: 'preset/pentest/agent.patch.yml —— 按用户的小问题推进，收起无关流程和后渗透工具',
     note: '常规测试、Nday发现和0Day挖掘共享证据；小任务直接做，确有必要才分派站点子任务',
@@ -103,7 +104,7 @@ export function computeDeny(mode, known, rules) {
   for (const rule of rules) {
     if (rule.modes.includes(mode)) continue // 该模式下可见
     for (const name of known) {
-      if (rule.exceptions?.includes(name)) continue
+      if (rule.exceptions?.includes(name) || rule.modeExceptions?.[mode]?.includes(name)) continue
       if (rule.prefixes.some((p) => name.startsWith(p))) deny.add(name)
     }
   }

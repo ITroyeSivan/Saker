@@ -34,11 +34,31 @@ DSH 宿主平面插件：把各安全预设（Saker 的 pentest / code-audit / c
 | attack-defense | recon / breach / lateral（需 file）/ persistence / report（需 file） | assets.md、evidence-index.md、paths-ledger.md（candidate/chosen）、persistence-registry.md（手动排除） |
 | av-evasion | V1 边界 / V3 配对（需 file）/ V2 证据（需 file）/ V4 外推（需 file） | experiment-plan.md（自研/实验室/第三方）、实验报告（技术侧+检测侧）、判定日志（构建/判定+哈希） |
 
-## v1 边界（诚实声明）
+## 结构门禁的边界
 
 - 只做结构校验；表格「未填满行」会列出但不理解语义（N-A 理由是否成立仍是复核员的事）。
-- 不拦截工具调用、不监听会话事件（那是未来版本；先证明 schema 校验有用）。
-- 哈希检查是「存在 64 位十六进制串」，不重算哈希（重算需要原始样本，属复核员/人工范围）。
+- 阶段材料中的哈希检查只检查格式；任务依赖产物另外读取原文件核对 sha256。
+- 结构门禁与依赖就绪都不能代替漏洞语义验证。
+
+## 依赖任务与防重复执行（1.10.0）
+
+`operation_intent` 可带 `task_key`、`depends_on` 和 `required_artifacts`。
+同会话同键同定义重放返回原 id，变更定义拒绝复用。引用必须指向已登记执行任务；
+拒绝依赖环、跨会话、不同资产组与不相交的显式资产范围。
+
+`operation_task action=ready` 查询就绪和等待原因，`claim/start` 在状态锁内再次检查。
+前置任务未成功不能启动；指定产物还需前置任务登记该路径、文件存在且非空、
+位于当前工作区并通过 sha256。产物目前限 16 MiB，相对路径禁止越界。
+这只证明依赖与内容完整性，不证明产物中的结论正确。
+
+带依赖或稳定键的任务更新需回传 `start/claim` 返回的 `task.leaseId` 为 `lease_id`；
+重试产生新租约，旧执行者不能提交结果。无依赖的旧任务维持旧更新协议。
+`runTrackedTask` 的依赖失败会阻止执行体；宿主原生 guard 在子代理、MCP 等匹配工具执行前
+检查依赖，但不自动把所有工具调用记为成功，也不声称对子代理派发实现跨进程事务。
+工作台显示真实等待原因，重启后根据落盘任务与当前产物重新计算。
+
+负责人匹配沿用保守工具别名；同时有多个受约束任务匹配时拒绝猜测，
+应使用不同负责人或逐项编排。未登记的工具动作不由这一层自动推断依赖。
 
 ## 桌面端安装
 
@@ -50,9 +70,10 @@ DSH 宿主平面插件：把各安全预设（Saker 的 pentest / code-audit / c
 （含结果冲突 `⚠` 与 `interrupted`）、产物索引（证据行 / 扫描待处置 / 最近门禁 / `reports/`）
 与需要处理的 attention 清单。
 
-- 服务端：`lib/project-snapshot.mjs` 只读本工作区文件（**不读别的插件 SQLite**）；
-  `lib/project-channel.mjs` 自注册路由 `/dsh-stage-gate-project`，
-  同源信任栅栏 + CSRF，端点 `status`（只接受绝对路径且存在的工作区）。
+- 服务端：`lib/project-snapshot.mjs` 只读本工作区文件；
+  `lib/project-channel.mjs` 通过宿主 connection 注册 `/dsh-stage-gate-project`，
+  使用宿主鉴权与同源保护，端点 `status`（只接受绝对路径且存在的工作区）。
+  Desktop 与 Web 客户端共用 connection RPC，避免直接 fetch 在 Desktop 返回空响应。
 - 客户端：`lib/client.js` 注册 `conversation.view`。注意必须
   `ctx.slots.inject("conversation.view", () => ctx.slots.register(...))`——
   直接 `register` 不会出现在标签栏（实测）。

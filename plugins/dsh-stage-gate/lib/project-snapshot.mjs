@@ -7,6 +7,7 @@
 // 由各自标签页负责（离线报告脚本 `scripts/project-status.mjs` 才做跨库汇总）。
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
+import { taskReadiness } from "./task-dependencies.mjs";
 
 const STATE_FILE = "operation-state.json";
 const GATE_LOG = "gate-log.md";
@@ -170,6 +171,8 @@ export function projectSnapshot(workspace, { now = new Date() } = {}) {
 			reuseScore: Number(intent?.reuseScore) || 0,
 			parentTaskId: String(intent?.parentTaskId ?? ""),
 			...(intent?.task && typeof intent.task === "object" ? intent.task : {}),
+			dependsOn: intent?.dependsOn || [],
+			...taskReadiness(state, intent, root),
 		}))
 		.filter((task) => task.state);
 
@@ -245,6 +248,7 @@ export function projectSnapshot(workspace, { now = new Date() } = {}) {
 	};
 
 	const attention = [];
+	for (const item of tasks.filter((task) => task.state === "queued" && !task.ready)) attention.push({ kind: "等待前置条件", text: `${item.id}：${item.blockedReason}` });
 	if (state && !goalRegistered) {
 		attention.push({ kind: "目标未登记", text: "还没登记任务目标——完成标准 0/0 不代表已经做完" });
 	}
@@ -298,6 +302,9 @@ export function projectSnapshot(workspace, { now = new Date() } = {}) {
 			targetIds: Array.isArray(task.targetIds) ? task.targetIds : [],
 			reuseScore: Number(task.reuseScore) || 0,
 			parentTaskId: String(task.parentTaskId ?? ""),
+			dependsOn: task.dependsOn,
+			ready: task.ready,
+			blockedReason: task.blockedReason,
 		})),
 		taskTree,
 		graph,
@@ -316,6 +323,8 @@ export function projectSnapshot(workspace, { now = new Date() } = {}) {
 		},
 		counts: {
 			openCriteria: openCriteria.length,
+			ready: tasks.filter((item) => item.ready).length,
+			waiting: tasks.filter((item) => item.state === "queued" && !item.ready).length,
 			openIntents: openIntents.length,
 			interrupted: interrupted.length,
 			conflicts: conflicted.length,

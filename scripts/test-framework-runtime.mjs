@@ -51,6 +51,17 @@ try{
     assert.match(taskExecutionGuard(store,'local-only','nday_source_fetch'),/task_policy_missing/);
     assert.match(taskExecutionGuard(store,'local-only','httpx_probe'),/task_policy_missing/);
   });
+  await test('dependency bookkeeping remains usable without a target policy and after cancellation',async()=>{
+    const names=['operation_goal','operation_scope','operation_intent','operation_task','operation_progress','operation_constraints','operation_conclude','stage_gate','gates_list'];
+    for(const name of names)assert.equal(taskExecutionGuard(store,'ledger-only',name),undefined);
+    assert.equal(readTaskPolicy(store,'ledger-only'),null);
+    assert.match(taskExecutionGuard(store,'ledger-only','httpx_probe'),/task_policy_missing/);
+    parent('ledger-stopped');updateTaskProgress(store,'ledger-stopped',{cancelled:true});
+    const before=readTaskPolicy(store,'ledger-stopped');
+    for(const name of names)assert.equal(taskExecutionGuard(store,'ledger-stopped',name),undefined);
+    assert.deepEqual(readTaskPolicy(store,'ledger-stopped'),before);
+    assert.match(taskExecutionGuard(store,'ledger-stopped','httpx_probe'),/任务已停止/);
+  });
   await test('default main work creates no children; necessity, scope and zero worker budget are enforced',async()=>{
     const a=parent('no-workers',0,site);assert.equal(starts.length,0);
     await assert.rejects(delegateManager.delegate(a,{...delegate,need:'fanout'}),/specific delegation need/);

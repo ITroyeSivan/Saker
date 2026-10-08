@@ -1,0 +1,1104 @@
+{
+  "version": "0.4.93",
+  "desktop": "0.2.0-rc.2",
+  "fixture": "synthetic local dependency queue",
+  "model": "DeepSeek-V41-Flash, Low (Desktop selection)",
+  "limits": "No vulnerability benchmark or real target scan. Early failing turns are retained.",
+  "events": [
+    {
+      "type": "request/header",
+      "seq": 14,
+      "time": 1791472720401,
+      "tools": [
+        "ask_user_question",
+        "attack_plan",
+        "create_goal",
+        "edit",
+        "exit_plan_mode",
+        "get_goal",
+        "glob",
+        "grep",
+        "job_kill",
+        "job_list",
+        "job_output",
+        "knowledge_list",
+        "knowledge_read",
+        "knowledge_search",
+        "load_workspace_dependencies",
+        "oob_probe",
+        "present",
+        "pwsh",
+        "read",
+        "read_image",
+        "redteam_checks",
+        "redteam_context",
+        "redteam_delivery",
+        "redteam_execution",
+        "redteam_finding_delete",
+        "redteam_finding_register",
+        "redteam_finding_update",
+        "redteam_method",
+        "redteam_research",
+        "redteam_task",
+        "saker_method",
+        "skill",
+        "todo_write",
+        "tool_pack",
+        "update_goal",
+        "web_fetch",
+        "web_search",
+        "write",
+        "zday_pattern"
+      ],
+      "taskSchemas": []
+    },
+    {
+      "type": "model/usage",
+      "seq": 16,
+      "time": 1791472726489,
+      "usage": {
+        "inputTokens": 16113,
+        "outputTokens": 906,
+        "cacheReadTokens": 640,
+        "cacheWriteTokens": 0,
+        "totalTokens": 17659
+      }
+    },
+    {
+      "type": "turn/end",
+      "seq": 18,
+      "time": 1791472726502,
+      "reason": {
+        "kind": "completed"
+      }
+    },
+    {
+      "type": "request/header",
+      "seq": 27,
+      "time": 1791474453090,
+      "tools": [
+        "ask_user_question",
+        "attack_plan",
+        "create_goal",
+        "edit",
+        "exit_plan_mode",
+        "gates_list",
+        "get_goal",
+        "glob",
+        "grep",
+        "job_kill",
+        "job_list",
+        "job_output",
+        "knowledge_list",
+        "knowledge_read",
+        "knowledge_search",
+        "load_workspace_dependencies",
+        "oob_probe",
+        "present",
+        "pwsh",
+        "read",
+        "read_image",
+        "redteam_checks",
+        "redteam_context",
+        "redteam_delivery",
+        "redteam_execution",
+        "redteam_finding_delete",
+        "redteam_finding_register",
+        "redteam_finding_update",
+        "redteam_method",
+        "redteam_research",
+        "redteam_task",
+        "saker_method",
+        "skill",
+        "stage_gate",
+        "todo_write",
+        "tool_pack",
+        "update_goal",
+        "web_fetch",
+        "web_search",
+        "write",
+        "zday_pattern"
+      ],
+      "taskSchemas": []
+    },
+    {
+      "type": "model/usage",
+      "seq": 29,
+      "time": 1791474456493,
+      "usage": {
+        "inputTokens": 18375,
+        "outputTokens": 113,
+        "cacheReadTokens": 3072,
+        "cacheWriteTokens": 0,
+        "totalTokens": 21560
+      }
+    },
+    {
+      "type": "tool/call",
+      "seq": 30,
+      "time": 1791474456498,
+      "name": "tool_pack",
+      "arguments": "{\"action\": \"load\", \"pack\": \"task-workflow\"}"
+    },
+    {
+      "type": "tool/result",
+      "seq": 31,
+      "time": 1791474456514,
+      "isError": false,
+      "content": [
+        "工具包 task-workflow：已加载"
+      ]
+    },
+    {
+      "type": "request/header",
+      "seq": 34,
+      "time": 1791474456605,
+      "tools": [
+        "ask_user_question",
+        "attack_plan",
+        "create_goal",
+        "edit",
+        "exit_plan_mode",
+        "gates_list",
+        "get_goal",
+        "glob",
+        "grep",
+        "job_kill",
+        "job_list",
+        "job_output",
+        "knowledge_list",
+        "knowledge_read",
+        "knowledge_search",
+        "load_workspace_dependencies",
+        "oob_probe",
+        "operation_conclude",
+        "operation_constraints",
+        "operation_goal",
+        "operation_intent",
+        "operation_progress",
+        "operation_scope",
+        "operation_task",
+        "present",
+        "pwsh",
+        "read",
+        "read_image",
+        "redteam_checks",
+        "redteam_context",
+        "redteam_delivery",
+        "redteam_execution",
+        "redteam_finding_delete",
+        "redteam_finding_register",
+        "redteam_finding_update",
+        "redteam_method",
+        "redteam_research",
+        "redteam_task",
+        "saker_method",
+        "skill",
+        "stage_gate",
+        "todo_write",
+        "tool_pack",
+        "update_goal",
+        "web_fetch",
+        "web_search",
+        "write",
+        "zday_pattern"
+      ],
+      "taskSchemas": [
+        {
+          "name": "operation_intent",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "workspace": {
+                "type": "string",
+                "description": "Task workspace root"
+              },
+              "summary": {
+                "type": "string",
+                "description": "一句话方向（做什么、追什么线索）≤200 字符"
+              },
+              "anchor_kind": {
+                "type": "string",
+                "description": "锚点类型（boot=开局豁免，其余须带 anchor_ref）",
+                "enum": [
+                  "boot",
+                  "criterion",
+                  "scope",
+                  "finding",
+                  "chain"
+                ]
+              },
+              "anchor_ref": {
+                "type": "string",
+                "description": "锚点 id（boot 省略；criterion/scope/finding/chain 必填）"
+              },
+              "note": {
+                "type": "string",
+                "description": "备注（派单对象/预期产出等 ≤300 字符）"
+              },
+              "owner": {
+                "type": "string",
+                "description": "负责人（可选；填了就建立执行状态）"
+              },
+              "max_attempts": {
+                "type": "number",
+                "description": "最大尝试次数（1-20，默认 1）"
+              },
+              "stage": {
+                "type": "string",
+                "description": "进度阶段（内部值，如 S4/S5）"
+              },
+              "bucket_id": {
+                "type": "string",
+                "description": "资产组 id（与 fingerprint-buckets.json 对齐）"
+              },
+              "target_ids": {
+                "type": "string",
+                "description": "覆盖资产 id，逗号/换行分隔"
+              },
+              "reuse_score": {
+                "type": "number",
+                "description": "优先分（同一条漏洞可复用的程度）"
+              },
+              "parent_task_id": {
+                "type": "string",
+                "description": "父任务 id（用于两级子代理任务图）"
+              },
+              "task_key": {
+                "type": "string",
+                "description": "本会话内稳定键；同定义重复登记返回原任务，改变定义须新键"
+              },
+              "depends_on": {
+                "type": "array",
+                "description": "前置执行任务 id；未成功则不能领取/启动",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "required_artifacts": {
+                "type": "array",
+                "description": "需核对的前置产物：taskId、工作区相对 path、sha256；不等同于漏洞语义验证",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "taskId": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "sha256": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "taskId",
+                    "path",
+                    "sha256"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "workspace",
+              "summary",
+              "anchor_kind"
+            ]
+          }
+        },
+        {
+          "name": "operation_task",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "workspace": {
+                "type": "string",
+                "description": "Task workspace root"
+              },
+              "id": {
+                "type": "string",
+                "description": "方向 id（如 i1；action=claim 时省略）"
+              },
+              "action": {
+                "type": "string",
+                "description": "ready=查询就绪与等待原因；claim=只领取就绪任务；其余动作传 id",
+                "enum": [
+                  "ready",
+                  "claim",
+                  "start",
+                  "heartbeat",
+                  "progress",
+                  "succeed",
+                  "fail",
+                  "cancel",
+                  "retry",
+                  "interrupt",
+                  "update"
+                ]
+              },
+              "lease_id": {
+                "type": "string",
+                "description": "受依赖/稳定键约束的执行任务更新时，回传 start/claim 的 task.leaseId"
+              },
+              "owner": {
+                "type": "string",
+                "description": "负责人"
+              },
+              "progress": {
+                "type": "number",
+                "description": "进度 0-100"
+              },
+              "result": {
+                "type": "string",
+                "description": "结果摘要"
+              },
+              "error": {
+                "type": "string",
+                "description": "失败/中断原因"
+              },
+              "artifacts": {
+                "type": "array",
+                "description": "产物路径列表",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "note": {
+                "type": "string",
+                "description": "操作注记"
+              }
+            },
+            "required": [
+              "workspace",
+              "action"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "type": "model/usage",
+      "seq": 36,
+      "time": 1791474462151,
+      "usage": {
+        "inputTokens": 1959,
+        "outputTokens": 290,
+        "cacheReadTokens": 21504,
+        "cacheWriteTokens": 0,
+        "totalTokens": 23753
+      }
+    },
+    {
+      "type": "tool/call",
+      "seq": 37,
+      "time": 1791474462163,
+      "name": "operation_task",
+      "arguments": "{\"workspace\": \".\", \"action\": \"ready\"}"
+    },
+    {
+      "type": "tool/result",
+      "seq": 38,
+      "time": 1791474462169,
+      "isError": true,
+      "content": [
+        "Error: task_policy_missing：先调用redteam_task设置模式和任务预算，再执行目标操作。"
+      ]
+    },
+    {
+      "type": "model/usage",
+      "seq": 41,
+      "time": 1791474463875,
+      "usage": {
+        "inputTokens": 235,
+        "outputTokens": 107,
+        "cacheReadTokens": 23552,
+        "cacheWriteTokens": 0,
+        "totalTokens": 23894
+      }
+    },
+    {
+      "type": "tool/call",
+      "seq": 42,
+      "time": 1791474463887,
+      "name": "operation_task",
+      "arguments": "{\"action\": \"start\", \"id\": \"i2\", \"workspace\": \".\"}"
+    },
+    {
+      "type": "tool/result",
+      "seq": 43,
+      "time": 1791474463893,
+      "isError": true,
+      "content": [
+        "Error: task_policy_missing：先调用redteam_task设置模式和任务预算，再执行目标操作。"
+      ]
+    },
+    {
+      "type": "model/usage",
+      "seq": 46,
+      "time": 1791474469257,
+      "usage": {
+        "inputTokens": 248,
+        "outputTokens": 570,
+        "cacheReadTokens": 23680,
+        "cacheWriteTokens": 0,
+        "totalTokens": 24498
+      }
+    },
+    {
+      "type": "turn/end",
+      "seq": 48,
+      "time": 1791474469270,
+      "reason": {
+        "kind": "completed"
+      }
+    },
+    {
+      "type": "request/header",
+      "seq": 56,
+      "time": 1791474626305,
+      "tools": [
+        "ask_user_question",
+        "attack_plan",
+        "create_goal",
+        "edit",
+        "exit_plan_mode",
+        "gates_list",
+        "get_goal",
+        "glob",
+        "grep",
+        "job_kill",
+        "job_list",
+        "job_output",
+        "knowledge_list",
+        "knowledge_read",
+        "knowledge_search",
+        "load_workspace_dependencies",
+        "oob_probe",
+        "present",
+        "pwsh",
+        "read",
+        "read_image",
+        "redteam_checks",
+        "redteam_context",
+        "redteam_delivery",
+        "redteam_execution",
+        "redteam_finding_delete",
+        "redteam_finding_register",
+        "redteam_finding_update",
+        "redteam_method",
+        "redteam_research",
+        "redteam_task",
+        "saker_method",
+        "skill",
+        "stage_gate",
+        "todo_write",
+        "tool_pack",
+        "update_goal",
+        "web_fetch",
+        "web_search",
+        "write",
+        "zday_pattern"
+      ],
+      "taskSchemas": []
+    },
+    {
+      "type": "model/usage",
+      "seq": 58,
+      "time": 1791474630219,
+      "usage": {
+        "inputTokens": 2299,
+        "outputTokens": 66,
+        "cacheReadTokens": 21504,
+        "cacheWriteTokens": 0,
+        "totalTokens": 23869
+      }
+    },
+    {
+      "type": "tool/call",
+      "seq": 59,
+      "time": 1791474630227,
+      "name": "tool_pack",
+      "arguments": "{\"action\": \"load\", \"pack\": \"task-workflow\"}"
+    },
+    {
+      "type": "tool/result",
+      "seq": 60,
+      "time": 1791474630249,
+      "isError": false,
+      "content": [
+        "工具包 task-workflow：已加载"
+      ]
+    },
+    {
+      "type": "request/header",
+      "seq": 63,
+      "time": 1791474630370,
+      "tools": [
+        "ask_user_question",
+        "attack_plan",
+        "create_goal",
+        "edit",
+        "exit_plan_mode",
+        "gates_list",
+        "get_goal",
+        "glob",
+        "grep",
+        "job_kill",
+        "job_list",
+        "job_output",
+        "knowledge_list",
+        "knowledge_read",
+        "knowledge_search",
+        "load_workspace_dependencies",
+        "oob_probe",
+        "operation_conclude",
+        "operation_constraints",
+        "operation_goal",
+        "operation_intent",
+        "operation_progress",
+        "operation_scope",
+        "operation_task",
+        "present",
+        "pwsh",
+        "read",
+        "read_image",
+        "redteam_checks",
+        "redteam_context",
+        "redteam_delivery",
+        "redteam_execution",
+        "redteam_finding_delete",
+        "redteam_finding_register",
+        "redteam_finding_update",
+        "redteam_method",
+        "redteam_research",
+        "redteam_task",
+        "saker_method",
+        "skill",
+        "stage_gate",
+        "todo_write",
+        "tool_pack",
+        "update_goal",
+        "web_fetch",
+        "web_search",
+        "write",
+        "zday_pattern"
+      ],
+      "taskSchemas": [
+        {
+          "name": "operation_intent",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "workspace": {
+                "type": "string",
+                "description": "Task workspace root"
+              },
+              "summary": {
+                "type": "string",
+                "description": "一句话方向（做什么、追什么线索）≤200 字符"
+              },
+              "anchor_kind": {
+                "type": "string",
+                "description": "锚点类型（boot=开局豁免，其余须带 anchor_ref）",
+                "enum": [
+                  "boot",
+                  "criterion",
+                  "scope",
+                  "finding",
+                  "chain"
+                ]
+              },
+              "anchor_ref": {
+                "type": "string",
+                "description": "锚点 id（boot 省略；criterion/scope/finding/chain 必填）"
+              },
+              "note": {
+                "type": "string",
+                "description": "备注（派单对象/预期产出等 ≤300 字符）"
+              },
+              "owner": {
+                "type": "string",
+                "description": "负责人（可选；填了就建立执行状态）"
+              },
+              "max_attempts": {
+                "type": "number",
+                "description": "最大尝试次数（1-20，默认 1）"
+              },
+              "stage": {
+                "type": "string",
+                "description": "进度阶段（内部值，如 S4/S5）"
+              },
+              "bucket_id": {
+                "type": "string",
+                "description": "资产组 id（与 fingerprint-buckets.json 对齐）"
+              },
+              "target_ids": {
+                "type": "string",
+                "description": "覆盖资产 id，逗号/换行分隔"
+              },
+              "reuse_score": {
+                "type": "number",
+                "description": "优先分（同一条漏洞可复用的程度）"
+              },
+              "parent_task_id": {
+                "type": "string",
+                "description": "父任务 id（用于两级子代理任务图）"
+              },
+              "task_key": {
+                "type": "string",
+                "description": "本会话内稳定键；同定义重复登记返回原任务，改变定义须新键"
+              },
+              "depends_on": {
+                "type": "array",
+                "description": "前置执行任务 id；未成功则不能领取/启动",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "required_artifacts": {
+                "type": "array",
+                "description": "需核对的前置产物：taskId、工作区相对 path、sha256；不等同于漏洞语义验证",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "taskId": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "sha256": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "taskId",
+                    "path",
+                    "sha256"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "workspace",
+              "summary",
+              "anchor_kind"
+            ]
+          }
+        },
+        {
+          "name": "operation_task",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "workspace": {
+                "type": "string",
+                "description": "Task workspace root"
+              },
+              "id": {
+                "type": "string",
+                "description": "方向 id（如 i1；action=claim 时省略）"
+              },
+              "action": {
+                "type": "string",
+                "description": "ready=查询就绪与等待原因；claim=只领取就绪任务；其余动作传 id",
+                "enum": [
+                  "ready",
+                  "claim",
+                  "start",
+                  "heartbeat",
+                  "progress",
+                  "succeed",
+                  "fail",
+                  "cancel",
+                  "retry",
+                  "interrupt",
+                  "update"
+                ]
+              },
+              "lease_id": {
+                "type": "string",
+                "description": "受依赖/稳定键约束的执行任务更新时，回传 start/claim 的 task.leaseId"
+              },
+              "owner": {
+                "type": "string",
+                "description": "负责人"
+              },
+              "progress": {
+                "type": "number",
+                "description": "进度 0-100"
+              },
+              "result": {
+                "type": "string",
+                "description": "结果摘要"
+              },
+              "error": {
+                "type": "string",
+                "description": "失败/中断原因"
+              },
+              "artifacts": {
+                "type": "array",
+                "description": "产物路径列表",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "note": {
+                "type": "string",
+                "description": "操作注记"
+              }
+            },
+            "required": [
+              "workspace",
+              "action"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "type": "model/usage",
+      "seq": 65,
+      "time": 1791474633194,
+      "usage": {
+        "inputTokens": 1324,
+        "outputTokens": 54,
+        "cacheReadTokens": 24448,
+        "cacheWriteTokens": 0,
+        "totalTokens": 25826
+      }
+    },
+    {
+      "type": "tool/call",
+      "seq": 66,
+      "time": 1791474633206,
+      "name": "operation_task",
+      "arguments": "{\"action\": \"ready\", \"workspace\": \".\"}"
+    },
+    {
+      "type": "tool/result",
+      "seq": 67,
+      "time": 1791474633219,
+      "isError": false,
+      "content": [
+        "[{\"id\":\"i1\",\"summary\":\"核对本地身份练习资料\",\"state\":\"queued\",\"ready\":true,\"blockedReason\":\"\"},{\"id\":\"i2\",\"summary\":\"使用已核对的练习资料继续验证\",\"state\":\"queued\",\"ready\":false,\"blockedReason\":\"等待前置任务 i1（queued）\"}]"
+      ]
+    },
+    {
+      "type": "model/usage",
+      "seq": 70,
+      "time": 1791474636509,
+      "usage": {
+        "inputTokens": 179,
+        "outputTokens": 76,
+        "cacheReadTokens": 25728,
+        "cacheWriteTokens": 0,
+        "totalTokens": 25983
+      }
+    },
+    {
+      "type": "tool/call",
+      "seq": 71,
+      "time": 1791474636521,
+      "name": "operation_task",
+      "arguments": "{\"action\": \"start\", \"id\": \"i2\", \"workspace\": \".\"}"
+    },
+    {
+      "type": "tool/result",
+      "seq": 72,
+      "time": 1791474636533,
+      "isError": false,
+      "content": [
+        "任务操作失败：i2：等待前置任务 i1（queued）"
+      ]
+    },
+    {
+      "type": "model/usage",
+      "seq": 75,
+      "time": 1791474640295,
+      "usage": {
+        "inputTokens": 155,
+        "outputTokens": 551,
+        "cacheReadTokens": 25856,
+        "cacheWriteTokens": 0,
+        "totalTokens": 26562
+      }
+    },
+    {
+      "type": "turn/end",
+      "seq": 77,
+      "time": 1791474640301,
+      "reason": {
+        "kind": "completed"
+      }
+    },
+    {
+      "type": "model/usage",
+      "seq": 84,
+      "time": 1791474706772,
+      "usage": {
+        "inputTokens": 1340,
+        "outputTokens": 79,
+        "cacheReadTokens": 26496,
+        "cacheWriteTokens": 0,
+        "totalTokens": 27915
+      }
+    },
+    {
+      "type": "tool/call",
+      "seq": 85,
+      "time": 1791474706776,
+      "name": "operation_task",
+      "arguments": "{\"action\": \"start\", \"id\": \"i1\", \"workspace\": \".\"}"
+    },
+    {
+      "type": "tool/result",
+      "seq": 86,
+      "time": 1791474706798,
+      "isError": false,
+      "content": [
+        "任务 i1：running 0% attempts 1/2｜lease_id=b27cbafa-5fa5-4b18-8823-45f914c0258a"
+      ]
+    },
+    {
+      "type": "model/usage",
+      "seq": 89,
+      "time": 1791474709333,
+      "usage": {
+        "inputTokens": 190,
+        "outputTokens": 39,
+        "cacheReadTokens": 27776,
+        "cacheWriteTokens": 0,
+        "totalTokens": 28005
+      }
+    },
+    {
+      "type": "tool/call",
+      "seq": 90,
+      "time": 1791474709340,
+      "name": "read",
+      "arguments": "{\"file_path\": \"identity.json\"}"
+    },
+    {
+      "type": "tool/result",
+      "seq": 91,
+      "time": 1791474709355,
+      "isError": false,
+      "content": [
+        "<path>E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-dependency-desktop-20261008\\identity.json</path>\n<type>file</type>\n<content>\n1: {\"fixture\":\"local-only\",\"ready\":true}\n\n(End of file - total 1 lines)\n</content>"
+      ]
+    },
+    {
+      "type": "model/usage",
+      "seq": 94,
+      "time": 1791474712500,
+      "usage": {
+        "inputTokens": 183,
+        "outputTokens": 177,
+        "cacheReadTokens": 27904,
+        "cacheWriteTokens": 0,
+        "totalTokens": 28264
+      }
+    },
+    {
+      "type": "tool/call",
+      "seq": 95,
+      "time": 1791474712512,
+      "name": "operation_task",
+      "arguments": "{\"action\": \"succeed\", \"id\": \"i1\", \"workspace\": \".\", \"lease_id\": \"b27cbafa-5fa5-4b18-8823-45f914c0258a\", \"artifacts\": [\"identity.json\"], \"result\": \"已读取本地合成资料 identity.json（内容 {\\\"fixture\\\":\\\"local-only\\\",\\\"ready\\\":true}），仅本地合成数据，无真实身份信息。\"}"
+    },
+    {
+      "type": "tool/result",
+      "seq": 96,
+      "time": 1791474712524,
+      "isError": false,
+      "content": [
+        "任务 i1：succeeded 100% attempts 1/2｜lease_id=b27cbafa-5fa5-4b18-8823-45f914c0258a"
+      ]
+    },
+    {
+      "type": "model/usage",
+      "seq": 99,
+      "time": 1791474714087,
+      "usage": {
+        "inputTokens": 156,
+        "outputTokens": 54,
+        "cacheReadTokens": 28160,
+        "cacheWriteTokens": 0,
+        "totalTokens": 28370
+      }
+    },
+    {
+      "type": "tool/call",
+      "seq": 100,
+      "time": 1791474714092,
+      "name": "operation_task",
+      "arguments": "{\"action\": \"ready\", \"workspace\": \".\"}"
+    },
+    {
+      "type": "tool/result",
+      "seq": 101,
+      "time": 1791474714102,
+      "isError": false,
+      "content": [
+        "[{\"id\":\"i1\",\"summary\":\"核对本地身份练习资料\",\"state\":\"succeeded\",\"ready\":false,\"blockedReason\":\"任务状态为 succeeded\"},{\"id\":\"i2\",\"summary\":\"使用已核对的练习资料继续验证\",\"state\":\"queued\",\"ready\":true,\"blockedReason\":\"\"}]"
+      ]
+    },
+    {
+      "type": "model/usage",
+      "seq": 104,
+      "time": 1791474720231,
+      "usage": {
+        "inputTokens": 158,
+        "outputTokens": 73,
+        "cacheReadTokens": 28288,
+        "cacheWriteTokens": 0,
+        "totalTokens": 28519
+      }
+    },
+    {
+      "type": "tool/call",
+      "seq": 105,
+      "time": 1791474720236,
+      "name": "operation_task",
+      "arguments": "{\"action\": \"claim\", \"owner\": \"httpx_probe\", \"workspace\": \".\"}"
+    },
+    {
+      "type": "tool/result",
+      "seq": 106,
+      "time": 1791474720249,
+      "isError": false,
+      "content": [
+        "任务 i2：running 0% attempts 1/1｜lease_id=38861932-d15b-486c-b4fb-d9c1d2beaa74"
+      ]
+    },
+    {
+      "type": "model/usage",
+      "seq": 109,
+      "time": 1791474724545,
+      "usage": {
+        "inputTokens": 153,
+        "outputTokens": 133,
+        "cacheReadTokens": 28416,
+        "cacheWriteTokens": 0,
+        "totalTokens": 28702
+      }
+    },
+    {
+      "type": "tool/call",
+      "seq": 110,
+      "time": 1791474724549,
+      "name": "operation_task",
+      "arguments": "{\"action\": \"succeed\", \"id\": \"i2\", \"lease_id\": \"38861932-d15b-486c-b4fb-d9c1d2beaa74\", \"result\": \"依赖队列本地验收通过，不代表漏洞确认\", \"workspace\": \".\"}"
+    },
+    {
+      "type": "tool/result",
+      "seq": 111,
+      "time": 1791474724563,
+      "isError": false,
+      "content": [
+        "任务 i2：succeeded 100% attempts 1/1｜lease_id=38861932-d15b-486c-b4fb-d9c1d2beaa74"
+      ]
+    },
+    {
+      "type": "model/usage",
+      "seq": 114,
+      "time": 1791474726050,
+      "usage": {
+        "inputTokens": 209,
+        "outputTokens": 54,
+        "cacheReadTokens": 28544,
+        "cacheWriteTokens": 0,
+        "totalTokens": 28807
+      }
+    },
+    {
+      "type": "tool/call",
+      "seq": 115,
+      "time": 1791474726062,
+      "name": "operation_task",
+      "arguments": "{\"action\": \"ready\", \"workspace\": \".\"}"
+    },
+    {
+      "type": "tool/result",
+      "seq": 116,
+      "time": 1791474726073,
+      "isError": false,
+      "content": [
+        "[{\"id\":\"i1\",\"summary\":\"核对本地身份练习资料\",\"state\":\"succeeded\",\"ready\":false,\"blockedReason\":\"任务状态为 succeeded\"},{\"id\":\"i2\",\"summary\":\"使用已核对的练习资料继续验证\",\"state\":\"succeeded\",\"ready\":false,\"blockedReason\":\"任务状态为 succeeded\"}]"
+      ]
+    },
+    {
+      "type": "model/usage",
+      "seq": 119,
+      "time": 1791474731198,
+      "usage": {
+        "inputTokens": 215,
+        "outputTokens": 949,
+        "cacheReadTokens": 28672,
+        "cacheWriteTokens": 0,
+        "totalTokens": 29836
+      }
+    },
+    {
+      "type": "turn/end",
+      "seq": 121,
+      "time": 1791474731203,
+      "reason": {
+        "kind": "completed"
+      }
+    }
+  ],
+  "finalTasks": [
+    {
+      "id": "i1",
+      "task": {
+        "state": "succeeded",
+        "owner": "fixture_prepare",
+        "leaseId": "b27cbafa-5fa5-4b18-8823-45f914c0258a",
+        "attempts": 1,
+        "maxAttempts": 2,
+        "progress": 100,
+        "error": "",
+        "result": "已读取本地合成资料 identity.json（内容 {\"fixture\":\"local-only\",\"ready\":true}），仅本地合成数据，无真实身份信息。",
+        "artifacts": [
+          "identity.json"
+        ],
+        "conflicts": [],
+        "startedAt": "2026-10-08T15:51:46.787Z",
+        "updatedAt": "2026-10-08T15:51:52.522Z",
+        "heartbeatAt": "2026-10-08T15:51:52.522Z"
+      }
+    },
+    {
+      "id": "i2",
+      "dependsOn": [
+        "i1"
+      ],
+      "requiredArtifacts": [
+        {
+          "taskId": "i1",
+          "path": "identity.json",
+          "sha256": "74033309fbcd7e5dfabc1cff0ecdd48d8bdef5ff411862209a0587779de47efe"
+        }
+      ],
+      "task": {
+        "state": "succeeded",
+        "owner": "httpx_probe",
+        "leaseId": "38861932-d15b-486c-b4fb-d9c1d2beaa74",
+        "attempts": 1,
+        "maxAttempts": 1,
+        "progress": 100,
+        "error": "",
+        "result": "依赖队列本地验收通过，不代表漏洞确认",
+        "artifacts": [],
+        "conflicts": [],
+        "startedAt": "2026-10-08T15:52:00.248Z",
+        "updatedAt": "2026-10-08T15:52:04.561Z",
+        "heartbeatAt": "2026-10-08T15:52:04.561Z"
+      }
+    }
+  ]
+}

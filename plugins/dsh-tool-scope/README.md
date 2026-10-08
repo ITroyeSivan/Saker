@@ -6,6 +6,7 @@
 
 | 工具包 | 何时加载 |
 |---|---|
+| task-workflow | 多步依赖、持久队列或中断恢复；含 operation_intent/task 等已有账本工具 |
 | asset-discovery | 只给URL时做有限识别，或明确约定的少量资产查询 |
 | nday | 查相关公开漏洞、核对组件条件、维护情报源 |
 | active-scan | 已选定范围和检查方法，需要相应扫描器 |

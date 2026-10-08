@@ -166,10 +166,10 @@ export function apply(ctx, config = {}) {
   if (enable && packs.length) {
     ctx.tools.register(defineTool({
       name: 'tool_pack',
-      description: '按需加载工具包，action=list/load/unload。pack=asset-discovery 用于有限目标识别和资产查询；nday 用于公开漏洞与情报源；active-scan 用于明确假设的扫描。加载不扩大权限或范围。',
+      description: '按需加载工具包，action=list/load/unload。task-workflow 提供依赖任务登记、就绪查询和恢复；asset-discovery 用于有限目标识别；nday 用于公开漏洞与情报源；active-scan 用于明确假设的扫描。加载不扩大权限或范围。',
       parameters: {
         action: { type: 'string', enum: ['list', 'load', 'unload'], required: true, description: 'list/load/unload' },
-        pack: { type: 'string', description: 'asset-discovery / nday / active-scan / webshell' },
+        pack: { type: 'string', description: 'task-workflow / asset-discovery / nday / active-scan / webshell' },
       },
       output: {
         schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },

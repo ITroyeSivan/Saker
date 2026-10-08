@@ -22,8 +22,10 @@ const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
 
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
+import { TaskBlockedError, normalizeTaskDependencies, assertTaskDependencies, taskReadiness } from "./task-dependencies.mjs";
 import { defineTool } from "@deepseek-ai/dsh-tools";
-import { ROUTE_PATH as PROJECT_ROUTE, createProjectHandler } from "./project-channel.mjs";
+import { registerProjectRpc } from "./project-channel.mjs";
 
 //#region gate schema
 
@@ -839,6 +841,7 @@ function taskOf(intent) {
 	return {
 		state: TASK_STATES.includes(t.state) ? t.state : "queued",
 		owner: cleanLine(t.owner, 80),
+		leaseId: cleanLine(t.leaseId, 80),
 		attempts: Math.max(0, Number(t.attempts) || 0),
 		maxAttempts: Math.max(1, Math.min(20, Number(t.maxAttempts) || 1)),
 		progress: Math.max(0, Math.min(100, Number(t.progress) || 0)),
@@ -945,15 +948,23 @@ export function registerIntent(workspace, {
 	targetIds = [],
 	reuseScore = 0,
 	parentTaskId = "",
+	taskKey = "",
+	dependsOn = [],
+	requiredArtifacts = [],
 }, resolvers = {}) {
 	const s = cleanLine(summary, 200);
 	if (!s) throw new Error("summary required（一句话方向，≤200 字符）");
+	if (typeof taskKey !== "string" || taskKey.length > 120) throw new Error("task_key 必须为至多 120 字符的字符串");
+	const key = taskKey.trim();
+	const dependencies = normalizeTaskDependencies({ dependsOn, requiredArtifacts });
 	const bad = validateAnchor(readOperationState(fs, workspace), { kind: anchorKind, ref: anchorRef }, resolvers, sessionId, mode);
 	if (bad) throw new Error(bad);
 	// id 按总数递增、且多路会同时登记 → 必须在锁内取号，否则会出现重复 id
+	let registeredId = "";
+	let reused = false;
 	const st = mutateStateLocked(fs, workspace, (cur) => {
 		const intents = normalizeIntents(cur);
-		const id = `i${intents.length + 1}`;
+		const id = `i${Math.max(0, ...intents.map((item) => Number(item.id.slice(1)) || 0)) + 1}`;
 		const now = new Date().toISOString();
 		const item = {
 			id,
@@ -972,7 +983,9 @@ export function registerIntent(workspace, {
 		}
 		if (Number.isFinite(Number(reuseScore)) && Number(reuseScore) !== 0) item.reuseScore = Number(reuseScore);
 		if (cleanLine(parentTaskId, 80)) item.parentTaskId = cleanLine(parentTaskId, 80);
-		const hasTask = cleanLine(owner, 80) || Number(maxAttempts) > 1;
+		if (key) item.taskKey = key;
+		if (dependencies.dependsOn.length) Object.assign(item, dependencies);
+		const hasTask = key || dependencies.dependsOn.length || cleanLine(owner, 80) || Number(maxAttempts) > 1;
 		if (hasTask) {
 			item.task = {
 				state: "queued",
@@ -988,12 +1001,23 @@ export function registerIntent(workspace, {
 				heartbeatAt: now,
 			};
 		}
+		assertTaskDependencies(cur, item);
+		const definition = (entry) => JSON.stringify({ summary: entry.summary, anchor: entry.anchor, mode: entry.mode, stage: entry.stage || "", bucketId: entry.bucketId || "", targetIds: [...(entry.targetIds || [])].sort(), parentTaskId: entry.parentTaskId || "", owner: entry.task?.owner || "", maxAttempts: entry.task?.maxAttempts || 1, ...normalizeTaskDependencies(entry) });
+		if (key) item.taskDefinition = definition(item);
+		const existing = key && intents.find((entry) => entry.taskKey === key && entry.sessionId === item.sessionId);
+		if (existing) {
+			if ((existing.taskDefinition || definition(existing)) !== item.taskDefinition) throw new Error(`task_key ${key} 已存在且定义不同；请复用 ${existing.id} 或选择新键`);
+			registeredId = existing.id;
+			reused = true;
+			return cur;
+		}
+		registeredId = id;
 		intents.push(item);
 		cur.intents = intents;
 		return cur;
 	});
 	if (st === null) throw new Error("operation-state.json 不存在——先 operation_goal 登记目标契约");
-	return intentSummary(st);
+	return { ...intentSummary(st), id: registeredId, reused };
 }
 
 /** 意图摘要。 */
@@ -1004,7 +1028,7 @@ export function intentSummary(st) {
 }
 
 /** Transition the execution state of an intent task. */
-export function taskTransition(workspace, { id, action, owner = "", progress, result = "", error = "", artifacts, note = "" }) {
+export function taskTransition(workspace, { id, action, owner = "", progress, result = "", error = "", artifacts, note = "", leaseId = "" }) {
 	const taskId = cleanLine(id, 40);
 	const act = cleanLine(action, 20);
 	if (!taskId) throw new Error("id required");
@@ -1019,13 +1043,18 @@ export function taskTransition(workspace, { id, action, owner = "", progress, re
 		if (!intent) throw new Error(`未知工作方向 id：${taskId}`);
 		if (!intent.task) throw new Error(`工作方向 ${taskId} 没有登记执行状态`);
 		const current = taskOf(intent);
+		const guarded = Boolean(intent.taskKey || intent.dependsOn?.length);
+		if (guarded && current.leaseId && ["heartbeat", "progress", "succeed", "fail", "update", "interrupt"].includes(act) && leaseId !== current.leaseId) throw new TaskBlockedError(`任务 ${taskId} 执行租约不匹配；使用 start/claim 返回的 lease_id`);
 		const now = new Date().toISOString();
 		const next = { ...current, updatedAt: now };
 		const closed = new Set(["succeeded", "failed", "cancelled"]);
 		const running = new Set(["running"]);
 
 		if (act === "start") {
-			if (current.state !== "queued") throw new Error(`任务 ${taskId} 状态 ${current.state} 不能 start`);
+			if (current.state !== "queued") throw new TaskBlockedError(`任务 ${taskId} 状态 ${current.state} 不能 start`);
+			const readiness = taskReadiness(cur, intent, workspace);
+			if (!readiness.ready) throw new TaskBlockedError(`${taskId}：${readiness.blockedReason}`);
+			next.leaseId = randomUUID();
 			next.attempts = current.attempts + 1;
 			if (next.attempts > current.maxAttempts) throw new Error(`任务 ${taskId} 尝试次数已达上限 ${current.maxAttempts}`);
 			next.state = "running";
@@ -1062,6 +1091,7 @@ export function taskTransition(workspace, { id, action, owner = "", progress, re
 			}
 		}
 		if (act === "succeed") {
+			if (guarded && current.state === "queued") throw new TaskBlockedError(`任务 ${taskId} 必须先 start/claim，不能跳过前置检查`);
 			if (!running.has(current.state) && current.state !== "queued") throw new Error(`任务 ${taskId} 状态 ${current.state} 不能 succeed`);
 			next.state = "succeeded";
 			next.progress = 100;
@@ -1108,7 +1138,7 @@ export function taskTransition(workspace, { id, action, owner = "", progress, re
 
 /** Atomically claim the oldest queued task in a workspace. Used by sibling
  * agents that share one project state and must not execute the same task twice. */
-export function taskClaim(workspace, { owner = "" } = {}) {
+export function taskClaim(workspace, { owner = "", sessionId = "" } = {}) {
 	const claimant = cleanLine(owner, 80);
 	let claimedId = "";
 	const st = mutateStateLocked(fs, workspace, (cur) => {
@@ -1117,6 +1147,8 @@ export function taskClaim(workspace, { owner = "" } = {}) {
 		const candidates = intents
 			.filter((intent) => {
 				if (intent.status !== "open" || !intent.task || intent.task.state !== "queued") return false;
+				if (sessionId && intent.sessionId && intent.sessionId !== sessionId) return false;
+				if (!taskReadiness(cur, intent, workspace).ready) return false;
 				if (!claimant) return true;
 				return !cleanLine(intent.task.owner, 80) || ownerMatches(intent.task.owner, new Set([claimant]));
 			})
@@ -1130,6 +1162,7 @@ export function taskClaim(workspace, { owner = "" } = {}) {
 		intent.task = {
 			...current,
 			state: "running",
+			leaseId: randomUUID(),
 			owner: claimant || current.owner,
 			attempts: current.attempts + 1,
 			startedAt: now,
@@ -1208,13 +1241,35 @@ export function autoTaskForTool(st, { sessionId = "", toolName = "", states = ["
 
 /** Start the queued task owned by a tool; returns null when no unambiguous binding exists. */
 export function startTaskForTool(workspace, { sessionId = "", toolName = "" } = {}) {
-	const intent = autoTaskForTool(readOperationState(fs, workspace), { sessionId, toolName });
+	const state = readOperationState(fs, workspace);
+	const intent = autoTaskForTool(state, { sessionId, toolName });
+	if (!intent) {
+		const guarded = normalizeIntents(state).filter((item) => item.status === "open" && item.task?.state === "queued" && (item.taskKey || item.dependsOn?.length) && (!sessionId || !item.sessionId || item.sessionId === sessionId) && ownerMatches(item.task.owner, new Set(taskToolAliases(toolName))));
+		if (guarded.length) throw new TaskBlockedError("多个受依赖约束的任务匹配此工具；先明确任务并领取，不能绕过任务执行");
+	}
 	if (!intent) return null;
 	return taskTransition(workspace, { id: intent.id, action: "start" });
 }
 
+/** Native pre-execution gate also covers subagent/MCP tools without a tracked wrapper. */
+export function buildTaskReadinessGuard() {
+	return (exec) => {
+		const workspace = exec?.agent?.session?.header?.cwd;
+		if (!workspace || !exec?.name || exec.name.startsWith("operation_")) return undefined;
+		const sessionId = String(exec.agent.session.id || "");
+		const state = readOperationState(fs, workspace);
+		const aliases = new Set(taskToolAliases(exec.name));
+		const matching = normalizeIntents(state).filter((item) => item.status === "open" && (item.taskKey || item.dependsOn?.length) && ["queued", "running"].includes(item.task?.state) && (!item.sessionId || !sessionId || item.sessionId === sessionId) && ownerMatches(item.task.owner, aliases));
+		if (!matching.length) return undefined;
+		if (matching.length > 1) return { reason: "多个受约束任务匹配此工具；请为任务指定不同负责人，避免重复执行" };
+		const item = matching[0];
+		const readiness = taskReadiness(state, { ...item, task: { ...item.task, state: "queued", attempts: 0 } }, workspace);
+		return readiness.ready ? undefined : { reason: `${item.id}：${readiness.blockedReason}` };
+	};
+}
+
 /** Close a task started by startTaskForTool according to the tool's own result. */
-export function finishTaskForTool(workspace, { id, ok = true, result = "", error = "", artifacts } = {}) {
+export function finishTaskForTool(workspace, { id, ok = true, result = "", error = "", artifacts, leaseId = "" } = {}) {
 	const taskId = cleanLine(id, 40);
 	if (!taskId) return null;
 	return taskTransition(workspace, {
@@ -1223,6 +1278,7 @@ export function finishTaskForTool(workspace, { id, ok = true, result = "", error
 		result,
 		error: error || (!ok ? "tool failed" : ""),
 		artifacts,
+		leaseId,
 	});
 }
 
@@ -1234,10 +1290,13 @@ export function finishTaskForTool(workspace, { id, ok = true, result = "", error
 export async function runTrackedTask(workspace, { sessionId = "", toolName = "" } = {}, run) {
 	let taskId = "";
 	let trackingError = "";
+	let leaseId = "";
 	try {
 		const started = startTaskForTool(workspace, { sessionId, toolName });
 		taskId = started?.id ?? "";
+		leaseId = started?.task?.leaseId ?? "";
 	} catch (error) {
+		if (error?.code === "TASK_NOT_READY") throw error;
 		trackingError = error?.message ?? String(error);
 	}
 
@@ -1246,7 +1305,7 @@ export async function runTrackedTask(workspace, { sessionId = "", toolName = "" 
 		value = await run();
 	} catch (error) {
 		if (taskId) {
-			try { finishTaskForTool(workspace, { id: taskId, ok: false, error: error?.message ?? String(error) }); }
+			try { finishTaskForTool(workspace, { id: taskId, leaseId, ok: false, error: error?.message ?? String(error) }); }
 			catch { /* task bookkeeping never replaces the tool error */ }
 		}
 		throw error;
@@ -1257,6 +1316,7 @@ export async function runTrackedTask(workspace, { sessionId = "", toolName = "" 
 		try {
 			finishTaskForTool(workspace, {
 				id: taskId,
+				leaseId,
 				ok,
 				result: ok ? String(value?.summaryText ?? value?.summary ?? "completed") : "",
 				error: ok ? "" : String(value?.error ?? "tool failed"),
@@ -1343,16 +1403,17 @@ export function finishSubagentTask(workspace, { sessionId = "", provider = "", s
 	try {
 		// 没经过 start（例如宿主没发 start 事件）时先补 running，让 attempts 与时间线完整
 		if (current.state === "queued") taskTransition(workspace, { id, action: "start" });
+		const leaseId = taskOf(normalizeIntents(readOperationState(fs, workspace)).find((item) => item.id === id))?.leaseId || "";
 		if (stopReason === "completed") {
-			return finishTaskForTool(workspace, { id, ok: true, result: text || "subagent 已完成（无输出）" });
+			return finishTaskForTool(workspace, { id, leaseId, ok: true, result: text || "subagent 已完成（无输出）" });
 		}
 		if (stopReason === "aborted") {
 			// 还在跑 → interrupted（可 retry）；已经收口了还收到 aborted → 借 fail 分支记冲突，状态不变
 			return taskTransition(workspace, current.state === "running"
-				? { id, action: "interrupt", error: text || "subagent aborted" }
-				: { id, action: "fail", error: text || "subagent aborted" });
+				? { id, leaseId, action: "interrupt", error: text || "subagent aborted" }
+				: { id, leaseId, action: "fail", error: text || "subagent aborted" });
 		}
-		return finishTaskForTool(workspace, { id, ok: false, error: text || `subagent 失败（${cleanLine(stopReason, 40) || "unknown"}）` });
+		return finishTaskForTool(workspace, { id, leaseId, ok: false, error: text || `subagent 失败（${cleanLine(stopReason, 40) || "unknown"}）` });
 	} catch {
 		return null;
 	}
@@ -1660,19 +1721,8 @@ export function deriveScopeDraft(texts, mode = "") {
 //#endregion
 
 function apply(ctx) {
-	// 项目工作台 web 路由（只读 + 同源栅栏 + CSRF）。宿主没有 webServer（非 web 运行时）时静默跳过。
-	try {
-		if (ctx.webServer?.register) {
-			const trustedHosts = () => {
-				try { return ctx.webRuntime?.trustedHosts ?? []; } catch { return []; }
-			};
-			ctx.effect?.(() => ctx.webServer.register({
-				kind: "prefix",
-				path: PROJECT_ROUTE,
-				handler: createProjectHandler({ trustedHosts }),
-			}), "dsh-stage-gate: 项目工作台路由");
-		}
-	} catch { /* 路由注册失败不影响台账工具 */ }
+	ctx.tools.guard?.(buildTaskReadinessGuard());
+	ctx.inject?.(["connection"], (scope) => registerProjectRpc(scope, scope.connection));
 	// 子代理生命周期回收（P1-9）。
 	//
 	// ⚠️ 两个实测约束（2026-09-18，真宿主 mock 子代理）：
@@ -1869,7 +1919,10 @@ function apply(ctx) {
 			bucket_id: { type: "string", description: "资产组 id（与 fingerprint-buckets.json 对齐）" },
 			target_ids: { type: "string", description: "覆盖资产 id，逗号/换行分隔" },
 			reuse_score: { type: "number", description: "优先分（同一条漏洞可复用的程度）" },
-			parent_task_id: { type: "string", description: "父任务 id（用于两级子代理任务图）" }
+			parent_task_id: { type: "string", description: "父任务 id（用于两级子代理任务图）" },
+			task_key: { type: "string", description: "本会话内稳定键；同定义重复登记返回原任务，改变定义须新键" },
+			depends_on: { type: "array", items: { type: "string" }, description: "前置执行任务 id；未成功则不能领取/启动" },
+			required_artifacts: { type: "array", items: { type: "object", additionalProperties: false, properties: { taskId: { type: "string", required: true }, path: { type: "string", required: true }, sha256: { type: "string", required: true } } }, description: "需核对的前置产物：taskId、工作区相对 path、sha256；不等同于漏洞语义验证" }
 		},
 		output: {
 			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
@@ -1901,10 +1954,13 @@ function apply(ctx) {
 					targetIds,
 					reuseScore: args.reuse_score,
 					parentTaskId: args.parent_task_id,
+					taskKey: args.task_key,
+					dependsOn: args.depends_on,
+					requiredArtifacts: args.required_artifacts,
 					sessionId,
 					mode,
 				}, resolvers);
-				return { ok: true, id: `i${s.total}`, anchor: `${args.anchor_kind}${args.anchor_ref ? ":" + args.anchor_ref : ""}`, open: s.open, total: s.total };
+				return { ok: true, id: s.id, reused: s.reused, anchor: `${args.anchor_kind}${args.anchor_ref ? ":" + args.anchor_ref : ""}`, open: s.open, total: s.total };
 			} catch (e) {
 				return { ok: false, error: e?.message ?? String(e) };
 			}
@@ -1916,7 +1972,8 @@ function apply(ctx) {
 		parameters: {
 			workspace: { type: "string", required: true, description: "Task workspace root" },
 		id: { type: "string", description: "方向 id（如 i1；action=claim 时省略）" },
-		action: { type: "string", required: true, enum: ["claim", "start", "heartbeat", "progress", "succeed", "fail", "cancel", "retry", "interrupt", "update"], description: "claim=领取下一条排队任务；其余动作传 id" },
+		action: { type: "string", required: true, enum: ["ready", "claim", "start", "heartbeat", "progress", "succeed", "fail", "cancel", "retry", "interrupt", "update"], description: "ready=查询就绪与等待原因；claim=只领取就绪任务；其余动作传 id" },
+			lease_id: { type: "string", description: "受依赖/稳定键约束的执行任务更新时，回传 start/claim 的 task.leaseId" },
 			owner: { type: "string", description: "负责人" },
 			progress: { type: "number", description: "进度 0-100" },
 			result: { type: "string", description: "结果摘要" },
@@ -1926,13 +1983,18 @@ function apply(ctx) {
 		},
 		output: {
 			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
-			render: (_args, v) => [{ type: "text", text: v.ok ? `任务 ${v.id}：${v.task.state} ${v.task.progress}% attempts ${v.task.attempts}/${v.task.maxAttempts}${v.task.error ? `｜${v.task.error}` : ""}` : `任务操作失败：${v.error}` }]
+			render: (_args, v) => [{ type: "text", text: v.ok ? (v.readyTasks ? JSON.stringify(v.readyTasks) : `任务 ${v.id}：${v.task.state} ${v.task.progress}% attempts ${v.task.attempts}/${v.task.maxAttempts}${v.task.error ? `｜${v.task.error}` : ""}${v.task.leaseId ? `｜lease_id=${v.task.leaseId}` : ""}`) : `任务操作失败：${v.error}` }]
 		},
 		execute(args, exec) {
 			try {
 				const workspace = resolveWorkspaceArg(args.workspace, exec);
-				if (args.action === "claim") return Promise.resolve({ ok: true, ...taskClaim(workspace, args) });
-				return Promise.resolve({ ok: true, ...taskTransition(workspace, args) });
+				const sessionId = String(exec?.agent?.session?.id || "");
+				const state = readOperationState(fs, workspace);
+				if (args.action === "ready") return Promise.resolve({ ok: true, readyTasks: normalizeIntents(state).filter((item) => item.task && (!sessionId || !item.sessionId || item.sessionId === sessionId)).map((item) => ({ id: item.id, summary: item.summary, state: item.task.state, ...taskReadiness(state, item, workspace) })) });
+				if (args.action === "claim") return Promise.resolve({ ok: true, ...taskClaim(workspace, { ...args, sessionId }) });
+				const item = normalizeIntents(state).find((entry) => entry.id === args.id);
+				if ((item?.taskKey || item?.dependsOn?.length) && sessionId && item.sessionId && item.sessionId !== sessionId) throw new TaskBlockedError("不能修改其他会话的受约束任务");
+				return Promise.resolve({ ok: true, ...taskTransition(workspace, { ...args, leaseId: args.lease_id }) });
 			} catch (e) {
 				return Promise.resolve({ ok: false, error: e?.message ?? String(e) });
 			}

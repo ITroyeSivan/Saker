@@ -13,27 +13,12 @@ var React = require("react");
 var useState = React.useState, useEffect = React.useEffect;
 
 var ROUTE = "/dsh-stage-gate-project";
-var csrfCache = {};
-function csrfOf(base) {
-	if (!csrfCache[base]) csrfCache[base] = fetch(base + "/csrf").then(function (r) { return r.json(); }).then(function (r) { return r && r.token ? r.token : ""; }).catch(function () { return ""; });
-	return csrfCache[base];
-}
-function postJson(tok, endpoint, payload) {
-	return fetch(ROUTE + "/" + endpoint, {
-		method: "POST",
-		headers: tok ? { "content-type": "application/json", "x-dsh-csrf": tok } : { "content-type": "application/json" },
-		body: JSON.stringify(payload || {})
-	});
-}
-function api(endpoint, payload) {
-	return csrfOf(ROUTE).then(function (tok) {
-		return postJson(tok, endpoint, payload).then(function (r) {
-			if (r.status === 403) {
-				delete csrfCache[ROUTE];
-				return csrfOf(ROUTE).then(function (tok2) { return postJson(tok2, endpoint, payload); }).then(function (r2) { return r2.json(); });
-			}
-			return r.json();
-		});
+function api(connection, endpoint, payload) {
+	if (!connection || !connection.rpc || typeof connection.rpc.call !== "function") return Promise.reject(new Error("项目工作台连接尚未就绪"));
+	return connection.rpc.call(ROUTE, endpoint, payload || {}).then(function (result) {
+		if (result && result.ok) return result.value;
+		var error = result && result.error;
+		return { ok: false, error: typeof error === "string" ? error : error && error.message || "项目工作台连接失败" };
 	});
 }
 
@@ -144,7 +129,7 @@ function ProgressDocumentTitle(props) {
 		}
 		function refreshSnapshot() {
 			if (!session || !session.cwd) { applyTitle(); return; }
-			api("status", { workspace: session.cwd }).then(function (result) {
+			api(props.connection, "status", { workspace: session.cwd }).then(function (result) {
 				if (!live) return;
 				latestSnapshot = result && result.ok ? result.snapshot : null;
 				applyTitle();
@@ -208,7 +193,7 @@ function ProjectWorkbench(props) {
 	function load() {
 		if (!workspace) { setState({ status: "error", data: null, error: "拿不到当前会话的工作区路径" }); return; }
 		setState({ status: "loading", data: data, error: "" });
-		api("status", { workspace: workspace }).then(function (res) {
+		api(props.connection, "status", { workspace: workspace }).then(function (res) {
 			if (res && res.ok && res.snapshot) setState({ status: "ready", data: res.snapshot, error: "" });
 			else setState({ status: "error", data: null, error: (res && res.error) || "读取失败" });
 		}).catch(function (e) {
@@ -278,6 +263,7 @@ function ProjectWorkbench(props) {
 			React.createElement("span", { style: Object.assign({}, stateColor(task.state), { fontSize: 11.5 }) }, taskStateLabel(task.state || task.status || "")),
 			task.bucketId ? React.createElement("span", { style: S.muted }, " · " + task.bucketId) : null,
 			task.owner ? React.createElement("span", { style: S.muted }, " · " + task.owner) : null,
+			task.state === "queued" ? React.createElement("div", { style: task.ready ? S.muted : S.warn }, task.ready ? "前置条件满足，可以领取" : "等待：" + (task.blockedReason || "前置条件尚未满足")) : null,
 			(task.children || []).length
 				? React.createElement("ul", { style: { margin: "2px 0 0", paddingLeft: 14 } }, (task.children || []).map(function (child) { return taskTreeNode(child, depth + 1); }))
 				: null);
@@ -292,6 +278,7 @@ function ProjectWorkbench(props) {
 			conflict ? React.createElement("span", { style: S.bad }, " · 结果不一致") : null,
 			task.owner ? React.createElement("span", { style: S.muted }, " · " + task.owner) : null,
 			(task.targetIds || []).length ? React.createElement("div", { style: S.muted }, "资产：" + (task.targetIds || []).join(", ")) : null,
+			task.state === "queued" ? React.createElement("div", { style: task.ready ? S.muted : S.warn }, task.ready ? "前置条件满足，可以领取" : "等待：" + (task.blockedReason || "前置条件尚未满足")) : null,
 			(task.error || task.result) ? React.createElement("div", { style: S.muted }, task.error || task.result) : null);
 	}
 	function graphCard(group) {
@@ -467,17 +454,17 @@ function apply(ctx) {
 				order: 58,
 				label: function () { return "项目工作台"; }
 			}, function (props) {
-				return React.createElement(ProjectWorkbench, Object.assign({}, props, { sessionsStore: sessionsStore }));
+				return React.createElement(ProjectWorkbench, Object.assign({}, props, { sessionsStore: sessionsStore, connection: ctx.connection }));
 			});
 		});
 		ctx.slots.inject("shell.overlay", function () {
 			return ctx.slots.register({ name: "shell.overlay", id: "stage-gate.progress-title", order: 92 }, function (props) {
-				return React.createElement(ProgressDocumentTitle, Object.assign({}, props, { sessionsStore: sessionsStore }));
+				return React.createElement(ProgressDocumentTitle, Object.assign({}, props, { sessionsStore: sessionsStore, connection: ctx.connection }));
 			});
 		});
 		return function () {};
 	});
 }
 
-module.exports = { name: "dsh-stage-gate-client", inject: ["slots"], apply: apply, progressTitleLabel: progressTitleLabel, lastTurnFailed: lastTurnFailed };
+module.exports = { name: "dsh-stage-gate-client", inject: ["slots", "connection"], apply: apply, api: api, progressTitleLabel: progressTitleLabel, lastTurnFailed: lastTurnFailed };
 return module.exports; } });
