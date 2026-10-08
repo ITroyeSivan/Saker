@@ -14,6 +14,7 @@ import { assessSourceDocument } from './source-applicability.js'
 import { NDAY_SOURCE_REGISTRY, sourceRegistrySummary } from './source-registry.js'
 import { readSourceZipEntry } from './source-zip.js'
 import { verifyExport } from './osv-export-storage.js'
+import { normalizeSubscriptions, repositoryDescriptor } from './source-subscriptions.js'
 
 export const COLLECTOR_SCHEMA = SOURCE_INDEX_SCHEMA
 export const DEFAULT_COLLECTOR_CONFIG = Object.freeze({
@@ -26,6 +27,10 @@ export const DEFAULT_COLLECTOR_CONFIG = Object.freeze({
   limit: 50,
   wechatQuery: '',
   maxPagesPerRun: 5,
+  repositories: Object.freeze([]),
+  reviewSources: Object.freeze([]),
+  reviewPerRun: 3,
+  reviewPer24Hours: 10,
 })
 
 function nowIso(now = Date.now()) {
@@ -70,8 +75,9 @@ function writeJson(file, value) {
   } finally { if (fs.existsSync(pending)) fs.unlinkSync(pending) }
 }
 
-function sourceIds(values, fallback = DEFAULT_COLLECTOR_CONFIG.sources) {
+function sourceIds(values, fallback = DEFAULT_COLLECTOR_CONFIG.sources, repositories = []) {
   const known = new Set(NDAY_SOURCE_REGISTRY.map((row) => row.id))
+  for (const row of repositories) known.add(row.id)
   const selected = (Array.isArray(values) ? values : fallback)
     .map((value) => clean(value, 40).toLowerCase())
     .filter((value) => known.has(value))
@@ -86,15 +92,20 @@ function integer(value, fallback, min, max) {
 
 export function normalizeCollectorConfig(value = {}) {
   const merged = { ...DEFAULT_COLLECTOR_CONFIG, ...(value && typeof value === 'object' ? value : {}) }
+  const repositories = normalizeSubscriptions(merged.repositories)
   return {
     enabled: merged.enabled !== false,
     intervalHours: integer(merged.intervalHours, DEFAULT_COLLECTOR_CONFIG.intervalHours, 1, 168),
-    sources: sourceIds(merged.sources),
+    sources: sourceIds(merged.sources, DEFAULT_COLLECTOR_CONFIG.sources, repositories),
     query: clean(merged.query, 240),
     lastDays: integer(merged.lastDays, DEFAULT_COLLECTOR_CONFIG.lastDays, 1, 365),
     limit: integer(merged.limit, DEFAULT_COLLECTOR_CONFIG.limit, 1, 100),
     wechatQuery: clean(merged.wechatQuery, 240),
     maxPagesPerRun: integer(merged.maxPagesPerRun, 5, 1, 100),
+    repositories,
+    reviewSources: sourceIds(merged.reviewSources, [], repositories),
+    reviewPerRun: integer(merged.reviewPerRun, 3, 1, 20),
+    reviewPer24Hours: integer(merged.reviewPer24Hours, 10, 1, 100),
   }
 }
 
@@ -254,6 +265,9 @@ export function collectorResponse(state, { includeCandidates = false, limit = 20
 
 export function collectorStatus(home = resolveDshHome(), now = Date.now(), options = {}) {
   const config = readCollectorConfig(home)
+  const registryRows = [...NDAY_SOURCE_REGISTRY, ...config.repositories.map(row => ({ id: row.id, label: row.repository,
+    category: 'research-project', integration: 'git', auth: 'public-git', implemented: true,
+    configuredVia: '漏洞情报更新 → GitHub 仓库订阅', detail: row.mode === 'ai' ? '增量同步并由 AI 整理；待复核知识条目' : '固定提交增量同步原始资料' }))]
   const state = readCollectorState(home, now)
   const nextDue = asTime(state.nextDueAt)
   // A persisted running flag survives a crash. Only a live lock owner means
@@ -277,7 +291,7 @@ export function collectorStatus(home = resolveDshHome(), now = Date.now(), optio
     interrupted: Boolean(state.running) && !running,
     summary: state.summary ? { ...state.summary, mergedCandidates: state.candidateCount, freshCandidates: state.freshCandidates } : null,
     sources: state.sources ?? [],
-    registry: { summary: sourceRegistrySummary(), rows: NDAY_SOURCE_REGISTRY },
+    registry: { summary: sourceRegistrySummary(registryRows), rows: registryRows },
   }
 }
 
@@ -310,7 +324,10 @@ export async function runCollector(options = {}, deps = {}) {
         sourceRows.push({ source, ok: false, skipped: true, error: '未配置公众号检索词，跳过公众号源' })
         continue
       }
-      const selection = JSON.stringify({ query, limit: config.limit, lastDays: config.lastDays })
+      const subscription = config.repositories.find(row => row.id === source)
+      const descriptor = subscription ? repositoryDescriptor(subscription) : undefined
+      const selection = JSON.stringify({ query, limit: config.limit, lastDays: config.lastDays,
+        ...(subscription ? { repository: subscription.repository } : {}) })
       const retained = checkpoints[source]
       const checkpoint = retained?.selection === selection ? retained : { selection, watermark: null, failures: 0 }
       checkpoints[source] = checkpoint
@@ -334,7 +351,8 @@ export async function runCollector(options = {}, deps = {}) {
         for (let index = 0; index < config.maxPagesPerRun; index++) {
           const window = checkpoint.window
           page = await (deps.fetchPage ?? fetchSourcePage)(source, { query, limit: config.limit,
-            lastDays: config.lastDays, home, revision: checkpoint.revision ?? null, gitDeps: deps.gitDeps, ...window }, fetchImpl)
+            lastDays: config.lastDays, home, revision: checkpoint.revision ?? null, gitDeps: deps.gitDeps,
+            repositoryDescriptor: descriptor, ...window }, fetchImpl)
           if (!Array.isArray(page?.rows) || typeof page.complete !== 'boolean') throw new Error('Invalid source page result')
           if (!page.complete && page.nextCursor !== null && page.nextCursor === window.cursor) throw new Error('Source pagination cursor made no progress')
           const coveredUntil = page.coveredUntil ?? window.until

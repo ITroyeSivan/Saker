@@ -25,7 +25,7 @@ function readHashed(file, digest) {
   return JSON.parse(bytes);
 }
 export async function fetchRepositoryPage(source, options, deps = {}) {
-  const descriptor = REPOSITORY_SOURCES[source];
+  const descriptor = REPOSITORY_SOURCES[source] ?? options.repositoryDescriptor;
   if (!descriptor) throw new Error('Repository source is not registered');
   const maxBytes = source === 'cve-official-git' ? OFFICIAL_CVE_MAX_BYTES : 2 * 1024 * 1024;
   const { since, until, query = '', limit = 50, cursor = null, revision = null, home = resolveDshHome() } = options;

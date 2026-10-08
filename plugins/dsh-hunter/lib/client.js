@@ -19,14 +19,22 @@ function postJson(tok, endpoint, payload) {
 		body: JSON.stringify(payload || {})
 	});
 }
+function readApiResponse(response) {
+	return response.text().then(function (text) {
+		if (!text.trim()) throw new Error("漏洞情报服务未就绪（HTTP " + response.status + "），请检查插件启用状态后重试。");
+		var value;
+		try { value = JSON.parse(text); } catch (_) { throw new Error("漏洞情报服务返回异常（HTTP " + response.status + "），请检查插件运行状态。"); }
+		return value;
+	});
+}
 function api(endpoint, payload) {
 	return csrfOf("/dsh-hunter").then(function (tok) {
 		return postJson(tok, endpoint, payload).then(function (r) {
 			if (r.status === 403) {
 				delete dshCsrf["/dsh-hunter"]; // token 失效（宿主重启轮换）——重取一次再发
-				return csrfOf("/dsh-hunter").then(function (tok2) { return postJson(tok2, endpoint, payload); }).then(function (r2) { return r2.json(); });
+				return csrfOf("/dsh-hunter").then(function (tok2) { return postJson(tok2, endpoint, payload); }).then(readApiResponse);
 			}
-			return r.json();
+			return readApiResponse(r);
 		});
 	});
 }
@@ -266,6 +274,8 @@ function NdayPolicySettings() {
 	var [notice, setNotice] = useState(null);
 	var [busy, setBusy] = useState(false);
 	var alive = useRef(true);
+	var [repositoryUrl, setRepositoryUrl] = useState("");
+	var [repositoryMode, setRepositoryMode] = useState("sync");
 	function errorText(error) { return String((error && error.message) || error || "操作失败"); }
 	function reload() {
 		return api("nday.config.get").then(function (r) {
@@ -278,11 +288,11 @@ function NdayPolicySettings() {
 		return api("nday.collector.status").then(function (r) {
 			if (!alive.current) return;
 			if (!r.ok) throw new Error(errorText(r.error));
-			setData(function (prev) { return Object.assign({}, prev, { status: r.status, job: r.job }); });
+			setData(function (prev) { return Object.assign({}, prev, { status: r.status, job: r.job, reviews: r.reviews, reviewJob: r.reviewJob }); });
 		}).catch(function (e) { if (alive.current) setNotice({ kind: "error", text: errorText(e) }); });
 	}
 	useEffect(function () { alive.current = true; reload(); return function () { alive.current = false; }; }, []);
-	var running = !!(data && ((data.job && data.job.running) || (data.status && data.status.running)));
+	var running = !!(data && ((data.job && data.job.running) || (data.status && data.status.running) || (data.reviewJob && data.reviewJob.running)));
 	useEffect(function () {
 		if (!running) return;
 		var cancelled = false, timer;
@@ -312,6 +322,27 @@ function NdayPolicySettings() {
 			if (alive.current) { setData(function (prev) { return Object.assign({}, prev, { job: r.job }); }); setNotice({ kind: "success", text: "更新已启动，可以离开此页。部分完成时再次点击更新即可续传。" }); }
 		}).catch(function (e) { if (alive.current) setNotice({ kind: "error", text: errorText(e) }); }).finally(function () { if (alive.current) setBusy(false); });
 	}
+	function subscribeRepository() {
+		setBusy(true); setNotice(null);
+		return api("nday.repository.add", { url: repositoryUrl, mode: repositoryMode }).then(function (r) {
+			if (!r.ok) throw new Error(errorText(r.error));
+			if (alive.current) { setData(function (prev) { return Object.assign({}, prev, { collector: r.collector }); }); setRepositoryUrl(""); setNotice({ kind: "success", text: "已订阅，点击更新即可获取资料。" }); }
+		}).catch(function (e) { if (alive.current) setNotice({ kind: "error", text: errorText(e) }); }).finally(function () { if (alive.current) setBusy(false); });
+	}
+	function removeRepository(id) {
+		setBusy(true); setNotice(null);
+		return api("nday.repository.remove", { id: id }).then(function (r) {
+			if (!r.ok) throw new Error(errorText(r.error));
+			if (alive.current) { setData(function (prev) { return Object.assign({}, prev, { collector: r.collector }); }); setNotice({ kind: "success", text: "已停止订阅，历史资料和知识条目保留。" }); }
+		}).catch(function (e) { if (alive.current) setNotice({ kind: "error", text: errorText(e) }); }).finally(function () { if (alive.current) setBusy(false); });
+	}
+	function reviewNow() {
+		setBusy(true); setNotice(null);
+		return api("nday.reviews.start", { collector: data.collector }).then(function (r) {
+			if (!r.ok) throw new Error(errorText(r.error));
+			if (alive.current) setData(function (prev) { return Object.assign({}, prev, { collector: r.collector, reviewJob: r.reviewJob }); });
+		}).catch(function (e) { if (alive.current) setNotice({ kind: "error", text: errorText(e) }); }).finally(function () { if (alive.current) setBusy(false); });
+	}
 	if (!data) return React.createElement("div", { role: "status" }, notice ? notice.text : "加载情报源…", React.createElement(Btn, { onClick: reload }, "重试"));
 	var collector = data.collector || {}, policy = data.policy || {}, status = data.status || {};
 	var disabled = busy || running;
@@ -332,6 +363,29 @@ function NdayPolicySettings() {
 		React.createElement("p", null, "把公开漏洞公告和 PoC 资料更新到本机，供 Nday 匹配检索。勾选来源后点更新即可，不需要先保存；这一步不扫描目标。"),
 		notice ? React.createElement("div", { role: "status", className: "dsh-hnt-notice is-" + notice.kind }, notice.text) : null,
 		data.job && data.job.error ? React.createElement("div", { role: "alert" }, "更新未完成：" + data.job.error) : null,
+		data.reviewJob && data.reviewJob.error ? React.createElement("div", { role: "alert" }, "AI 整理未完成：" + data.reviewJob.error) : null,
+		data.reviewJob && data.reviewJob.indexWarning ? React.createElement("div", { role: "alert" }, data.reviewJob.indexWarning) : null,
+		React.createElement("div", { className: "dsh-hnt-panel", "aria-label": "GitHub 仓库订阅" },
+			React.createElement("h4", null, "订阅 GitHub 仓库"),
+			React.createElement("div", { className: "dsh-hnt-row" },
+				React.createElement("input", { className: "dsh-hnt-input", "aria-label": "GitHub 仓库地址", value: repositoryUrl, placeholder: "https://github.com/作者/仓库", disabled: disabled, onChange: function (e) { setRepositoryUrl(e.target.value); } }),
+				React.createElement("select", { className: "dsh-hnt-select", "aria-label": "仓库更新方式", value: repositoryMode, disabled: disabled, onChange: function (e) { setRepositoryMode(e.target.value); } },
+					React.createElement("option", { value: "sync" }, "仅同步"), React.createElement("option", { value: "ai" }, "同步并由 AI 整理")),
+				React.createElement(Btn, { primary: true, disabled: disabled || !repositoryUrl.trim(), onClick: subscribeRepository }, "订阅")),
+			React.createElement("p", { className: "dsh-hnt-sub" }, "首次读取文本和代码文件，之后只同步变化。AI 整理使用默认模型，保存原文依据与来源版本，供知识库检索。"),
+			(collector.repositories || []).map(function (repository) {
+				var selected = (collector.sources || []).indexOf(repository.id) >= 0;
+				var current = (status.checkpoints || {})[repository.id] || {};
+				return React.createElement("div", { className: "dsh-hnt-row", key: repository.id },
+					React.createElement("label", { className: "dsh-hnt-check" }, React.createElement("input", { type: "checkbox", disabled: disabled, checked: selected, onChange: function () { toggleSource(repository.id); } }), repository.repository),
+					React.createElement("select", { className: "dsh-hnt-select", "aria-label": repository.repository + " 更新方式", disabled: disabled, value: repository.mode, onChange: function (e) {
+						patch("collector", "repositories", collector.repositories.map(function (row) { return row.id === repository.id ? Object.assign({}, row, { mode: e.target.value }) : row; }));
+					} }, React.createElement("option", { value: "sync" }, "仅同步"), React.createElement("option", { value: "ai" }, "AI 整理")),
+					React.createElement("span", { className: "dsh-hnt-sub" }, states[current.status] || "尚未更新"),
+					React.createElement(Btn, { disabled: disabled || !selected, onClick: function () { update(repository.id); } }, "更新此仓库"),
+					React.createElement(Btn, { disabled: disabled, onClick: function () { removeRepository(repository.id); } }, "停止订阅"),
+					current.error ? React.createElement("span", { role: "alert" }, current.error) : null);
+			})),
 		data.job && !data.job.running && data.job.summary ? React.createElement("div", { role: "status" }, "本轮结束：完成 " + data.job.summary.completeSources + " 个源，部分 " + data.job.summary.partialSources + " 个，失败 " + data.job.summary.failedSources + " 个。详见下方各源。") : null,
 		status.interrupted ? React.createElement("div", { role: "status" }, "上轮更新被中断，点击更新可继续已有进度。") : null,
 		React.createElement("div", { className: "dsh-hnt-row" },
@@ -360,6 +414,21 @@ function NdayPolicySettings() {
 			React.createElement("label", { className: "dsh-hnt-check" }, React.createElement("input", { type: "checkbox", disabled: disabled, checked: collector.enabled === true, onChange: function (e) { patch("collector", "enabled", e.target.checked); } }), "宿主运行时自动更新"),
 			numberInput("collector", "intervalHours", "自动更新间隔（小时）", 1, 168),
 			React.createElement(Btn, { disabled: disabled, onClick: save }, "保存设置")),
+		React.createElement("div", { className: "dsh-hnt-panel", "aria-label": "AI 知识整理" },
+			React.createElement("h4", null, "AI 知识整理"),
+			React.createElement("p", { className: "dsh-hnt-sub" }, "仅处理变化内容。生成条目保留待复核状态；引用存在不代表结论已经验证。超长原文保留待精读。"),
+			["github-research-files", "nuclei-files", "afrog-files"].map(function (id) { return React.createElement("label", { className: "dsh-hnt-check", key: id },
+				React.createElement("input", { type: "checkbox", disabled: disabled, checked: (collector.reviewSources || []).indexOf(id) >= 0, onChange: function () {
+					var ids = (collector.reviewSources || []).slice(), position = ids.indexOf(id); if (position < 0) ids.push(id); else ids.splice(position, 1); patch("collector", "reviewSources", ids);
+				} }), "整理 " + NDAY_FREE_SOURCES.find(function (row) { return row.id === id; }).label); }),
+			numberInput("collector", "reviewPerRun", "每轮最多整理（篇）", 1, 20),
+			numberInput("collector", "reviewPer24Hours", "24 小时最多模型请求（次）", 1, 100),
+			React.createElement(Btn, { disabled: disabled, onClick: save }, "保存整理设置"),
+			React.createElement(Btn, { disabled: disabled, onClick: reviewNow }, "继续整理 / 重试"),
+			React.createElement("p", { role: "status" }, "累计入库 " + ((data.reviews && data.reviews.counts.complete) || 0) + " · 待整理 " + ((data.reviews && data.reviews.counts.pending) || 0) + " · 失败 " + ((data.reviews && data.reviews.counts.error) || 0) + " · 24 小时请求 " + ((data.reviews && data.reviews.callsLast24Hours) || 0)),
+			(data.reviews && data.reviews.recent || []).filter(function (row) { return row.error; }).slice(0, 3).map(function (row) {
+				return React.createElement("div", { key: row.source + row.id, className: "dsh-hnt-sub" }, row.error);
+			})),
 		React.createElement("details", { className: "dsh-hnt-panel" },
 			React.createElement("summary", null, "高级设置（通常无需修改）"),
 			React.createElement("p", null, "每轮达到页数上限会保留进度，下次更新继续。影响候选排序的参数不改变来源内容。"),

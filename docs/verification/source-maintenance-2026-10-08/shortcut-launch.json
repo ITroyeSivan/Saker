@@ -1,0 +1,23 @@
+{
+  "shortcut": {
+    "shortcut": "C:/Users/12201/Desktop/Saker (dsh Desktop).lnk",
+    "target": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "arguments": "-NoLogo -NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -File \"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tools\\Start-SakerDesktop.ps1\"",
+    "desktopDirectory": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime",
+    "home": "C:\\Users\\12201\\.dsh",
+    "userDataDirectory": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-data"
+  },
+  "rootProcess": {
+    "ProcessId": 15836,
+    "ParentProcessId": 2780,
+    "CommandLine": "\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe\" --user-data-dir=\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-data\" "
+  },
+  "normalStartup": true,
+  "loginRequired": false,
+  "visibleControls": [
+    "53 按钮 Saker 渗透测试 ▾ Description: Saker 渗透测试",
+    "56 组合框 (settable, string) 任务方向 Value: 常规测试",
+    "58 组合框 (settable, string) 聊天协作方式 Value: 自主推进",
+    "60 组合框 (settable, string) 聊天子代理上限 Value: 子代理 1"
+  ]
+}

@@ -18,6 +18,7 @@ import os from "node:os";
 import fs from "node:fs";
 import { isIP } from "node:net";
 import { createUpdateJob } from "./update-job.js";
+import { createSourceMaintenance } from "./source-maintenance.js";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { parseScope, scopeSafeAsset, upsertAssets } from "dsh-saker/asset-inventory";
 import { parseQueryExpression, everyBranchHasField } from "dsh-saker/query-expression";
@@ -44,7 +45,7 @@ function resolveWorkspaceArg(workspace, exec) {
 }
 
 const name = "dsh-hunter";
-const inject = ["webServer", "webRuntime", "tools"];
+const inject = { webServer: { required: true }, webRuntime: { required: true }, tools: { required: true }, llm: { required: false }, agentDefaultModel: { required: false } };
 
 const ROUTE_PATH = "/dsh-hunter";
 /** 进程级 CSRF token：GET <route>/csrf 由同源页取走（跨源响应不可读），POST 须回带 x-dsh-csrf 头。 */
@@ -471,6 +472,14 @@ async function testKey(platform, key) {
 }
 
 const updateJob = createUpdateJob();
+const maintenanceOwners = new WeakMap();
+const standaloneMaintenanceContext = {};
+function maintenanceFor(ctx) {
+	ctx = ctx && typeof ctx === 'object' ? ctx : standaloneMaintenanceContext;
+  let maintenance = maintenanceOwners.get(ctx);
+  if (!maintenance) { maintenance = createSourceMaintenance(ctx, DSH_HOME, loadNdayModules); maintenanceOwners.set(ctx, maintenance); }
+  return maintenance;
+}
 const NDAY_POLICY_FILE = path.join(DSH_HOME, "nday-hunter", "policy.json");
 
 function readJsonFile(file, fallback) {
@@ -488,6 +497,8 @@ async function loadNdayModules() {
 		pipeline: await import("@dsh-external/dsh-nday-hunter/source-pipeline"),
 		metrics: await import("@dsh-external/dsh-nday-hunter/metrics"),
 		registry: await import("@dsh-external/dsh-nday-hunter/source-registry"),
+		reviews: await import("@dsh-external/dsh-nday-hunter/source-reviews"),
+		subscriptions: await import("@dsh-external/dsh-nday-hunter/source-subscriptions"),
 	};
 }
 
@@ -513,7 +524,7 @@ export async function dispatch(ctx, st, endpoint, payload) {
 		return r.ok ? { ok: true, info: r.info } : { ok: false, error: r.error };
 	}
 	if (endpoint === "nday.config.get") {
-		const { priority, pipeline, metrics, registry } = await loadNdayModules();
+		const { priority, pipeline, metrics, registry, reviews } = await loadNdayModules();
 		const policy = priority.normalizePriorityPolicy({ ...priority.DEFAULT_POLICY, ...readJsonFile(NDAY_POLICY_FILE, {}) });
 		return {
 			ok: true,
@@ -523,6 +534,8 @@ export async function dispatch(ctx, st, endpoint, payload) {
 			job: updateJob.status(),
 			metrics: metrics.summarizeMetrics(DSH_HOME),
 			registry: registry.sourceRegistrySummary(),
+			reviews: reviews.sourceReviewStatus(DSH_HOME),
+			reviewJob: maintenanceFor(ctx).status(),
 		};
 	}
 	if (endpoint === "nday.config.set") {
@@ -534,11 +547,33 @@ export async function dispatch(ctx, st, endpoint, payload) {
 	}
 	if (endpoint === "nday.collector.start") {
 		const { pipeline } = await loadNdayModules();
-		return { ok: true, job: updateJob.start(pipeline, DSH_HOME, p.collector ?? pipeline.readCollectorConfig(DSH_HOME), p.source) };
+		return { ok: true, job: updateJob.start(pipeline, DSH_HOME, p.collector ?? pipeline.readCollectorConfig(DSH_HOME), p.source,
+			config => maintenanceFor(ctx).review(config)) };
 	}
 	if (endpoint === "nday.collector.status") {
+		const { pipeline, reviews } = await loadNdayModules();
+		return { ok: true, status: pipeline.collectorStatus(DSH_HOME), job: updateJob.status(), reviews: reviews.sourceReviewStatus(DSH_HOME), reviewJob: maintenanceFor(ctx).status() };
+	}
+	if (endpoint === "nday.repository.add") {
+		const { pipeline, subscriptions } = await loadNdayModules();
+		const config = pipeline.readCollectorConfig(DSH_HOME);
+		const added = subscriptions.normalizeSubscriptions([{ url: p.url, mode: p.mode }])[0];
+		if (config.repositories.some(row => row.id === added.id)) throw new Error("仓库已订阅");
+		const collector = pipeline.writeCollectorConfig({ ...config, repositories: [...config.repositories, added], sources: [...config.sources, added.id] }, DSH_HOME);
+		return { ok: true, collector };
+	}
+	if (endpoint === "nday.repository.remove") {
 		const { pipeline } = await loadNdayModules();
-		return { ok: true, status: pipeline.collectorStatus(DSH_HOME), job: updateJob.status() };
+		const config = pipeline.readCollectorConfig(DSH_HOME);
+		if (!config.repositories.some(row => row.id === p.id)) throw new Error("订阅不存在");
+		const collector = pipeline.writeCollectorConfig({ ...config, repositories: config.repositories.filter(row => row.id !== p.id),
+			sources: config.sources.filter(id => id !== p.id), reviewSources: config.reviewSources.filter(id => id !== p.id) }, DSH_HOME);
+		return { ok: true, collector }; // Stop future updates; preserve collected history and user notes.
+	}
+	if (endpoint === "nday.reviews.start") {
+		const { pipeline } = await loadNdayModules();
+		const collector = p.collector ? pipeline.writeCollectorConfig(p.collector, DSH_HOME) : pipeline.readCollectorConfig(DSH_HOME);
+		return { ok: true, collector, reviewJob: maintenanceFor(ctx).start(collector) };
 	}
 	if (endpoint === "nday.collector.run") {
 		const { pipeline } = await loadNdayModules();
@@ -586,6 +621,12 @@ export async function dispatch(ctx, st, endpoint, payload) {
 }
 
 function apply(ctx) {
+	const maintenance = maintenanceFor(ctx);
+	const maintenanceTimer = setInterval(() => { maintenance.tick().catch(error => {
+		try { ctx.logger?.warn?.('source maintenance: ' + String(error.message)); } catch { /* The visible job retains model failures. */ }
+	}); }, 60000);
+	maintenanceTimer.unref?.();
+	ctx.effect(() => () => { clearInterval(maintenanceTimer); maintenance.stop(); });
 	const trustedHosts = () => {
 		try { return ctx.webRuntime?.trustedHosts ?? []; } catch { return []; }
 	};

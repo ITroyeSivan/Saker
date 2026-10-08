@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-hunter",
-  "version": "1.5.2",
+  "version": "1.5.3",
   "description": "DSH asset search: FOFA / Hunter / Quake, bounded batch queries, desktop vulnerability-source updates, and authorized live verification.",
   "files": [
     "lib",
@@ -27,6 +27,7 @@
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-tools": "*",
+    "@dsh-external/dsh-knowledge-hub": "*",
     "@dsh-external/dsh-nday-hunter": "*",
     "@dsh-external/dsh-redteam-results": "*",
     "dsh-saker": "*"

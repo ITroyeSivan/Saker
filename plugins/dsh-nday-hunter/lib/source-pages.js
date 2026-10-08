@@ -9,7 +9,7 @@ export async function fetchSourcePage(source, options, fetchImpl = globalThis.fe
   const { query = '', limit = 50, cursor = null, since, until } = options
   if (source === 'cve-official') return fetchOfficialCvePage(options, fetchImpl)
   if (source === 'osv') return fetchOsvExportPage(options, fetchImpl)
-  if (REPOSITORY_SOURCES[source]) return fetchRepositoryPage(source, options, options.gitDeps)
+  if (REPOSITORY_SOURCES[source] || options.repositoryDescriptor) return fetchRepositoryPage(source, options, options.gitDeps)
   if (source === 'nvd') {
     const start = cursor === null ? 0 : Number(cursor)
     if (!Number.isSafeInteger(start) || start < 0) throw new Error('Invalid NVD cursor')

@@ -29,10 +29,22 @@ function ui(code = source) {
   function nodes(node) { if (!node || typeof node !== 'object') return []; return [node, ...node.children.flat(Infinity).flatMap(nodes)]; }
   return { states, calls, slots, render, nodes: () => nodes(render()), button: label => nodes(render()).find(node => node.children.includes(label) && node.props.onClick) };
 }
-let failed = 0;
-async function check(name, fn) { try { await fn(); console.log('ok   ' + name); } catch (error) { failed++; console.log('FAIL ' + name + ': ' + error.stack); } }
+let failed = 0, passed = 0;
+async function check(name, fn) { try { await fn(); passed++; console.log('ok   ' + name); } catch (error) { failed++; console.log('FAIL ' + name + ': ' + error.stack); } }
 const st = openHunterStore(':memory:');
 try {
+  await check('repository subscription and AI review controls use real client events and preserve unsaved review limits', async () => {
+    const client = ui();
+    const address = client.nodes().find(node => node.props['aria-label'] === 'GitHub 仓库地址');
+    address.props.onChange({ target: { value: 'https://github.com/example/research' } });
+    client.nodes().find(node => node.props['aria-label'] === '仓库更新方式').props.onChange({ target: { value: 'ai' } });
+    await client.button('订阅').props.onClick();
+    assert.equal(client.calls[0][0], 'nday.repository.add'); assert.equal(client.calls[0][1].mode, 'ai');
+    assert.equal(client.calls[0][1].url, 'https://github.com/example/research');
+    const another = ui(); another.states[0].collector.reviewPerRun = 7;
+    await another.button('继续整理 / 重试').props.onClick();
+    assert.equal(another.calls[0][0], 'nday.reviews.start'); assert.equal(another.calls[0][1].collector.reviewPerRun, 7);
+  });
   await check('actual client registers update settings without SRC settings or composer dock', () => {
     const client = ui(); assert(!client.slots.some(slot => slot.id === 'hunter-src-scope'));
     assert.equal(client.slots.find(slot => slot.id === 'hunter-nday-policy').label(), '漏洞情报更新');
@@ -109,4 +121,4 @@ try {
     } finally { globalThis.fetch = originalFetch; }
   });
 } finally { st.close(); closeSharedStore(); }
-console.log(`${7 - failed} passed, ${failed} failed`); process.exitCode = failed ? 1 : 0;
+console.log(`${passed} passed, ${failed} failed`); process.exitCode = failed ? 1 : 0;

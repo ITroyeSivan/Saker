@@ -4,7 +4,7 @@ export function createUpdateJob() {
   let job = null;
   return {
     status: () => job ? { ...job } : null,
-    start(pipeline, home, collector, source) {
+    start(pipeline, home, collector, source, after) {
       if (job?.running) throw new Error('正在更新，请等待本轮结束');
       const config = pipeline.normalizeCollectorConfig(collector);
       if (!config.sources.length) throw new Error('请至少选择一个情报源');
@@ -17,9 +17,10 @@ export function createUpdateJob() {
       job = { running: true, sources, startedAt: new Date().toISOString(), error: '', summary: null };
       const current = job;
       Promise.resolve().then(() => pipeline.runCollector({ ...config, sources, force: true, noCache: true }, { home }))
-        .then(result => {
+        .then(async result => {
           if (result.skipped) throw new Error(result.reason || '更新未启动');
           current.summary = pipeline.collectorResponse(result).summary;
+          if (after) current.reviews = await after(config);
         })
         .catch(error => { current.error = String(error?.message || error); })
         .finally(() => { current.running = false; });
