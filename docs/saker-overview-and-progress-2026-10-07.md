@@ -171,6 +171,8 @@ Saker 是官方 DeepSeek Harness Desktop 的安全测试插件集。它把测试
 - [项目 README](../README.md)
 - [安装与首次配置](getting-started.md)
 - [插件清单](plugin-list.md)
+- [ARTEX 代码差距与设计借鉴（2026-10-08）](saker-artex-gap-analysis-2026-10-08.md)
+- [下一阶段完整目标与验收门槛（2026-10-08）](saker-next-stage-goals-2026-10-08.md)
 - [当前框架方案](saker-framework-plan-2026-10-03.md)
 - [此前桌面模型对照](verification/framework-desktop-2026-10-03.md)
 - [0.4.87 发布检查](verification/release-0.4.87.md)
