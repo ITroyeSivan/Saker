@@ -14,6 +14,7 @@ import { existsSync, readdirSync, readFileSync, unlinkSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { startModelProxy } from './model-proxy.js'
+import { createToolStartupChecks } from './tool-startup.js'
 import { homedir } from 'node:os'
 import { basename, dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -1470,12 +1471,14 @@ export function apply(ctx, config = {}) {
     const { connection, settings, shellEnv } = web
     // 内置代理：随插件走，不依赖任何外部程序
     const modelProxy = createModelProxyController(ctx.logger)
+    const checkToolStartup = createToolStartupChecks(current)
 
     connection.register(ctx, CHANNEL, async (endpoint, payload) => {
       try {
         if (endpoint === 'tool-presets') {
           return ok({ presets: TOOL_PRESETS, categories: TOOL_CATEGORIES })
         }
+        if (endpoint === 'tools/startup') return ok({ check: await checkToolStartup(payload) })
         if (endpoint === 'settings/get') {
           return ok({
             status: 'ready',

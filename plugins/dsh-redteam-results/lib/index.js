@@ -548,10 +548,15 @@ export async function dispatch(ctx, st, endpoint, payload) {
 		}
 		const sessionId = String(p.sessionId ?? "");
 		if (!sessionId) throw new Error("sessionId required");
-		return { groups: groupByTarget(st, sessionId, mode, p) };
+		return { groups: groupByTarget(st, sessionId, mode, p), stats: computeStats(st, sessionId, mode), meta: getMeta(st, sessionId) };
 	}
 	if (endpoint === "counts.all") {
 		return { counts: modeCountsAll(st) };
+	}
+	if (endpoint === "counts.session") {
+		const sessionId = String(p.sessionId ?? "");
+		if (!sessionId) throw new Error("sessionId required");
+		return { counts: modeCounts(st, sessionId) };
 	}
 	if (endpoint === "ledger.overview") {
 		if (p.scope === "all") {

@@ -1,6 +1,6 @@
 {
   "name": "dsh-saker",
-  "version": "0.4.95",
+  "version": "0.4.96",
   "description": "Saker — dsh Desktop 渗透测试工作台，常规测试、Nday发现与0Day挖掘；围绕人的具体问题推进，按需站点协作与证据验证。",
   "type": "module",
   "main": "./lib/preset-root.js",
@@ -16,7 +16,8 @@
     "./query-expression": "./lib/query-expression.mjs",
     "./verification-basis": "./lib/verification-basis.mjs",
     "./cordis.patch.yml": "./cordis.patch.yml",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./tool-runtime": "./lib/tool-runtime.mjs"
   },
   "files": [
     "preset",

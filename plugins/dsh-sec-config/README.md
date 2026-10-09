@@ -4,6 +4,8 @@
 
 ## 配置项
 
+工具库的“检查启动”对已保存路径运行内置固定帮助或版本参数，不接受任意命令、不自动安装或改路径。nmap、sqlmap、httpx、subfinder、afrog、nuclei、dirsearch、ffuf、katana、semgrep 支持检查；其他工具显示“尚未支持”，不能用文件存在当作可用。超时、错误退出、标识不符、输出不完整及编辑后旧结果分别处理。帮助成功只证明本机启动，不证明目标操作成功或模型工具已加载；检查结果不自动写入模型提示词。完整任务能力就绪判定仍需后续整合。
+
 设置页 →「安全配置」（设置区 `sec-config` 命名空间，落盘 `~/.dsh/settings.yaml`）：
 
 | 分组 | 字段 | 说明 |
@@ -21,7 +23,7 @@
 
 - **shellEnv 注入**：注册 `DSH_TOOL_<NAME>` 环境变量（值 resolve 自 settings.yaml），每次 shell 调用实时注入；playbook 优先读环境变量、空则回退 PATH。
 - **MCP 自动桥接**：`services.burpUrl / yakitUrl` 保存后自动同步为 mcp-studio 的一条 server——Yakit 走 `streamable-http`（自动补 `/mcp`），Burp 走 `stdio` 桥。模型下一轮即可见 `mcp__burp__*` / `mcp__yakit__*` 工具，无需去 MCP 工作台手工添加。前端在地址行显示挂载状态徽章（已挂载 N 工具 / 连接中 / 待启用 / 失败）与「立即挂载」按钮。
-- **提示词 manifest**：注册 `systemPrompt.context`（`sec-config-manifest`），每次提示词组装时渲染一份当前已配工具 / 服务端点 / DNSLog / 已挂载 MCP 工具面的清单。配置改动（UI 保存或直接改 yaml，均经 settings 热载）下一轮自动进模型上下文，无需重启；文本确定性，未变化零开销。
+- **提示词 manifest**：注册 `systemPrompt.context`（`sec-config-manifest`），每次提示词组装时渲染一份当前已配工具 / 服务端点 / DNSLog / 已挂载 MCP 工具面的清单。配置改动（UI 保存或直接改 yaml，均经 settings 热载）下一轮自动进模型上下文，无需重启；文本确定性可避免无变化时重复追加快照，不保证零 token 开销。
 - **Burp stdio 桥**：Burp 官方 MCP 扩展跑 legacy SSE（9876），mcp-studio 只支持 stdio / streamable-http，故随包附 `tools/burp-sse-bridge.mjs`（Node 标准库 stdio↔SSE 转发）。解析顺序：`services.burpBridgeScript` 覆盖 → 包内副本 → 空。免 Java、免提取 fat-jar 代理。
 - **secret 字段**（`dnslog.token` / `memshell.token` / `apiKeys.*`）：读取时 redact 为 `***`；空写/`***` 写被忽略（不清空已存值）。
 

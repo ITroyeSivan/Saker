@@ -137,6 +137,17 @@ function ToolLibrary(props) {
   var state = React.useState({ rootInput: '', scanning: false, msg: null, preview: null, manual: { cat: CAT_FALLBACK, name: '', path: '' }, newCat: '' });
   var S = state[0]; var set = state[1];
   var up = function (patch) { set(Object.assign({}, S, patch)); };
+  var startupState = useState({}), startup = startupState[0], setStartup = startupState[1];
+  function checkStartup(entry) {
+    setStartup(function (old) { return Object.assign({}, old, { [entry.key]: { busy: true, configuredPath: entry.path } }); });
+    rpc(props.connection, 'tools/startup', { key: entry.key, expectedPath: entry.path }).then(function (res) {
+      var check = res.value?.check;
+      if (!res || !res.ok || !check) throw new Error(errText(res, '读取启动检查失败'));
+      setStartup(function (old) { return Object.assign({}, old, { [entry.key]: check }); });
+    }).catch(function (error) {
+      setStartup(function (old) { return Object.assign({}, old, { [entry.key]: { state: 'failed', configuredPath: entry.path, reason: error.message || String(error) } }); });
+    });
+  }
   var patchCfg = function (p) { props.onChange && props.onChange(p); };
 
   var setRootInput = function (v) { up({ rootInput: v }); };
@@ -302,10 +313,16 @@ function ToolLibrary(props) {
   usedCats.forEach(function (c) {
     var rows = grouped[c] || [];
     var kids = rows.map(function (e) {
+          var checked = startup[e.key]?.configuredPath === e.path ? startup[e.key] : null;
           return el('div', { key: e.key, style: { display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0', fontSize: 13 } },
             el('span', { style: { flex: '0 0 150px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, e.name || e.key),
             el('span', { title: e.path, style: { flex: 1, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 } }, e.path),
             el('select', { value: e.category, style: { fontSize: 11 }, onChange: function (ev) { setEntryCat(e.key, ev.target.value); } }, cats.map(function (cc) { return el('option', { key: cc, value: cc }, cc); })),
+            el('button', { type: 'button', style: rowBtnStyle(), disabled: !!checked?.busy, onClick: function () { checkStartup(e); } }, checked?.busy ? '检查中…' : '检查启动'),
+            checked && !checked.busy ? el('details', { style: { maxWidth: 240 }, 'aria-label': '工具启动检查 ' + e.key },
+              el('summary', null, ({ available: '可启动', missing: '入口不存在', unconfigured: '未配置', unsupported: '尚未支持检查', stale: '请先保存', failed: '启动失败', timeout: '检查超时', mismatch: '工具不匹配', inconclusive: '无法确认' })[checked.state] || '无法确认'),
+              el('p', null, checked.reason), checked.actualFile ? el('small', null, '实际入口：' + checked.actualFile) : null,
+              checked.preview ? el('pre', { style: { whiteSpace: 'pre-wrap', maxHeight: 160, overflow: 'auto', fontSize: 11 } }, checked.preview) : null) : null,
             el('button', { type: 'button', style: rowBtnStyle({ color: '#d1242f' }), onClick: function () { removeEntry(e.key); } }, '移除'));
         });
     children.push(el(Group, { key: 'g:' + c, title: c + '（' + rows.length + '）' }, kids));

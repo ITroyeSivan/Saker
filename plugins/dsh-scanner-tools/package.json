@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-scanner-tools",
-  "version": "1.1.10",
+  "version": "1.1.11",
   "description": "DSH scanner-wrapper plugin (preset-plane): conservative scanner tools with evidence tracking and scope registration; Pentest can defer expensive scanners and register them per Agent only on explicit request. Local binaries only — never auto-installs.",
   "files": [
     "lib",
