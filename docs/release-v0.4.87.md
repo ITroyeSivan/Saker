@@ -19,8 +19,5 @@
 
 ### ⚠️ 其他变更
 
-- 移除 SRC 范围策略，以及代码审计、CTF 的新任务入口；历史会话仍可读取。
-- 本版已在 Windows 官方 Desktop 0.2.0-rc.2 验证。其他宿主版本尚未验证。
-- 受控测试不代表真实站点检出率，也不保证所有任务节省 token；Nday 对照中用量增加。
-
-下载桌面安装包后，按 [安装说明](https://github.com/ITroyeSivan/Saker/blob/v0.4.87/docs/getting-started.md) 更新。完整结果见 [发布检查](https://github.com/ITroyeSivan/Saker/blob/v0.4.87/docs/verification/release-0.4.87.md)。
+- 适配官方 Windows Desktop 0.2.0-rc.2；历史会话保留。
+- 适用于官方 Windows Desktop 0.2.0-rc.2，更新沿用原有用户数据与 MCP 配置。

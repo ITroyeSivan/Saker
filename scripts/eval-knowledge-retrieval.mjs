@@ -16,7 +16,7 @@ const value = (name, fallback) => {
 };
 
 process.env.DSH_HOME = process.env.DSH_HOME || resolve(homedir(), ".dsh");
-const casesFile = resolve(ROOT, value("cases", "docs/reports/02-体检与评估/knowledge-eval-cases-2026-09-17.json"));
+const casesFile = resolve(ROOT, value("cases", "benchmarks/knowledge-retrieval/cases.json"));
 const modeOverride = value("mode", "");
 const limit = Math.max(1, Number(value("limit", "5")) || 5);
 const jsonOut = value("json-out", "");

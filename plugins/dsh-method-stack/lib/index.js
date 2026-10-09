@@ -173,7 +173,7 @@ function writeProfile(presetId, data) {
 function currentProfile(presetId) {
   const p = readProfile(presetId)
   if (p && Array.isArray(p.active)) return p
-  // 默认**不启用任何方法**（2026-09-13 用户要求）。
+  // 方法默认关闭；由会话配置显式启用。
   //
   // 为什么改（原来是「开箱全开」）：方法正文是**每轮请求常驻注入**的 systemPrompt context ——
   // 26 个方法全文 ≈ 14KB（约 4–5K token），在 32K 窗口的模型上直接吃掉 15%，
@@ -279,7 +279,6 @@ const BACKUP_KEEP = 5
  *
  * 为什么：`save-prompt` / `opening-save` 直接 `writeFileSync` 到用户目录 ——
  * 用户改自己写的方法正文或开场文本，保存一下就永久覆盖上一版，没有回退手段。
- * （同一类问题 2026-09-19 已在 webshell-mgr 上真实踩过一次数据丢失。）
  * 备份放 `.backups/`：点开头不会被当成方法/开场文件读取；每个文件最多留 BACKUP_KEEP 份。
  */
 function backupFile(target, backupDir) {

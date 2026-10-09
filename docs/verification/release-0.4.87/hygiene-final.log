@@ -1,9 +1,0 @@
-ok   源码树根不含过程产物目录 _ref
-ok   源码树根不含 log/tmp/bak 残片
-ok   设 busy 的 RPC 链都有拒绝处理（否则会卡在转圈）
-ok   每个插件 lib 入口都能被解析（语法坏掉会让浏览器整块挂起）
-ok   「照着做」的字段都进了模型可见的 text（render 只输出 text）
-ok   persona 在预算内、且没把 playbook 的方法论细则搬回常驻层
-ok   tgz 与源码一致（改了要重打，否则改动送不出去）
-
-all 7 tests passed

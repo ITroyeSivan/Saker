@@ -146,7 +146,6 @@ write(path.join(IMPORTS, "team-notes", "win", "ad.md"), "# 域渗透\nKerberoast
 	ok("新写入的文件立刻可检索", hits.some((h) => h.path.includes("note.md")), JSON.stringify(hits.map((h) => h.path)));
 
 	// 覆盖写已有文件前必须留备份：用户改自己写的条目，保存一下不该永久覆盖上一版。
-	// （同一类问题 2026-09-19 已在 webshell-mgr 上真实踩过一次数据丢失。）
 	const w2 = await dispatch("write", { source: "user", mode: "pentest", path: "sub/dir/note.md", content: "# 笔记\n第二版\n" });
 	ok("覆盖写返回备份路径且备份内容是上一版",
 		w2 && w2.ok === true && typeof w2.value?.backup === "string" && fs.existsSync(w2.value.backup)
@@ -712,7 +711,6 @@ write(path.join(IMPORTS, "team-notes", "win", "ad.md"), "# 域渗透\nKerberoast
 	}
 }
 
-// ── 知识库目录交互契约（2026-09-19 实机复验）──────────────────────────────
 // 打开文章时旧实现直接卸载 TreeSection，返回目录后展开状态和滚动位置全丢，
 // 实战查资料只能在 66 个分类里反复翻。目录必须保持挂载（只在打开文章时隐藏），
 // 并提供来源内筛选作为快速定位入口。

@@ -15,8 +15,5 @@
 
 ### ⚠️ 其他变更
 
-- Windows 官方 Desktop 0.2.0-rc.2 实际跑通「等待 → 前置产物登记 → 领取 → 完成」。
-- 86 套标准回归、13,607 通过、0 失败、16 跳过；六种机制回退的反向验证通过。
-- 快捷方式沿用日常配置和数据，MCP 配置保留但两个服务未连接；本轮不是漏洞检出率或高并发性能验证。
-
-下载桌面安装包后，按 [安装说明](https://github.com/ITroyeSivan/Saker/blob/v0.4.93/docs/getting-started.md) 更新。具体操作、测试结果与限制见 [发布检查](https://github.com/ITroyeSivan/Saker/blob/v0.4.93/docs/verification/task-dependencies-2026-10-08/README.md)。另见 [完整目标及实施进度](https://github.com/ITroyeSivan/Saker/blob/v0.4.93/docs/saker-implementation-progress-2026-10-08.md)。
+- 前置条件与执行租约适用于新任务，保留旧任务兼容。
+- 适用于官方 Windows Desktop 0.2.0-rc.2，更新沿用原有用户数据与 MCP 配置。

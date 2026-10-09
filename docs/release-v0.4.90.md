@@ -16,8 +16,5 @@
 
 ### ⚠️ 其他变更
 
-- Windows 官方 Desktop 0.2.0-rc.2 实测六种协作/汇报组合和三个原生子代理接纳；81 套标准回归、13,559 通过、0 失败、16 跳过。
-- 16 是设置上限，尚未验证 16 代理并发；历史跨模块反向脚本仍有失败，不能计为通过。
-- 快捷方式沿用日常数据，MCP 配置保留但两个服务未连接；本轮不证明漏洞发现效果。
-
-下载桌面安装包后，按 [安装说明](https://github.com/ITroyeSivan/Saker/blob/v0.4.90/docs/getting-started.md) 更新。具体操作、测试结果与限制见 [发布检查](https://github.com/ITroyeSivan/Saker/blob/v0.4.90/docs/verification/chat-cooperation-2026-10-07.md)。另见 [设计依据](https://github.com/ITroyeSivan/Saker/blob/v0.4.90/docs/chat-cooperation-design-2026-10-07.md)。
+- 子代理上限支持 0–16，实际并发受模型、宿主和本机资源限制。
+- 适用于官方 Windows Desktop 0.2.0-rc.2，更新沿用原有用户数据与 MCP 配置。

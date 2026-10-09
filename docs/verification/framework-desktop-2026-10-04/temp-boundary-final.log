@@ -1,6 +1,0 @@
-TEMP BOUNDARY OK
-workspace: <workspace>
-temp root: <workspace>\_ref\tmp
-TEMP: <workspace>/_ref/tmp
-TMP: <workspace>/_ref/tmp
-TMPDIR: <workspace>/_ref/tmp

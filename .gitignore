@@ -17,8 +17,14 @@ settings.yaml
 Thumbs.db
 .DS_Store
 *.log
-# Sanitized, curated verification evidence referenced by public documentation.
-!docs/verification/**/*.log
+# Development records stay outside this repository.
+docs/verification/
+docs/reports/
+docs/plans/
+docs/saker-*.md
+docs/*-20??-??-??.md
+docs/nday-development-handoff.md
+docs/nday-implementation-audit.md
 smoke/
 .idea/
 .vscode/

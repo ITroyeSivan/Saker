@@ -376,7 +376,6 @@ export async function runScan({ bin, args, workspace, tool, rate, defaultRate, a
 	const isNuclei = path.basename(resolvedBin).toLowerCase().startsWith("nuclei");
 	// nuclei 模板库：**必须显式 -t 指过去**，不能只"检查一下存在性就放行"。
 	//
-	// 踩过的坑（2026-09-19 实测）：候选表里混了 macOS/Linux 路径，
 	// 本机 `~/.config/nuclei/templates` 是个指向 E 盘的**符号链接**且真有 13742 个模板，
 	// existsSync 通过 → 闸放行；但 **Windows 版 nuclei 只认 `%USERPROFILE%\nuclei-templates`**，
 	// 它不认这个路径 → 空模板集启动 → 联网初始化 → 实测卡 8 分 52 秒（超时上限 15 分钟）。

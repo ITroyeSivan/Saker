@@ -133,7 +133,7 @@ const row = methodRowBody(src)
 }
 
 // ── 2026-09-13 轮次：默认不启用任何方法 + 「仅此组」必须排他 ────────────────
-// 两个都来自用户实测报障：
+// 两种目录读取失败均须返回明确错误：
 //  ① 「点仅此组没用」—— 旧实现是"把本组设为全启用"（其他组不动），默认全开时点它原地踏步。
 //  ② 「默认应该一个都不选，不然每轮提示词太爆炸」—— 方法正文是每轮常驻注入，
 //     26 个方法 ≈ 14KB（约 4–5K token），32K 窗口的模型实测被顶到 CONTEXT_WINDOW_EXCEEDED。
@@ -226,7 +226,6 @@ const row = methodRowBody(src)
         `reads=${reads}/${afterSave}, prompt=${savedMethod?.prompt ?? ''}`)
 
       // 覆盖写用户正文前必须先备份：第二次保存应留下第一版的副本。
-      // （同一类问题 2026-09-19 已在 webshell-mgr 上真实踩过一次数据丢失。）
       ok('首次 save-prompt（用户层原本没有正文）不产生备份',
         saved?.ok === true && !saved.value?.backup, JSON.stringify(saved?.value))
       const saved2 = await handler('save-prompt', { group: 'recon', id: 'port-scan', text: '# cache probe v2\n' })

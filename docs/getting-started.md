@@ -1,13 +1,13 @@
 # 桌面端安装与首次配置
 
-当前版本：Saker **0.4.99**。宿主：Windows 官方 DeepSeek Harness Desktop **0.2.0-rc.2**；本版验收记录随发布附上。
+当前版本：Saker **0.4.100**。宿主：Windows 官方 DeepSeek Harness Desktop **0.2.0-rc.2**。
 
 [下载 Saker](https://github.com/ITroyeSivan/Saker/releases/latest) · [下载对应官方桌面](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.0-rc.2)
 
 ## 使用发布包
 
 1. 安装并打开官方 Desktop，完成首次初始化，配置一个可用模型。
-2. 下载 `Saker-0.4.99-desktop.zip`，解压到长期保留的目录。
+2. 下载 `Saker-0.4.100-desktop.zip`，解压到长期保留的目录。
 3. 完全退出 Desktop。在解压目录打开 PowerShell，运行：
 
 ```powershell
@@ -25,7 +25,7 @@ node scripts/install-desktop.mjs --desktop-dir "C:/实际安装目录/DeepSeek H
 
 从旧版升级请优先使用安装器：它先通过官方命令移除 AttackAtlas、战役记忆、WebShell 管理，再安装当前 22 个包，不删除历史数据库。手动安装前应在插件页卸载这三项，避免旧入口继续加载。
 
-不想使用脚本时，可在官方「插件」页依次安装发布包内的 tgz：先功能插件，最后 `dsh-saker-0.4.99.tgz`，再按应用提示重启。应用内安装使用桌面自带的 Node 和 pnpm，无需额外安装它们。
+不想使用脚本时，可在官方「插件」页依次安装发布包内的 tgz：先功能插件，最后 `dsh-saker-0.4.100.tgz`，再按应用提示重启。应用内安装使用桌面自带的 Node 和 pnpm，无需额外安装它们。
 
 如果需要命令行管理插件，通过应用菜单「管理 dsh 命令」安装桌面自带命令；完全退出应用后再操作 desktop profile。不要用 npm 安装的独立 dsh 命令修改它。
 
@@ -84,7 +84,7 @@ MCP 配置存在与服务在线是两件事：Burp/Yakit 没启动时会显示�
 
 小任务通常由主代理完成，确有需要才分派站点子任务。IP 被封或正常访问失效时及时停止请求。疑点、已确认问题和交付材料分别记录，响应差异本身不能当作漏洞结论。
 
-进度汇报在「设置」中独立选择结束时汇总或每阶段简报。共同研判时可在等待节点补充思路，再按当前思路继续。设计依据见 [协作设置](chat-cooperation-design-2026-10-07.md)。
+进度汇报在「设置」中独立选择结束时汇总或每阶段简报。共同研判时可在等待节点补充思路，再按当前思路继续。
 
 ## 更新与卸载
 
@@ -96,4 +96,4 @@ MCP 配置存在与服务在线是两件事：Burp/Yakit 没启动时会显示�
 dsh plugin --profile desktop remove dsh-saker
 ```
 
-插件卸载不会自动删除历史会话、成果数据库或交付文件。实测范围及仍未验证的项目见[桌面功能复测](verification/desktop-healthcheck-2026-10-04.md)。
+插件卸载不会自动删除历史会话、成果数据库或交付文件。产品使用边界见 [功能说明](features.md)。

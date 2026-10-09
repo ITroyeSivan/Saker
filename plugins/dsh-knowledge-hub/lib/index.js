@@ -463,7 +463,6 @@ const BACKUP_KEEP = 5
  *
  * 为什么：`write` 直接 `writeFileSync` 到用户层/导入层 —— 用户改自己写的知识条目
  * 时，保存一下就永久覆盖上一版，没有任何回退手段。
- * （同一类问题 2026-09-19 已在 webshell-mgr 上真实踩过一次数据丢失。）
  * 备份放同层 `.backups/`：点开头，listEntries / packRoots 都会跳过，
  * 不会出现在目录树或检索里；每个文件最多留 BACKUP_KEEP 份。
  */
@@ -1220,7 +1219,6 @@ async function dispatch(endpoint, payload) {
       try {
         fs.statSync(target)
         // 删除前先移进同层 `.trash/`：这条路径删的是**用户自己写的知识条目/导入包**，
-        // 直接 rm 就永久没了（2026-09-19 已在 webshell-mgr 上真实踩过一次覆盖丢数据）。
         // 同卷 rename 是原子的、几乎零成本，且可人工找回。
         // `.trash` 以点开头，listEntries / packRoots 都会跳过，不会出现在树或检索里。
         const trashDir = path.join(base, '.trash')

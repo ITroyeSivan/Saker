@@ -55,10 +55,8 @@ export function auditWireRecords(captured,status,bodyForIndex){
     throw Error('Individual Desktop settlements differ from transport observations');
   return {at:new Date().toISOString(),consistencyPassed:true,strictBudgetReady:false,sessionId:ledger.rootSession,calls,
     actualTotalTokens:ledger.knownTokens,
-    qualifications:['Observed API-key text route only; no images/files, account route or injected retry yet.',
-      'Provider count endpoint is available in this observation; a published exact/upper-bound contract has not been established.',
-      'The diagnostic buffered small responses and added count calls; timings are not performance evidence.',
-      'Default 256000 output cap prevents admitting these requests under a 150000 full-request reservation.']};
+    qualifications:['Request and usage consistency alone does not establish a provider exact-count or upper-bound contract.',
+      'Admission must also cover output caps, all wire attempts and every participating model route.']};
 }
 export function auditWireDirectory(directory){
   const captured=JSON.parse(readFileSync(join(directory,'native-wire.json'),'utf8'));

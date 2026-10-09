@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-method-stack",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "description": "测试方法目录按当前问题读取正文；桌面可编辑、保存组合和恢复默认。",
   "type": "module",
   "main": "./lib/index.js",

@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { productPluginDirectories } from './lib/product-plugins.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let pass = 0;
@@ -26,8 +27,6 @@ const transient = readdirSync(ROOT).filter((name) => /\.(?:log|tmp|bak)$/i.test(
 ok("源码树根不含 log/tmp/bak 残片", transient.length === 0, transient.join(", "));
 
 // 客户端「转圈转不停」：设了 busy 标志的 RPC 链必须有拒绝处理。
-// 背景（2026-09-19）：knowledge-hub 的 read/save/remove/search 只写了 `.then`，
-// RPC 一旦 reject（当时是连接层错误形状不合规），busy 永远为 true ——
 // 界面卡在「保存中…」+ 白板，且不显示任何错误。这类"看起来在忙、其实已经死了"
 // 的状态只有静态扫得出来：面板非空、data-slot-error 也是 0。
 {
@@ -105,8 +104,7 @@ ok("源码树根不含 log/tmp/bak 残片", transient.length === 0, transient.jo
 }
 
 // persona 预算：persona 是**每轮都在**的常驻提示词，方法论细则属于**按需读**的 skill。
-// 用户口径（2026-09-25）：「不要想着覆盖所有，要相信模型本身能力，太多提示词只会让效果变差」。
-// 方案 §0.2 也写明「persona 里只放声明与检索顺序」。这条把两者钉住：
+// 常驻 persona 保留声明与检索顺序；详细方法按需读取。
 //   · persona 文本超过预算 → 红（防止提示词慢慢长回去）；
 //   · persona 里出现 playbook 的**方法论细则标志词** → 红（说明又把细则搬回常驻层了）。
 // 默认 persona 现在保存在 preset/<mode>/opening.md，由方法编排设置页整段编辑。
@@ -189,7 +187,7 @@ ok("源码树根不含 log/tmp/bak 残片", transient.length === 0, transient.jo
     trees: ["lib", "preset", "shared"],
     files: ["README.md", "cordis.patch.yml"],
   });
-  for (const name of readdirSync(join(ROOT, "plugins"))) {
+  for (const name of productPluginDirectories(ROOT)) {
     if (!name.startsWith("dsh-")) continue;
     const dir = join(ROOT, "plugins", name);
     if (!existsSync(join(dir, "package.json"))) continue;

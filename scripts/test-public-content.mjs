@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import { assertReleaseContent } from './lib/public-content.mjs';
+const body=['✨ 新增功能','🐛 问题修复','🎨 体验优化','⚠️ 其他变更'].map(h=>'### '+h+'\n\n- 无。').join('\n\n');
+assert.doesNotThrow(()=>assertReleaseContent(body));
+console.log('ok valid release sections');
+assert.doesNotThrow(()=>assertReleaseContent(body+'\n- 常规测试支持 Nday 衔接。'));
+console.log('ok product test mode remains allowed');
+assert.throws(()=>assertReleaseContent(body+'\n- 回归 12 套，120 通过。'),/development records/);
+console.log('ok regression results rejected');
+assert.throws(()=>assertReleaseContent(body+'\n- '+['用户反馈','原话'].join('')+': synthetic'),/development records/);
+console.log('ok development conversation rejected');
+assert.throws(()=>assertReleaseContent(body.replace('### ⚠️ 其他变更','')),/Missing release section/);
+console.log('ok missing release section rejected');
+console.log('Public release guard: 5 checks passed');

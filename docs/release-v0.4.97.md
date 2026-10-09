@@ -1,7 +1,6 @@
 ### ✨ 新增功能
 
 - 增加统一发布插件清单与升级迁移检查，防止已移除模块被重新打包、安装。
-- 补充 ARTEX 借鉴、已有实施状态和常规/Nday/0Day 统一验收清单。
 
 ### 🐛 问题修复
 
@@ -15,6 +14,5 @@
 
 ### ⚠️ 其他变更
 
-- 发布包由 25 项减少为 22 项；旧数据库保留，手动升级需要卸载三项旧插件。
-- 官方 Desktop 实测旧入口移除、三种子模式及常规/Nday 安排保存、本地 Nday 与任务工具加载；回归 96 套，13,650 通过、0 失败、16 跳过。Burp、Yakit 配置仍启用，服务未连接。[实际验收](https://github.com/ITroyeSivan/Saker/blob/main/docs/verification/product-pruning-2026-10-09/README.md)。
-- 本版不代表 G0–G10 全部完成、无人值守可用或已证明 token 节省。全任务树 token 预算、完整同条件效果对照和高并发试用仍在推进；验收以对应实际 Desktop 记录为准。
+- AttackAtlas、战役记忆和 WebShell 管理退出运行包；已有用户数据保留。
+- 适用于官方 Windows Desktop 0.2.0-rc.2，更新沿用原有用户数据与 MCP 配置。

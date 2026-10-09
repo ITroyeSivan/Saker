@@ -15,8 +15,5 @@
 
 ### ⚠️ 其他变更
 
-- Windows 官方 Desktop 0.2.0-rc.2 实际完成任务启动、8 个本地对照请求、独立评分和界面完成；恢复轮成功登记待复核成果。
-- 89 套回归、13,626 通过、0 失败、16 跳过；官方编译器验证 20 个实际工具 schema。
-- 快捷方式沿用日常数据，MCP 配置保留但两个服务未连接；尚未完成宿主独立验证与交付全流程，未完成 ARTEX 同条件效果比较。
-
-下载桌面安装包后，按 [安装说明](https://github.com/ITroyeSivan/Saker/blob/v0.4.94/docs/getting-started.md) 更新。具体操作、测试结果与限制见 [发布检查](https://github.com/ITroyeSivan/Saker/blob/v0.4.94/docs/verification/task-inputs-2026-10-09/README.md)。另见 [完整目标及剩余工作](https://github.com/ITroyeSivan/Saker/blob/v0.4.94/docs/saker-implementation-progress-2026-10-08.md)。
+- 常规与 Nday 共用操作额度；成果仍须证据复核。
+- 适用于官方 Windows Desktop 0.2.0-rc.2，更新沿用原有用户数据与 MCP 配置。

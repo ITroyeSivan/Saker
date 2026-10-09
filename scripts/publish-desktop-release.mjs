@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
+import { assertReleaseContent, checkPublicContent } from './lib/public-content.mjs';
 
 const [repository, tag, notesPath, zipPath] = process.argv.slice(2);
 if (!/^[\w.-]+\/[\w.-]+$/.test(repository ?? '') || !/^v\d+\.\d+\.\d+$/.test(tag ?? '') || !notesPath || !zipPath)
@@ -22,6 +23,8 @@ if(![`https://github.com/${repository}.git`,`https://github.com/${repository}`,`
 const version=JSON.parse(readFileSync('package.json','utf8')).version;
 if(tag!=='v'+version || basename(zipPath)!==`Saker-${version}-desktop.zip`)throw Error('Version, tag and asset disagree');
 const body=readFileSync(notesPath,'utf8');
+assertReleaseContent(body);
+checkPublicContent(process.cwd());
 const zip=readFileSync(resolve(zipPath));
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const checksum=Buffer.from(`${hash(zip)}  ${basename(zipPath)}\n`);

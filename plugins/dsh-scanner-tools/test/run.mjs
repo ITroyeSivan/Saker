@@ -162,7 +162,6 @@ expect("保守默认值齐备", RATE_DEFAULTS.nuclei === 15 && RATE_DEFAULTS.htt
 }
 
 // nuclei 模板库：必须挑**真含模板**的目录，并且用 -t 显式指过去。
-// 背景（2026-09-19 实测）：旧代码只 existsSync 检查候选目录就放行，而本机
 // ~/.config/nuclei/templates 是个符号链接（真有 13742 个模板），Windows 版 nuclei
 // 却不认这个路径 → 空模板集启动 → 联网初始化 → 卡 8 分 52 秒（超时上限 15 分钟）。
 {

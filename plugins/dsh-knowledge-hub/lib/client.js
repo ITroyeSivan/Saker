@@ -462,7 +462,6 @@ function Editor(props) {
       else setMsg({ ok: false, text: errText(r) });
     }).catch(function (e) {
       // RPC 被 reject（宿主重启、连接层协议错等）也必须清 busy —— 否则按钮永远"保存中…"，
-      // 详情区一片空白且没有任何原因可看。这正是 2026-09-19 那个白板 bug 的形态。
       setBusy(false); setMsg({ ok: false, text: '读取失败：' + String((e && e.message) || e) });
     });
   }, [props.file && props.file.source + '|' + props.file.mode + '|' + props.file.path]);

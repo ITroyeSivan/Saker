@@ -13,8 +13,5 @@
 
 ### ⚠️ 其他变更
 
-- Windows 官方 Desktop 0.2.0-rc.2 实际验证三个代表性示例；其余示例核对源码内容，未逐个执行桌面插入。
-- 24 项聊天组件检查通过；本轮没有重跑全量回归，也没有发起模型回合或目标请求。
-- 任务范围、协作和预算规则未修改；桌面快捷方式沿用日常数据，MCP 配置保留但两个服务未连接。
-
-下载桌面安装包后，按 [安装说明](https://github.com/ITroyeSivan/Saker/blob/v0.4.91/docs/getting-started.md) 更新。具体操作、测试结果与限制见 [发布检查](https://github.com/ITroyeSivan/Saker/blob/v0.4.91/docs/verification/simple-prompts-2026-10-08.md)。
+- 提示词模板可编辑；任务执行仍遵循范围与额度。
+- 适用于官方 Windows Desktop 0.2.0-rc.2，更新沿用原有用户数据与 MCP 配置。

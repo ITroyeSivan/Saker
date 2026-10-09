@@ -16,8 +16,5 @@
 
 ### ⚠️ 其他变更
 
-- Windows 官方 Desktop 0.2.0-rc.2 实测同步 194 文件；最终三篇整理 2 篇发布并可检索、1 篇失败待重试。这是小样本通路验证。
-- 83 套标准回归、13,577 通过、0 失败、16 跳过；MCP 配置保留但两个服务未连接。
-- 整理不执行来源代码，不自动生成已确认漏洞或可执行探针；今天同步不代表来源仓库今天更新，尚缺无人值守生产效果证据。
-
-下载桌面安装包后，按 [安装说明](https://github.com/ITroyeSivan/Saker/blob/v0.4.92/docs/getting-started.md) 更新。具体操作、测试结果与限制见 [发布检查](https://github.com/ITroyeSivan/Saker/blob/v0.4.92/docs/verification/source-maintenance-2026-10-08.md)。另见 [整体评估和项目比较](https://github.com/ITroyeSivan/Saker/blob/v0.4.92/docs/saker-assessment-2026-10-08.md)。
+- 漏洞知识是候选线索；不自动执行上游仓库代码，不保证来源完整或即时更新。
+- 适用于官方 Windows Desktop 0.2.0-rc.2，更新沿用原有用户数据与 MCP 配置。

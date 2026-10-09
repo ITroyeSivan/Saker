@@ -1,4 +1,3 @@
-
 // ── 平台数据根（$DSH_HOME）────────────────────────────────────────────
 // 宿主按 $DSH_HOME 装配 profiles/会话/存储；插件一律跟随，避免「一半落 A 一半落 B」。
 // 未设置时等价于 ~/.dsh，故对既有用户是零行为变更。
@@ -962,17 +961,7 @@ export function isBoundedDiscoverySession(session) {
 	return false;
 }
 
-/**
- * 覆盖提醒是否**注入会话**。默认关。
- *
- * 为什么默认关（2026-09-24 用户反馈「attackatlas 老是发消息浪费 token」）：
- * 每条提醒都是一条 role=user 的消息，会被追加进模型上下文并再滚一轮——
- * 一次作业里按主类各发一条，token 成本与聊天区噪声都很可观。
- *
- * 安全前提：提醒不是覆盖收口的唯一防线。`stage_gate` 的阶段门与
- * `redteam_coverage_list` 仍然对未终态格子把关，自动点亮（真正的产物）也完全保留。
- * 需要旧行为时设 `SAKER_ATLAS_NUDGE=1`（或测试里传 `deps.nudge`）。
- */
+/** 覆盖提醒默认关闭，按配置显式开启。 */
 const ATLAS_NUDGE_IN_SESSION = process.env.SAKER_ATLAS_NUDGE === "1";
 
 function nudgeUndetermined(ctx, sessionId, mode, taxonomy, doneKeys, markedCats, deps = {}) {

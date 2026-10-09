@@ -1,19 +1,18 @@
-// Mutate actual Desktop receipts: a captured `matches: true` must never be
-// sufficient to qualify a corrupted count, request or independent settlement.
+// Synthetic receipts exercise independent reconciliation and corrupted inputs.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { auditWireRecords, validateWireCount } from './audit-wire-token-count.mjs';
-const evidence=fileURLToPath(new URL('../docs/verification/wire-token-count-2026-10-09/',import.meta.url));
-const captured=JSON.parse(readFileSync(join(evidence,'native-wire.json'),'utf8'));
-const status=JSON.parse(readFileSync(join(evidence,'second-status.json'),'utf8'));
-const body=index=>readFileSync(join(evidence,`wire-${index}.json`));
+const rootSession='fixture-root';
+const bodies=[1,2,3].map(index=>Buffer.from(JSON.stringify({model:'fixture-model',max_tokens:16,thinking:{type:'disabled'},system:'Synthetic instructions',tools:[],messages:[{role:'user',content:'Synthetic request '+index}]})));
+const body=index=>bodies[index-1];
+const records=bodies.map((bytes,i)=>({index:i+1,sessionId:rootSession,model:'fixture-model',maxTokens:16,thinking:'disabled',bodySha256:createHash('sha256').update(bytes).digest('hex'),bodyBytes:bytes.length,countStatus:200,generationStatus:200,countedInput:12+i,matches:true,actual:{input:9+i,cacheRead:3,cacheWrite:0,output:1,terminal:true}}));
+const captured={records};
+const status={task:{modelBudget:{rootSession,knownTokens:42,chargedCalls:3,unknownCalls:0,unresolvedCalls:0,unboundedUnknownCalls:0,counterViolation:false,calls:records.map((r,i)=>({id:'fixture-'+i,sessionId:rootSession,model:r.model,state:'settled',usage:{inputTokens:r.actual.input,outputTokens:1,cacheReadTokens:3,cacheWriteTokens:0,totalTokens:r.countedInput+1}}))}}};
 const passed=[];
-function check(name,run){run();passed.push(name);console.log('PASS '+name);}
-check('actual three-request Desktop capture reconciles',()=>{
+function check(name,run){run();passed.push(name);console.log('ok '+name);}
+check('synthetic three-request capture reconciles',()=>{
   const result=auditWireRecords(captured,status,body);
-  assert.equal(result.actualTotalTokens,56608);
+  assert.equal(result.actualTotalTokens,42);
   assert.equal(result.calls.length,3);
   assert.equal(result.strictBudgetReady,false);
   for(const row of result.calls)assert.equal(Object.values(row.categories).reduce((a,b)=>a+b,0)+row.syntaxBytes,row.bodyBytes);

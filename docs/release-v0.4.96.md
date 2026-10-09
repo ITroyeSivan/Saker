@@ -16,8 +16,5 @@
 
 ### ⚠️ 其他变更
 
-- 官方 Windows Desktop 0.2.0-rc.2 实际验收，95 套回归、13,661 通过、0 失败、16 跳过。16 项本机启动检查中 10 可启动、4 入口缺失、2 尚未支持；帮助成功不证明目标操作或模型工具已加载。
-- 页面操作未增加模型请求，专用 transcript 哈希不变；工具定义仍有上下文开销，本版不宣称 token 节省或漏洞发现效果提升。
-- Desktop 快捷方式已刷新并实际启动，日常配置保留；两项 MCP 仍未连接。其他插件顶层页及 G0–G10 完整目标继续改进。
-
-下载桌面安装包后，按 [安装说明](https://github.com/ITroyeSivan/Saker/blob/v0.4.96/docs/getting-started.md) 更新。实际操作、失败记录与限制见 [发布检查](https://github.com/ITroyeSivan/Saker/blob/v0.4.96/docs/verification/workspace-ui-2026-10-09/README.md)。另见 [完整目标及实施进度](https://github.com/ITroyeSivan/Saker/blob/v0.4.96/docs/saker-implementation-progress-2026-10-08.md)。
+- 工具路径和版本检查不能代替目标上的实际操作结果。
+- 适用于官方 Windows Desktop 0.2.0-rc.2，更新沿用原有用户数据与 MCP 配置。

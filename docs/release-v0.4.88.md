@@ -9,7 +9,7 @@
 
 - 修复同站子任务从常规继续到 Nday 时，原工具过滤器遗漏 Nday 本地工具的问题；保留原会话、已用操作数与历史报告。
 - 首次分派前检查 Nday 工具包已加载，避免把缺少工具的清单固化进子会话；子会话可加载其已获准的本地工具。
-- 修复桌面发布包遗漏 README 引用截图的问题。
+- 修复桌面发布包遗漏用户说明资源的问题。
 - 精简重复工具说明，恢复描述长度预算检查。
 
 ### 🎨 体验优化
@@ -19,7 +19,5 @@
 
 ### ⚠️ 其他变更
 
-- 本版在 Windows 官方 Desktop 0.2.0-rc.2 使用合成资料验证。MCP 配置保留，Burp、Yakit 服务未连接，本轮没有验证其业务工具。
-- 受控流程验收不代表真实目标检出率，也不保证节省 token。
-
-下载桌面安装包后，按 [安装说明](https://github.com/ITroyeSivan/Saker/blob/v0.4.88/docs/getting-started.md) 更新。具体操作、测试结果与限制见 [发布检查](https://github.com/ITroyeSivan/Saker/blob/v0.4.88/docs/verification/release-0.4.88.md)。
+- Nday 与常规方向共用任务资料；更新保留用户数据。
+- 适用于官方 Windows Desktop 0.2.0-rc.2，更新沿用原有用户数据与 MCP 配置。

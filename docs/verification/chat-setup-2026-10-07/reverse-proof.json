@@ -1,8 +1,0 @@
-{
-  "mutation": "Remove mode from prompt draft reads, simulating a cross-direction draft leak",
-  "reverseExit": 1,
-  "failingAssertions": [
-    "FAIL prompt drafts are isolated by session and direction, personal templates persist, and nothing injects drafts: Expected values to be strictly equal:"
-  ],
-  "sourceRestored": true
-}

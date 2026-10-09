@@ -710,16 +710,7 @@ function configuredNucleiBin(ctx) {
   }
 }
 
-/**
- * 知识覆盖体检：一次把三层来源对这个关键词的覆盖数出来。
- *
- * 为什么需要它（2026-09-24 用户质疑「除了有非常全的项目或网站，不然没法做到吧」）：
- * **他说得对——没有单一来源是全的**。实测同一批信创产品：
- *   nuclei 模板库：泛微 46 / 致远 10 / 用友 22 / 金蝶 2 / **东方通 0 / 宝兰德 0**
- *   本地知识包：  泛微 49 / 致远 44 / 用友 42 / 金蝶 12 / **东方通 0 / 宝兰德 0**
- * 两组来源互补，但**都盖不住东方通**——而那恰好是撑起对手 8 个 shell 的产品。
- * 所以真正要回答的不是「哪个库全」，而是「**这个产品在哪一层有货、哪一层是空的**」。
- */
+/** 按产品关键词汇总目录、知识导入与模板来源覆盖；没有单一来源保证完整。 */
 export function coverageScan({ keyword, catalogEntries = [], importsDir = '', nucleiDir = '', fsImpl = fs, fileCap = 20000 }) {
   const primary = String(keyword || '').toLowerCase()
   const entryText = (entry) => [entry.id, entry.product, entry.vendor, entry.vulnClass,

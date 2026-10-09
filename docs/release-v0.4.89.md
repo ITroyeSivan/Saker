@@ -16,7 +16,5 @@
 
 ### ⚠️ 其他变更
 
-- Windows 官方 Desktop 0.2.0-rc.2 实际验收；81 套回归、13,555 通过、0 失败、16 跳过。
-- 桌面快捷方式沿用日常配置和数据；Burp、Yakit 配置保留但未连接。离线合成验收不代表漏洞检出率或 token 节省。
-
-下载桌面安装包后，按 [安装说明](https://github.com/ITroyeSivan/Saker/blob/v0.4.89/docs/getting-started.md) 更新。具体操作、测试结果与限制见 [发布检查](https://github.com/ITroyeSivan/Saker/blob/v0.4.89/docs/verification/chat-setup-2026-10-07.md)。另见 [聊天设置设计](https://github.com/ITroyeSivan/Saker/blob/v0.4.89/docs/chat-setup-design-2026-10-07.md)。
+- 聊天设置应用于当前任务；更新保留已有配置。
+- 适用于官方 Windows Desktop 0.2.0-rc.2，更新沿用原有用户数据与 MCP 配置。

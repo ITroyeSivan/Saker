@@ -1,14 +1,16 @@
 // Build a Windows Desktop delivery from the exact current pnpm artifacts.
 // Include package contents so install-desktop can verify installed bytes.
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, readFileSync, readdirSync, copyFileSync, cpSync, existsSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, copyFileSync, existsSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { productPluginDirectories } from './lib/product-plugins.mjs'
+import { checkPublicContent } from './lib/public-content.mjs'
 
 if (process.platform !== 'win32') throw new Error('Desktop release packaging currently supports Windows only.')
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+checkPublicContent(root)
 const version = JSON.parse(readFileSync(join(root, 'package.json'))).version
 const output = join(root, 'dist', 'releases')
 const payload = join(output, `Saker-${version}-desktop`)
@@ -29,17 +31,12 @@ for (const dir of dirs) {
   copyFileSync(artifact, join(destination, name))
   manifest.push({ name: pkg.name, version: pkg.version, artifact: dir === root ? name : `plugins/${dir.split(/[\\/]/).at(-1)}/${name}`, sha256: createHash('sha256').update(readFileSync(artifact)).digest('hex') })
 }
-for (const file of ['scripts/install-desktop.mjs', 'scripts/update-desktop-shortcut.mjs', 'scripts/lib/product-plugins.mjs', 'scripts/lib/desktop-artifacts.mjs', 'scripts/lib/desktop-shortcut.mjs', 'scripts/lib/desktop-launch.ps1', 'docs/getting-started.md', 'docs/plugin-list.md', `docs/release-v${version}.md`]) {
+for (const file of ['scripts/install-desktop.mjs', 'scripts/update-desktop-shortcut.mjs', 'scripts/lib/product-plugins.mjs', 'scripts/lib/desktop-artifacts.mjs', 'scripts/lib/desktop-shortcut.mjs', 'scripts/lib/desktop-launch.ps1', 'docs/getting-started.md', 'docs/plugin-list.md', 'docs/features.md', 'docs/boundaries.md', 'docs/development.md', 'docs/release-format.md', 'benchmarks/task-effects/README.md', `docs/release-v${version}.md`]) {
   const destination = join(payload, file)
   mkdirSync(dirname(destination), { recursive: true })
   copyFileSync(join(root, file), destination)
 }
-cpSync(join(root, 'docs', 'verification'), join(payload, 'docs', 'verification'), { recursive: true })
-cpSync(join(root, 'docs', 'images'), join(payload, 'docs', 'images'), { recursive: true })
-// README and the usage guide link to design/progress documents as well.
-for (const file of readdirSync(join(root, 'docs')).filter(name => name.endsWith('.md'))) {
-  copyFileSync(join(root, 'docs', file), join(payload, 'docs', file))
-}
+// Copy only user documentation, never recursive development directories.
 writeFileSync(join(payload, 'packages.json'), JSON.stringify(manifest, null, 2) + '\n')
 const zip = payload + '.zip'
 const quote = x => "'" + x.replaceAll("'", "''") + "'"

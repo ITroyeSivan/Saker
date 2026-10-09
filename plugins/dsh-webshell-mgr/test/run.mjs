@@ -807,7 +807,6 @@ await ok("客户端按结构化错误取文案（不会把对象塞进 React 子
 });
 
 // 覆盖写用户文件前必须留备份：self-content-set 直接写用户的 WebShell 目录，
-// 覆盖不可恢复（回收站收不到覆盖）。2026-09-19 一次误操作把 jsp_antsword.jsp
 // 覆盖成测试串，本机无副本，只能按 JDK9 孪生文件重写一份功能等价版本。
 await ok("覆盖写前留备份（内容一致 + 每个文件只留 5 份）", async () => {
 	const { backupBeforeWrite } = await import("../lib/index.js");

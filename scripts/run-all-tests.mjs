@@ -464,6 +464,8 @@ for (const [suiteName, runner] of [
   ['adaptive-execution-reverse', join(root, 'scripts', 'test-adaptive-execution-reverse.mjs')],
   ['verification-basis-reverse', join(root, 'scripts', 'test-verification-basis-reverse.mjs')],
   ['delivery-semantics-reverse', join(root, 'scripts', 'test-delivery-semantics-reverse.mjs')],
+  ['public-content', join(root, 'scripts', 'test-public-content.mjs')],
+  ['wire-token-count', join(root, 'scripts', 'test-wire-token-count.mjs')],
 ]) {
   const r = spawnSync(NODE, ['--import', pathToFileURL(stub).href, runner], { cwd: root, encoding: 'utf8' })
   const lines = `${r.stdout || ''}${r.stderr || ''}`.split('\n')
@@ -547,6 +549,8 @@ const REQUIRED_SUITES = [
   'adaptive-execution-reverse',
   'verification-basis-reverse',
   'delivery-semantics-reverse',
+  'public-content',
+  'wire-token-count',
   'asset-inventory',
   'attack-flow',
   'zeroday-catalog',
