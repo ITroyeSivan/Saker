@@ -1551,9 +1551,8 @@ function ChatSetup(props) {
   function load(){var revision=++request.current;return api('chat.settings',{sessionId:props.sessionId}).then(function(result){
     if(!result.ok)throw Error(chatError(result.error));
     if(!mounted.current||request.current!==revision||saving.current)return result;
-    // Make the visible default controls real before admitting edits. This only
-    // saves preferences: no task, operation budget, tool or model is started.
-    if(!result.configured&&!result.choice){var initial=result.options||{};return api('task.choose',{sessionId:props.sessionId,mode:'regular',workflow:'single',workers:initial.workers??1,interaction:initial.interaction||'continuous',reporting:chatReporting(initial)}).then(function(value){if(!value.ok)throw Error(chatError(value.error));return api('chat.settings',{sessionId:props.sessionId});});}
+    // Reading or polling must not turn displayed defaults into a user choice.
+    // Explicit controls persist preferences through run('task.choose', ...).
     return result;
   }).then(function(result){
     if(!result.ok)throw Error(chatError(result.error));if(mounted.current&&request.current===revision&&!saving.current){state[1](result);readError[1]('');}

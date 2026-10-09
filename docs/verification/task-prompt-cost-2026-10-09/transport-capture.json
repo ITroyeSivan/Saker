@@ -1,0 +1,66 @@
+{
+  "method": "Official Desktop owned backend session-only fetch body observer; original arguments forwarded",
+  "sessionId": "session-ab50dab9-fd40-4f28-96c5-08f2f825d46e",
+  "restored": true,
+  "errors": [],
+  "records": [
+    {
+      "number": 1,
+      "bytes": 84311,
+      "sha256": "4baa715e1b41d0d777f9335d4533d7732d7f01cca3fe0c6ec68c03e030c840fe",
+      "at": "2026-10-09T00:17:18.745Z",
+      "file": "request-01.json"
+    },
+    {
+      "number": 2,
+      "bytes": 14041,
+      "sha256": "bfabb947b9201d5147ade266db20723effc5b754c83f6be39edeafccb5e47b88",
+      "at": "2026-10-09T00:17:18.750Z",
+      "file": "request-02.json"
+    },
+    {
+      "number": 3,
+      "bytes": 84620,
+      "sha256": "9ad8d97044d050da0235bf392788883317a7a2fe5d1e5191b66dc41e8626d8f3",
+      "at": "2026-10-09T00:17:55.231Z",
+      "file": "request-03.json"
+    },
+    {
+      "number": 4,
+      "bytes": 89763,
+      "sha256": "907a35b399e4717eb6d663c7ee6e0c326a29f1569c05681bfab054ec8be93a51",
+      "at": "2026-10-09T00:18:15.787Z",
+      "file": "request-04.json"
+    },
+    {
+      "number": 5,
+      "bytes": 94925,
+      "sha256": "0e091784d4ff1c7c422470ff47e7a18fb2f97abbbdf9960dfbb92acc1c3f69f0",
+      "at": "2026-10-09T00:19:11.842Z",
+      "file": "request-05.json"
+    },
+    {
+      "number": 6,
+      "bytes": 101988,
+      "sha256": "160b61857d57229619b4bea3acc118d7eae25755c39baaea746d3d0926b1dbd6",
+      "at": "2026-10-09T00:20:11.206Z",
+      "file": "request-06.json"
+    },
+    {
+      "number": 7,
+      "bytes": 112154,
+      "sha256": "298531799a8ab2886de651650e60fb092da9ecad45d4d648f684169c9c4aedb0",
+      "at": "2026-10-09T00:20:17.901Z",
+      "file": "request-07.json"
+    },
+    {
+      "number": 8,
+      "bytes": 117894,
+      "sha256": "25e741751ab6b9b3dce62626affa2af53d6967f9c0857828d59f961203b5249d",
+      "at": "2026-10-09T00:20:37.847Z",
+      "file": "request-08.json"
+    }
+  ],
+  "rawBodiesPublished": false,
+  "unchangedSystemAndToolsAcrossMainRequests": true
+}

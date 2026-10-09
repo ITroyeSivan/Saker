@@ -15,7 +15,7 @@ process.env.DSH_HOME = home;
 const results = await import('../plugins/dsh-redteam-results/lib/index.js');
 const store = openStore(path.join(home, 'redteam-results', 'results.db'));
 const sections = [], disposers = [], registeredTools = new Map();
-const sessionMap = new Map(['ui', 'hero', 'nday', 'regular', '0day', 'records', 'interaction-ui'].map(id => [id, { id, header: { agentPreset: 'pentest' } }]));
+const sessionMap = new Map(['ui', 'hero', 'nday', 'regular', '0day', 'records', 'interaction-ui', 'poll-readonly'].map(id => [id, { id, header: { agentPreset: 'pentest' } }]));
 sessionMap.set('audit', { id: 'audit', header: { agentPreset: 'code-audit' } });
 const queued = [], cancellations = [];
 const agents = { get: id => sessionMap.has(id) ? { session: sessionMap.get(id), status: 'idle', followup: message => queued.push({ id, message }), cancel: cause => cancellations.push({ id, cause }) } : undefined };
@@ -27,19 +27,27 @@ results.apply(ctx);
 const source = fs.readFileSync(new URL('../plugins/dsh-redteam-results/lib/client.js', import.meta.url), 'utf8');
 const componentSource = source.slice(source.indexOf('function exampleTemplates('), source.indexOf('function CheckedList('));
 function harness(name, sessionId, props = {}, extras = {}) {
-  const state = [], calls = []; let cursor = 0;
+  const state = [], calls = [], effects = [], timers = []; let cursor = 0;
   const sandbox = { useState: value => { const index = cursor++; if (!(index in state)) state[index] = value; return [state[index], next => { state[index] = typeof next === 'function' ? next(state[index]) : next; }]; },
-    useEffect: () => {}, useRef: initial => { const index=cursor++; if (!(index in state))state[index]={current:initial};return state[index]; }, Btn: 'button', React: { createElement: (type, props, ...children) => ({ type, props: props || {}, children }) },
+    useEffect: effect => effects.push(effect), setInterval: fn => { timers.push(fn); return timers.length; }, clearInterval: () => {}, useRef: initial => { const index=cursor++; if (!(index in state))state[index]={current:initial};return state[index]; }, Btn: 'button', React: { createElement: (type, props, ...children) => ({ type, props: props || {}, children }) },
     api: async (endpoint, payload) => { calls.push([endpoint, payload]); try { return await results.dispatch(ctx, store, endpoint, payload); } catch (error) { return { ok: false, error: error.message }; } } };
   Object.assign(sandbox, extras);
   runInNewContext(componentSource + '; this.component = ' + name, sandbox);
   function render() { cursor = 0; return sandbox.component({ sessionId, ...props }); }
   function nodes(node) { if (!node || typeof node !== 'object') return []; return [node, ...node.children.flat(Infinity).flatMap(nodes)]; }
-  return { state, calls, render, find: predicate => nodes(render()).find(predicate), button: label => nodes(render()).find(node => node.type === 'button' && node.children.includes(label)) };
+  return { state, calls, render, mount: async () => { render(); for(const effect of effects.slice())effect(); await new Promise(setImmediate); }, poll: async () => { for(const timer of timers)await timer(); }, find: predicate => nodes(render()).find(predicate), button: label => nodes(render()).find(node => node.type === 'button' && node.children.includes(label)) };
 }
 let failed = 0;
 async function test(name, fn) { try { await fn(); console.log('ok   ' + name); } catch (error) { failed++; console.log('FAIL ' + name + ': ' + error.message); } }
 try {
+  await test('reading and polling Desktop chat settings never persist a mode or task', async () => {
+    const ui=harness('ChatSetup','poll-readonly');await ui.mount();await ui.poll();await ui.poll();
+    assert(ui.calls.length>=3);assert(ui.calls.every(([endpoint])=>endpoint==='chat.settings'),'read invoked a mutation RPC');
+    const state=await results.dispatch(ctx,store,'chat.settings',{sessionId:'poll-readonly'});
+    assert.equal(state.choice,null);assert.equal(state.configured,false);assert.equal(readTaskPolicy(store,'poll-readonly'),null);
+    assert.equal(store.db.prepare('SELECT count(*) AS n FROM task_flow_choice WHERE session_id=?').get('poll-readonly').n,0);
+    assert.equal(ui.find(n=>n.props['aria-label']==='任务方向').props.value,'regular');
+  });
   await test('Desktop interaction control saves preferences, confirms a real checkpoint and preserves policy on failed delivery',async()=>{
     const id='interaction-ui';
     const control=harness('InteractionControl',id);
@@ -325,14 +333,19 @@ try {
     const view=siteWorkerView(store,id);assert.equal(view.active,16);assert.equal(view.workers.filter(w=>w.state!=='released').length,16);assert.equal(view.more,2);
     assert(view.workers.some(w=>w.childId==='visible-0'));assert(view.workers.some(w=>w.childId==='visible-15'));
   });
-  await test('visible initial defaults are persisted before editing, without starting a task or model',async()=>{
+  await test('visible defaults remain read-only until an explicit edit, without starting a task or model',async()=>{
     const id='chat-initial';sessionMap.set(id,{id,header:{agentPreset:'pentest'}});let boot;
     const before=queued.length,ui=harness('ChatSetup',id,{}, {useEffect:fn=>{boot=fn;},setInterval:()=>0,clearInterval(){}});
     ui.render();const unmount=boot();
     for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
     const value=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
-    assert.equal(value.choice,'regular');assert.equal(value.options.workers,1);assert.equal(value.options.interaction,'continuous');
-    assert.equal(value.configured,false);assert.equal(queued.length,before);unmount();
+    assert.equal(value.choice,null);assert.equal(value.configured,false);
+    assert.equal(ui.find(n=>n.props['aria-label']==='聊天子代理上限').props.value,'1');
+    assert.equal(ui.find(n=>n.props['aria-label']==='聊天协作方式').props.value,'continuous');
+    await ui.find(n=>n.props['aria-label']==='聊天子代理上限').props.onChange({target:{value:'4'}});
+    const edited=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
+    assert.equal(edited.choice,'regular');assert.equal(edited.options.workers,4);assert.equal(edited.options.interaction,'continuous');
+    assert.equal(edited.configured,false);assert.equal(queued.length,before);unmount();
   });
   await test('editable prompt inserts through native revision-guarded composer API and copies exact edits without sending',async()=>{
     let clipboard='',inserted='',admit=true,captured=0;

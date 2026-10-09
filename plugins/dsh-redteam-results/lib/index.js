@@ -38,6 +38,7 @@ import { indexBusinessMaterials, businessMaterialView } from './business-materia
 import { runComparisonJob, readComparisonJob, comparisonFindingInput } from './comparison-jobs.js';
 import { recordImpactReview } from './impact-reviews.js';
 import { PROOF_KINDS, parseReproduction, renderReproduction, renderFindingDelivery } from './delivery.js';
+import { registerTaskPrompt } from './task-prompt.js';
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { saveChecks, readChecks, compactChecks, renderCheckedTsv } from './checked.js';
 import { openStore, registerFinding, updateFinding, removeFinding, getFinding, allFindings, listFindings, listFindingsAll, groupByTarget, groupByTargetAll, computeStats, computeStatsAll, modeCounts, modeCountsAll, ledgerOverview, ledgerOverviewAll, getMeta, setMeta, SEVERITIES, STATUSES, REGISTER_STATUSES, MODE_STATUSES, ALL_STATUSES, EVIDENCE_LEVELS, SOURCE_ORIGINS, SECOND_RATINGS, secondReviewError, secondReviewVerdict, statusesOf } from "./store.js";
@@ -641,15 +642,13 @@ function apply(ctx) {
   });
   const siteWorkers = createSiteWorkers(ctx, theStore);
   workerManagers.set(ctx, siteWorkers);
-  if (typeof ctx.systemPrompt?.section === 'function') ctx.systemPrompt.section({
-    name: 'saker-pentest-task', order: 470,
-    text: assembly => {
+  registerTaskPrompt(ctx, assembly => sessionOf(ctx, { agent: assembly?.agent })?.mode === 'pentest',
+    assembly => {
       const session = sessionOf(ctx, { agent: assembly?.agent });
       if (!session || session.mode !== 'pentest') return '';
       try { return taskPrompt(taskPolicyStatus(theStore(), session.id)); }
       catch { return '本会话任务状态无法读取，停止目标操作并报告原因；不要重建或重置历史。'; }
-    }
-  });
+    });
   const enforcementAvailable = typeof ctx.tools.guard === 'function';
   if (enforcementAvailable) ctx.tools.guard(exec => {
     const session = sessionOf(ctx, exec);

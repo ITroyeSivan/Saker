@@ -1,0 +1,1778 @@
+[
+  {
+    "file": "request-01.json",
+    "sha256": "4baa715e1b41d0d777f9335d4533d7732d7f01cca3fe0c6ec68c03e030c840fe",
+    "rawBytes": 84311,
+    "canonicalBytes": 84311,
+    "canonicalWire": true,
+    "bytePartitions": {
+      "system": 10318,
+      "tools": 35762,
+      "messages": 24768,
+      "packageInventory": 13286,
+      "other": 177
+    },
+    "model": "deepseek-flash",
+    "toolCount": 41,
+    "packageCount": 195,
+    "toolSources": [
+      {
+        "source": "host",
+        "count": 20,
+        "definitionBytes": 14789
+      },
+      {
+        "source": "dsh-redteam-results",
+        "count": 10,
+        "definitionBytes": 13662
+      },
+      {
+        "source": "unattributed",
+        "count": 5,
+        "definitionBytes": 2820
+      },
+      {
+        "source": "dsh-knowledge-hub",
+        "count": 3,
+        "definitionBytes": 2282
+      },
+      {
+        "source": "dsh-stage-gate",
+        "count": 1,
+        "definitionBytes": 1067
+      },
+      {
+        "source": "dsh-tool-scope",
+        "count": 1,
+        "definitionBytes": 575
+      },
+      {
+        "source": "dsh-campaign-memory",
+        "count": 1,
+        "definitionBytes": 525
+      }
+    ],
+    "largestTools": [
+      {
+        "name": "redteam_finding_register",
+        "bytes": 4032
+      },
+      {
+        "name": "pwsh",
+        "bytes": 3452
+      },
+      {
+        "name": "redteam_finding_update",
+        "bytes": 2508
+      },
+      {
+        "name": "redteam_task",
+        "bytes": 1614
+      },
+      {
+        "name": "redteam_research",
+        "bytes": 1502
+      },
+      {
+        "name": "redteam_execution",
+        "bytes": 1390
+      },
+      {
+        "name": "ask_user_question",
+        "bytes": 1251
+      },
+      {
+        "name": "edit",
+        "bytes": 1080
+      },
+      {
+        "name": "stage_gate",
+        "bytes": 1067
+      },
+      {
+        "name": "update_goal",
+        "bytes": 986
+      },
+      {
+        "name": "knowledge_read",
+        "bytes": 891
+      },
+      {
+        "name": "todo_write",
+        "bytes": 860
+      }
+    ],
+    "messages": [
+      {
+        "index": 0,
+        "role": "user",
+        "bytes": 24766,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 130
+          },
+          {
+            "kind": "workspace-instructions",
+            "bytes": 14743
+          },
+          {
+            "kind": "runtime-context",
+            "bytes": 4752
+          },
+          {
+            "kind": "skills",
+            "bytes": 5110
+          }
+        ]
+      }
+    ],
+    "systemHistoryBytes": 0,
+    "titleLike": false,
+    "limitations": [
+      "Bytes are not token attribution or monetary cost.",
+      "Package metadata is a transport extension; model billing treatment is unknown.",
+      "Tool ownership uses conservative name rules; unknown tools remain unattributed."
+    ],
+    "taskState": {
+      "systemRulePresent": true,
+      "contextStateSnapshots": [
+        {
+          "bytes": 4685,
+          "workerLimit": null,
+          "budget0of3": false,
+          "cancelled": false
+        }
+      ],
+      "systemHistoryBytes": 0
+    }
+  },
+  {
+    "file": "request-02.json",
+    "sha256": "bfabb947b9201d5147ade266db20723effc5b754c83f6be39edeafccb5e47b88",
+    "rawBytes": 14041,
+    "canonicalBytes": 14041,
+    "canonicalWire": true,
+    "bytePartitions": {
+      "system": 368,
+      "tools": 0,
+      "messages": 255,
+      "packageInventory": 13286,
+      "other": 132
+    },
+    "model": "deepseek-flash",
+    "toolCount": 0,
+    "packageCount": 195,
+    "toolSources": [],
+    "largestTools": [],
+    "messages": [
+      {
+        "index": 0,
+        "role": "user",
+        "bytes": 253,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 225
+          }
+        ]
+      }
+    ],
+    "systemHistoryBytes": 0,
+    "titleLike": true,
+    "limitations": [
+      "Bytes are not token attribution or monetary cost.",
+      "Package metadata is a transport extension; model billing treatment is unknown.",
+      "Tool ownership uses conservative name rules; unknown tools remain unattributed."
+    ],
+    "taskState": {
+      "systemRulePresent": false,
+      "contextStateSnapshots": [],
+      "systemHistoryBytes": 0
+    }
+  },
+  {
+    "file": "request-03.json",
+    "sha256": "9ad8d97044d050da0235bf392788883317a7a2fe5d1e5191b66dc41e8626d8f3",
+    "rawBytes": 84620,
+    "canonicalBytes": 84620,
+    "canonicalWire": true,
+    "bytePartitions": {
+      "system": 10318,
+      "tools": 35762,
+      "messages": 25077,
+      "packageInventory": 13286,
+      "other": 177
+    },
+    "model": "deepseek-flash",
+    "toolCount": 41,
+    "packageCount": 195,
+    "toolSources": [
+      {
+        "source": "host",
+        "count": 20,
+        "definitionBytes": 14789
+      },
+      {
+        "source": "dsh-redteam-results",
+        "count": 10,
+        "definitionBytes": 13662
+      },
+      {
+        "source": "unattributed",
+        "count": 5,
+        "definitionBytes": 2820
+      },
+      {
+        "source": "dsh-knowledge-hub",
+        "count": 3,
+        "definitionBytes": 2282
+      },
+      {
+        "source": "dsh-stage-gate",
+        "count": 1,
+        "definitionBytes": 1067
+      },
+      {
+        "source": "dsh-tool-scope",
+        "count": 1,
+        "definitionBytes": 575
+      },
+      {
+        "source": "dsh-campaign-memory",
+        "count": 1,
+        "definitionBytes": 525
+      }
+    ],
+    "largestTools": [
+      {
+        "name": "redteam_finding_register",
+        "bytes": 4032
+      },
+      {
+        "name": "pwsh",
+        "bytes": 3452
+      },
+      {
+        "name": "redteam_finding_update",
+        "bytes": 2508
+      },
+      {
+        "name": "redteam_task",
+        "bytes": 1614
+      },
+      {
+        "name": "redteam_research",
+        "bytes": 1502
+      },
+      {
+        "name": "redteam_execution",
+        "bytes": 1390
+      },
+      {
+        "name": "ask_user_question",
+        "bytes": 1251
+      },
+      {
+        "name": "edit",
+        "bytes": 1080
+      },
+      {
+        "name": "stage_gate",
+        "bytes": 1067
+      },
+      {
+        "name": "update_goal",
+        "bytes": 986
+      },
+      {
+        "name": "knowledge_read",
+        "bytes": 891
+      },
+      {
+        "name": "todo_write",
+        "bytes": 860
+      }
+    ],
+    "messages": [
+      {
+        "index": 0,
+        "role": "user",
+        "bytes": 24766,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 130
+          },
+          {
+            "kind": "workspace-instructions",
+            "bytes": 14743
+          },
+          {
+            "kind": "runtime-context",
+            "bytes": 4752
+          },
+          {
+            "kind": "skills",
+            "bytes": 5110
+          }
+        ]
+      },
+      {
+        "index": 1,
+        "role": "assistant",
+        "bytes": 149,
+        "blocks": [
+          {
+            "kind": "thinking",
+            "bytes": 84
+          },
+          {
+            "kind": "text",
+            "bytes": 31
+          }
+        ]
+      },
+      {
+        "index": 2,
+        "role": "user",
+        "bytes": 158,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 130
+          }
+        ]
+      }
+    ],
+    "systemHistoryBytes": 0,
+    "titleLike": false,
+    "limitations": [
+      "Bytes are not token attribution or monetary cost.",
+      "Package metadata is a transport extension; model billing treatment is unknown.",
+      "Tool ownership uses conservative name rules; unknown tools remain unattributed."
+    ],
+    "taskState": {
+      "systemRulePresent": true,
+      "contextStateSnapshots": [
+        {
+          "bytes": 4685,
+          "workerLimit": null,
+          "budget0of3": false,
+          "cancelled": false
+        }
+      ],
+      "systemHistoryBytes": 0
+    }
+  },
+  {
+    "file": "request-04.json",
+    "sha256": "907a35b399e4717eb6d663c7ee6e0c326a29f1569c05681bfab054ec8be93a51",
+    "rawBytes": 89763,
+    "canonicalBytes": 89763,
+    "canonicalWire": true,
+    "bytePartitions": {
+      "system": 10318,
+      "tools": 35762,
+      "messages": 30220,
+      "packageInventory": 13286,
+      "other": 177
+    },
+    "model": "deepseek-flash",
+    "toolCount": 41,
+    "packageCount": 195,
+    "toolSources": [
+      {
+        "source": "host",
+        "count": 20,
+        "definitionBytes": 14789
+      },
+      {
+        "source": "dsh-redteam-results",
+        "count": 10,
+        "definitionBytes": 13662
+      },
+      {
+        "source": "unattributed",
+        "count": 5,
+        "definitionBytes": 2820
+      },
+      {
+        "source": "dsh-knowledge-hub",
+        "count": 3,
+        "definitionBytes": 2282
+      },
+      {
+        "source": "dsh-stage-gate",
+        "count": 1,
+        "definitionBytes": 1067
+      },
+      {
+        "source": "dsh-tool-scope",
+        "count": 1,
+        "definitionBytes": 575
+      },
+      {
+        "source": "dsh-campaign-memory",
+        "count": 1,
+        "definitionBytes": 525
+      }
+    ],
+    "largestTools": [
+      {
+        "name": "redteam_finding_register",
+        "bytes": 4032
+      },
+      {
+        "name": "pwsh",
+        "bytes": 3452
+      },
+      {
+        "name": "redteam_finding_update",
+        "bytes": 2508
+      },
+      {
+        "name": "redteam_task",
+        "bytes": 1614
+      },
+      {
+        "name": "redteam_research",
+        "bytes": 1502
+      },
+      {
+        "name": "redteam_execution",
+        "bytes": 1390
+      },
+      {
+        "name": "ask_user_question",
+        "bytes": 1251
+      },
+      {
+        "name": "edit",
+        "bytes": 1080
+      },
+      {
+        "name": "stage_gate",
+        "bytes": 1067
+      },
+      {
+        "name": "update_goal",
+        "bytes": 986
+      },
+      {
+        "name": "knowledge_read",
+        "bytes": 891
+      },
+      {
+        "name": "todo_write",
+        "bytes": 860
+      }
+    ],
+    "messages": [
+      {
+        "index": 0,
+        "role": "user",
+        "bytes": 24766,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 130
+          },
+          {
+            "kind": "workspace-instructions",
+            "bytes": 14743
+          },
+          {
+            "kind": "runtime-context",
+            "bytes": 4752
+          },
+          {
+            "kind": "skills",
+            "bytes": 5110
+          }
+        ]
+      },
+      {
+        "index": 1,
+        "role": "assistant",
+        "bytes": 149,
+        "blocks": [
+          {
+            "kind": "thinking",
+            "bytes": 84
+          },
+          {
+            "kind": "text",
+            "bytes": 31
+          }
+        ]
+      },
+      {
+        "index": 2,
+        "role": "user",
+        "bytes": 158,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 130
+          }
+        ]
+      },
+      {
+        "index": 3,
+        "role": "assistant",
+        "bytes": 149,
+        "blocks": [
+          {
+            "kind": "thinking",
+            "bytes": 84
+          },
+          {
+            "kind": "text",
+            "bytes": 31
+          }
+        ]
+      },
+      {
+        "index": 4,
+        "role": "user",
+        "bytes": 4992,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 130
+          },
+          {
+            "kind": "runtime-context",
+            "bytes": 4833
+          }
+        ]
+      }
+    ],
+    "systemHistoryBytes": 0,
+    "titleLike": false,
+    "limitations": [
+      "Bytes are not token attribution or monetary cost.",
+      "Package metadata is a transport extension; model billing treatment is unknown.",
+      "Tool ownership uses conservative name rules; unknown tools remain unattributed."
+    ],
+    "taskState": {
+      "systemRulePresent": true,
+      "contextStateSnapshots": [
+        {
+          "bytes": 4685,
+          "workerLimit": null,
+          "budget0of3": false,
+          "cancelled": false
+        },
+        {
+          "bytes": 4766,
+          "workerLimit": "4",
+          "budget0of3": false,
+          "cancelled": false
+        }
+      ],
+      "systemHistoryBytes": 0
+    }
+  },
+  {
+    "file": "request-05.json",
+    "sha256": "0e091784d4ff1c7c422470ff47e7a18fb2f97abbbdf9960dfbb92acc1c3f69f0",
+    "rawBytes": 94925,
+    "canonicalBytes": 94925,
+    "canonicalWire": true,
+    "bytePartitions": {
+      "system": 10318,
+      "tools": 35762,
+      "messages": 35382,
+      "packageInventory": 13286,
+      "other": 177
+    },
+    "model": "deepseek-flash",
+    "toolCount": 41,
+    "packageCount": 195,
+    "toolSources": [
+      {
+        "source": "host",
+        "count": 20,
+        "definitionBytes": 14789
+      },
+      {
+        "source": "dsh-redteam-results",
+        "count": 10,
+        "definitionBytes": 13662
+      },
+      {
+        "source": "unattributed",
+        "count": 5,
+        "definitionBytes": 2820
+      },
+      {
+        "source": "dsh-knowledge-hub",
+        "count": 3,
+        "definitionBytes": 2282
+      },
+      {
+        "source": "dsh-stage-gate",
+        "count": 1,
+        "definitionBytes": 1067
+      },
+      {
+        "source": "dsh-tool-scope",
+        "count": 1,
+        "definitionBytes": 575
+      },
+      {
+        "source": "dsh-campaign-memory",
+        "count": 1,
+        "definitionBytes": 525
+      }
+    ],
+    "largestTools": [
+      {
+        "name": "redteam_finding_register",
+        "bytes": 4032
+      },
+      {
+        "name": "pwsh",
+        "bytes": 3452
+      },
+      {
+        "name": "redteam_finding_update",
+        "bytes": 2508
+      },
+      {
+        "name": "redteam_task",
+        "bytes": 1614
+      },
+      {
+        "name": "redteam_research",
+        "bytes": 1502
+      },
+      {
+        "name": "redteam_execution",
+        "bytes": 1390
+      },
+      {
+        "name": "ask_user_question",
+        "bytes": 1251
+      },
+      {
+        "name": "edit",
+        "bytes": 1080
+      },
+      {
+        "name": "stage_gate",
+        "bytes": 1067
+      },
+      {
+        "name": "update_goal",
+        "bytes": 986
+      },
+      {
+        "name": "knowledge_read",
+        "bytes": 891
+      },
+      {
+        "name": "todo_write",
+        "bytes": 860
+      }
+    ],
+    "messages": [
+      {
+        "index": 0,
+        "role": "user",
+        "bytes": 24766,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 130
+          },
+          {
+            "kind": "workspace-instructions",
+            "bytes": 14743
+          },
+          {
+            "kind": "runtime-context",
+            "bytes": 4752
+          },
+          {
+            "kind": "skills",
+            "bytes": 5110
+          }
+        ]
+      },
+      {
+        "index": 1,
+        "role": "assistant",
+        "bytes": 149,
+        "blocks": [
+          {
+            "kind": "thinking",
+            "bytes": 84
+          },
+          {
+            "kind": "text",
+            "bytes": 31
+          }
+        ]
+      },
+      {
+        "index": 2,
+        "role": "user",
+        "bytes": 158,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 130
+          }
+        ]
+      },
+      {
+        "index": 3,
+        "role": "assistant",
+        "bytes": 149,
+        "blocks": [
+          {
+            "kind": "thinking",
+            "bytes": 84
+          },
+          {
+            "kind": "text",
+            "bytes": 31
+          }
+        ]
+      },
+      {
+        "index": 4,
+        "role": "user",
+        "bytes": 4992,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 130
+          },
+          {
+            "kind": "runtime-context",
+            "bytes": 4833
+          }
+        ]
+      },
+      {
+        "index": 5,
+        "role": "assistant",
+        "bytes": 149,
+        "blocks": [
+          {
+            "kind": "thinking",
+            "bytes": 84
+          },
+          {
+            "kind": "text",
+            "bytes": 31
+          }
+        ]
+      },
+      {
+        "index": 6,
+        "role": "user",
+        "bytes": 5011,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 165
+          },
+          {
+            "kind": "runtime-context",
+            "bytes": 4817
+          }
+        ]
+      }
+    ],
+    "systemHistoryBytes": 0,
+    "titleLike": false,
+    "limitations": [
+      "Bytes are not token attribution or monetary cost.",
+      "Package metadata is a transport extension; model billing treatment is unknown.",
+      "Tool ownership uses conservative name rules; unknown tools remain unattributed."
+    ],
+    "taskState": {
+      "systemRulePresent": true,
+      "contextStateSnapshots": [
+        {
+          "bytes": 4685,
+          "workerLimit": null,
+          "budget0of3": false,
+          "cancelled": false
+        },
+        {
+          "bytes": 4766,
+          "workerLimit": "4",
+          "budget0of3": false,
+          "cancelled": false
+        },
+        {
+          "bytes": 4750,
+          "workerLimit": "4",
+          "budget0of3": false,
+          "cancelled": false
+        }
+      ],
+      "systemHistoryBytes": 0
+    }
+  },
+  {
+    "file": "request-06.json",
+    "sha256": "160b61857d57229619b4bea3acc118d7eae25755c39baaea746d3d0926b1dbd6",
+    "rawBytes": 101988,
+    "canonicalBytes": 101988,
+    "canonicalWire": true,
+    "bytePartitions": {
+      "system": 10318,
+      "tools": 35762,
+      "messages": 42445,
+      "packageInventory": 13286,
+      "other": 177
+    },
+    "model": "deepseek-flash",
+    "toolCount": 41,
+    "packageCount": 195,
+    "toolSources": [
+      {
+        "source": "host",
+        "count": 20,
+        "definitionBytes": 14789
+      },
+      {
+        "source": "dsh-redteam-results",
+        "count": 10,
+        "definitionBytes": 13662
+      },
+      {
+        "source": "unattributed",
+        "count": 5,
+        "definitionBytes": 2820
+      },
+      {
+        "source": "dsh-knowledge-hub",
+        "count": 3,
+        "definitionBytes": 2282
+      },
+      {
+        "source": "dsh-stage-gate",
+        "count": 1,
+        "definitionBytes": 1067
+      },
+      {
+        "source": "dsh-tool-scope",
+        "count": 1,
+        "definitionBytes": 575
+      },
+      {
+        "source": "dsh-campaign-memory",
+        "count": 1,
+        "definitionBytes": 525
+      }
+    ],
+    "largestTools": [
+      {
+        "name": "redteam_finding_register",
+        "bytes": 4032
+      },
+      {
+        "name": "pwsh",
+        "bytes": 3452
+      },
+      {
+        "name": "redteam_finding_update",
+        "bytes": 2508
+      },
+      {
+        "name": "redteam_task",
+        "bytes": 1614
+      },
+      {
+        "name": "redteam_research",
+        "bytes": 1502
+      },
+      {
+        "name": "redteam_execution",
+        "bytes": 1390
+      },
+      {
+        "name": "ask_user_question",
+        "bytes": 1251
+      },
+      {
+        "name": "edit",
+        "bytes": 1080
+      },
+      {
+        "name": "stage_gate",
+        "bytes": 1067
+      },
+      {
+        "name": "update_goal",
+        "bytes": 986
+      },
+      {
+        "name": "knowledge_read",
+        "bytes": 891
+      },
+      {
+        "name": "todo_write",
+        "bytes": 860
+      }
+    ],
+    "messages": [
+      {
+        "index": 0,
+        "role": "user",
+        "bytes": 24766,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 130
+          },
+          {
+            "kind": "workspace-instructions",
+            "bytes": 14743
+          },
+          {
+            "kind": "runtime-context",
+            "bytes": 4752
+          },
+          {
+            "kind": "skills",
+            "bytes": 5110
+          }
+        ]
+      },
+      {
+        "index": 1,
+        "role": "assistant",
+        "bytes": 149,
+        "blocks": [
+          {
+            "kind": "thinking",
+            "bytes": 84
+          },
+          {
+            "kind": "text",
+            "bytes": 31
+          }
+        ]
+      },
+      {
+        "index": 2,
+        "role": "user",
+        "bytes": 158,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 130
+          }
+        ]
+      },
+      {
+        "index": 3,
+        "role": "assistant",
+        "bytes": 149,
+        "blocks": [
+          {
+            "kind": "thinking",
+            "bytes": 84
+          },
+          {
+            "kind": "text",
+            "bytes": 31
+          }
+        ]
+      },
+      {
+        "index": 4,
+        "role": "user",
+        "bytes": 4992,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 130
+          },
+          {
+            "kind": "runtime-context",
+            "bytes": 4833
+          }
+        ]
+      },
+      {
+        "index": 5,
+        "role": "assistant",
+        "bytes": 149,
+        "blocks": [
+          {
+            "kind": "thinking",
+            "bytes": 84
+          },
+          {
+            "kind": "text",
+            "bytes": 31
+          }
+        ]
+      },
+      {
+        "index": 6,
+        "role": "user",
+        "bytes": 5011,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 165
+          },
+          {
+            "kind": "runtime-context",
+            "bytes": 4817
+          }
+        ]
+      },
+      {
+        "index": 7,
+        "role": "assistant",
+        "bytes": 1617,
+        "blocks": [
+          {
+            "kind": "thinking",
+            "bytes": 759
+          },
+          {
+            "kind": "text",
+            "bytes": 824
+          }
+        ]
+      },
+      {
+        "index": 8,
+        "role": "user",
+        "bytes": 5444,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 328
+          },
+          {
+            "kind": "runtime-context",
+            "bytes": 5087
+          }
+        ]
+      }
+    ],
+    "systemHistoryBytes": 0,
+    "titleLike": false,
+    "limitations": [
+      "Bytes are not token attribution or monetary cost.",
+      "Package metadata is a transport extension; model billing treatment is unknown.",
+      "Tool ownership uses conservative name rules; unknown tools remain unattributed."
+    ],
+    "taskState": {
+      "systemRulePresent": true,
+      "contextStateSnapshots": [
+        {
+          "bytes": 4685,
+          "workerLimit": null,
+          "budget0of3": false,
+          "cancelled": false
+        },
+        {
+          "bytes": 4766,
+          "workerLimit": "4",
+          "budget0of3": false,
+          "cancelled": false
+        },
+        {
+          "bytes": 4750,
+          "workerLimit": "4",
+          "budget0of3": false,
+          "cancelled": false
+        },
+        {
+          "bytes": 5020,
+          "workerLimit": null,
+          "budget0of3": true,
+          "cancelled": false
+        }
+      ],
+      "systemHistoryBytes": 0
+    }
+  },
+  {
+    "file": "request-07.json",
+    "sha256": "298531799a8ab2886de651650e60fb092da9ecad45d4d648f684169c9c4aedb0",
+    "rawBytes": 112154,
+    "canonicalBytes": 112154,
+    "canonicalWire": true,
+    "bytePartitions": {
+      "system": 10318,
+      "tools": 35762,
+      "messages": 52611,
+      "packageInventory": 13286,
+      "other": 177
+    },
+    "model": "deepseek-flash",
+    "toolCount": 41,
+    "packageCount": 195,
+    "toolSources": [
+      {
+        "source": "host",
+        "count": 20,
+        "definitionBytes": 14789
+      },
+      {
+        "source": "dsh-redteam-results",
+        "count": 10,
+        "definitionBytes": 13662
+      },
+      {
+        "source": "unattributed",
+        "count": 5,
+        "definitionBytes": 2820
+      },
+      {
+        "source": "dsh-knowledge-hub",
+        "count": 3,
+        "definitionBytes": 2282
+      },
+      {
+        "source": "dsh-stage-gate",
+        "count": 1,
+        "definitionBytes": 1067
+      },
+      {
+        "source": "dsh-tool-scope",
+        "count": 1,
+        "definitionBytes": 575
+      },
+      {
+        "source": "dsh-campaign-memory",
+        "count": 1,
+        "definitionBytes": 525
+      }
+    ],
+    "largestTools": [
+      {
+        "name": "redteam_finding_register",
+        "bytes": 4032
+      },
+      {
+        "name": "pwsh",
+        "bytes": 3452
+      },
+      {
+        "name": "redteam_finding_update",
+        "bytes": 2508
+      },
+      {
+        "name": "redteam_task",
+        "bytes": 1614
+      },
+      {
+        "name": "redteam_research",
+        "bytes": 1502
+      },
+      {
+        "name": "redteam_execution",
+        "bytes": 1390
+      },
+      {
+        "name": "ask_user_question",
+        "bytes": 1251
+      },
+      {
+        "name": "edit",
+        "bytes": 1080
+      },
+      {
+        "name": "stage_gate",
+        "bytes": 1067
+      },
+      {
+        "name": "update_goal",
+        "bytes": 986
+      },
+      {
+        "name": "knowledge_read",
+        "bytes": 891
+      },
+      {
+        "name": "todo_write",
+        "bytes": 860
+      }
+    ],
+    "messages": [
+      {
+        "index": 0,
+        "role": "user",
+        "bytes": 24766,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 130
+          },
+          {
+            "kind": "workspace-instructions",
+            "bytes": 14743
+          },
+          {
+            "kind": "runtime-context",
+            "bytes": 4752
+          },
+          {
+            "kind": "skills",
+            "bytes": 5110
+          }
+        ]
+      },
+      {
+        "index": 1,
+        "role": "assistant",
+        "bytes": 149,
+        "blocks": [
+          {
+            "kind": "thinking",
+            "bytes": 84
+          },
+          {
+            "kind": "text",
+            "bytes": 31
+          }
+        ]
+      },
+      {
+        "index": 2,
+        "role": "user",
+        "bytes": 158,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 130
+          }
+        ]
+      },
+      {
+        "index": 3,
+        "role": "assistant",
+        "bytes": 149,
+        "blocks": [
+          {
+            "kind": "thinking",
+            "bytes": 84
+          },
+          {
+            "kind": "text",
+            "bytes": 31
+          }
+        ]
+      },
+      {
+        "index": 4,
+        "role": "user",
+        "bytes": 4992,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 130
+          },
+          {
+            "kind": "runtime-context",
+            "bytes": 4833
+          }
+        ]
+      },
+      {
+        "index": 5,
+        "role": "assistant",
+        "bytes": 149,
+        "blocks": [
+          {
+            "kind": "thinking",
+            "bytes": 84
+          },
+          {
+            "kind": "text",
+            "bytes": 31
+          }
+        ]
+      },
+      {
+        "index": 6,
+        "role": "user",
+        "bytes": 5011,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 165
+          },
+          {
+            "kind": "runtime-context",
+            "bytes": 4817
+          }
+        ]
+      },
+      {
+        "index": 7,
+        "role": "assistant",
+        "bytes": 1617,
+        "blocks": [
+          {
+            "kind": "thinking",
+            "bytes": 759
+          },
+          {
+            "kind": "text",
+            "bytes": 824
+          }
+        ]
+      },
+      {
+        "index": 8,
+        "role": "user",
+        "bytes": 5444,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 328
+          },
+          {
+            "kind": "runtime-context",
+            "bytes": 5087
+          }
+        ]
+      },
+      {
+        "index": 9,
+        "role": "assistant",
+        "bytes": 4830,
+        "blocks": [
+          {
+            "kind": "thinking",
+            "bytes": 2785
+          },
+          {
+            "kind": "text",
+            "bytes": 2011
+          }
+        ]
+      },
+      {
+        "index": 10,
+        "role": "user",
+        "bytes": 5334,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 217
+          },
+          {
+            "kind": "runtime-context",
+            "bytes": 5088
+          }
+        ]
+      }
+    ],
+    "systemHistoryBytes": 0,
+    "titleLike": false,
+    "limitations": [
+      "Bytes are not token attribution or monetary cost.",
+      "Package metadata is a transport extension; model billing treatment is unknown.",
+      "Tool ownership uses conservative name rules; unknown tools remain unattributed."
+    ],
+    "taskState": {
+      "systemRulePresent": true,
+      "contextStateSnapshots": [
+        {
+          "bytes": 4685,
+          "workerLimit": null,
+          "budget0of3": false,
+          "cancelled": false
+        },
+        {
+          "bytes": 4766,
+          "workerLimit": "4",
+          "budget0of3": false,
+          "cancelled": false
+        },
+        {
+          "bytes": 4750,
+          "workerLimit": "4",
+          "budget0of3": false,
+          "cancelled": false
+        },
+        {
+          "bytes": 5020,
+          "workerLimit": null,
+          "budget0of3": true,
+          "cancelled": false
+        },
+        {
+          "bytes": 5021,
+          "workerLimit": null,
+          "budget0of3": true,
+          "cancelled": false
+        }
+      ],
+      "systemHistoryBytes": 0
+    }
+  },
+  {
+    "file": "request-08.json",
+    "sha256": "25e741751ab6b9b3dce62626affa2af53d6967f9c0857828d59f961203b5249d",
+    "rawBytes": 117894,
+    "canonicalBytes": 117894,
+    "canonicalWire": true,
+    "bytePartitions": {
+      "system": 10318,
+      "tools": 35762,
+      "messages": 58351,
+      "packageInventory": 13286,
+      "other": 177
+    },
+    "model": "deepseek-flash",
+    "toolCount": 41,
+    "packageCount": 195,
+    "toolSources": [
+      {
+        "source": "host",
+        "count": 20,
+        "definitionBytes": 14789
+      },
+      {
+        "source": "dsh-redteam-results",
+        "count": 10,
+        "definitionBytes": 13662
+      },
+      {
+        "source": "unattributed",
+        "count": 5,
+        "definitionBytes": 2820
+      },
+      {
+        "source": "dsh-knowledge-hub",
+        "count": 3,
+        "definitionBytes": 2282
+      },
+      {
+        "source": "dsh-stage-gate",
+        "count": 1,
+        "definitionBytes": 1067
+      },
+      {
+        "source": "dsh-tool-scope",
+        "count": 1,
+        "definitionBytes": 575
+      },
+      {
+        "source": "dsh-campaign-memory",
+        "count": 1,
+        "definitionBytes": 525
+      }
+    ],
+    "largestTools": [
+      {
+        "name": "redteam_finding_register",
+        "bytes": 4032
+      },
+      {
+        "name": "pwsh",
+        "bytes": 3452
+      },
+      {
+        "name": "redteam_finding_update",
+        "bytes": 2508
+      },
+      {
+        "name": "redteam_task",
+        "bytes": 1614
+      },
+      {
+        "name": "redteam_research",
+        "bytes": 1502
+      },
+      {
+        "name": "redteam_execution",
+        "bytes": 1390
+      },
+      {
+        "name": "ask_user_question",
+        "bytes": 1251
+      },
+      {
+        "name": "edit",
+        "bytes": 1080
+      },
+      {
+        "name": "stage_gate",
+        "bytes": 1067
+      },
+      {
+        "name": "update_goal",
+        "bytes": 986
+      },
+      {
+        "name": "knowledge_read",
+        "bytes": 891
+      },
+      {
+        "name": "todo_write",
+        "bytes": 860
+      }
+    ],
+    "messages": [
+      {
+        "index": 0,
+        "role": "user",
+        "bytes": 24766,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 130
+          },
+          {
+            "kind": "workspace-instructions",
+            "bytes": 14743
+          },
+          {
+            "kind": "runtime-context",
+            "bytes": 4752
+          },
+          {
+            "kind": "skills",
+            "bytes": 5110
+          }
+        ]
+      },
+      {
+        "index": 1,
+        "role": "assistant",
+        "bytes": 149,
+        "blocks": [
+          {
+            "kind": "thinking",
+            "bytes": 84
+          },
+          {
+            "kind": "text",
+            "bytes": 31
+          }
+        ]
+      },
+      {
+        "index": 2,
+        "role": "user",
+        "bytes": 158,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 130
+          }
+        ]
+      },
+      {
+        "index": 3,
+        "role": "assistant",
+        "bytes": 149,
+        "blocks": [
+          {
+            "kind": "thinking",
+            "bytes": 84
+          },
+          {
+            "kind": "text",
+            "bytes": 31
+          }
+        ]
+      },
+      {
+        "index": 4,
+        "role": "user",
+        "bytes": 4992,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 130
+          },
+          {
+            "kind": "runtime-context",
+            "bytes": 4833
+          }
+        ]
+      },
+      {
+        "index": 5,
+        "role": "assistant",
+        "bytes": 149,
+        "blocks": [
+          {
+            "kind": "thinking",
+            "bytes": 84
+          },
+          {
+            "kind": "text",
+            "bytes": 31
+          }
+        ]
+      },
+      {
+        "index": 6,
+        "role": "user",
+        "bytes": 5011,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 165
+          },
+          {
+            "kind": "runtime-context",
+            "bytes": 4817
+          }
+        ]
+      },
+      {
+        "index": 7,
+        "role": "assistant",
+        "bytes": 1617,
+        "blocks": [
+          {
+            "kind": "thinking",
+            "bytes": 759
+          },
+          {
+            "kind": "text",
+            "bytes": 824
+          }
+        ]
+      },
+      {
+        "index": 8,
+        "role": "user",
+        "bytes": 5444,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 328
+          },
+          {
+            "kind": "runtime-context",
+            "bytes": 5087
+          }
+        ]
+      },
+      {
+        "index": 9,
+        "role": "assistant",
+        "bytes": 4830,
+        "blocks": [
+          {
+            "kind": "thinking",
+            "bytes": 2785
+          },
+          {
+            "kind": "text",
+            "bytes": 2011
+          }
+        ]
+      },
+      {
+        "index": 10,
+        "role": "user",
+        "bytes": 5334,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 217
+          },
+          {
+            "kind": "runtime-context",
+            "bytes": 5088
+          }
+        ]
+      },
+      {
+        "index": 11,
+        "role": "assistant",
+        "bytes": 453,
+        "blocks": [
+          {
+            "kind": "thinking",
+            "bytes": 84
+          },
+          {
+            "kind": "text",
+            "bytes": 335
+          }
+        ]
+      },
+      {
+        "index": 12,
+        "role": "user",
+        "bytes": 5285,
+        "blocks": [
+          {
+            "kind": "text",
+            "bytes": 217
+          },
+          {
+            "kind": "runtime-context",
+            "bytes": 5039
+          }
+        ]
+      }
+    ],
+    "systemHistoryBytes": 0,
+    "titleLike": false,
+    "limitations": [
+      "Bytes are not token attribution or monetary cost.",
+      "Package metadata is a transport extension; model billing treatment is unknown.",
+      "Tool ownership uses conservative name rules; unknown tools remain unattributed."
+    ],
+    "taskState": {
+      "systemRulePresent": true,
+      "contextStateSnapshots": [
+        {
+          "bytes": 4685,
+          "workerLimit": null,
+          "budget0of3": false,
+          "cancelled": false
+        },
+        {
+          "bytes": 4766,
+          "workerLimit": "4",
+          "budget0of3": false,
+          "cancelled": false
+        },
+        {
+          "bytes": 4750,
+          "workerLimit": "4",
+          "budget0of3": false,
+          "cancelled": false
+        },
+        {
+          "bytes": 5020,
+          "workerLimit": null,
+          "budget0of3": true,
+          "cancelled": false
+        },
+        {
+          "bytes": 5021,
+          "workerLimit": null,
+          "budget0of3": true,
+          "cancelled": false
+        },
+        {
+          "bytes": 4972,
+          "workerLimit": null,
+          "budget0of3": true,
+          "cancelled": true
+        }
+      ],
+      "systemHistoryBytes": 0
+    }
+  }
+]
