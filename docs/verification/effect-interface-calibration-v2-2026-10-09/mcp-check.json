@@ -1,0 +1,19 @@
+{
+  "http": 200,
+  "ok": true,
+  "summary": {
+    "total": 2,
+    "enabled": 2,
+    "connected": 0,
+    "tools": 0
+  },
+  "servers": [
+    {
+      "name": "burp"
+    },
+    {
+      "name": "yakit"
+    }
+  ],
+  "errors": []
+}

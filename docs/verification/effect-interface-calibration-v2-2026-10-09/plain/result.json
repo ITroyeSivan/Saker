@@ -1,0 +1,248 @@
+{
+  "interfaceVersion": "saker.effect-interface/2",
+  "caseId": "p1",
+  "runId": "76ead595-c442-4626-81dd-9f4e14cd30c9",
+  "sessionId": "session-85719cf7-1f92-4372-bb10-4243fc5123e5",
+  "variant": "plain-agent",
+  "sakerVersion": "0.4.97",
+  "model": "deepseek-flash",
+  "provider": "deepseek-official",
+  "toolDigest": "44de8da6b2490dd8a303fcbb7423a2ffd27a5b64bcfd147f737a9866459ab477",
+  "accessDigest": "d8d08dae88b97c272ab94d431fe7bd364bba54ae05a2c8ff4d9875c350e57cd1",
+  "preset": "saker-effect-standard-76ead595-c442-4626-81dd-9f4e14cd30c9",
+  "presetCompositionDigest": "7efa0ce044398573219a702bf1dbbb5d4d826db0c6bc3b17881100ba8093c7d9",
+  "sourcePreset": "standard",
+  "sourcePresetCompositionDigest": "309e2191c667976c4f198d72fcd76302ddcebfd1b8142ff7dffa63aba07da6a9",
+  "presetAdjustments": [
+    {
+      "property": "subagent.modelSelectionSettings",
+      "value": false,
+      "rows": 1,
+      "reason": "shared controlled interface has zero workers; prevent late agent-local tool registration"
+    }
+  ],
+  "budget": {
+    "minutes": 5,
+    "targetRequests": 40,
+    "tokens": 150000
+  },
+  "startedAt": "2026-10-09T06:11:33.107Z",
+  "elapsedMs": 55807,
+  "durationFinal": true,
+  "cleanupComplete": true,
+  "status": "idle",
+  "stopReason": "submitted",
+  "isolationFailures": [],
+  "toolCalls": [
+    {
+      "seq": 17,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 19,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 21,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 23,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 28,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 30,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 32,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 34,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 39,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 41,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 43,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 45,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 50,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 52,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 54,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 56,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 61,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 63,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 65,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 67,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 72,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 74,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 76,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 78,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 83,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 85,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 87,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 89,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 94,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 96,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 98,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 100,
+      "name": "exercise_request"
+    },
+    {
+      "seq": 105,
+      "name": "exercise_submit"
+    }
+  ],
+  "usage": {
+    "modelCalls": 10,
+    "tokens": 166715,
+    "knownTokens": 166715,
+    "unknownUsage": false,
+    "elapsedMs": 55807,
+    "humanInterventions": 0
+  },
+  "submission": {
+    "outcome": "confirmed",
+    "evidenceIds": [
+      "792fe12f-c8d2-4592-a1de-6e4d0fda380e",
+      "ef36f784-571f-48f3-858f-f293736dd069",
+      "1ca7a0f0-d2a8-402b-a59f-9d25957d89d5",
+      "023c56cc-d74c-46c9-be02-34b4f8fb3258",
+      "09b25ded-24f8-4afb-a5d6-bcb410c9f1c1",
+      "62a8b595-e3ed-4910-83e9-d4a4081ceda7",
+      "9cd4eedd-2a96-487c-9dc2-daa74da54148",
+      "46065eeb-a25b-4032-b4b4-a1f71680234b",
+      "63a7108b-b2d0-4864-9633-26adb02fdbb3",
+      "c80e3eaa-7385-4287-b559-3b42da55f33a",
+      "40d41d7f-330f-40d8-8a66-c54667954c60",
+      "d8f1e85f-3928-4f05-a55e-0fd9a11136cf",
+      "225431b1-840c-43d3-8597-b847fe6989fb",
+      "97bfc4f6-ce54-4034-9d5b-7429c13e1fcd",
+      "e15afe9e-4912-43d0-a645-2ec81acf30a7",
+      "c6977961-eed1-4c15-af22-037eb92f75b9",
+      "4233ea6c-f766-423f-8cc3-f0af11940f17"
+    ],
+    "findings": [
+      {
+        "caseId": "76ead595-c442-4626-81dd-9f4e14cd30c9",
+        "kind": "private-read",
+        "status": "confirmed",
+        "evidenceIds": [
+          "792fe12f-c8d2-4592-a1de-6e4d0fda380e",
+          "ef36f784-571f-48f3-858f-f293736dd069",
+          "1ca7a0f0-d2a8-402b-a59f-9d25957d89d5",
+          "023c56cc-d74c-46c9-be02-34b4f8fb3258",
+          "09b25ded-24f8-4afb-a5d6-bcb410c9f1c1",
+          "62a8b595-e3ed-4910-83e9-d4a4081ceda7",
+          "9cd4eedd-2a96-487c-9dc2-daa74da54148",
+          "46065eeb-a25b-4032-b4b4-a1f71680234b",
+          "63a7108b-b2d0-4864-9633-26adb02fdbb3",
+          "c80e3eaa-7385-4287-b559-3b42da55f33a",
+          "40d41d7f-330f-40d8-8a66-c54667954c60",
+          "d8f1e85f-3928-4f05-a55e-0fd9a11136cf",
+          "225431b1-840c-43d3-8597-b847fe6989fb",
+          "97bfc4f6-ce54-4034-9d5b-7429c13e1fcd",
+          "e15afe9e-4912-43d0-a645-2ec81acf30a7",
+          "c6977961-eed1-4c15-af22-037eb92f75b9",
+          "4233ea6c-f766-423f-8cc3-f0af11940f17"
+        ]
+      }
+    ]
+  },
+  "score": {
+    "caseId": "p1",
+    "runId": "76ead595-c442-4626-81dd-9f4e14cd30c9",
+    "category": "single-positive",
+    "expected": "confirmed",
+    "outcome": "confirmed",
+    "independentSuccess": false,
+    "falseConfirmed": 1,
+    "unconfirmedPositive": true,
+    "targetRequests": 32,
+    "controlsVerified": false,
+    "effectVerified": false,
+    "evidenceValid": true,
+    "reason": "unsupported confirmation"
+  },
+  "comparability": {
+    "comparable": false,
+    "mismatches": [
+      "budget-not-calibrated",
+      "frozen-three-group-comparison-not-run"
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "@saker-dev/effect-benchmark",
+  "version": "0.0.5",
+  "private": true,
+  "type": "module",
+  "main": "./desktop-plugin.mjs",
+  "files": ["*.mjs", "cordis.patch.yml", "README.md"],
+  "peerDependencies": {"@deepseek-ai/dsh-tools": "*", "@deepseek-ai/dsh-llm": "*", "@deepseek-ai/cordis-plugin-include": "*", "js-yaml": "*", "@dsh-external/dsh-redteam-results": "*", "dsh-saker": "*"},
+  "dsh": {"bundle": {"patch": "./cordis.patch.yml"}}
+}

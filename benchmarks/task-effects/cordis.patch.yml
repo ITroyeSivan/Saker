@@ -1,0 +1,3 @@
+- insert:
+    - id: saker-effect-benchmark
+      name: '@saker-dev/effect-benchmark'
