@@ -83,4 +83,12 @@ if(release.draft)release=await api(`/releases/${release.id}`,{method:'PATCH',dat
 await verifyTag(true);
 const verified=await api('/releases/tags/'+encodeURIComponent(tag));
 if(verified.draft || verified.prerelease)throw Error('Release is not a normal published release');
-console.log(JSON.stringify({ok:true,commit,tag,url:verified.html_url,assets:uploaded},null,2));
+// Draft asset URLs use an untagged identifier. Read the promoted assets again
+// instead of reporting those temporary URLs as the public download links.
+const publishedAssets=uploaded.map(local=>{
+  const remote=verified.assets.find(asset=>asset.name===local.name);
+  if(!remote || remote.state!=='uploaded' || remote.size!==local.size || (remote.digest && remote.digest!=='sha256:'+local.sha256))
+    throw Error('Published asset changed: '+local.name);
+  return {...local,url:remote.browser_download_url};
+});
+console.log(JSON.stringify({ok:true,commit,tag,url:verified.html_url,assets:publishedAssets},null,2));
