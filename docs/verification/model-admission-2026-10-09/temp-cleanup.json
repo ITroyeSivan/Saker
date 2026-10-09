@@ -1,0 +1,423 @@
+{
+  "at": "2026-10-09T12:02:04.876931+00:00",
+  "state": "recycled",
+  "targets": [
+    {
+      "name": "ctf-board-cap-Khxm4F",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\ctf-board-cap-Khxm4F",
+      "files": 1,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "ctf-board-cap-xhkKxJ",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\ctf-board-cap-xhkKxJ",
+      "files": 1,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "ctf-board-conc-beEDyS",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\ctf-board-conc-beEDyS",
+      "files": 1,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "ctf-board-conc-YMppeQ",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\ctf-board-conc-YMppeQ",
+      "files": 1,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "ctf-board-EFBdPX",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\ctf-board-EFBdPX",
+      "files": 1,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "ctf-board-id-T3IqmT",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\ctf-board-id-T3IqmT",
+      "files": 1,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "ctf-board-id-y6tHgw",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\ctf-board-id-y6tHgw",
+      "files": 1,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "ctf-board-lock-T9WNlb",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\ctf-board-lock-T9WNlb",
+      "files": 1,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "ctf-board-lock-xcSg8g",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\ctf-board-lock-xcSg8g",
+      "files": 1,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "ctf-board-rKh8W0",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\ctf-board-rKh8W0",
+      "files": 1,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "dsh-acl-skill-AJAswS",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\dsh-acl-skill-AJAswS",
+      "files": 2,
+      "reason": "owned Desktop runtime scratch",
+      "recycled": true
+    },
+    {
+      "name": "dsh-acl-skill-bGws9y",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\dsh-acl-skill-bGws9y",
+      "files": 2,
+      "reason": "owned Desktop runtime scratch",
+      "recycled": true
+    },
+    {
+      "name": "dsh-acl-skill-IDDN8B",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\dsh-acl-skill-IDDN8B",
+      "files": 2,
+      "reason": "owned Desktop runtime scratch",
+      "recycled": true
+    },
+    {
+      "name": "dsh-acl-skill-qVEG0i",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\dsh-acl-skill-qVEG0i",
+      "files": 2,
+      "reason": "owned Desktop runtime scratch",
+      "recycled": true
+    },
+    {
+      "name": "dsh-prodsub-fallback-IWudGq",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\dsh-prodsub-fallback-IWudGq",
+      "files": 1,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "dsh-prodsub-fallback-whXJqP",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\dsh-prodsub-fallback-whXJqP",
+      "files": 1,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "dsh-prodsub-test-A3b4Rh",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\dsh-prodsub-test-A3b4Rh",
+      "files": 1,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "dsh-prodsub-test-L5YObD",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\dsh-prodsub-test-L5YObD",
+      "files": 1,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "dsh-prodsub-trace-CVmgLg",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\dsh-prodsub-trace-CVmgLg",
+      "files": 1,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "dsh-prodsub-trace-dNhXDM",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\dsh-prodsub-trace-dNhXDM",
+      "files": 1,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "dsh-spill-kJcM4g",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\dsh-spill-kJcM4g",
+      "files": 0,
+      "reason": "owned Desktop runtime scratch",
+      "recycled": true
+    },
+    {
+      "name": "dsh-subprocess-6rAFy3",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\dsh-subprocess-6rAFy3",
+      "files": 0,
+      "reason": "owned Desktop runtime scratch",
+      "recycled": true
+    },
+    {
+      "name": "model-budget-1009",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\model-budget-1009",
+      "files": 44,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "rb-acc-Lshngx",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\rb-acc-Lshngx",
+      "files": 1,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "rb-acc-Q2Vusd",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\rb-acc-Q2Vusd",
+      "files": 1,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-1aoDYh",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-1aoDYh",
+      "files": 0,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-1MlihW",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-1MlihW",
+      "files": 0,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-1TkcsR",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-1TkcsR",
+      "files": 0,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-2MxHwi",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-2MxHwi",
+      "files": 0,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-8aoO2j",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-8aoO2j",
+      "files": 0,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-9Ot99Q",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-9Ot99Q",
+      "files": 0,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-AuXmbd",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-AuXmbd",
+      "files": 0,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-b0zPZ3",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-b0zPZ3",
+      "files": 0,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-b8tBPT",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-b8tBPT",
+      "files": 0,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-bpqVbG",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-bpqVbG",
+      "files": 0,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-DETzpc",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-DETzpc",
+      "files": 0,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-Ev97sU",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-Ev97sU",
+      "files": 1,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-fiI8xi",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-fiI8xi",
+      "files": 0,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-Fp1hMO",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-Fp1hMO",
+      "files": 0,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-gDHf3L",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-gDHf3L",
+      "files": 0,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-iKJQ2x",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-iKJQ2x",
+      "files": 0,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-jY8HgR",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-jY8HgR",
+      "files": 0,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-L2pGsl",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-L2pGsl",
+      "files": 0,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-MDmQpB",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-MDmQpB",
+      "files": 0,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-Nk7ovF",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-Nk7ovF",
+      "files": 0,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-oMWg38",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-oMWg38",
+      "files": 1,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-q4GorP",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-q4GorP",
+      "files": 0,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-QWUOIq",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-QWUOIq",
+      "files": 0,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-Tg9mVm",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-Tg9mVm",
+      "files": 0,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-wjXYug",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-wjXYug",
+      "files": 0,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-WWenhv",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-WWenhv",
+      "files": 0,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-WzINRB",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-WzINRB",
+      "files": 0,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "saker-test-home-XTUe3e",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-XTUe3e",
+      "files": 0,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "scan-gov-6YYqhw",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\scan-gov-6YYqhw",
+      "files": 1,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "scan-gov-dpNxuM",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\scan-gov-dpNxuM",
+      "files": 1,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "trace-vault-nqfklc",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\trace-vault-nqfklc",
+      "files": 3,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "trace-vault-RUcApy",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\trace-vault-RUcApy",
+      "files": 3,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "wsm-lib-2WMLyC",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\wsm-lib-2WMLyC",
+      "files": 7,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    },
+    {
+      "name": "wsm-lib-bTCnLt",
+      "path": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\wsm-lib-bTCnLt",
+      "files": 7,
+      "reason": "owned regression/admission verification",
+      "recycled": true
+    }
+  ],
+  "remainingOwnedTargets": 0,
+  "olderOrUnownedTempsPreserved": true,
+  "userHomeDeleted": false,
+  "tempRootPreserved": true
+}

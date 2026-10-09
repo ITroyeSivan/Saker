@@ -1,0 +1,24 @@
+{
+  "at": "2026-10-09T11:57:29.769Z",
+  "sessions": [
+    {
+      "sessionId": "session-8df1a08a-2cb8-4180-bd7a-437b9b7fb576",
+      "archived": true
+    },
+    {
+      "sessionId": "session-df93e6fd-84d9-40f1-a86f-4d5670ee8f72",
+      "archived": true
+    },
+    {
+      "sessionId": "session-bac4a115-0ab8-422f-b76f-09560b0f5791",
+      "archived": true
+    },
+    {
+      "sessionId": "session-ad0c7146-4ced-4bd8-968f-1ec519027c59",
+      "archived": true
+    }
+  ],
+  "ownedWorkspaceRegistrationRemoved": true,
+  "selectionRestored": "session-0d880de2-77e7-448e-bf5d-92a9eaccd68b",
+  "userDataDeleted": false
+}

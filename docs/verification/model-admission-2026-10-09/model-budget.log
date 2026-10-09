@@ -1,0 +1,12 @@
+ok shared root admission reserves before dispatch; children, retries and auxiliary purposes consume the same call ceiling
+ok strict token reservations include in-flight and unknown cost, release only never-dispatched work, and retain actual settlement
+ok estimated, stale or incomplete counting certificates cannot admit a strict request; counter violations block later work
+ok recovery cancels only undispatched reservations; interrupted dispatch retains its hold and cannot be blindly replayed
+ok native stream middleware blocks before next(), settles complete usage, and keeps partial/error streams unknown
+ok usage normalization rejects contradictory, missing and overflowing counts while including cache exactly once
+ok already admitted work survives another request exhausting the ceiling; cancellation before dispatch releases its reservation
+ok missing certified counter stops strict native dispatch without invoking the provider or charging a call
+ok simultaneous SQLite connections share one admission ceiling without double allocation
+ok a genuinely exited owner is recovered on reopening; unknown dispatched cost survives restart
+ok unloading drains an active cancelled stream before closing its persistent ledger
+ok the actual Desktop RPC rejects a new model ceiling when host admission is unavailable

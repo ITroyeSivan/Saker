@@ -1,4 +1,4 @@
-const startFields = ['mode', 'question', 'target', 'workflow', 'stop', 'toolCalls', 'minutes', 'workers', 'discoveryCalls'];
+const startFields = ['mode', 'question', 'target', 'workflow', 'stop', 'toolCalls', 'minutes', 'workers', 'discoveryCalls', 'modelCalls', 'tokens'];
 const progressFields = ['planComplete', 'queueComplete', 'regularComplete', 'ndayComplete'];
 function document(value, label) {
   if (typeof value !== 'string' || value.length > 8192) throw new Error(`${label} 必须为不超过8192字符的JSON对象`);
@@ -11,7 +11,7 @@ export function taskStartInput(args) {
     if (startFields.some(key => args[key] !== undefined)) throw new Error('start使用独立字段或旧policy JSON，不能混用');
     return document(args.policy, 'policy');
   }
-  const budget = Object.fromEntries(['toolCalls', 'minutes', 'workers', 'discoveryCalls']
+  const budget = Object.fromEntries(['toolCalls', 'minutes', 'workers', 'discoveryCalls', 'modelCalls', 'tokens']
     .filter(key => args[key] !== undefined).map(key => [key, args[key]]));
   return { ...Object.fromEntries(['mode', 'question', 'target', 'workflow', 'stop']
     .filter(key => args[key] !== undefined).map(key => [key, args[key]])), budget };

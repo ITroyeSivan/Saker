@@ -39,10 +39,10 @@ AttackAtlas、战役记忆和 WebShell 管理已退出运行包；hunter 聊天�
 
 ## 安装
 
-当前版本 **0.4.98**，已在 Windows 的官方 Desktop **0.2.0-rc.2** 上测试。本版修复已保存 HTTP 证据损坏后仍可能有效的问题，见[实际验收与边界](docs/verification/evidence-integrity-2026-10-09/README.md)。完整效果对照和全任务树 token 硬预算尚未完成，当前用于学习及有人监督的有限试用。其他宿主版本尚未验证。
+当前版本 **0.4.99**，官方 Windows Desktop **0.2.0-rc.2** 的[共享模型调用预算流程与边界](docs/verification/model-admission-2026-10-09/README.md)已实测；聊天设置可在首次生成前设定任务额度。严格 token 请求在缺可靠计数时拒绝，生产硬 token 成功路径和完整效果对照尚未完成。当前用于学习及有人监督的有限试用，其他宿主版本尚未验证。
 
 1. 安装官方 Desktop，完成首次初始化并配置模型，然后完全退出应用。
-2. 下载 [Saker-0.4.98-desktop.zip](https://github.com/ITroyeSivan/Saker/releases/download/v0.4.98/Saker-0.4.98-desktop.zip)，解压到长期保留的目录。
+2. 下载 [Saker-0.4.99-desktop.zip](https://github.com/ITroyeSivan/Saker/releases/download/v0.4.99/Saker-0.4.99-desktop.zip)，解压到长期保留的目录。
 3. 在解压目录执行，将路径替换为 Desktop 的实际安装目录：
 
 ```powershell

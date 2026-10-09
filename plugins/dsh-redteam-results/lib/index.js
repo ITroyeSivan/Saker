@@ -33,6 +33,7 @@ import { startTaskPolicy, updateTaskProgress, taskPolicyStatus, taskExecutionGua
 import { taskStartInput, taskProgressInput } from './task-inputs.js';
 import { chatDefaults, saveChatDefaults, promptDraft, promptTemplates } from './chat-setup.js';
 import { captureTaskCost, taskCostOverview } from './task-cost.js';
+import { registerModelAdmission, recoverModelRuntime, modelBudgetOverview } from './model-budget.js';
 import { createSiteWorkers, siteWorkerView, siteWorkerRows, siteWorkerParent } from './site-workers.js';
 import { indexBusinessMaterials, businessMaterialView } from './business-materials.js';
 import { runComparisonJob, readComparisonJob, comparisonFindingInput } from './comparison-jobs.js';
@@ -44,7 +45,7 @@ import { saveChecks, readChecks, compactChecks, renderCheckedTsv } from './check
 import { openStore, registerFinding, updateFinding, removeFinding, getFinding, allFindings, listFindings, listFindingsAll, groupByTarget, groupByTargetAll, computeStats, computeStatsAll, modeCounts, modeCountsAll, ledgerOverview, ledgerOverviewAll, getMeta, setMeta, SEVERITIES, STATUSES, REGISTER_STATUSES, MODE_STATUSES, ALL_STATUSES, EVIDENCE_LEVELS, SOURCE_ORIGINS, SECOND_RATINGS, secondReviewError, secondReviewVerdict, statusesOf } from "./store.js";
 
 const name = "dsh-redteam-results";
-const inject = ["tools", "webServer", "webRuntime", "agentPresets", "systemPrompt", "sessions", "agents", "subagents"];
+const inject = ["tools", "webServer", "webRuntime", "agentPresets", "systemPrompt", "sessions", "agents", "subagents", "llm"];
 
 const ROUTE_PATH = "/dsh-redteam-results";
 /** 进程级 CSRF token：GET <route>/csrf 由同源页取走（跨源响应不可读），POST 须回带 x-dsh-csrf 头。 */
@@ -56,6 +57,7 @@ export function checkCsrf(req, token) {
 const VERIFY_SENT = new Map();
 const VERIFY_WINDOW_MS = 10 * 60 * 1000;
 const workerManagers = new WeakMap();
+const modelAdmissions = new WeakMap();
 
 const MODES = ["pentest", "code-audit", "ctf-solver"];
 const MODE_LABELS = {
@@ -318,6 +320,8 @@ export async function dispatch(ctx, st, endpoint, payload) {
         }
       }
       else if (endpoint === 'task.start') {
+        if((p.policy?.budget?.modelCalls!==undefined || p.policy?.budget?.tokens!==undefined) && !modelAdmissions.get(ctx)?.available)
+          throw new Error('宿主缺少模型请求准入钩子，不能执行共享模型额度');
         const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
         if (typeof agent?.followup !== 'function') throw new Error('当前代理不可用，任务尚未开始；请打开该会话后重试');
         if (agent.status === 'running') throw new Error('当前模型仍在运行，请先停止或等待完成');
@@ -357,6 +361,7 @@ export async function dispatch(ctx, st, endpoint, payload) {
     const overview = taskOverview(st, sessionId), cost = taskCostOverview(ctx, st, sessionId);
     return { ok: true, isPentest: session?.header?.agentPreset === 'pentest', ...overview, ...workers, cost,
       roundCost: overview.policy ? taskCostOverview(ctx, st, sessionId, overview.policy.startedAt) : null,
+      modelBudget: overview.policy ? modelBudgetOverview(st,sessionId) : null,
       previousRounds: st.db.prepare('SELECT count(*) AS n FROM task_rounds WHERE session_id=?').get(sessionId).n,
       elapsedSeconds: overview.policy ? Math.max(0, Math.floor((Math.min(Date.now(), overview.policy.finishedAt ?? Infinity, overview.policy.budget.deadline ?? Infinity) - overview.policy.startedAt) / 1000)) : 0 };
   }
@@ -492,6 +497,11 @@ export async function dispatch(ctx, st, endpoint, payload) {
 //#region host wiring
 
 function apply(ctx) {
+  const modelAdmission=registerModelAdmission(ctx,theStore,{countInput:options=>{
+    let counter;try{counter=ctx.get?.('sakerInputCounter');}catch{ /* optional certified provider counter is unavailable */ }
+    return counter?.countInput?.(options);
+  }});
+  modelAdmissions.set(ctx,modelAdmission);
   ctx.on?.('session/event', (session, event) => {
     if (session?.header?.agentPreset !== 'pentest' && !siteWorkerParent(theStore(), session?.id || '')) return;
     captureTaskCost(theStore(), session, event);
@@ -526,7 +536,7 @@ function apply(ctx) {
 	// 既删不掉也改不了名（备份/迁移/损坏自愈都要 rename 它）。
 	// 对照 campaign-memory：它一直有这条 ctx.effect，其余插件此前都缺，
 	// 插件重载/HMR 会因此留下永不回收的句柄（实测同进程二次 openStore 会 EBUSY）。
-	ctx.effect(() => async () => { await siteWorkers.dispose(); workerManagers.delete(ctx); try { store?.close?.(); } catch { /* 已关或句柄失效 */ } store = undefined; }, "dsh-redteam-results: store handle");
+	ctx.effect(() => async () => { await siteWorkers.dispose(); workerManagers.delete(ctx); await modelAdmission.dispose(); modelAdmissions.delete(ctx); if(store)recoverModelRuntime(store,modelAdmission.runtimeId); try { store?.close?.(); } catch { /* 已关或句柄失效 */ } store = undefined; }, "dsh-redteam-results: store handle");
 	//#region 模型工具（宿主平面，三种安全模式可见）
 	ctx.tools.register(defineTool({
 		name: "redteam_finding_register",
@@ -804,6 +814,7 @@ function apply(ctx) {
 			target: { type: 'string' },
 			question: { type: 'string', description: '问题≤600字' },
 			toolCalls: { type: 'integer', description: '整轮共享工具上限1–10000' },
+      modelCalls: { type: 'integer', description: '可选：主/子代理、重试、压缩及标题共享模型调用上限1–10000；开始前设置' },
 			minutes: { type: 'integer', description: '时间上限1–10080分钟' },
 			workers: { type: 'integer', description: '子代理0–16，≤桌面上限；小任务0' },
 			discoveryCalls: { type: 'integer', description: '0day探路额度0至toolCalls' },
@@ -827,7 +838,10 @@ function apply(ctx) {
 			try {
 				if (args.action === 'start') {
 					if (!enforcementAvailable) throw new Error('宿主缺少tools.guard，不能启动有预算保证的任务；请使用受支持桌面版本');
-					startTaskPolicy(theStore(), session.id, taskStartInput(args));
+          const input=taskStartInput(args);
+          if((input.budget?.modelCalls!==undefined || input.budget?.tokens!==undefined) && !modelAdmission.available)
+            throw new Error('宿主缺少模型请求准入钩子，不能执行共享模型额度');
+					startTaskPolicy(theStore(), session.id, input);
 				} else if (args.action === 'progress') {
           updateTaskProgress(theStore(), session.id, taskProgressInput(args));
         }

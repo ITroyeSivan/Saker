@@ -2,7 +2,7 @@
 
 更新日期：2026-10-09。本文汇总目前的使用方式和开发状态，方便查看，也可作为后续工作的交接材料。
 
-当前安装 **0.4.98**：修复保存的 HTTP 回执损坏后仍可能有效的问题，实际 Desktop 原生模型调用与边界见[本批证据](verification/evidence-integrity-2026-10-09/README.md)。0.4.97 已完整卸载 AttackAtlas、战役记忆、WebShell 管理并移除 hunter 聊天页，清理旧工具提示词与互链；保留常规/Nday/0Day、任务证据及 Nday 情报维护，见[精简验收](verification/product-pruning-2026-10-09/README.md)。完整目标尚未完成；已有状态、ARTEX 借鉴和 Nday 接续验收合同见[统一实施清单](saker-consolidated-delivery-2026-10-09.md)。以下为此前版本的交付历史，旧功能取舍和人数限制以本段及最新文档为准。
+当前版本 **0.4.99**：共享模型次数准入、持久结算、标题成本及空白聊天预算启动已接入；[实际 Desktop 证据与限制](verification/model-admission-2026-10-09/README.md)。生产硬 token 成功路径及公平效果对照仍未完成。0.4.98 的[原始回执完整性修复](verification/evidence-integrity-2026-10-09/README.md)和 0.4.97 的[旧模块精简](verification/product-pruning-2026-10-09/README.md)继续保留。完整目标、ARTEX 借鉴和 Nday 验收合同见[统一实施清单](saker-consolidated-delivery-2026-10-09.md)。以下为此前版本的交付历史，旧功能取舍以最新文档为准。
 
 当前安装0.4.92，成果插件1.0.42：提示词示例已简化为两三行、最多两个填写项，名称与说明按用户已有材料表达；旧草稿保留。见[实际桌面验收](verification/simple-prompts-2026-10-08.md)。新增公开 GitHub 仓库订阅、增量更新和默认模型整理，实际同步194份文件、发布两份待复核知识；见[本轮验收](verification/source-maintenance-2026-10-08.md)和[整体评估](saker-assessment-2026-10-08.md)。下面保留0.4.91及此前的设计与验收历史。
 

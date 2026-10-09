@@ -139,6 +139,10 @@ export function startTaskPolicy(store, sessionId, input, now = Date.now()) {
   const toolCalls = integer(input.budget?.toolCalls, 'budget.toolCalls', 1, 10000);
   const discoveryCalls = mode === '0day' ? integer(input.budget?.discoveryCalls ?? Math.min(5, toolCalls), 'budget.discoveryCalls', 0, toolCalls) : 0;
   const minutes = input.budget?.minutes === undefined ? null : integer(input.budget.minutes, 'budget.minutes', 1, 10080);
+  const modelLimits=Object.fromEntries(['modelCalls','tokens'].filter(key=>input.budget?.[key]!==undefined)
+    .map(key=>[key,integer(input.budget[key],'budget.'+key,1,key==='modelCalls'?10000:1000000000000)]));
+  if(parentId && Object.entries(modelLimits).some(([key,value])=>value!==readTaskPolicy(store,parentId)?.budget[key]))
+    throw Error('子代理不能更改主任务共享模型额度');
   const question = input.question === undefined ? '有限观察已有目标，向用户建议具体研究问题' : boundedText(input.question, 'question', 600);
   const target = input.target === undefined ? '' : siteOrigin(input.target);
   const workerLimit = integer(input.budget?.workers ?? choice?.workers ?? 1, 'budget.workers', 0, MAX_SITE_WORKERS);
@@ -149,7 +153,7 @@ export function startTaskPolicy(store, sessionId, input, now = Date.now()) {
   if (parentSession && flow.kind !== 'single') throw new Error('子代理不能开启独立衔接流程');
   return write(store, sessionId, { mode, flow, interaction, reporting, stop, question, target, workerLimit, ...(parentSession ? { parentSession } : {}),
     ...(parentSession ? { parentRound: readTaskPolicy(store, parentSession)?.startedAt } : {}),
-    budget: { toolCalls, discoveryCalls, deadline: minutes === null ? null : now + minutes * 60000 },
+    budget: { toolCalls, discoveryCalls, deadline: minutes === null ? null : now + minutes * 60000, ...modelLimits },
     used: { toolCalls: 0, discoveryCalls: 0 }, startedAt: now, cancelled: false, planComplete: false, queueComplete: false });
 }
 export function updateTaskProgress(store, sessionId, input) {
@@ -230,6 +234,7 @@ export function taskPolicyStatus(store, sessionId, now = Date.now()) {
   });
   let reason = '';
   if (policy.blocker) reason = 'paused:' + policy.blocker.code;
+  else if (policy.modelBudgetBlock) reason = 'model_budget:' + policy.modelBudgetBlock.code;
   else if (policy.cancelled) reason = 'cancelled';
   else if (policy.flow?.phase === 'done') reason = 'plan_complete';
   else if (policy.stop === 'queue' && policy.queueComplete) reason = 'queue_complete';
