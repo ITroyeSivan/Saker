@@ -1,0 +1,10 @@
+{
+  "debugEnabled": false,
+  "created": "2026-10-09T20:29:26.274861+08:00",
+  "shortcutPath": "C:\\Users\\12201\\Desktop\\Saker (dsh Desktop).lnk",
+  "rootPid": 7320,
+  "arguments": "-NoLogo -NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -File \"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tools\\Start-SakerDesktop.ps1\"",
+  "ownedTreeCount": 6,
+  "target": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+  "workingDirectory": "E:\\工作\\WorkBuddy\\WebSec\\dsh"
+}

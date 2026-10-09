@@ -1,0 +1,30 @@
+{
+  "at": "2026-10-09T12:29:15.087Z",
+  "generations": 0,
+  "results": [
+    {
+      "name": "thinking-omitted",
+      "status": 200,
+      "inputTokens": 34,
+      "bodySha256": "7003f337322dbbc6fdb3274f52bc7c52b6a0c3f859b4f7bdb48bc2cd9b995485"
+    },
+    {
+      "name": "thinking-disabled",
+      "status": 200,
+      "inputTokens": 8,
+      "bodySha256": "667aa46fdc883f4bf3a489d5aa7112a68c954b7ac9da7a9d97bc51bd0809c919"
+    },
+    {
+      "name": "thinking-enabled",
+      "status": 200,
+      "inputTokens": 34,
+      "bodySha256": "af1724a4a2e11336ba8fe113761e7542f7c93a9afdc78c2851be8ff35161dd5a"
+    },
+    {
+      "name": "desktop-output-4096",
+      "status": 200,
+      "inputTokens": 17883,
+      "bodySha256": "b9a4dcda8c2d6be67649ae590cfecf7d1870c6774862e64f1ce28a2fccce19ae"
+    }
+  ]
+}

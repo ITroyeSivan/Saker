@@ -1,0 +1,128 @@
+Window: "Saker_workspace — DeepSeek Harness", App: DeepSeek Harness.exe.
+	0 窗口 Saker_workspace — DeepSeek Harness Secondary Actions: Raise
+		1 窗格 (disabled)
+		2 区域 Saker_workspace — DeepSeek Harness
+			3 区域
+				4 区域
+					5 区域
+						6 按钮 最小化
+						7 按钮 最大化
+						8 按钮 关闭
+					9 区域
+						10 区域
+							11 区域
+								12 区域
+									13 文档 Saker_workspace — DeepSeek Harness Value: dsh-app://app/ ID: RootWebArea
+										14 组
+											15 组 ID: root
+												16 按钮 新建会话
+												17 按钮 收起侧边栏
+												18 按钮 新建会话
+												19 导航 全局面板
+													20 按钮 插件
+												21 文本 工作区
+												22 组
+													23 按钮 搜索会话
+													24 编辑 (settable, string) 搜索会话名称 Description: 搜索会话名称
+												25 按钮 视图选项
+												26 按钮 添加工作区
+												27 树 会话
+													28 树项目 edusrc
+													29 树项目 (selectable) 新会话
+													30 树项目 (selectable) 宿主续接合成验收 2天
+													31 树项目 (selectable) Saker 合成流程验收 2天
+													32 树项目 护网_saker
+													33 树项目 test
+													34 树项目 (selectable) 验收站点子代理释放与复用 6天
+													35 树项目 (selectable) Saker 冒烟验收 redteam_task 状态 6天
+													36 树项目 (selectable) test 6天
+													37 树项目 (selectable) 你好 25天
+													38 树项目 (selectable) 1 25天
+													39 按钮 展开其余 1 个会话
+													40 树项目 未分组
+													41 树项目 (selectable) 本地 nday 配置读取验收 7小时
+													42 树项目 (selectable) 本地访问边界测试提交结论 10小时
+													43 树项目 (selectable) 本地请求成本验收 12小时
+													44 树项目 (selectable) 提示词成本审计只回复收到 19小时
+													45 树项目 (selectable) 本地提示词成本审计 19小时
+													46 按钮 展开其余 47 个会话
+												47 按钮 账号菜单
+												48 标题
+													49 按钮 打开右侧边栏
+												50 文本 探索未至之境
+												51 文本 预览版
+												52 按钮 选择工作区
+												53 按钮 Saker 渗透测试 ▾ Description: Saker 渗透测试
+												54 区域 聊天任务设置
+													55 组 这次研究的重点 Description: 这次研究的重点
+														56 组合框 (settable, string) 任务方向 Value: 常规测试
+													57 组 AI在约定范围与预算内选择下一步，缺关键资料时集中询问。 Description: AI在约定范围与预算内选择下一步，缺关键资料时集中询问。
+														58 组合框 (settable, string) 聊天协作方式 Value: 自主推进
+													59 组 按需分派，当前占用 0/1 Description: 按需分派，当前占用 0/1
+														60 组合框 (settable, string) 聊天子代理上限 Value: 子代理 1
+													61 按钮 写提示词
+													62 按钮 设置
+												63 组
+													64 编辑 (settable, string) 描述你想要构建的内容, / 调用指令, @ 文件或对话
+													65 按钮 添加文件或调用指令
+													66 按钮 访问模式，当前：完全权限
+													67 按钮 选择模型，当前 DeepSeek-V41-Flash，推理等级 Low Description: DeepSeek-V41-Flash · Low
+													68 按钮 (disabled) 发送消息
+											69 菜单栏 应用菜单
+												70 菜单项 应用
+												71 菜单项 编辑
+											77 对话框 设置 Secondary Actions: Raise
+												78 导航
+													79 组 ID: :r1b:
+														80 文本 设置
+													81 按钮 通用设置
+													82 按钮 模型
+													83 按钮 内置插件
+													84 按钮 Agent 预设
+													85 按钮 MCP 工作台
+													86 按钮 安全配置
+													87 按钮 知识库
+													88 按钮 资产平台 API
+													89 按钮 漏洞情报更新
+													90 按钮 技能
+													91 按钮 方法编排
+												92 按钮 打开配置文件
+												93 按钮 关闭
+												131 标题 MCP 工作台
+												132 文本 每个启用的服务器实时挂载，并以 mcp__<名称>__<工具> 的形式向模型暴露工具。保存后即时生效，无需重启。
+												133 按钮 紧凑
+												134 按钮 粘贴 JSON
+												135 按钮 复制 JSON
+												136 按钮 添加服务器
+												137 按钮 (disabled) 放弃修改
+												138 按钮 (disabled) 保存
+												139 文本 服务器
+												140 文本 2
+												141 文本 已启用
+												142 文本 2
+												143 文本 已连接
+												144 文本 2
+												145 文本 工具
+												146 文本 176
+												147 编辑 (settable, string) 按名称、命令或 URL 筛选服务器… Description: 按名称、命令或 URL 筛选服务器…
+												148 切换按钮 全部
+												149 切换按钮 已连接
+												150 切换按钮 未连接
+												151 切换按钮 已禁用
+												152 按钮 burp STDIO PROXY E:/工作/WorkBuddy/WebSec/dsh/_ref/dsh-src-0.2.0-rc.2/desktop-runtime/DeepSeek Harness.exe "C:/Users/12201/.dsh/profiles/desktop/node_modules/@dsh-external/dsh-sec-config/tools/burp-sse-bridge.mjs" --sse-url http://127.0.0.1:9876 已连接 27 个工具 启用 删除服务器 Description: burp · E:/工作/WorkBuddy/WebSec/dsh/_ref/dsh-src-0.2.0-rc.2/desktop-runtime/DeepSeek Harness.exe "C:/Users/12201/.dsh/profiles/desktop/node_modules/@dsh-external/dsh-sec-config/tools/burp-sse-bridge.mjs" --sse-url http://127.0.0.1:9876
+													160 组 Description: 已代理：它的工具通过 mcp_search / mcp_call 调用，不再逐个出现在工具列表里。
+													161 按钮 27 个工具 Description: 查看工具
+													153 组 启用 Description: 启用
+														154 复选框 (settable, string) 启用
+													155 按钮 删除服务器 Description: 删除服务器
+												156 按钮 yakit HTTP PROXY http://127.0.0.1:11432/mcp 已连接 149 个工具 启用 删除服务器 Description: yakit · http://127.0.0.1:11432/mcp
+													162 组 Description: 已代理：它的工具通过 mcp_search / mcp_call 调用，不再逐个出现在工具列表里。
+													163 按钮 149 个工具 Description: 查看工具
+													157 组 启用 Description: 启用
+														158 复选框 (settable, string) 启用
+													159 按钮 删除服务器 Description: 删除服务器
+								72 区域
+
+Document text: ```
+￼
+```

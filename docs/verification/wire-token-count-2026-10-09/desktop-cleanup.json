@@ -1,0 +1,17 @@
+{
+  "at": "2026-10-09T12:26:37.705Z",
+  "sessionArchived": true,
+  "taskCancelled": true,
+  "workspaceRegistrationRemoved": true,
+  "userHomeDeleted": false,
+  "selectionRestored": true,
+  "mcp": {
+    "ok": true,
+    "summary": {
+      "total": 2,
+      "enabled": 2,
+      "connected": 2,
+      "tools": 176
+    }
+  }
+}

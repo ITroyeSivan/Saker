@@ -1,0 +1,39 @@
+{
+  "at": "2026-10-09T12:48:29.106331+00:00",
+  "ownedDesktopRootStopped": 7320,
+  "ownedDesktopTreeCount": 6,
+  "debugDesktopRootStopped": 26040,
+  "probeRemoved": true,
+  "ownSessionArchived": true,
+  "ownWorkspaceRegistryRemoved": true,
+  "dailyHomeDataPreserved": true,
+  "recycled": [
+    {
+      "name": "dsh-acl-skill-psHWVU",
+      "recycled": true,
+      "absent": true
+    },
+    {
+      "name": "dsh-acl-skill-zsvaBR",
+      "recycled": true,
+      "absent": true
+    },
+    {
+      "name": "dsh-spill-tYHXUG",
+      "recycled": true,
+      "absent": true
+    },
+    {
+      "name": "dsh-subprocess-qOYQoA",
+      "recycled": true,
+      "absent": true
+    },
+    {
+      "name": "token-route-1009",
+      "recycled": true,
+      "absent": true
+    }
+  ],
+  "unknownEmptyTempPreserved": "323db0c6-7cfd-48dd-8293-b1ab486246f0.tmp",
+  "note": "The zero-byte file appeared during launch, but ownership was not established; not removed."
+}

@@ -1,0 +1,38 @@
+[
+  {
+    "ProcessId": 4908,
+    "ParentProcessId": 7320,
+    "ExecutablePath": "C:\\Program Files\\Intel\\SUR\\QUEENCREEK\\x64\\esrv.exe",
+    "CommandLine": "\"C:\\Program Files\\Intel\\SUR\\QUEENCREEK\\x64\\esrv.exe\" \"--start\" \"--start_options_handle\" \"1124\""
+  },
+  {
+    "ProcessId": 7320,
+    "ParentProcessId": 27748,
+    "ExecutablePath": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe",
+    "CommandLine": "\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe\" --user-data-dir=\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-data\" "
+  },
+  {
+    "ProcessId": 20328,
+    "ParentProcessId": 7320,
+    "ExecutablePath": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe",
+    "CommandLine": "\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe\" --type=gpu-process --user-data-dir=\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-data\" --gpu-preferences=WAAAAAAAAADgAAAEAAAAAAAAAAAAAGAAQAAAAAAAAAADAAAAAAAAADgAAAAAAAAAAAAAAAAAAAACAAAAAAAAAAAAAAAAAAAAKAAAAAAAAAAoAAAAAAAAAAgAAAAAAAAAEAAAAAIAAAABAAAAAAAAAAgAAAAAAAAACAAAAAAAAAA= --field-trial-handle=1836,i,5816992901047193298,14707496763565829657,262144 --enable-features=PdfUseShowSaveFilePicker --disable-features=DropInputEventsWhilePaintHolding,LocalNetworkAccessChecks,NetworkServiceSandbox,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProcessCreation --variations-seed-version --pseudonymization-salt-handle=1844,i,4938920821953720923,1747848813269681107,4 --trace-process-track-uuid=3190708988185955192 --mojo-platform-channel-handle=1832 /prefetch:2"
+  },
+  {
+    "ProcessId": 26180,
+    "ParentProcessId": 7320,
+    "ExecutablePath": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe",
+    "CommandLine": "\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe\" --type=utility --utility-sub-type=network.mojom.NetworkService --lang=zh-CN --service-sandbox-type=none --user-data-dir=\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-data\" --standard-schemes=dsh-app --secure-schemes=dsh-app --cors-schemes=dsh-app --fetch-schemes=dsh-app --streaming-schemes=dsh-app --code-cache-schemes=dsh-app --field-trial-handle=1836,i,5816992901047193298,14707496763565829657,262144 --enable-features=PdfUseShowSaveFilePicker --disable-features=DropInputEventsWhilePaintHolding,LocalNetworkAccessChecks,NetworkServiceSandbox,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProcessCreation --variations-seed-version --pseudonymization-salt-handle=1844,i,4938920821953720923,1747848813269681107,4 --trace-process-track-uuid=3190708989122997041 --mojo-platform-channel-handle=2032 /prefetch:11"
+  },
+  {
+    "ProcessId": 12860,
+    "ParentProcessId": 7320,
+    "ExecutablePath": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe",
+    "CommandLine": "\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe\" --type=renderer --user-data-dir=\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-data\" --standard-schemes=dsh-app --secure-schemes=dsh-app --cors-schemes=dsh-app --fetch-schemes=dsh-app --streaming-schemes=dsh-app --code-cache-schemes=dsh-app --app-path=\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\resources\\app.asar\" --enable-sandbox --video-capture-use-gpu-memory-buffer --lang=zh-CN --device-scale-factor=2 --num-raster-threads=4 --enable-main-frame-before-activation --renderer-client-id=4 --launch-time-ticks=45051077445 --field-trial-handle=1836,i,5816992901047193298,14707496763565829657,262144 --enable-features=PdfUseShowSaveFilePicker --disable-features=DropInputEventsWhilePaintHolding,LocalNetworkAccessChecks,NetworkServiceSandbox,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProcessCreation --variations-seed-version --pseudonymization-salt-handle=1844,i,4938920821953720923,1747848813269681107,4 --trace-process-track-uuid=3190708990060038890 --mojo-platform-channel-handle=2532 /prefetch:1"
+  },
+  {
+    "ProcessId": 3356,
+    "ParentProcessId": 7320,
+    "ExecutablePath": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe",
+    "CommandLine": "\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe\" --expose-internals E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\resources\\app.asar\\dsh\\node_modules\\@deepseek-ai\\dsh-desktop-host\\lib\\index.js E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\resources\\app.asar\\dsh C:\\Users\\12201\\.dsh\\profiles\\desktop E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\resources\\runtime\\primary-runtime E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\resources\\runtime\\pnpm\\bin\\pnpm.mjs E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\resources\\runtime\\bin"
+  }
+]

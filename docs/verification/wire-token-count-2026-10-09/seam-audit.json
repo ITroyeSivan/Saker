@@ -1,0 +1,195 @@
+{
+  "at": "2026-10-09T12:54:09.056Z",
+  "kind": "local-reference-source-audit",
+  "sourceRoot": "_ref/dsh-src-0.2.0-rc.2",
+  "hasVerifiedUpstreamCommit": false,
+  "compiledDesktopByteIdentityProven": false,
+  "productionWireAdmissionImplemented": false,
+  "files": [
+    {
+      "path": "packages/core/agent-loop/src/agent.ts",
+      "sha256": "9c985dd5ce3612b0a6f1833cb592930e4e390d4249821accea53064d8e42015c",
+      "finding": "Main/worker call config is proposed before preparation; change output limits there, not after freeze.",
+      "anchors": [
+        {
+          "needle": "agent/request",
+          "lines": [
+            495,
+            577,
+            582
+          ]
+        },
+        {
+          "needle": "preparedCall = await this.loopCtx.llm.prepareCall",
+          "lines": [
+            587
+          ]
+        },
+        {
+          "needle": "Object.freeze({",
+          "lines": [
+            678
+          ]
+        }
+      ]
+    },
+    {
+      "path": "packages/llm/llm/src/index.ts",
+      "sha256": "95364943b5c48dba3cb2239981a6ebe89393b55927b4d646ee72a581f23e6914",
+      "finding": "Global stream admission precedes final adapter projection; prepared calls reject config mutation.",
+      "anchors": [
+        {
+          "needle": "INVALID_PREPARED_CALL",
+          "lines": [
+            187,
+            966,
+            971,
+            1057
+          ]
+        },
+        {
+          "needle": "projectFilesToText",
+          "lines": [
+            40,
+            1068
+          ]
+        },
+        {
+          "needle": "projectToolUpdates",
+          "lines": [
+            40,
+            1076
+          ]
+        },
+        {
+          "needle": "llm/stream",
+          "lines": [
+            75,
+            189,
+            340,
+            1133,
+            1145
+          ]
+        }
+      ]
+    },
+    {
+      "path": "packages/llm/llm-deepseek/src/adapter.ts",
+      "sha256": "68d03fbaa3dd5f04a55ff48d7cd0f2ef125077f8144977459c15432e1464cf8f",
+      "finding": "One host dispatch can make multiple actual Messages attempts; count/admit every attempt after final body is ready.",
+      "anchors": [
+        {
+          "needle": "while (true)",
+          "lines": [
+            57,
+            89
+          ]
+        },
+        {
+          "needle": "prepareRequestExtensions",
+          "lines": [
+            12,
+            106
+          ]
+        },
+        {
+          "needle": "body: extensions.payload",
+          "lines": [
+            121
+          ]
+        },
+        {
+          "needle": "files.retry(detail)",
+          "lines": [
+            140
+          ]
+        }
+      ]
+    },
+    {
+      "path": "packages/llm/llm-deepseek/src/request-extensions.ts",
+      "sha256": "03607973027a1126869e43bbdb67653482a5196536ffa70d73ada9c123baa28d",
+      "finding": "Extension contributors receive base only; another contributor or serialization fallback can change final wire body.",
+      "anchors": [
+        {
+          "needle": "extensions = await prepare",
+          "lines": [
+            26
+          ]
+        },
+        {
+          "needle": "JSON.stringify({ ...body, ...extensions.fields })",
+          "lines": [
+            38
+          ]
+        },
+        {
+          "needle": "payload: base",
+          "lines": [
+            43
+          ]
+        }
+      ]
+    },
+    {
+      "path": "packages/session/session-title-llm/src/index.ts",
+      "sha256": "374d33aceaa065feae193662346dae5b562a15a1aab834ea8be8356d125afc03",
+      "finding": "Title generation bypasses agent/request and carries its own frozen cap.",
+      "anchors": [
+        {
+          "needle": "deepFreeze({",
+          "lines": [
+            146,
+            261
+          ]
+        },
+        {
+          "needle": "maxTokens: config.maxOutputTokens",
+          "lines": [
+            266,
+            277
+          ]
+        },
+        {
+          "needle": "purpose: 'session-title'",
+          "lines": [
+            268
+          ]
+        },
+        {
+          "needle": "ctx.llm.stream(options)",
+          "lines": [
+            281
+          ]
+        }
+      ]
+    },
+    {
+      "path": "packages/compaction/compaction-basic/src/summarizer.ts",
+      "sha256": "03ef6eb0b6a011530829820e30ff709c2c1b34cfa37a98c19c0037432b9d2f55",
+      "finding": "Compaction bypasses agent/request and owns another configured output cap.",
+      "anchors": [
+        {
+          "needle": "maxTokens: config.maxTokens",
+          "lines": [
+            158,
+            178
+          ]
+        },
+        {
+          "needle": "purpose: 'compaction'",
+          "lines": [
+            160
+          ]
+        },
+        {
+          "needle": "ctx.llm.stream(options)",
+          "lines": [
+            163
+          ]
+        }
+      ]
+    }
+  ],
+  "decision": "Do not install the diagnostic global fetch wrapper as production. Add supported final-body per-attempt admission and explicit pre-preparation role caps; unsupported counting remains fail closed."
+}
