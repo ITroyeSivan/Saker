@@ -1,0 +1,13 @@
+{
+  "version": "0.4.98",
+  "packages": 22,
+  "zip": "dist/releases/Saker-0.4.98-desktop.zip",
+  "bytes": 23556225,
+  "sha256": "c58fdecc3337605e59c0a329c3f30aa9b13c1ffc143fd01832ac1100544c579a",
+  "releaseHeadings": [
+    "### ✨ 新增功能",
+    "### 🐛 问题修复",
+    "### 🎨 体验优化",
+    "### ⚠️ 其他变更"
+  ]
+}

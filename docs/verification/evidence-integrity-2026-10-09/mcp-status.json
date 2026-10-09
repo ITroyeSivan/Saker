@@ -1,0 +1,23 @@
+{
+  "summary": {
+    "total": 2,
+    "enabled": 2,
+    "connected": 2,
+    "tools": 176
+  },
+  "servers": [
+    {
+      "id": "srv-sec-burp",
+      "name": "burp",
+      "state": "connected",
+      "toolCount": 27
+    },
+    {
+      "id": "srv-sec-yakit",
+      "name": "yakit",
+      "state": "connected",
+      "toolCount": 149
+    }
+  ],
+  "limit": "Live connection and catalog verified; no MCP tool invoked in this probe."
+}

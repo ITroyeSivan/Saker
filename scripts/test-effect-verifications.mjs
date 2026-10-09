@@ -282,6 +282,38 @@ try {
       }
     }
   });
+  await test('damaged captured bytes and metadata revoke independent effects and delivery without deleting historical records or sending HTTP', () => {
+    const sid = 'positive', id = validInput.rounds[0].owner;
+    const saved = store.db.prepare('SELECT record FROM execution_receipts WHERE session_id=? AND id=?').get(sid, id).record;
+    const original = JSON.parse(saved), before = requests;
+    const mutations = [
+      row => { row.request += 'damaged'; },
+      row => { row.responseHead += 'damaged'; },
+      row => { row.responseBodyBase64 = Buffer.from('damaged').toString('base64'); },
+      row => { row.responseBodyBase64 += '!'; },
+      row => { row.status = 403; },
+      row => { row.capturedBytes++; },
+      row => { row.responseBytes = -1; },
+      row => { delete row.requestSha256; },
+      row => { delete row.responseSha256; },
+    ];
+    try {
+      for (const mutate of mutations) {
+        const changed = structuredClone(original); mutate(changed);
+        store.db.prepare('UPDATE execution_receipts SET record=? WHERE session_id=? AND id=?').run(JSON.stringify(changed), sid, id);
+        const receipt = readExecutionReceipt(store, sid, id);
+        assert.equal(receipt.integrityValid, false); assert.equal(receipt.current, false); assert(receipt.currentReason);
+        assert.equal(receipt.id, id, 'damaged history remains available for inspection');
+        assert.equal(readEffectVerification(store, sid, effect.id).current, false);
+        assert.equal(verifyEffect(store, sid, validInput).verified, false);
+        assert.equal(getFinding(store, sid, finding.id).delivery.ready, false);
+        assert.equal(requests, before);
+      }
+    } finally { store.db.prepare('UPDATE execution_receipts SET record=? WHERE session_id=? AND id=?').run(saved, sid, id); }
+    assert.equal(readExecutionReceipt(store, sid, id).integrityValid, true);
+    assert.equal(readEffectVerification(store, sid, effect.id).current, true);
+    assert.equal(getFinding(store, sid, finding.id).delivery.ready, true);
+  });
   await test('aged executions cannot create a fresh effect while timestamped historical proof remains readable without repeat HTTP', () => {
     const clock = Date.now, before = requests;
     try {

@@ -14,7 +14,13 @@ try {
   }
   const negative = 'fixed ACL public/shared objects HTML pages invalid identities and request-reflected markers never produce private-read effects';
   const independent = 'duplicate or borrowed receipts cannot replace independent execution and method changes revoke persisted effects and ready views';
+  const receiptSource = fs.readFileSync(path.join(copy, 'plugins/dsh-redteam-results/lib/execution-receipts.js'), 'utf8');
+  const integrityBlock = receiptSource.slice(receiptSource.indexOf('  let current = false, integrityValid = false'),
+    receiptSource.indexOf('\n}\nexport function executionReceiptSummary'));
   const cases = [
+    ['execution-receipts.js', integrityBlock, `  let current = false;
+  try { current = basis(requestRow(store, sessionId, result.requestId, result.requestRevision)) === result.requestBasis; } catch {}
+  return { ...result, current, integrityValid: true, currentReason: '' };`, 'damaged captured bytes and metadata revoke independent effects and delivery without deleting historical records or sending HTTP'],
     ['effect-verifications.js', 'controlReceiptId: input.rounds.at(-1).normal, probeReceiptId: input.rounds.at(-1).probe', 'controlReceiptId: input.rounds[1].normal, probeReceiptId: input.rounds[1].probe', 'one real comparison can support continuing but cannot create a confirmed effect or persist a verdict'],
     ['effect-verifications.js', 'owner.readers.includes(normal.ownerId)', 'false', negative],
     ['effect-verifications.js', 'if (Object.values(round).some(receipt => receipt.request.includes(owner.marker)', 'if (false && Object.values(round).some(receipt => receipt.request.includes(owner.marker)', negative],

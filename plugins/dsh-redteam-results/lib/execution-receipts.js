@@ -171,9 +171,26 @@ export function readExecutionReceipt(store, sessionId, id) {
   const record = store.db.prepare('SELECT record FROM execution_receipts WHERE session_id=? AND id=?').get(sessionId, id);
   if (!record) throw new Error('execution receipt not found in current session');
   const result = JSON.parse(record.record);
-  let current = false;
-  try { current = basis(requestRow(store, sessionId, result.requestId, result.requestRevision)) === result.requestBasis; } catch { /* Archived receipt remains visible. */ }
-  return { ...result, current };
+  let current = false, integrityValid = false, currentReason = '';
+  try {
+    // Validate saved bytes before exposing them as evidence. A digest detects
+    // damaged/replaced content; it does not authenticate a rewritten database.
+    if (typeof result.request !== 'string' || typeof result.responseHead !== 'string'
+      || typeof result.responseBodyBase64 !== 'string') throw new Error('receipt original bytes missing');
+    const body = Buffer.from(result.responseBodyBase64, 'base64');
+    if (body.toString('base64') !== result.responseBodyBase64
+      || digest(result.request) !== result.requestSha256
+      || digest(Buffer.concat([Buffer.from(result.responseHead), body])) !== result.responseSha256)
+      throw new Error('receipt original bytes failed integrity validation');
+    const status = /^HTTP\/\S+ (\d{3})\b/.exec(result.responseHead);
+    if ((status ? Number(status[1]) : null) !== result.status
+      || result.capturedBytes !== body.length || !Number.isSafeInteger(result.responseBytes)
+      || result.responseBytes < body.length) throw new Error('receipt metadata differs from captured bytes');
+    integrityValid = true;
+    current = basis(requestRow(store, sessionId, result.requestId, result.requestRevision)) === result.requestBasis;
+    if (!current) currentReason = 'receipt request revision changed';
+  } catch (error) { currentReason = error.message; /* Historical bytes remain readable, never silently repaired. */ }
+  return { ...result, current, integrityValid, currentReason };
 }
 export function executionReceiptSummary(record) {
   const { request, responseHead, responseBodyBase64, requestBasis, ...summary } = record;

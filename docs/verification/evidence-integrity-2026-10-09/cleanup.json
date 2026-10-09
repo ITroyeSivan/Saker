@@ -1,0 +1,140 @@
+{
+  "shortcut": {
+    "workingDirectory": "E:\\工作\\WorkBuddy\\WebSec\\dsh",
+    "arguments": "-NoLogo -NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -File \"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tools\\Start-SakerDesktop.ps1\"",
+    "icon": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe,0",
+    "path": "C:\\Users\\12201\\Desktop\\Saker (dsh Desktop).lnk",
+    "target": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+  },
+  "launch": {
+    "pid": 31080,
+    "at": "2026-10-09T07:21:01.5544952Z"
+  },
+  "window": {
+    "Id": 12956,
+    "MainWindowTitle": "本地 nday 配置读取验收 — DeepSeek Harness",
+    "MainWindowHandle": {
+      "value": 919526
+    }
+  },
+  "processes": [
+    {
+      "ProcessId": 12956,
+      "ParentProcessId": 31080,
+      "ExecutablePath": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe",
+      "CommandLine": "\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe\" --user-data-dir=\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-data\" "
+    },
+    {
+      "ProcessId": 32440,
+      "ParentProcessId": 12956,
+      "ExecutablePath": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe",
+      "CommandLine": "\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe\" --type=gpu-process --user-data-dir=\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-data\" --gpu-preferences=WAAAAAAAAADgAAAEAAAAAAAAAAAAAGAAQAAAAAAAAAADAAAAAAAAADgAAAAAAAAAAAAAAAAAAAACAAAAAAAAAAAAAAAAAAAAKAAAAAAAAAAoAAAAAAAAAAgAAAAAAAAAEAAAAAIAAAABAAAAAAAAAAgAAAAAAAAACAAAAAAAAAA= --field-trial-handle=1844,i,4520750841999118117,16634178670585597110,262144 --enable-features=PdfUseShowSaveFilePicker --disable-features=DropInputEventsWhilePaintHolding,LocalNetworkAccessChecks,NetworkServiceSandbox,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProcessCreation --variations-seed-version --pseudonymization-salt-handle=1848,i,13142248429632916474,5429468212964211704,4 --trace-process-track-uuid=3190708988185955192 --mojo-platform-channel-handle=1840 /prefetch:2"
+    },
+    {
+      "ProcessId": 31180,
+      "ParentProcessId": 12956,
+      "ExecutablePath": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe",
+      "CommandLine": "\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe\" --type=utility --utility-sub-type=network.mojom.NetworkService --lang=zh-CN --service-sandbox-type=none --user-data-dir=\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-data\" --standard-schemes=dsh-app --secure-schemes=dsh-app --cors-schemes=dsh-app --fetch-schemes=dsh-app --streaming-schemes=dsh-app --code-cache-schemes=dsh-app --field-trial-handle=1844,i,4520750841999118117,16634178670585597110,262144 --enable-features=PdfUseShowSaveFilePicker --disable-features=DropInputEventsWhilePaintHolding,LocalNetworkAccessChecks,NetworkServiceSandbox,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProcessCreation --variations-seed-version --pseudonymization-salt-handle=1848,i,13142248429632916474,5429468212964211704,4 --trace-process-track-uuid=3190708989122997041 --mojo-platform-channel-handle=1936 /prefetch:11"
+    },
+    {
+      "ProcessId": 30052,
+      "ParentProcessId": 12956,
+      "ExecutablePath": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe",
+      "CommandLine": "\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe\" --type=renderer --user-data-dir=\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-data\" --standard-schemes=dsh-app --secure-schemes=dsh-app --cors-schemes=dsh-app --fetch-schemes=dsh-app --streaming-schemes=dsh-app --code-cache-schemes=dsh-app --app-path=\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\resources\\app.asar\" --enable-sandbox --video-capture-use-gpu-memory-buffer --lang=zh-CN --device-scale-factor=2 --num-raster-threads=4 --enable-main-frame-before-activation --renderer-client-id=4 --launch-time-ticks=26549950283 --field-trial-handle=1844,i,4520750841999118117,16634178670585597110,262144 --enable-features=PdfUseShowSaveFilePicker --disable-features=DropInputEventsWhilePaintHolding,LocalNetworkAccessChecks,NetworkServiceSandbox,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProcessCreation --variations-seed-version --pseudonymization-salt-handle=1848,i,13142248429632916474,5429468212964211704,4 --trace-process-track-uuid=3190708990060038890 --mojo-platform-channel-handle=2212 /prefetch:1"
+    },
+    {
+      "ProcessId": 20440,
+      "ParentProcessId": 12956,
+      "ExecutablePath": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe",
+      "CommandLine": "\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe\" --expose-internals E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\resources\\app.asar\\dsh\\node_modules\\@deepseek-ai\\dsh-desktop-host\\lib\\index.js E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\resources\\app.asar\\dsh C:\\Users\\12201\\.dsh\\profiles\\desktop E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\resources\\runtime\\primary-runtime E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\resources\\runtime\\pnpm\\bin\\pnpm.mjs E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\resources\\runtime\\bin"
+    },
+    {
+      "ProcessId": 10092,
+      "ParentProcessId": 20440,
+      "ExecutablePath": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe",
+      "CommandLine": "\"E:/工作/WorkBuddy/WebSec/dsh/_ref/dsh-src-0.2.0-rc.2/desktop-runtime/DeepSeek Harness.exe\" C:/Users/12201/.dsh/profiles/desktop/node_modules/@dsh-external/dsh-sec-config/tools/burp-sse-bridge.mjs --sse-url http://127.0.0.1:9876"
+    }
+  ],
+  "profilePreservation": {
+    "sameProfileSettings": true,
+    "sameDependencyNames": true,
+    "probeRemoved": true,
+    "retiredRemoved": true
+  },
+  "ownedDebugRoots": [
+    {
+      "ProcessId": 9896,
+      "ParentProcessId": 1236,
+      "ExecutablePath": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe",
+      "CommandLine": "\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe\" --user-data-dir=\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-data\" --remote-debugging-port=9337"
+    },
+    {
+      "ProcessId": 7860,
+      "ParentProcessId": 31020,
+      "CommandLine": "\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe\" --user-data-dir=\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-data\" --remote-debugging-port=9337"
+    },
+    {
+      "ProcessId": 13304,
+      "ParentProcessId": 30972,
+      "ExecutablePath": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe",
+      "CommandLine": "\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe\" --user-data-dir=\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-data\" --remote-debugging-port=9337"
+    }
+  ],
+  "stoppedRoots": [
+    9896,
+    7860,
+    13304,
+    12956
+  ],
+  "temporaryPaths": [
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\ctf-board-9lb01r",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\ctf-board-cap-7ILfrM",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\ctf-board-conc-gXYYZs",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\ctf-board-id-w6RNyt",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\ctf-board-lock-t6d5sp",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\dsh-acl-skill-FMdWRs",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\dsh-acl-skill-JF2Su1",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\dsh-acl-skill-LVRZpB",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\dsh-acl-skill-Zoq5lP",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\dsh-prodsub-fallback-E42RHO",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\dsh-prodsub-test-sh6wAF",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\dsh-prodsub-trace-4miwqm",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\dsh-spill-GJUwxg",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\dsh-subprocess-rpViMs",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\rb-acc-6Z9CV0",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-0Ztu9z",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-1WxM6B",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-62LXjZ",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-7xl7oz",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-9TonwC",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-a5xowz",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-AafA3L",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-ai614b",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-Ckdh8d",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-CPAo8S",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-CyqqQx",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-DHjEIz",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-DPPPZT",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-GjyYPB",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-hc0aSd",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-IYo6Xp",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-IzGN9i",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-JPP69G",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-kWuFOS",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-PEzfTt",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-QaP2G8",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-UPb3jO",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-test-home-X9SCf1",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\scan-gov-hjLYbA",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\trace-vault-yD1NYM",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\wsm-lib-nxcg47",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-integrity-desktop-CLPUKY",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\integrity-1009"
+  ],
+  "ownership": "Test residuals from executed suites and four official Desktop launch initializations during this turn; older state retained.",
+  "probeSessionArchived": true,
+  "selectedDailySessionRestored": true,
+  "cleanupComplete": true,
+  "recycleExitCode": 0,
+  "remaining": []
+}

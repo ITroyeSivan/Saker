@@ -17,13 +17,14 @@
 import { readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { productPluginDirectories } from './lib/product-plugins.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const FIX = process.argv.includes('--fix')
 
 // ── 实际清单（唯一真源）────────────────────────────────────────────────────
 const actual = new Map() // 包名 → { dir, version }
-for (const d of readdirSync(join(ROOT, 'plugins')).sort()) {
+for (const d of productPluginDirectories(ROOT)) {
   if (!d.startsWith('dsh-')) continue
   const pkgPath = join(ROOT, 'plugins', d, 'package.json')
   if (!existsSync(pkgPath)) continue
@@ -88,7 +89,7 @@ if (missingRows.length) problems.push(`docs/plugin-list.md：表格缺少 ${miss
 const rootPkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
 const TGZ_RE = /dsh-(?:saker|external-dsh-[a-z0-9-]+?)-(\d+\.\d+\.\d+)\.tgz/g
 const currentDocs = ['README.md', 'docs/getting-started.md', 'docs/installation.md', 'docs/development.md']
-for (const d of readdirSync(join(ROOT, 'plugins')).sort()) {
+for (const d of productPluginDirectories(ROOT)) {
   const p = join(ROOT, 'plugins', d, 'README.md')
   if (existsSync(p)) currentDocs.push(`plugins/${d}/README.md`)
 }
