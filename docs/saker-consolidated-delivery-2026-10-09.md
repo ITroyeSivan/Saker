@@ -17,7 +17,7 @@ ARTEX 确实有探索图、资产图、记忆能力，不能说它完全没有�
 | 持久依赖任务 | [依赖验收](verification/task-dependencies-2026-10-08/README.md)，包括 Desktop 与重启 | 与 Nday 候选、验证条件及新证据唤醒的完整整合 |
 | 来源订阅、固定提交增量、模型整理、检索 | [来源维护 Desktop 验收](verification/source-maintenance-2026-10-08.md) | 来源活跃度、过期条件、语义质量和错误知识撤回门槛 |
 | 任务上下文与用量 | [真实请求成本审计](verification/task-prompt-cost-2026-10-09/README.md) | 全任务树 token 预留/结算、角色模型和断流恢复 |
-| 受控效果基准 | [基准记录](verification/task-effect-benchmark-2026-10-09/README.md)；新增受限接口仍在开发 | 普通 Agent / 冻结版 / 改进版同条件重复对跑、隐藏集合验收 |
+| 受控效果基准 | [基准记录](verification/task-effect-benchmark-2026-10-09/README.md)；[受限接口校准单例](verification/effect-interface-calibration-2026-10-09/README.md)因提交证据不一致被独立评分判失败，v2 接口仍在开发 | 普通 Agent / 冻结版 / 改进版同条件重复对跑、隐藏集合验收；单例没有证明实战收益 |
 | 旧功能精简 | 0.4.97 清理发布/安装清单、通过官方命令卸载、移除提示词和互链；[官方 Desktop 验收](verification/product-pruning-2026-10-09/README.md) | 项目工作台与任务页仍需合并信息层级；按需工具划分尚待效果对照 |
 
 这些是部分交付，不能把 G0–G10 标成完成，也不能由单测数推导可无人值守投入使用。
