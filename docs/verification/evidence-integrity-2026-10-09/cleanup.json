@@ -129,12 +129,15 @@
     "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\trace-vault-yD1NYM",
     "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\wsm-lib-nxcg47",
     "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-integrity-desktop-CLPUKY",
-    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\integrity-1009"
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\integrity-1009",
+    "E:/工作/WorkBuddy/WebSec/dsh/_ref/tmp/release-0498"
   ],
   "ownership": "Test residuals from executed suites and four official Desktop launch initializations during this turn; older state retained.",
   "probeSessionArchived": true,
   "selectedDailySessionRestored": true,
   "cleanupComplete": true,
   "recycleExitCode": 0,
-  "remaining": []
+  "remaining": [],
+  "remainingOfficialDesktopProcesses": 0,
+  "tempBoundaryVerified": true
 }
