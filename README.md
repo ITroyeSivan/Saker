@@ -16,7 +16,7 @@ Saker 是 [DeepSeek Harness Desktop](https://github.com/deepseek-ai/deepseek-har
 
 聊天框上方可快速选择共同研判、关键节点确认或自主推进，进度汇报单独设置。提示词支持示例、填空、编辑、插入和复制，个人模板可跨会话复用。子代理上限可设置为 0–16，按需创建、同站复用、结束释放。
 
-常规与 Nday 可安排为先常规再 Nday、先 Nday 再常规或仅当前方向，共用资料、操作额度和截止时间。支持导入请求、流量、JS 和已有扫描结果，保存复现步骤、证据和报告材料。
+常规测试可选择仅当前方向、收集后接 Nday 或与 Nday 一起推进，共用资料、操作额度和截止时间。支持导入请求、流量、JS 和已有扫描结果，保存复现步骤、证据和报告材料。
 
 ## 功能
 
@@ -30,7 +30,7 @@ Saker 是 [DeepSeek Harness Desktop](https://github.com/deepseek-ai/deepseek-har
 
 ## 安装
 
-当前版本 **0.4.100**，适用于官方 Windows Desktop **0.2.0-rc.2**。
+当前版本 **0.4.101**，适用于官方 Windows Desktop **0.2.0-rc.2**。
 
 1. 安装官方 Desktop，完成初始化和模型配置，然后完全退出应用。
 2. 从 [Releases](https://github.com/ITroyeSivan/Saker/releases/latest) 下载桌面安装包，解压到长期保留的目录。
