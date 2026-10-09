@@ -75,6 +75,9 @@ await test('submission cannot race a request still awaiting a real response', as
 await test('usage includes cached input and unknown or corrupt fields never become zero', () => {
   assert.equal(countUsage({ inputTokens: 100, outputTokens: 20, cacheReadTokens: 700, cacheWriteTokens: 30 }), 850);
   assert.equal(countUsage({ inputTokens: 0, outputTokens: 0 }), 0);
+  assert.equal(countUsage({ inputTokens: 100, outputTokens: 20, cacheReadTokens: 700, cacheWriteTokens: 30, totalTokens: 850 }), 850);
+  assert.equal(countUsage({ inputTokens: 100, outputTokens: 20, totalTokens: 119 }), null, 'contradictory authoritative total is unknown');
+  assert.equal(countUsage({ inputTokens: Number.MAX_SAFE_INTEGER, outputTokens: 1 }), null, 'overflow cannot be reported as reliable usage');
   for (const usage of [undefined, {}, { inputTokens: 1 }, { inputTokens: -1, outputTokens: 2 }, { inputTokens: 1, outputTokens: 2, cacheReadTokens: null }]) assert.equal(countUsage(usage), null);
 });
 await test('execution guard denies later local shell tools and rollback releases only owned registrations', async () => {

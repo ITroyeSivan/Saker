@@ -1,0 +1,47 @@
+{
+  "profileBefore": {
+    "profile": {
+      "sha256": "48be31c54626703cf79d54f421d84a6b101c7a4f63418c56d07ba77daacff404",
+      "bytes": 5665
+    },
+    "settings": {
+      "sha256": "c300dcf2ebc5f02062d6591268d29d3db6fe45e0cb138f5467276fe2ba06076e",
+      "bytes": 223
+    }
+  },
+  "profileAfter": {
+    "profile": {
+      "sha256": "48be31c54626703cf79d54f421d84a6b101c7a4f63418c56d07ba77daacff404",
+      "bytes": 5665
+    },
+    "settings": {
+      "sha256": "c300dcf2ebc5f02062d6591268d29d3db6fe45e0cb138f5467276fe2ba06076e",
+      "bytes": 223
+    }
+  },
+  "temporaryBundleRemoved": true,
+  "ownedNativeSessionArchived": "session-15882f71-4ff9-46d2-ae8c-06105b5b94cd",
+  "ownedRootsStopped": [
+    31696,
+    28464
+  ],
+  "normalShortcutLaunch": {
+    "ProcessId": 28464,
+    "ParentProcessId": 12216,
+    "ExecutablePath": "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe",
+    "CommandLine": "\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-runtime\\DeepSeek Harness.exe\" --user-data-dir=\"E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\dsh-src-0.2.0-rc.2\\desktop-data\" ",
+    "WindowTitle": "Saker_workspace — DeepSeek Harness",
+    "WindowHandle": {
+      "value": 2164676
+    }
+  },
+  "temporaryPathsRecycled": [
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\qualification-1009",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\saker-effect-desktop-sgvoY6",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\dsh-subprocess-4YhGPa",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\dsh-acl-skill-jWuwcY",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\dsh-acl-skill-cXJEoZ",
+    "E:\\工作\\WorkBuddy\\WebSec\\dsh\\_ref\\tmp\\dsh-spill-JI5kzn"
+  ],
+  "preserved": "Daily home, MCP settings, standard preset and native transcript history. Production remains 0.4.98."
+}

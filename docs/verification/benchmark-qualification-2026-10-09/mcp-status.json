@@ -1,0 +1,1 @@
+{"ok":true,"summary":{"total":2,"enabled":2,"connected":2,"tools":176},"servers":[{"name":"burp","state":"connected","toolCount":27,"error":null},{"name":"yakit","state":"connected","toolCount":149,"error":null}]}

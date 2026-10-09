@@ -12,6 +12,7 @@ import { dispatch as dispatchTask, openStore } from '@dsh-external/dsh-redteam-r
 import { createEffectLab } from './lab.mjs';
 import { createAgentInterface, mountRestrictedAgent, assertRestrictedSurface, countUsage } from './agent-interface.mjs';
 import { resolveComparisonPreset, freezeSingleAgentRows, createRunClock, createRunStopper } from './runtime.mjs';
+import { assessRunQualification } from './protocol.mjs';
 
 export const name = 'saker-effect-benchmark';
 export const inject = ['agents', 'agentPresets', 'connection', 'tools', 'sessions', 'webServer'];
@@ -39,6 +40,7 @@ export function apply(ctx) {
       score: run.bridge.controller.grade(),
       comparability: { comparable: false, mismatches: ['budget-not-calibrated', 'frozen-three-group-comparison-not-run'] },
     };
+    result.qualification = assessRunQualification(result);
     writeFileSync(join(run.directory, 'result.json'), json(result));
     writeFileSync(join(run.directory, 'audit.json'), json(run.lab.audit()));
     return result;

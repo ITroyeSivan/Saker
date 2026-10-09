@@ -1,0 +1,38 @@
+[test-task-effect-benchmark] exit=0
+ok frozen cases contain 8 single positives, 6 identity chains, 6 negatives, 4 faults and 12 holdouts
+ok all 36 local cases produce independent outcomes from actual HTTP and fault captures
+ok agent completion text, 200 error pages and reflected private markers cannot pass confirmation
+ok repeated receipt ids, foreign reset evidence and changed response bytes are rejected
+ok loopback adapter refuses out-of-scope URLs and enforces a shared request cap before execution
+ok multi-step flows cannot use static identity or skip export-ticket preconditions
+ok timeout is an actual timed-out client request and never an invented successful receipt
+ok comparison protocol pins three groups and randomizes three repeats reproducibly; unknown use stays unknown
+ok qualified success excludes overruns, unknown budgets, incomplete runs and incomparable results without erasing raw scores
+Fixture verification only: modelCalls=0; no agent effectiveness or cost improvement is claimed.
+[test-effect-agent-interface] exit=0
+ok agent brief has an opaque case identity and no truth, grader or filesystem capability
+ok shared interface returns real raw receipts, denies escapes and preserves request budget under concurrency
+ok submit seals once without revealing a score; fabricated confirmation stays false in controller grading
+ok genuine effect is independently scored using only this opaque run id and observed receipts
+ok submission cannot race a request still awaiting a real response
+ok usage includes cached input and unknown or corrupt fields never become zero
+ok execution guard denies later local shell tools and rollback releases only owned registrations
+Interface behavior only: modelCalls=0; Desktop enforcement is verified separately.
+[test-effect-runtime] exit=0
+ok plain control uses standard even when the native default is pentest
+ok missing, broken and customized Saker standard presets cannot enter the plain group
+ok native idle seals elapsed time before delayed polling or cleanup; start and end are idempotent
+ok zero-worker standard copy disables only dynamic subagent model selection without changing the source
+ok concurrent stops wait for the same cleanup and preserve the first reason
+ok a cleanup failure remains a failure for all stop callers
+[revcheck-effect-qualification] exit=0
+ok reverse raw-success-counted: targeted behavior assertion failed
+ok reverse no-budget-check: targeted behavior assertion failed
+ok reverse trust-stale-qualification: targeted behavior assertion failed
+ok reverse usage-overflow-and-conflict: targeted behavior assertion failed
+[test-product-pruning] exit=0
+ok   product selection retires three modules and preserves Nday services
+ok   migration checks actual removal, preserves unrelated configuration and is idempotent
+ok   every production build, installer and delivery uses one selection
+ok   runtime links, obsolete chat tab and published prompt requirements are removed
+ok   documentation checker accepts shipped selection and restoring retired counting fails behaviorally

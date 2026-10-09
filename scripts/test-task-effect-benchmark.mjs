@@ -3,7 +3,7 @@ import { performance } from 'node:perf_hooks';
 import { CASES, caseById } from '../benchmarks/task-effects/cases.mjs';
 import { createEffectLab } from '../benchmarks/task-effects/lab.mjs';
 import { gradeAttempt } from '../benchmarks/task-effects/grade.mjs';
-import { makeProtocol, assessComparability, summarizeRuns } from '../benchmarks/task-effects/protocol.mjs';
+import { makeProtocol, assessComparability, assessRunQualification, summarizeRuns } from '../benchmarks/task-effects/protocol.mjs';
 
 async function login(lab, role) {
   const spec = caseById(lab.caseId);
@@ -125,6 +125,50 @@ await test('comparison protocol pins three groups and randomizes three repeats r
   const summary=summarizeRuns([{variant:'candidate',score,usage:{tokens:null,elapsedMs:100,humanInterventions:null},comparability:{comparable:false}}]);
   assert.equal(summary.candidate.tokensUnknownRuns,1);assert.equal(summary.candidate.tokensTotal,null);
   assert.equal(summary.candidate.humanUnknownRuns,1);assert.equal(summary.candidate.humanInterventionsTotal,null);assert.equal(summary.candidate.incomparableRuns,1);
+});
+await test('qualified success excludes overruns, unknown budgets, incomplete runs and incomparable results without erasing raw scores', () => {
+  const base = { variant: 'candidate', score: { independentSuccess: true, falseConfirmed: 0, targetRequests: 2 },
+    budget: { minutes: 1, targetRequests: 2, tokens: 10 }, usage: { tokens: 10, elapsedMs: 60000, humanInterventions: 0 },
+    comparability: { comparable: true }, durationFinal: true, cleanupComplete: true, isolationFailures: [] };
+  assert.equal(assessRunQualification(base).qualifiedSuccess, true, 'equal to the ceiling remains within budget');
+  const mutations = [
+    ['tokens-budget-exceeded', r => { r.usage.tokens = 11; }],
+    ['target-requests-budget-exceeded', r => { r.score.targetRequests = 3; }],
+    ['elapsed-budget-exceeded', r => { r.usage.elapsedMs = 60000.01; }],
+    ['tokens-unknown-or-invalid', r => { r.usage.tokens = null; }],
+    ['tokens-unknown-or-invalid', r => { r.usage.tokens = 1.5; }],
+    ['tokens-unknown-or-invalid', r => { r.usage.tokens = Number.MAX_SAFE_INTEGER + 1; }],
+    ['target-requests-unknown-or-invalid', r => { delete r.score.targetRequests; }],
+    ['elapsed-unknown-or-invalid', r => { r.usage.elapsedMs = NaN; }],
+    ['budget-missing-or-invalid', r => { delete r.budget; }],
+    ['budget-missing-or-invalid', r => { r.budget.minutes = Number.MAX_SAFE_INTEGER; }],
+    ['runtime-not-comparable', r => { r.comparability.comparable = false; }],
+    ['run-not-final', r => { r.durationFinal = false; }],
+    ['cleanup-not-complete', r => { r.cleanupComplete = false; }],
+    ['isolation-not-proven', r => { r.isolationFailures = ['late tool exposed']; }],
+    ['isolation-not-proven', r => { delete r.isolationFailures; }],
+    ['human-interventions-unknown-or-invalid', r => { r.usage.humanInterventions = null; }],
+    ['score-missing-or-invalid', r => { r.score.falseConfirmed = null; }],
+  ];
+  const disqualified = mutations.map(([reason, mutate]) => {
+    const run = structuredClone(base); mutate(run);
+    // A previously saved/stale qualification cannot override current facts.
+    run.qualification = { eligible: true, qualifiedSuccess: true };
+    const result = assessRunQualification(run);
+    assert.equal(result.qualifiedSuccess, false, reason); assert(result.reasons.includes(reason));
+    return run;
+  });
+  const negative = structuredClone(base); negative.score = { ...negative.score, independentSuccess: false, falseConfirmed: 1 };
+  assert(assessRunQualification(negative).eligible, 'a completed negative or failed case is part of the experiment');
+  const before = structuredClone(disqualified);
+  const summary = summarizeRuns([base, ...disqualified, negative]).candidate;
+  assert.equal(summary.independentSuccess, 1, 'only budget-compliant comparable completed success qualifies');
+  assert.equal(summary.rawIndependentSuccess, 18); assert.equal(summary.qualifiedRuns, 2);
+  assert.equal(summary.disqualifiedRuns, 17); assert.equal(summary.overBudgetRuns, 3);
+  assert.equal(summary.falseConfirmedKnown, 1); assert.equal(summary.falseConfirmed, null, 'a missing failure count must not become zero');
+  assert.equal(summary.requests, null); assert.equal(summary.tokensTotal, null);
+  assert.equal(summary.disqualificationReasons['runtime-not-comparable'], 1);
+  assert.deepEqual(disqualified, before, 'raw run facts are retained');
 });
 console.log('Fixture verification only: modelCalls=0; no agent effectiveness or cost improvement is claimed.');
 process.exitCode=failed?1:0;

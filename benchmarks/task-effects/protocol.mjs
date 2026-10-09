@@ -25,23 +25,70 @@ export function assessComparability(protocol, runtime = {}) {
   return { comparable: mismatches.length === 0, mismatches };
 }
 
+// Independent effect and experiment eligibility are separate facts. The raw
+// grader result is never rewritten to hide an overrun or a failed experiment.
+export function assessRunQualification(run) {
+  const reasons = [];
+  const budget = run?.budget;
+  const validBudget = budget && ['minutes', 'targetRequests', 'tokens']
+    .every(key => Number.isSafeInteger(budget[key]) && budget[key] > 0)
+    && Number.isSafeInteger(budget.minutes * 60000);
+  if (!validBudget) reasons.push('budget-missing-or-invalid');
+  const counts = [
+    ['tokens', run?.usage?.tokens, budget?.tokens, true],
+    ['target-requests', run?.score?.targetRequests, budget?.targetRequests, true],
+    ['elapsed', run?.usage?.elapsedMs, validBudget ? budget.minutes * 60000 : undefined, false],
+  ];
+  for (const [name, value, limit, integer] of counts) {
+    if (!Number.isFinite(value) || value < 0 || (integer && !Number.isSafeInteger(value))) reasons.push(name + '-unknown-or-invalid');
+    else if (validBudget && value > limit) reasons.push(name + '-budget-exceeded');
+  }
+  if (run?.comparability?.comparable !== true) reasons.push('runtime-not-comparable');
+  if (run?.durationFinal !== true) reasons.push('run-not-final');
+  if (run?.cleanupComplete !== true) reasons.push('cleanup-not-complete');
+  if (!Array.isArray(run?.isolationFailures) || run.isolationFailures.length) reasons.push('isolation-not-proven');
+  if (!Number.isSafeInteger(run?.usage?.humanInterventions) || run.usage.humanInterventions < 0) reasons.push('human-interventions-unknown-or-invalid');
+  if (typeof run?.score?.independentSuccess !== 'boolean'
+    || !Number.isSafeInteger(run?.score?.falseConfirmed) || run.score.falseConfirmed < 0) reasons.push('score-missing-or-invalid');
+  const overBudget = reasons.some(reason => reason.endsWith('-budget-exceeded'));
+  const budgetUnknown = reasons.some(reason => reason === 'budget-missing-or-invalid'
+    || ['tokens', 'target-requests', 'elapsed'].some(name => reason === name + '-unknown-or-invalid'));
+  return { eligible: reasons.length === 0, qualifiedSuccess: reasons.length === 0 && run.score.independentSuccess,
+    budgetStatus: overBudget ? 'exceeded' : budgetUnknown ? 'unknown' : 'within', reasons };
+}
+
 export function summarizeRuns(runs) {
   const groups = {};
   for (const run of runs) {
-    const group = groups[run.variant] ||= { runs: 0, independentSuccess: 0, falseConfirmed: 0,
-      requests: 0, tokensKnown: 0, tokensUnknownRuns: 0, elapsedMsKnown: 0, elapsedUnknownRuns: 0,
+    const group = groups[run.variant] ||= { runs: 0, independentSuccess: 0, rawIndependentSuccess: 0,
+      qualifiedRuns: 0, disqualifiedRuns: 0, overBudgetRuns: 0, unknownBudgetRuns: 0, disqualificationReasons: {},
+      falseConfirmedKnown: 0, falseConfirmedUnknownRuns: 0, requestsKnown: 0, requestsUnknownRuns: 0,
+      tokensKnown: 0, tokensUnknownRuns: 0, elapsedMsKnown: 0, elapsedUnknownRuns: 0,
       humanInterventionsKnown: 0, humanUnknownRuns: 0, incomparableRuns: 0 };
-    group.runs++; group.independentSuccess += Number(run.score.independentSuccess);
-    group.falseConfirmed += run.score.falseConfirmed; group.requests += run.score.targetRequests;
+    const qualification = assessRunQualification(run);
+    group.runs++; group.rawIndependentSuccess += Number(run.score?.independentSuccess === true);
+    group.independentSuccess += Number(qualification.qualifiedSuccess);
+    group.qualifiedRuns += Number(qualification.eligible); group.disqualifiedRuns += Number(!qualification.eligible);
+    group.overBudgetRuns += Number(qualification.budgetStatus === 'exceeded');
+    group.unknownBudgetRuns += Number(qualification.reasons.some(reason => reason === 'budget-missing-or-invalid'
+      || ['tokens', 'target-requests', 'elapsed'].some(name => reason === name + '-unknown-or-invalid')));
+    for (const reason of qualification.reasons) group.disqualificationReasons[reason] = (group.disqualificationReasons[reason] ?? 0) + 1;
+    for (const [key, total, unknown] of [['falseConfirmed', 'falseConfirmedKnown', 'falseConfirmedUnknownRuns'], ['targetRequests', 'requestsKnown', 'requestsUnknownRuns']]) {
+      const value = run.score?.[key];
+      if (Number.isSafeInteger(value) && value >= 0) group[total] += value;
+      else group[unknown]++;
+    }
     for (const [key, total, unknown] of [['tokens', 'tokensKnown', 'tokensUnknownRuns'], ['elapsedMs', 'elapsedMsKnown', 'elapsedUnknownRuns'],
       ['humanInterventions', 'humanInterventionsKnown', 'humanUnknownRuns']]) {
       const value = run.usage?.[key];
-      if (Number.isFinite(value) && value >= 0) group[total] += value;
+      if (Number.isFinite(value) && value >= 0 && (key === 'elapsedMs' || Number.isSafeInteger(value))) group[total] += value;
       else group[unknown]++;
     }
     if (run.comparability?.comparable !== true) group.incomparableRuns++;
   }
   for (const group of Object.values(groups)) {
+    group.falseConfirmed = group.falseConfirmedUnknownRuns ? null : group.falseConfirmedKnown;
+    group.requests = group.requestsUnknownRuns ? null : group.requestsKnown;
     group.tokensTotal = group.tokensUnknownRuns ? null : group.tokensKnown;
     group.elapsedMsTotal = group.elapsedUnknownRuns ? null : group.elapsedMsKnown;
     group.humanInterventionsTotal = group.humanUnknownRuns ? null : group.humanInterventionsKnown;

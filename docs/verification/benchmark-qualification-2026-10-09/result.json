@@ -1,0 +1,77 @@
+{
+  "interfaceVersion": "saker.effect-interface/2",
+  "caseId": "p1",
+  "runId": "a8d0823c-ba3a-496d-8409-f3625dedfe0d",
+  "sessionId": "session-15882f71-4ff9-46d2-ae8c-06105b5b94cd",
+  "variant": "plain-agent",
+  "sakerVersion": "0.4.98",
+  "model": "deepseek-flash",
+  "provider": "deepseek-official",
+  "toolDigest": "44de8da6b2490dd8a303fcbb7423a2ffd27a5b64bcfd147f737a9866459ab477",
+  "accessDigest": "d8d08dae88b97c272ab94d431fe7bd364bba54ae05a2c8ff4d9875c350e57cd1",
+  "preset": "saker-effect-standard-a8d0823c-ba3a-496d-8409-f3625dedfe0d",
+  "presetCompositionDigest": "7efa0ce044398573219a702bf1dbbb5d4d826db0c6bc3b17881100ba8093c7d9",
+  "sourcePreset": "standard",
+  "sourcePresetCompositionDigest": "309e2191c667976c4f198d72fcd76302ddcebfd1b8142ff7dffa63aba07da6a9",
+  "presetAdjustments": [
+    {
+      "property": "subagent.modelSelectionSettings",
+      "value": false,
+      "rows": 1,
+      "reason": "shared controlled interface has zero workers; prevent late agent-local tool registration"
+    }
+  ],
+  "budget": {
+    "minutes": 1,
+    "targetRequests": 2,
+    "tokens": 100
+  },
+  "startedAt": "2026-10-09T08:03:26.453Z",
+  "elapsedMs": 3815,
+  "durationFinal": true,
+  "cleanupComplete": true,
+  "status": "idle",
+  "stopReason": "missing-submission",
+  "isolationFailures": [],
+  "toolCalls": [],
+  "usage": {
+    "modelCalls": 1,
+    "tokens": 5641,
+    "knownTokens": 5641,
+    "unknownUsage": false,
+    "elapsedMs": 3815,
+    "humanInterventions": 0
+  },
+  "submission": null,
+  "score": {
+    "caseId": "p1",
+    "runId": "a8d0823c-ba3a-496d-8409-f3625dedfe0d",
+    "category": "single-positive",
+    "expected": "confirmed",
+    "outcome": "missing",
+    "independentSuccess": false,
+    "falseConfirmed": 0,
+    "unconfirmedPositive": true,
+    "targetRequests": 0,
+    "controlsVerified": false,
+    "effectVerified": false,
+    "evidenceValid": false,
+    "reason": "missing, duplicate, foreign or corrupt evidence"
+  },
+  "comparability": {
+    "comparable": false,
+    "mismatches": [
+      "budget-not-calibrated",
+      "frozen-three-group-comparison-not-run"
+    ]
+  },
+  "qualification": {
+    "eligible": false,
+    "qualifiedSuccess": false,
+    "budgetStatus": "exceeded",
+    "reasons": [
+      "tokens-budget-exceeded",
+      "runtime-not-comparable"
+    ]
+  }
+}

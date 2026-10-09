@@ -9,7 +9,9 @@ const copy = value => structuredClone(value);
 export function countUsage(usage) {
   if (!usage || !['inputTokens', 'outputTokens'].every(key => Number.isSafeInteger(usage[key]) && usage[key] >= 0)) return null;
   if (['cacheReadTokens', 'cacheWriteTokens'].some(key => usage[key] !== undefined && (!Number.isSafeInteger(usage[key]) || usage[key] < 0))) return null;
-  return usage.inputTokens + usage.outputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0);
+  const total = usage.inputTokens + usage.outputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0);
+  if (!Number.isSafeInteger(total) || (usage.totalTokens !== undefined && usage.totalTokens !== total)) return null;
+  return total;
 }
 
 const requestParameters = {

@@ -1,0 +1,167 @@
+{
+  "adapterVersion": "0.0.6",
+  "productVersion": "0.4.98",
+  "codeHashes": {
+    "protocol.mjs": "b977828a16998eef2bbc6c2aea080778b5262bfcf586275e87544b1eaa0c69c7",
+    "agent-interface.mjs": "1ad694ae4b65bbe24276263f0b41f6e0b9ee4b9191ffcb2f2485933989703111",
+    "desktop-plugin.mjs": "87a6856801f04a1cc3232de6036faab3c5566a93d3e972b527e521023f2dda27"
+  },
+  "sessionId": "session-15882f71-4ff9-46d2-ae8c-06105b5b94cd",
+  "headers": [
+    {
+      "seq": 11,
+      "config": {
+        "provider": "deepseek-official",
+        "model": "deepseek-flash",
+        "maxTokens": 100,
+        "reasoningEffort": "high"
+      },
+      "names": [
+        "exercise_request",
+        "exercise_submit"
+      ]
+    }
+  ],
+  "usage": [
+    {
+      "seq": 15,
+      "type": "assistant/message",
+      "usage": {
+        "inputTokens": 4773,
+        "outputTokens": 100,
+        "cacheReadTokens": 768,
+        "cacheWriteTokens": 0,
+        "totalTokens": 5641
+      }
+    }
+  ],
+  "nativeStatus": "idle",
+  "final": true,
+  "cleanupComplete": true,
+  "targetRequests": 0,
+  "qualification": {
+    "eligible": false,
+    "qualifiedSuccess": false,
+    "budgetStatus": "exceeded",
+    "reasons": [
+      "tokens-budget-exceeded",
+      "runtime-not-comparable"
+    ]
+  },
+  "summary": {
+    "plain-agent": {
+      "runs": 1,
+      "independentSuccess": 0,
+      "rawIndependentSuccess": 0,
+      "qualifiedRuns": 0,
+      "disqualifiedRuns": 1,
+      "overBudgetRuns": 1,
+      "unknownBudgetRuns": 0,
+      "disqualificationReasons": {
+        "tokens-budget-exceeded": 1,
+        "runtime-not-comparable": 1
+      },
+      "falseConfirmedKnown": 0,
+      "falseConfirmedUnknownRuns": 0,
+      "requestsKnown": 0,
+      "requestsUnknownRuns": 0,
+      "tokensKnown": 5641,
+      "tokensUnknownRuns": 0,
+      "elapsedMsKnown": 3815,
+      "elapsedUnknownRuns": 0,
+      "humanInterventionsKnown": 0,
+      "humanUnknownRuns": 0,
+      "incomparableRuns": 1,
+      "falseConfirmed": 0,
+      "requests": 0,
+      "tokensTotal": 5641,
+      "elapsedMsTotal": 3815,
+      "humanInterventionsTotal": 0
+    }
+  },
+  "historicalReassessment": [
+    {
+      "sessionId": "session-85719cf7-1f92-4372-bb10-4243fc5123e5",
+      "qualification": {
+        "eligible": false,
+        "qualifiedSuccess": false,
+        "budgetStatus": "exceeded",
+        "reasons": [
+          "tokens-budget-exceeded",
+          "runtime-not-comparable"
+        ]
+      }
+    },
+    {
+      "sessionId": "session-d2bfda34-992d-49a5-8501-2822511bd6e4",
+      "qualification": {
+        "eligible": false,
+        "qualifiedSuccess": false,
+        "budgetStatus": "within",
+        "reasons": [
+          "runtime-not-comparable"
+        ]
+      }
+    }
+  ],
+  "historicalSummary": {
+    "plain-agent": {
+      "runs": 1,
+      "independentSuccess": 0,
+      "rawIndependentSuccess": 0,
+      "qualifiedRuns": 0,
+      "disqualifiedRuns": 1,
+      "overBudgetRuns": 1,
+      "unknownBudgetRuns": 0,
+      "disqualificationReasons": {
+        "tokens-budget-exceeded": 1,
+        "runtime-not-comparable": 1
+      },
+      "falseConfirmedKnown": 1,
+      "falseConfirmedUnknownRuns": 0,
+      "requestsKnown": 32,
+      "requestsUnknownRuns": 0,
+      "tokensKnown": 166715,
+      "tokensUnknownRuns": 0,
+      "elapsedMsKnown": 55807,
+      "elapsedUnknownRuns": 0,
+      "humanInterventionsKnown": 0,
+      "humanUnknownRuns": 0,
+      "incomparableRuns": 1,
+      "falseConfirmed": 1,
+      "requests": 32,
+      "tokensTotal": 166715,
+      "elapsedMsTotal": 55807,
+      "humanInterventionsTotal": 0
+    },
+    "candidate": {
+      "runs": 1,
+      "independentSuccess": 0,
+      "rawIndependentSuccess": 0,
+      "qualifiedRuns": 0,
+      "disqualifiedRuns": 1,
+      "overBudgetRuns": 0,
+      "unknownBudgetRuns": 0,
+      "disqualificationReasons": {
+        "runtime-not-comparable": 1
+      },
+      "falseConfirmedKnown": 1,
+      "falseConfirmedUnknownRuns": 0,
+      "requestsKnown": 19,
+      "requestsUnknownRuns": 0,
+      "tokensKnown": 124173,
+      "tokensUnknownRuns": 0,
+      "elapsedMsKnown": 44292,
+      "elapsedUnknownRuns": 0,
+      "humanInterventionsKnown": 0,
+      "humanUnknownRuns": 0,
+      "incomparableRuns": 1,
+      "falseConfirmed": 1,
+      "requests": 19,
+      "tokensTotal": 124173,
+      "elapsedMsTotal": 44292,
+      "humanInterventionsTotal": 0
+    }
+  },
+  "scope": "Actual official Desktop model call and controller qualification; not a successful vulnerability case or a hard pre-call token limit."
+}
