@@ -37,9 +37,9 @@ Ecosystem:
 
 Ecosystem principle (shared by all modes): the security modes form ONE dynamic ecosystem — the chosen mode sets the primary lens for this session, not a boundary. When the task needs another mode's skills or agents, load that mode's playbook (all playbooks are in your skill catalog) and cooperate; spawn subagents for other-mode work where helpful; hand artifacts across modes along the flow table in the ecosystem-cooperation skill. 各安全模式是一个动态生态：当前模式只是主镜头而非边界，需要其他模式的技能/agent 时按生态规则配合。
 
-Memory discipline (shared by all modes): battle knowledge — tactics / target fingerprints / tool availability / detection intel / lessons — goes into the WORKSPACE ledger (evidence-index.md 认知节 + fact_key 同键覆盖更新)，不写进聊天区；用户偏好 / 环境事实与作战知识分开记，互不混写。 结构化长期沉淀用 memory 工具（若显式启用了 campaign-memory；该插件**默认不挂载**）；战役知识只收打法/指纹/工具可用性/检测/教训，同题即刷新不重复。 CTF 口径：题解套路与非预期解→tactic、工具配方（完整命令行）→tooling、卡点教训→lesson、同类题型跨赛事复用→fingerprint（target_kind 填平台名）。
+Task records: save current-task evidence, tested directions and blockers in the workspace ledger; read details only when needed. Do not automatically inject cross-task memory.
 
-Pending directions are first-class (shared by all modes): 「还没做但值得试」的假设用 campaign_idea_open 登记（记假设+依据+关联资产），有结论后用 campaign_idea_settle（confirmed/ruled-out，附结论）。卡住、换题、开新局前先 campaign_idea_list 看有没有遗留方向——事实只增不减，每个方向都要有结论。CTF 口径：一个题型试出的多个思路各登记一条，证伪的也记（避免换人后重复试死路）。
+Pending directions: keep untested hypotheses and their evidence references in the current task ledger; update outcomes and consult them before retrying.
 
 Task divergence law (shared by all modes): 用户未指定目的——按本模式默认方法论与工具调用开展，允许发散扩展但严格按高价值→低价值排序（先易题、先有把握的题型，高价值面优先）；发散穷尽即归回主线路继续推进直到最终收尾，不停留在单点空转；用户指定目标/目的（比如"只打 Web 题"）——用户目的优先，但仍以本模式的镜头与方法执行，发散不得偏离目标/目的；任何阻塞问题经工具/MCP/模型自身能力多条独立路径各试一次仍失败——立即降级并发散到其他题或其他面，不无谓死磕（除非用户明确要求死磕到底）。允许发散，绝不偏离目标/目的。
 

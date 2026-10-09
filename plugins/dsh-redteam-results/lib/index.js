@@ -57,143 +57,6 @@ const VERIFY_SENT = new Map();
 const VERIFY_WINDOW_MS = 10 * 60 * 1000;
 const workerManagers = new WeakMap();
 
-/** 链路互链（chain 三模式）：反查 AttackAtlas 链路节点对各 finding 的引用——行带 chainNodes
- *  供 Detail 互链显示。atlas 包/库不可用时静默缺省（不阻塞成果读取）。
- *
- *  句柄缓存存 { dbPath, store }：atlas 的 openStore 返回对象**不带 dbPath 字段**，
- *  原先写 `cache.dbPath !== dbPath` 判定恒真 → 每次列表/分组请求都新开一个 SQLite 连接、
- *  旧句柄永不关闭（连接泄漏；Windows 上还表现为库文件被长期占用、临时目录删不掉）。 */
-let atlasStoreCache; // { dbPath: string, store: { close(): void } }
-/** 释放互链句柄（换库/测试/宿主卸载时用——Windows 上不关句柄则库文件不可删）。 */
-export function releaseChainRefs() {
-	if (atlasStoreCache === undefined) return;
-	try { atlasStoreCache.store.close(); } catch { /* 已关或句柄失效 */ }
-	atlasStoreCache = undefined;
-}
-/** 取 atlas 句柄（进程级缓存）；库不存在或包不可用返回 undefined（调用方静默降级）。 */
-async function atlasHandle() {
-	try {
-		const mod = await import("@dsh-external/dsh-attack-atlas/store");
-		const dbPath = process.env.DSH_ATLAS_DB || path.join(DSH_HOME, "attack-atlas", "atlas.db");
-		if (dbPath !== ":memory:" && !fs.existsSync(dbPath)) return undefined;
-		if (!atlasStoreCache || atlasStoreCache.dbPath !== dbPath) {
-			releaseChainRefs();
-			atlasStoreCache = { dbPath, store: mod.openStore(dbPath) };
-		}
-		return { mod, store: atlasStoreCache.store };
-	} catch { return undefined; }
-}
-
-async function joinChainRefs(rows, mode) {
-	if (!Array.isArray(rows) || rows.length === 0) return;
-	const atlas = await atlasHandle();
-	if (atlas === undefined) return;
-	try {
-		const refIdx = atlas.mod.chainRefIndex(atlas.store, mode);
-		for (const f of rows) {
-			const refs = refIdx[`${f.sessionId ?? ""}:${f.id}`];
-			if (refs) f.chainNodes = refs.map((r) => ({ id: r.nodeId, label: r.label, kind: r.kind, major: !!r.major }));
-		}
-	} catch { /* atlas 不可用或无链路数据——互链缺省 */ }
-}
-
-/** 读本会话链路的全部节点（省略 target = 全目标并集）；atlas 不可用返回 undefined。 */
-async function atlasChainNodes(sessionId, mode) {
-	const atlas = await atlasHandle();
-	if (atlas === undefined) return undefined;
-	try { return atlas.mod.listChain(atlas.store, sessionId, mode); } catch { return undefined; }
-}
-
-/** 攻击图 ↔ 成果 只读对账（P1-2 步 2）。返回两清单，不改任何数据。
- *
- *  - **unlinked**：有成果、但没有任何链路节点引用它 —— 图漏了。stage-gate 读的就是这张图，
- *    图不全，门禁就是拿着一张不全的图在做判断。
- *  - **dangling**：链路节点引用了存在不了的成果（写错了 id / 来自别会话）—— 图脏了，
- *    在跨会话聚合视图里会误连到别人的成果上。
- *
- *  为什么只报告不自动修：自动补节点会制造噪声，自动删节点会吃掉人工编排的拓扑。
- *  修不修、怎么修由人判；这里只把不一致摊开。 */
-export function reconcileChain({ findings, nodes, sessionId }) {
-	const keyOf = (sid, id) => `${sid ?? ""}:${id ?? ""}`;
-	const known = new Set(findings.map((f) => keyOf(f.sessionId, f.id)));
-	const linked = new Set();
-	const dangling = [];
-	for (const n of nodes) {
-		const ref = String(n.findingRef ?? "").trim();
-		if (ref === "") continue;   // 无关联节点是合法拓扑（纯资产节点），不算脏
-		// listChain 的节点投影不带 sessionId（查询本身就是按会话过滤的）——缺省按被查会话归属，
-		// 否则每个节点都会被误判成「他会话」。显式带 sessionId 的调用方（跨会话对账）仍然生效。
-		const nodeSid = n.sessionId ?? sessionId;
-		const k = keyOf(nodeSid, ref);
-		if (known.has(k)) { linked.add(k); continue; }
-		dangling.push({
-			nodeId: n.id, nodeLabel: n.label, sessionId: nodeSid, target: n.target, findingRef: ref,
-			reason: String(nodeSid) === String(sessionId) ? "指向本会话不存在的成果" : "指向他会话的成果（聚合视图会误连）"
-		});
-	}
-	const unlinked = findings
-		.filter((f) => !linked.has(keyOf(f.sessionId, f.id)))
-		.map((f) => ({ id: f.id, title: f.title, status: f.status, severity: f.severity, target: f.target }));
-	return { unlinked, dangling, checked: { findings: findings.length, nodes: nodes.length } };
-}
-
-/** 渲染链路对账结果。纯函数，便于对“超过 12 条”的省略分支做回归测试。 */
-export function renderChainReconcile(v) {
-	if (!v.ok) return `对账失败：${v.error}`;
-	if (v.available === false) return "未安装攻击图插件或本机尚无攻击图库——本次只核对成果侧，无图可对。";
-	if (v.unlinked.length === 0 && v.dangling.length === 0) {
-		return `对账通过：${v.checked.findings} 条成果、${v.checked.nodes} 个链路节点，两边一致。`;
-	}
-	const lines = [`链路对账：${v.checked.findings} 条成果 / ${v.checked.nodes} 个节点`];
-	if (v.unlinked.length > 0) {
-		lines.push(`未上图 ${v.unlinked.length} 条（图会失真，门禁据此判断）：`);
-		for (const f of v.unlinked.slice(0, 12)) lines.push(`  - ${f.id} ${f.title}（${f.status}）`);
-		if (v.unlinked.length > 12) lines.push(`  …另有 ${v.unlinked.length - 12} 条`);
-	}
-	if (v.dangling.length > 0) {
-		lines.push(`悬挂引用 ${v.dangling.length} 处（节点指向不存在的成果）：`);
-		for (const d of v.dangling.slice(0, 12)) lines.push(`  - 节点 ${d.nodeId} → ${d.findingRef}：${d.reason}`);
-		if (v.dangling.length > 12) lines.push(`  …另有 ${v.dangling.length - 12} 处`);
-	}
-	lines.push("本条只报告不修改：补节点请在攻击图里手动加（自动补会造噪声），删错引用请人工确认后处理。");
-	return lines.join("\n");
-}
-/** 发现自动上图（P1-2 步 1）：登记成功后，在本会话链路上补一个引用该 finding 的节点，
- *  让「攻击图」与「redteam 成果」页天然同步（stage-gate 读的就是这张图）。
- *
- *  三条自我约束：
- *  - **幂等**：节点 id 取 finding id，addChainNode 按 (session,mode,target,id) upsert，重复登记不产重复节点。
- *  - **不为不用图的用户凭空建库**：只在 atlas 库已存在时执行（":memory:" 除外）。
- *  - **失败绝不阻塞登记**：atlas 未装/库损坏一律静默返回 undefined。
- *
- *  kind 固定 other（「资产」）——按 finding.type 猜图例类型会制造错色节点，宁可交给人在图里改。
- */
-export async function autoLinkFinding(sessionId, mode, finding) {
-	try {
-		const mod = await import("@dsh-external/dsh-attack-atlas/store");
-		const dbPath = process.env.DSH_ATLAS_DB || path.join(DSH_HOME, "attack-atlas", "atlas.db");
-		if (dbPath !== ":memory:" && !fs.existsSync(dbPath)) return undefined;
-		if (!atlasStoreCache || atlasStoreCache.dbPath !== dbPath) {
-			releaseChainRefs();
-			atlasStoreCache = { dbPath, store: mod.openStore(dbPath) };
-		}
-		return mod.addChainNode(atlasStoreCache.store, sessionId, mode, {
-			id: finding.id,
-			label: finding.title || finding.target || finding.id,
-			kind: "other",
-			note: `自动补登自成果 ${finding.id}${finding.type ? `（类型：${finding.type}）` : ""}`,
-			findingRef: finding.id
-		});
-	} catch { return undefined; }
-}
-
-/** 登记 + 自动上图（模型工具与测试共用同一路径）。 */
-export async function registerFindingWithLink(store, sessionId, mode, args) {
-	const finding = registerFinding(store, sessionId, mode, args);
-	const node = await autoLinkFinding(sessionId, mode, finding);
-	return { finding, node };
-}
-
 const MODES = ["pentest", "code-audit", "ctf-solver"];
 const MODE_LABELS = {
 	pentest: "渗透测试模式",
@@ -530,7 +393,6 @@ export async function dispatch(ctx, st, endpoint, payload) {
 			// meta 取请求会话（标签页所属会话）——模式页元数据栏不为空。
 			const range = { from: String(p.from ?? ""), to: String(p.to ?? "") };
 			const out = { list: listFindingsAll(st, mode, { ...p, ...range }), stats: computeStatsAll(st, mode, range), counts: modeCountsAll(st), meta: p.sessionId ? getMeta(st, String(p.sessionId)) : undefined };
-			await joinChainRefs(out.list.rows, mode);
 			return out;
 		}
 		const sessionId = String(p.sessionId ?? "");
@@ -543,7 +405,6 @@ export async function dispatch(ctx, st, endpoint, payload) {
 			const range = { from: String(p.from ?? ""), to: String(p.to ?? "") };
 			// 分组视图带统计（四档卡/状态 chips 在分组态不再全零）+ 请求会话 meta
 			const out = { groups: groupByTargetAll(st, mode, { ...p, ...range }), stats: computeStatsAll(st, mode, range), meta: p.sessionId ? getMeta(st, String(p.sessionId)) : undefined };
-			await joinChainRefs(out.groups.flatMap((g) => g.items), mode);
 			return out;
 		}
 		const sessionId = String(p.sessionId ?? "");
@@ -721,7 +582,7 @@ function apply(ctx) {
 					id: { type: "string", required: true }
 				}
 			},
-			render: (_a, v) => [{ type: "text", text: v.ok ? `已登记成果 #${v.seq} ${v.title}（${v.mode}，${v.severity}）——本会话「redteam 成果」页可见${v.chainNode ? `，并已在攻击图补节点 ${v.chainNode}` : ""}` : `登记失败：${v.error}${v.recovery ? '\n' + v.recovery : ''}` }]
+			render: (_a, v) => [{ type: "text", text: v.ok ? `已登记成果 #${v.seq} ${v.title}（${v.mode}，${v.severity}）——本会话「redteam 成果」页可见` : `登记失败：${v.error}${v.recovery ? '\n' + v.recovery : ''}` }]
 		},
 		async execute(args, exec) {
 			const session = sessionOf(ctx, exec);
@@ -739,8 +600,8 @@ function apply(ctx) {
           const saved = allFindings(theStore(), session.id, session.mode).find(row => row.reproduction === input.reproduction);
           if (saved) return { ok: true, id: saved.id, seq: saved.seq, title: saved.title, mode: saved.mode, severity: saved.severity, reused: true };
         }
-        const { finding, node } = await registerFindingWithLink(theStore(), session.id, session.mode, input);
-        return { ok: true, id: finding.id, seq: finding.seq, title: finding.title, mode: finding.mode, severity: finding.severity, chainNode: node ? node.id : '' };
+        const finding = registerFinding(theStore(), session.id, session.mode, input);
+        return { ok: true, id: finding.id, seq: finding.seq, title: finding.title, mode: finding.mode, severity: finding.severity };
       } catch (error) { return { ok: false, id: '', error: error.message }; }
 		}
 	}));
@@ -817,28 +678,6 @@ function apply(ctx) {
 			if (finding === undefined) return Promise.resolve({ ok: false, error: `finding ${args.id} 不存在（本会话 ${session.mode} 页）` });
 			return Promise.resolve({ ok: true, id: finding.id, status: finding.status, verifyNote: finding.verifyNote, secondRating: finding.secondRating, severity: finding.severity, verdict: secondReviewVerdict(finding),
         ...(finding.delivery ? { delivery: { ready: finding.delivery.ready, executionVerified: finding.delivery.executionVerified, gaps: finding.delivery.gaps } } : {}) });
-		}
-	}));
-
-	ctx.tools.register(defineTool({
-		name: "redteam_chain_reconcile",
-		description: "只读对账本会话「redteam 成果」与攻击图链路：列出未入图成果和引用不存在成果的节点。出报告前建议运行。",
-		parameters: {},
-		output: {
-			schema: {
-				type: "object", additionalProperties: true,
-				properties: { ok: { type: "boolean", required: true }, available: { type: "boolean" } }
-			},
-			render: (_a, v) => [{ type: "text", text: renderChainReconcile(v) }]
-		},
-		async execute(_args, exec) {
-			const session = sessionOf(ctx, exec);
-			if (!session) return { ok: false, error: "无法解析当前会话" };
-			const findings = allFindings(theStore(), session.id, session.mode).map((f) => ({ ...f, sessionId: session.id }));
-			const chain = await atlasChainNodes(session.id, session.mode);
-			if (chain === undefined) return { ok: true, available: false, unlinked: [], dangling: [], checked: { findings: findings.length, nodes: 0 } };
-			const report = reconcileChain({ findings, nodes: chain.nodes, sessionId: session.id });
-			return { ok: true, available: true, ...report };
 		}
 	}));
 
@@ -1123,7 +962,6 @@ function apply(ctx) {
 		}
 	}), "dsh-redteam-results: web route");
 	// 卸载时释放 atlas 互链句柄——否则 Windows 上库文件被占，插件重装/库迁移会失败。
-	ctx.effect(() => () => { try { releaseChainRefs(); } catch { /* 卸载期静默 */ } }, "dsh-redteam-results: chain refs");
 	//#endregion
 }
 

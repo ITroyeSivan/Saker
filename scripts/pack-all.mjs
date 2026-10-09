@@ -12,6 +12,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
+import { productPluginDirectories } from './lib/product-plugins.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 let ok = 0
@@ -41,7 +42,7 @@ function pack(dir, label) {
 if (existsSync(join(root, 'package.json'))) pack(root, 'root dsh-saker')
 
 // plugin bundles
-for (const name of readdirSync(join(root, 'plugins')).sort()) {
+for (const name of productPluginDirectories(root)) {
   const dir = join(root, 'plugins', name)
   if (!statSync(dir).isDirectory() || !existsSync(join(dir, 'package.json'))) continue
   if (name.startsWith('dsh-')) pack(dir, name)

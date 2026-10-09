@@ -4,9 +4,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { openStore as atlasOpen, addChainNode as atlasAddNode, listChain as atlasListChain } from "@dsh-external/dsh-attack-atlas/store";
 import { openStore, registerFinding, updateFinding, removeFinding, getFinding, allFindings, listFindings, listFindingsAll, computeStats, computeStatsAll, modeCounts, modeCountsAll, groupByTarget, groupByTargetAll, setMeta, getMeta, ledgerOverviewAll, secondReviewError, secondReviewVerdict, SECOND_RATINGS, RATING_SCALE, REGISTER_STATUSES, MODE_STATUSES } from "../lib/store.js";
-import { verifyMessage, findingAdmissionError, isTrustedRequest, dispatch, checkCsrf, releaseChainRefs, registerFindingWithLink, autoLinkFinding, reconcileChain, renderChainReconcile, apply } from "../lib/index.js";
+import { verifyMessage, findingAdmissionError, isTrustedRequest, dispatch, checkCsrf, apply } from "../lib/index.js";
 
 // 二次复核成对参数：verified 是各模式通用的「验证类终态」，首次流转须在同一次调用里
 // 同时给出独立二次评级与足量依据——上游用例原先只流转状态，此处统一以 ...RV 补齐。
@@ -634,28 +633,6 @@ ok("CSRF 头校验：匹配放行/缺失或错值拒", () => {
 	});
 	st.close();
 }
-{
-	// 链路互联回填：临时 atlas 库（DSH_ATLAS_DB 注入）+ chainRefIndex 反查
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rtr-chain-"));
-	const adb = atlasOpen(path.join(dir, "atlas.db"));
-	atlasAddNode(adb, "s-adl", "attack-defense", { id: "dc-01", label: "DC01", kind: "dc", major: true, findingRef: "attack-defense-1" });
-	adb.close();
-	process.env.DSH_ATLAS_DB = path.join(dir, "atlas.db");
-	try {
-		const st = openStore(":memory:");
-		registerFinding(st, "s-adl", "attack-defense", { title: "域控成果", type: "域控成果", target: "DC01", summary: "s" });
-		const res = await dispatch(null, st, "findings.list", { scope: "all", mode: "attack-defense", sessionId: "s-adl" });
-		ok("链路互链：scope:all 行带 chainNodes（atlas finding_ref 反查，含 major）", () => {
-			assert.ok(res.list.rows[0].chainNodes && res.list.rows[0].chainNodes[0].id === "dc-01" && res.list.rows[0].chainNodes[0].major === true, "互链行回填");
-		});
-		st.close();
-	} finally {
-		delete process.env.DSH_ATLAS_DB;
-		// 互链句柄为进程级缓存：不显式释放则 Windows 上 atlas.db 被占用，rmSync 抛 EBUSY。
-		releaseChainRefs();
-		fs.rmSync(dir, { recursive: true, force: true });
-	}
-}
 
 // ===== code-audit 批：auditMode 枚举清洗 / verifyMessage 代审分支直测 =====
 {
@@ -855,156 +832,5 @@ ok("二次评级词表与刻度自洽：info 低于 low，五档齐备", () => {
 	assert.equal(Object.keys(RATING_SCALE).length, SECOND_RATINGS.length, "两表须一一对应");
 });
 
-
-// ── P1-2 步 1：登记成果自动上图（真实临时 atlas 库，端到端） ──
-{
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rtr-autolink-"));
-	const seed = atlasOpen(path.join(dir, "atlas.db"));
-	seed.close(); // 只借它建库；之后让 autoLinkFinding 自己的句柄成为唯一持有者
-	process.env.DSH_ATLAS_DB = path.join(dir, "atlas.db");
-	let chain = { nodes: [] };
-	try {
-		const st = openStore(":memory:");
-		const { finding, node } = await registerFindingWithLink(st, "s-al", "attack-defense", { title: "域控成果", type: "域控成果", target: "DC01", summary: "s", severity: "high" });
-		ok("自动上图：登记即补链路节点，id=finding id 且 findingRef 自填", () => {
-			assert.equal(node.id, finding.id);
-			assert.equal(node.findingRef, finding.id);
-			assert.equal(node.label, "域控成果");
-		});
-		// 端到端：走 dispatch 的真实读取路径（joinChainRefs 反查）
-		const res = await dispatch(null, st, "findings.list", { scope: "all", mode: "attack-defense", sessionId: "s-al" });
-		ok("自动上图：成果页行经 atlas 反查拿回 chainNodes（图与发现天然同步）", () => {
-			assert.ok(res.list.rows[0].chainNodes, "行带 chainNodes");
-			assert.equal(res.list.rows[0].chainNodes[0].id, finding.id);
-		});
-		await autoLinkFinding("s-al", "attack-defense", finding); // 再触发一次
-		const peek = atlasOpen(process.env.DSH_ATLAS_DB);
-		chain = atlasListChain(peek, "s-al", "attack-defense");
-		peek.close();
-		ok("自动上图：重复触发不产生重复节点（按 (session,mode,target,id) upsert）", () => {
-			assert.equal(chain.nodes.filter((n) => n.findingRef === finding.id).length, 1);
-		});
-		ok("自动上图：节点 note 记录来源与类型（可追溯是自动补的）", () => {
-			const n = chain.nodes.find((x) => x.id === finding.id);
-			assert.match(n.note, /自动补登自成果/);
-			assert.match(n.note, /类型：域控成果/);
-		});
-		st.close();
-	} finally {
-		delete process.env.DSH_ATLAS_DB;
-		releaseChainRefs();
-		fs.rmSync(dir, { recursive: true, force: true });
-	}
-}
-
-// 库不存在时，不得为「不用图」的用户凭空建库
-{
-	const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), "rtr-nolink-"));
-	const missing = path.join(dir2, "attack-atlas", "atlas.db");
-	process.env.DSH_ATLAS_DB = missing;
-	const st = openStore(":memory:");
-	const { finding, node } = await registerFindingWithLink(st, "s-nl", "pentest", { title: "XSS", target: "http://t", summary: "s" });
-	delete process.env.DSH_ATLAS_DB;
-	ok("自动上图：atlas 库不存在时跳过且不建库（不给不用图的用户凭空造文件）", () => {
-		assert.equal(node, undefined);
-		assert.equal(fs.existsSync(missing), false);
-	});
-	ok("自动上图：跳过时登记本身照常成功（上图绝不阻塞成果登记）", () => {
-		assert.equal(getFinding(st, "s-nl", finding.id).title, "XSS");
-	});
-	st.close();
-	fs.rmSync(dir2, { recursive: true, force: true });
-}
-
-
-// ── P1-2 步 2：攻击图 ↔ 成果 只读对账 ──
-ok("对账：两边一致时两清单皆空", () => {
-	const findings = [{ sessionId: "s1", id: "pentest-1", title: "SQLi", status: "verified", severity: "high", target: "http://a" }];
-	const nodes = [{ sessionId: "s1", id: "pentest-1", label: "SQLi", findingRef: "pentest-1", target: "" }];
-	const r = reconcileChain({ findings, nodes, sessionId: "s1" });
-	assert.equal(r.unlinked.length, 0);
-	assert.equal(r.dangling.length, 0);
-	assert.deepEqual(r.checked, { findings: 1, nodes: 1 });
-});
-
-ok("对账：有成果未上图 → 进 unlinked（图会失真，门禁据此判断）", () => {
-	const findings = [
-		{ sessionId: "s1", id: "pentest-1", title: "SQLi", status: "verified", severity: "high", target: "http://a" },
-		{ sessionId: "s1", id: "pentest-2", title: "越权", status: "pending", severity: "medium", target: "http://b" }
-	];
-	const nodes = [{ sessionId: "s1", id: "pentest-1", label: "SQLi", findingRef: "pentest-1", target: "" }];
-	const r = reconcileChain({ findings, nodes, sessionId: "s1" });
-	assert.deepEqual(r.unlinked.map((f) => f.id), ["pentest-2"]);
-	assert.equal(r.unlinked[0].title, "越权");
-	assert.equal(r.dangling.length, 0);
-});
-
-ok("对账：节点指向不存在/他会话的成果 → 进 dangling 且区分成因", () => {
-	const findings = [{ sessionId: "s1", id: "pentest-1", title: "SQLi", status: "verified", severity: "high", target: "http://a" }];
-	const nodes = [
-		{ sessionId: "s1", id: "pentest-1", label: "SQLi", findingRef: "pentest-1", target: "" },
-		{ sessionId: "s1", id: "ghost", label: "幽灵", findingRef: "pentest-9", target: "" },
-		{ sessionId: "s2", id: "cross", label: "跨会话", findingRef: "pentest-1", target: "" }
-	];
-	const r = reconcileChain({ findings, nodes, sessionId: "s1" });
-	assert.equal(r.dangling.length, 2);
-	assert.match(r.dangling.find((d) => d.nodeId === "ghost").reason, /本会话不存在/);
-	assert.match(r.dangling.find((d) => d.nodeId === "cross").reason, /他会话/);
-});
-
-ok("对账：无 findingRef 的纯资产节点不算脏", () => {
-	const findings = [{ sessionId: "s1", id: "pentest-1", title: "SQLi", status: "verified", severity: "high", target: "http://a" }];
-	const nodes = [
-		{ sessionId: "s1", id: "pentest-1", label: "SQLi", findingRef: "pentest-1", target: "" },
-		{ sessionId: "s1", id: "dc-01", label: "DC01", findingRef: "", target: "" }
-	];
-	const r = reconcileChain({ findings, nodes, sessionId: "s1" });
-	assert.equal(r.dangling.length, 0);
-	assert.equal(r.unlinked.length, 0);
-});
-
-ok("对账渲染：超过 12 条悬挂引用时不因省略行抛错", () => {
-	const dangling = Array.from({ length: 13 }, (_, i) => ({ nodeId: `n${i}`, findingRef: `f${i}`, reason: "missing" }));
-	const text = renderChainReconcile({ ok: true, unlinked: [], dangling, checked: { findings: 0, nodes: 13 } });
-	assert.match(text, /另有 1 处/);
-});
-
-ok("客户端报告导出含稳定 JSON schema 入口", () => {
-	const src = fs.readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
-	assert.match(src, /saker\.redteam\.report\.v1/);
-	assert.match(src, /schemaVersion:\s*1/);
-	assert.match(src, /结构化报告（JSON）/);
-});
-
-// 端到端：自动上图之后，该成果不该再出现在 unlinked 里（真实 atlas 库）
-{
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rtr-rc-"));
-	const seed = atlasOpen(path.join(dir, "atlas.db"));
-	seed.close();
-	process.env.DSH_ATLAS_DB = path.join(dir, "atlas.db");
-	try {
-		const st = openStore(":memory:");
-		const { finding } = await registerFindingWithLink(st, "s-rc", "pentest", { title: "上传绕过", target: "http://u", summary: "s", severity: "high" });
-		const findings = allFindings(st, "s-rc", "pentest").map((f) => ({ ...f, sessionId: "s-rc" }));
-		const peek = atlasOpen(process.env.DSH_ATLAS_DB);
-		const chain = atlasListChain(peek, "s-rc", "pentest");
-		peek.close();
-		const before = reconcileChain({ findings, nodes: [], sessionId: "s-rc" });
-		ok("端到端：自动上图前，该成果确实被对账列为未上图", () => {
-			assert.deepEqual(before.unlinked.map((f) => f.id), [finding.id]);
-		});
-		const after = reconcileChain({ findings, nodes: chain.nodes, sessionId: "s-rc" });
-		ok("端到端：自动上图后，对账两边一致（图与发现同步）", () => {
-			assert.equal(after.unlinked.length, 0);
-			assert.equal(after.dangling.length, 0);
-			assert.equal(after.checked.nodes, 1);
-		});
-		st.close();
-	} finally {
-		delete process.env.DSH_ATLAS_DB;
-		releaseChainRefs();
-		fs.rmSync(dir, { recursive: true, force: true });
-	}
-}
 
 console.log(`\nall ${passed} tests passed`);

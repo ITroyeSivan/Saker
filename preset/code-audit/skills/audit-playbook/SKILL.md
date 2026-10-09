@@ -88,11 +88,11 @@ shared/refs/finding-fields.md）；成果页列表/详情/导出报告/统计分
   thinkphp）：先核该组件全部
   已知漏洞面（版本比对 + 利用条件核对）再增量审业务代码；refs 未收录的框架按
   `refs/lang/` 对应语言手册 + 公开漏洞库检索兜底，并登记「未收录框架」到规则降级记录。
-- **经验召回**：开工读工作区 `lessons.md`（存在时）——同类框架/组件续审召回历史坑与方法（本仓续审专用；跨任务/跨客户知识已由战役记忆自动注入，勿在此重复检索）
+  只按需读取本任务的证据索引与 lessons.md，不自动注入跨任务记录。
   （格式见 ecosystem-cooperation「经验台账」）。
 - **经验沉淀（代审特化）**：框架 sink 特征经验证后落工作区台账（evidence-index.md 认知节 +
   fact_key，kind=fingerprint，命中条件与 sink 清单入正文）；semgrep 规则集调优结论记 tooling。
-  跨任务复用走台账/记忆库（campaign-memory 显式启用时才有），本仓续审用 lessons.md——两轨不重叠。
+  只按需读取本任务的证据索引与 lessons.md，不自动注入跨任务记录。
 - 完全不认识的代码/框架/系统：才走 0→1 全量审计，且先向用户确认范围与深度。
 
 ## 静态审计标准
@@ -574,12 +574,12 @@ trivy config --config-policy ./policy --namespaces user <dir>
 | 复核员 | 独立 spawn（independent-review） | 原始代码段 → 确认/挑战 + gate | 跨 harness 复核列为建议项（用户触发） |
 | 报告员 | spawn | gate-pass findings → 六字段 + 待人工验证清单汇总 | 调用链标注反编译来源（如适用） |
 
-### AttackAtlas 图谱联动
+## 本任务覆盖与证据
 - **目标重申（防漂移）**：开战先 `operation_scope` 登记审计对象分母（仓库/模块清单）；每阶段开始与每次派单开头核对当前作业模块在登记范围内——对未登记模块/未登记仓库作业=漂移，立即停手回锚（信封 target 行同源注入）；多仓库任务逐仓库核对当前对象。
 - **任务口径（用户指定优先）**：用户显式指定测试范围（如「测 SQL 注入和 XSS」）时，指定项为最高优先级——只执行指定项并逐项回写点亮（图谱终态），未指定项不补测不欠账，转全流程须用户明示；用户未指定具体项（仅给目标/全量委托）时，按本模式全流程矩阵推进。
 
-- 「AttackAtlas」标签页按本手册结构展示——五分区（审计前置/RCE 主线/覆盖矩阵轴/场景审计卡/确证与交付）× 15 战术列 × 六阶段带（形态 Triage→静态→动态验证→确证闭环→覆盖对账→复核报告）× 五对象形态（后端应用/移动端/小程序/LLM Agent/供应链配置）。
-- **覆盖矩阵的 UI 面**：audit-coverage-matrix.md 每格（sink 类型/业务逻辑行/RCE 类）有结论时同步调 `redteam_coverage_mark`（已审有 finding=tested-found、已审无 finding=tested-clear、N-A 附原因=na、未完成附预算=budget-stop）；扫描对账同规则；阶段推进调 `redteam_coverage_stage`（s1…s6）。审计对象（应用/模块组/样本）调 `redteam_atlas_target` 登记，多对象逐对象 target 参数回写。key/阶段均可直接写中文标签（自动转换，写错会列出可用值）；整表完成可用 `redteam_coverage_sync` 一次批量回写（rows 数组或矩阵文件 path）；`redteam_finding_register` 登记成功后关联格自动点亮 tested-found（人工结论优先，自动不覆盖）。阶段检查 stage_gate 判定 PASS 后，对应阶段及其此前阶段自动回写 done（级联点亮）；无门阶段可手动 redteam_coverage_stage 推进补记。
+- 测过的项目和结论只在本任务覆盖记录中保存一次，发现引用原始证据；不重复登记图谱。
+- 测过的项目和结论只在本任务覆盖记录中保存一次，发现引用原始证据；不重复登记图谱。
 
 ### 审计覆盖规则（防「只审几个模块」）
 

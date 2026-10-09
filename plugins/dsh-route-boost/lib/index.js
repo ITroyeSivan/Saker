@@ -196,7 +196,7 @@ const TARGET_ANCHOR_TEXT = {
 	"ctf-solver": "target: 开工先 challenge-board 登记题目；每次开题前核对题目已登记（题名/模块/分值）——对未登记题目环境作业=漂移，立即停手回锚"
 };
 const targetAnchorText = (presetId) => TARGET_ANCHOR_TEXT[presetId]
-	?? "target: 开战先 redteam_atlas_target 登记目标；每阶段/每次派单开头重读图谱目标带与 assets.md 核对当前作业对象——对未登记对象作业或超出授权=漂移，立即停手回锚";
+	?? "target: 沿用本任务已确认的范围和资产资料；作业对象或授权不明时先询问";
 
 /** 目的原文单行化+裁剪（粘滞随轮携带，防长会话目的漂移）。 */
 export function purposeLine(text, max = 120) {
@@ -224,7 +224,7 @@ export function buildEnvelopeDetailed({ presetId, mode, phase, refsHits, evidenc
 		`evidence: ${evidence}（confirmed=按已验证引用；partial/unknown=下结论前先补证据）`
 	];
 	if (scope) {
-		const mark = presetId === "redteam" ? "台账终态登记" : "redteam_coverage_mark 点亮";
+		const mark = presetId === "redteam" ? "台账终态登记" : "记录本任务结论与证据引用";
 		const line = presetId === "pentest"
 			? (scope.directed
 				? `scope: RCE 定向——围绕用户线索${scope.hits && scope.hits.length > 0 ? `（${scope.hits.slice(0, 5).join("、")}）` : ""}只验证有证据通向 RCE 的路径；不扩展到无关漏洞；一条可复现 RCE 成功即停止`

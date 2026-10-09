@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 import { buildSurfaceGuard, isWrapPhase } from "../lib/index.js";
 import { scanSkillDeps, checkTool, listSkillNames } from "../lib/skilltools.mjs";
 import { detectScope } from "../lib/scope.mjs";
-import { TAXONOMIES } from "../../dsh-attack-atlas/lib/taxonomy.js";
+import { TASK_TERMS } from "../lib/task-terms.mjs";
 import os from "node:os";
 import { FALLBACK_GATES } from "../lib/routes.mjs";
 import { GATES } from "../../dsh-stage-gate/lib/index.js";
@@ -383,7 +383,7 @@ console.log(fail === 0 ? `\nall ${pass} tests passed` : `\n${fail} FAILED, ${pas
 	ok("目的行：无 purpose 不出行", !buildEnvelopeDetailed({ presetId: "pentest", mode: m, phase, refsHits: [], gates: GATES }).text.includes("目的:"));
 	ok("目的行：多行原文单行化+超长裁剪", purposeLine("第一行\n第二行   空格") === "第一行 第二行 空格" && purposeLine("x".repeat(200)).length === 121 && purposeLine("x".repeat(200)).endsWith("…") && purposeLine("  ") === "");
 	ok("target 行：Pentest 锚定用户明确授权资产", buildEnvelopeDetailed({ presetId: "pentest", mode: MODES.pentest, phase: MODES.pentest.phases[0], refsHits: [], gates: GATES }).text.includes("target: 仅测试用户明确给出的授权 URL/IP"));
-	ok("target 行：其余作战模式继续锚定图谱目标", ["attack-defense", "cloud-security"].every((pid) => buildEnvelopeDetailed({ presetId: pid, mode: MODES[pid], phase: MODES[pid].phases[0], refsHits: [], gates: GATES }).text.includes("target: 开战先 redteam_atlas_target")));
+	ok("target 行：其余作战模式沿用本任务范围", ["attack-defense", "cloud-security"].every((pid) => buildEnvelopeDetailed({ presetId: pid, mode: MODES[pid], phase: MODES[pid].phases[0], refsHits: [], gates: GATES }).text.includes("target: 沿用本任务已确认的范围")));
 	ok("target 行：其余模式不注入", !buildEnvelopeDetailed({ presetId: "redteam", mode: MODES.redteam, phase: MODES.redteam.phases[0], refsHits: [], gates: GATES }).text.includes("target: 开战先") && !buildEnvelopeDetailed({ presetId: "incident-response", mode: MODES["incident-response"], phase: MODES["incident-response"].phases[0], refsHits: [], gates: GATES }).text.includes("target: 开战先"));
 	ok("target 行：分析三模式按各自对象锚注入", ["code-audit", "binary-analysis", "ctf-solver"].every((pid) => buildEnvelopeDetailed({ presetId: pid, mode: MODES[pid], phase: MODES[pid].phases[0], refsHits: [], gates: GATES }).text.includes("target: ")) && buildEnvelopeDetailed({ presetId: "code-audit", mode: MODES["code-audit"], phase: MODES["code-audit"].phases[0], refsHits: [], gates: GATES }).text.includes("operation_scope 登记审计对象") && buildEnvelopeDetailed({ presetId: "binary-analysis", mode: MODES["binary-analysis"], phase: MODES["binary-analysis"].phases[0], refsHits: [], gates: GATES }).text.includes("B0 登记样本") && buildEnvelopeDetailed({ presetId: "ctf-solver", mode: MODES["ctf-solver"], phase: MODES["ctf-solver"].phases[0], refsHits: [], gates: GATES }).text.includes("challenge-board 登记题目"));
 	const rtEnv = buildEnvelopeDetailed({ presetId: "redteam", mode: MODES.redteam, phase: MODES.redteam.phases[0], refsHits: [], gates: GATES, scope: { directed: false, hits: [] } });
@@ -405,9 +405,9 @@ console.log(fail === 0 ? `\nall ${pass} tests passed` : `\n${fail} FAILED, ${pas
 		["cloud-security", "这个云环境整体评估一遍，全面执行，出报告"],
 		["ctf-solver", "这场比赛全部题目整体推进，出复盘"]
 	]) {
-		const tax = TAXONOMIES[presetId];
+		const tax = TASK_TERMS[presetId];
 		assert.ok(tax, presetId);
-		const labels = tax.categories.flatMap((c) => c.items).slice(0, 6).map((i) => i.label);
+		const labels = tax.slice(0, 6);
 		const head = labels.map((l) => l.split(/（|\(|·|\/|、/)[0]).find((h) => norm(h).length >= 3) || labels[0];
 		const dir = detectScope(presetId, `帮我测试一下「${head}」这个点，其他不用动`);
 		ok(`${presetId}: 定向命中本模式类目（${head}）`, dir.directed === true && dir.hits.length > 0);

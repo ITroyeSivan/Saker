@@ -627,40 +627,6 @@ function HunterView() {
 		showSettings ? React.createElement(SettingsModal, { config: config, onClose: function () { setShowSettings(false); loadConfig(); }, onSaved: setConfig }) : null);
 }
 
-var REDTEAM_MANAGER_UI_NAMESPACE = "redteam-manager-ui";
-
-function injectVisibleConversationView(ctx, field, register) {
-	var settings = ctx.configForms && ctx.configForms.get
-		? ctx.configForms.get(REDTEAM_MANAGER_UI_NAMESPACE)
-		: ctx.settingsScope.bind({ namespace: REDTEAM_MANAGER_UI_NAMESPACE });
-	ctx.slots.inject("conversation.view", function () {
-		var disposeView;
-		function isVisible() {
-			var snapshot = settings.getSnapshot();
-			return snapshot.status !== "ready" || !snapshot.value || snapshot.value[field] !== false;
-		}
-		function reconcile() {
-			if (isVisible()) {
-				if (!disposeView) disposeView = register();
-				return;
-			}
-			if (disposeView) {
-				disposeView();
-				disposeView = undefined;
-			}
-		}
-		var unsubscribe = settings.subscribe(reconcile);
-		reconcile();
-		return function () {
-			unsubscribe();
-			if (disposeView) {
-				disposeView();
-				disposeView = undefined;
-			}
-		};
-	});
-}
-
 function apply(ctx) {
 	ctx.effect(function () { return installStyles(); }, "dsh-hunter: styles");
 	ctx.slots.inject("settings.section", function () {
@@ -679,16 +645,7 @@ function apply(ctx) {
 			label: function () { return "漏洞情报更新"; }
 		}, function () { return React.createElement(NdayPolicySettings, null); });
 	});
-	injectVisibleConversationView(ctx, "showHunter", function () {
-		return ctx.slots.register({
-			name: "conversation.view",
-			id: "hunter",
-			order: 60,
-			label: function () { return "hunter 狩猎"; }
-		}, function (props) {
-			return React.createElement(HunterView, props);
-		});
-	});
+
 }
 
 module.exports = { name: "dsh-hunter-client", inject: ["slots", "configForms", "sessions", "conversation"], apply: apply };

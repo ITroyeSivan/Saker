@@ -23,6 +23,7 @@ import { existsSync, readdirSync, statSync, readFileSync, writeFileSync } from '
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 import { stashInstalledDir, restoreStash, dropStash, sweepStashRoot } from './lib/install-stash.mjs'
+import { productPluginDirectories, RETIRED_PLUGINS, installedRetiredPlugins } from './lib/product-plugins.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const profile = process.env.SAKER_PROFILE || ''
@@ -60,9 +61,9 @@ const profilePkgPath = join(homeRoot, 'profiles', profile, 'package.json')
 // Only these are pruned/reconciled below; a user's own third-party profile deps
 // are never touched.
 const rootPkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
-const sakerPackages = new Set([rootPkg.name])
+const sakerPackages = new Set([rootPkg.name, ...RETIRED_PLUGINS])
 const pluginDirs = []
-for (const name of readdirSync(join(root, 'plugins')).sort()) {
+for (const name of productPluginDirectories(root)) {
   const dir = join(root, 'plugins', name)
   if (!name.startsWith('dsh-') || !statSync(dir).isDirectory()) continue
   const pkgPath = join(dir, 'package.json')
@@ -166,17 +167,17 @@ function tokenize(s) {
   return out
 }
 
-function runAdd(spec) {
+function runAdd(spec, operation = 'add') {
   const base = tokenize(cli)
   const first = base[0] || ''
   const isShim = /\.(cmd|bat)$/i.test(first) || first === 'dsh'
   if (isShim) {
     // .cmd shims need a shell; wrap the spec in double quotes (cmd-safe)
-    const cmd = `${cli} plugin --profile ${profile} add "${spec}"`
+    const cmd = `${cli} plugin --profile ${profile} ${operation} "${spec}"`
     const r = spawnSync(cmd, { shell: true, encoding: 'utf8', env: { ...process.env, NODE_OPTIONS: '' } })
     return { status: r.status, out: String(r.stdout || '') + String(r.stderr || '') }
   }
-  const args = [...base.slice(1), 'plugin', '--profile', profile, 'add', spec]
+  const args = [...base.slice(1), 'plugin', '--profile', profile, operation, spec]
   const r = spawnSync(first, args, { shell: false, encoding: 'utf8', env: { ...process.env, NODE_OPTIONS: '' } })
   return { status: r.status, out: String(r.stdout || '') + String(r.stderr || '') }
 }
@@ -258,6 +259,15 @@ function addWithRetry(label, pkgName, spec, version) {
 // 0. reconcile the profile first: drop Saker-managed file: deps whose tgz is
 //    gone, so a repack + version bump cannot poison the whole pnpm resolve.
 //    顺手清掉上次运行可能留下的暂存残片（此前崩溃会把改名后的旧副本留在这里）。
+if (existsSync(profilePkgPath)) {
+  const retired = installedRetiredPlugins(JSON.parse(readFileSync(profilePkgPath, 'utf8')))
+  for (const name of retired) {
+    const result = runAdd(name, 'remove')
+    if (result.status !== 0) throw Error(`Could not remove retired plugin ${name}: ${result.out}`)
+  }
+  const remaining = installedRetiredPlugins(JSON.parse(readFileSync(profilePkgPath, 'utf8')))
+  if (remaining.length) throw Error('Retired plugins remain: ' + remaining.join(', '))
+}
 sweepStashRoot(join(homeRoot, 'profiles', profile, 'node_modules'))
 const pruned = pruneDanglingSakerDeps()
 if (pruned.length) {

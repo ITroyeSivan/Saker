@@ -2,7 +2,7 @@
 
 Saker 是 [DeepSeek Harness Desktop](https://github.com/deepseek-ai/deepseek-harness) 的安全测试插件集，包含常规测试、Nday 发现、0Day 挖掘，以及工具管理、MCP、漏洞情报和知识库。
 
-![Saker 桌面端功能截图](docs/images/00-hero-collage.png)
+![Saker 0.4.97 官方 Desktop：精简入口与常规/Nday 安排](docs/verification/product-pruning-2026-10-09/desktop.png)
 
 [查看单张截图](docs/images/desktop-screenshots-2026-10-04.md)
 
@@ -32,23 +32,24 @@ Saker 是 [DeepSeek Harness Desktop](https://github.com/deepseek-ai/deepseek-har
 - **知识库**：随包提供安全资料，支持检索和导入资料。
 - **技能与方法**：编辑技能、提示词和测试方法，调整调用顺序。
 - **任务与成果**：查看任务进度、操作记录和子任务，保存漏洞证据，导出报告及附件。
-- **WebShell 管理**：管理脚本、连接和文件操作。
 
-共 24 个功能插件和一个根包，可按需安装。外部工具及 MCP 服务需要单独安装、配置和启动，见[插件清单](docs/plugin-list.md)。
+共 21 个功能插件和一个根包，可按需安装。外部工具及 MCP 服务需要单独安装、配置和启动，见[插件清单](docs/plugin-list.md)。
+
+AttackAtlas、战役记忆和 WebShell 管理已退出运行包；hunter 聊天页移除，资产平台与漏洞情报设置保留。升级安装器通过官方命令卸载旧模块，历史数据库保留。实施进度与 Nday 验收边界见[统一实施清单](docs/saker-consolidated-delivery-2026-10-09.md)。
 
 ## 安装
 
-当前版本 **0.4.96**，已在 Windows 的官方 Desktop **0.2.0-rc.2** 上测试。其他宿主版本尚未验证。
+当前版本 **0.4.97**，已在 Windows 的官方 Desktop **0.2.0-rc.2** 上测试。其他宿主版本尚未验证。
 
 1. 安装官方 Desktop，完成首次初始化并配置模型，然后完全退出应用。
-2. 下载 [Saker-0.4.96-desktop.zip](https://github.com/ITroyeSivan/Saker/releases/download/v0.4.96/Saker-0.4.96-desktop.zip)，解压到长期保留的目录。
+2. 下载 [Saker-0.4.97-desktop.zip](https://github.com/ITroyeSivan/Saker/releases/download/v0.4.97/Saker-0.4.97-desktop.zip)，解压到长期保留的目录。
 3. 在解压目录执行，将路径替换为 Desktop 的实际安装目录：
 
 ```powershell
 node scripts/install-desktop.mjs --desktop-dir "C:/实际安装目录/DeepSeek Harness"
 ```
 
-安装脚本会检查全部 25 个包，并创建或刷新桌面的 **Saker (dsh Desktop)** 快捷方式。安装后双击快捷方式启动；更新时沿用原来的用户数据目录。
+安装脚本会检查全部 22 个包，并创建或刷新桌面的 **Saker (dsh Desktop)** 快捷方式。安装后双击快捷方式启动；更新时沿用原来的用户数据目录。
 
 请保留解压目录中的 `dist/desktop`，已安装插件会引用其中的文件。脚本需要 Node.js ≥22.5；也可在应用的「插件」页手动安装 tgz，先安装功能插件，最后安装根包。源码构建步骤见[安装说明](docs/getting-started.md)。
 

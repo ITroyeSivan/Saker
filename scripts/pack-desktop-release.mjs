@@ -5,6 +5,7 @@ import { mkdirSync, readFileSync, readdirSync, copyFileSync, cpSync, existsSync,
 import { createHash } from 'node:crypto'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { productPluginDirectories } from './lib/product-plugins.mjs'
 
 if (process.platform !== 'win32') throw new Error('Desktop release packaging currently supports Windows only.')
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -13,7 +14,7 @@ const output = join(root, 'dist', 'releases')
 const payload = join(output, `Saker-${version}-desktop`)
 if (existsSync(payload)) throw new Error(`Release directory already exists: ${payload}; use a fresh directory after reviewing its contents.`)
 mkdirSync(payload, { recursive: true })
-const dirs = [root, ...readdirSync(join(root, 'plugins')).filter(x => x.startsWith('dsh-')).sort().map(x => join(root, 'plugins', x))]
+const dirs = [root, ...productPluginDirectories(root).map(x => join(root, 'plugins', x))]
 const manifest = []
 for (const dir of dirs) {
   const pkg = JSON.parse(readFileSync(join(dir, 'package.json')))
@@ -28,7 +29,7 @@ for (const dir of dirs) {
   copyFileSync(artifact, join(destination, name))
   manifest.push({ name: pkg.name, version: pkg.version, artifact: dir === root ? name : `plugins/${dir.split(/[\\/]/).at(-1)}/${name}`, sha256: createHash('sha256').update(readFileSync(artifact)).digest('hex') })
 }
-for (const file of ['scripts/install-desktop.mjs', 'scripts/update-desktop-shortcut.mjs', 'scripts/lib/desktop-artifacts.mjs', 'scripts/lib/desktop-shortcut.mjs', 'scripts/lib/desktop-launch.ps1', 'docs/getting-started.md', 'docs/plugin-list.md', `docs/release-v${version}.md`]) {
+for (const file of ['scripts/install-desktop.mjs', 'scripts/update-desktop-shortcut.mjs', 'scripts/lib/product-plugins.mjs', 'scripts/lib/desktop-artifacts.mjs', 'scripts/lib/desktop-shortcut.mjs', 'scripts/lib/desktop-launch.ps1', 'docs/getting-started.md', 'docs/plugin-list.md', `docs/release-v${version}.md`]) {
   const destination = join(payload, file)
   mkdirSync(dirname(destination), { recursive: true })
   copyFileSync(join(root, file), destination)

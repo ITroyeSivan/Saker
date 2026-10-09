@@ -16,7 +16,7 @@ const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-outcomes-'))
 const previousHome = process.env.DSH_HOME, previousAtlas = process.env.DSH_ATLAS_DB
 process.env.DSH_HOME = home
 process.env.DSH_ATLAS_DB = path.join(home, 'absent-atlas.db')
-const { dispatch, apply, verifyMessage, releaseChainRefs } = await import('../plugins/dsh-redteam-results/lib/index.js')
+const { dispatch, apply, verifyMessage } = await import('../plugins/dsh-redteam-results/lib/index.js')
 const disposers = []
 let store
 const method = { kind: 'method', mechanism: 'fixture-controlled-execution', methodVersion: 'fixture-v1',
@@ -203,7 +203,7 @@ try {
   })
 } finally {
   for (const dispose of disposers.reverse()) await dispose()
-  releaseChainRefs(); store?.close()
+   store?.close()
   if (previousHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = previousHome
   if (previousAtlas === undefined) delete process.env.DSH_ATLAS_DB; else process.env.DSH_ATLAS_DB = previousAtlas
   fs.rmSync(home, { recursive: true, force: true })

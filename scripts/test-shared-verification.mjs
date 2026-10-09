@@ -190,5 +190,5 @@ try {
       verificationContext: JSON.stringify({ ...context, history: [history] }) }, { agent: { session: { id: 'unstamped' } } });
     assert.equal(legacy.ok, true, legacy.error); assert.equal(legacy.plan.verificationQueue.items[0].reuse, false);
   });
-} finally { for (const dispose of disposers.reverse()) await dispose(); results.releaseChainRefs(); store.close(); fs.rmSync(home, { recursive: true, force: true }); }
+} finally { for (const dispose of disposers.reverse()) await dispose();  store.close(); fs.rmSync(home, { recursive: true, force: true }); }
 process.exitCode = failed ? 1 : 0;

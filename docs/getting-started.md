@@ -1,13 +1,13 @@
 # 桌面端安装与首次配置
 
-当前版本：Saker **0.4.96**。已验证的宿主：Windows 官方 DeepSeek Harness Desktop **0.2.0-rc.2**。
+当前版本：Saker **0.4.97**。已验证的宿主：Windows 官方 DeepSeek Harness Desktop **0.2.0-rc.2**。
 
 [下载 Saker](https://github.com/ITroyeSivan/Saker/releases/latest) · [下载对应官方桌面](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.0-rc.2)
 
 ## 使用发布包
 
 1. 安装并打开官方 Desktop，完成首次初始化，配置一个可用模型。
-2. 下载 `Saker-0.4.96-desktop.zip`，解压到长期保留的目录。
+2. 下载 `Saker-0.4.97-desktop.zip`，解压到长期保留的目录。
 3. 完全退出 Desktop。在解压目录打开 PowerShell，运行：
 
 ```powershell
@@ -15,7 +15,7 @@ node scripts/install-desktop.mjs --desktop-dir "C:/实际安装目录/DeepSeek H
 node scripts/install-desktop.mjs --desktop-dir "C:/实际安装目录/DeepSeek Harness"
 ```
 
-脚本安装需要 Node.js ≥22.5，不需要另外安装 pnpm。它调用指定应用内的官方命令，在一个安装事务中添加 24 个功能插件和根包，并检查已安装文件。当前安装器只接受已验证的 Desktop 0.2.0-rc.2。
+脚本安装需要 Node.js ≥22.5，不需要另外安装 pnpm。它调用指定应用内的官方命令，在一个安装事务中添加 21 个功能插件和根包，并检查已安装文件。当前安装器只接受已验证的 Desktop 0.2.0-rc.2。
 
 安装完成后双击桌面的 **Saker (dsh Desktop)** 快捷方式。脚本每次更新都会刷新它；更换应用目录时保留原来的用户数据目录和 `.dsh` 配置。
 
@@ -23,7 +23,9 @@ node scripts/install-desktop.mjs --desktop-dir "C:/实际安装目录/DeepSeek H
 
 ## 在应用内安装
 
-不想使用脚本时，可在官方「插件」页依次安装发布包内的 tgz：先功能插件，最后 `dsh-saker-0.4.96.tgz`，再按应用提示重启。应用内安装使用桌面自带的 Node 和 pnpm，无需额外安装它们。
+从旧版升级请优先使用安装器：它先通过官方命令移除 AttackAtlas、战役记忆、WebShell 管理，再安装当前 22 个包，不删除历史数据库。手动安装前应在插件页卸载这三项，避免旧入口继续加载。
+
+不想使用脚本时，可在官方「插件」页依次安装发布包内的 tgz：先功能插件，最后 `dsh-saker-0.4.97.tgz`，再按应用提示重启。应用内安装使用桌面自带的 Node 和 pnpm，无需额外安装它们。
 
 如果需要命令行管理插件，通过应用菜单「管理 dsh 命令」安装桌面自带命令；完全退出应用后再操作 desktop profile。不要用 npm 安装的独立 dsh 命令修改它。
 

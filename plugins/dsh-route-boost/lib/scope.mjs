@@ -1,22 +1,7 @@
-// dsh-route-boost scope —— 任务口径判定：用户显式指定的定向任务优先于全流程。
-//
-// 判定三源：①图谱类目命中（用户文本提到具体子项名，如「SQL注入」「XSS」——类目数据来自
-// 同 bundle 的 dsh-attack-atlas taxonomy，导入失败降级为零命中仍可工作）；②显式定向措辞
-// （只测/仅做/专项/就好…）；③泛类词+动作词组合（注入/xss/越权… × 测/查/验证…）。
-// 未命中时，非 Pentest 模式沿用各自矩阵；Pentest 固定只推进一条可证据化的 RCE 路径。
-// 定向口径下按用户线索聚焦，但仍受 Pentest 的 RCE 终点约束。
-
-let TAXONOMIES = {};
-try {
-	// bundle 布局保证同级插件在位；try 保持手工部分安装可降级（零命中仍可判定）
-	({ TAXONOMIES } = await import("../../dsh-attack-atlas/lib/taxonomy.js"));
-} catch {
-	TAXONOMIES = {};
-}
+// Deterministic task focus detection, independent of retired UI plugins.
+import { TASK_TERMS } from './task-terms.mjs';
 function taxonomyItems(presetId) {
-	const tax = TAXONOMIES?.[presetId];
-	if (!tax || !Array.isArray(tax.categories)) return [];
-	return tax.categories.flatMap((c) => (c.items ?? []).map((i) => String(i.label ?? "")));
+	return TASK_TERMS[presetId] ?? [];
 }
 
 const norm = (s) => String(s ?? "").toLowerCase().replace(/[\s　]/g, "");

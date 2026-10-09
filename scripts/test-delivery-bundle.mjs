@@ -13,7 +13,7 @@ let failed = 0;
 async function test(name, fn) { try { await fn(); console.log('ok   ' + name); } catch (error) { failed++; console.log('FAIL ' + name + ': ' + error.message); } }
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-bundle-'));
 process.env.DSH_HOME = home; process.env.DSH_ATLAS_DB = path.join(home, 'unused-atlas.db');
-const { apply, dispatch, releaseChainRefs } = await import('../plugins/dsh-redteam-results/lib/index.js');
+const { apply, dispatch } = await import('../plugins/dsh-redteam-results/lib/index.js');
 const store = openStore(path.join(home, 'redteam-results', 'results.db')), disposers = [];
 const method = { kind: 'script', mechanism: 'controlled-fixture-impact', methodVersion: 'v1', endpoint: 'https://fixture.test/input',
   prerequisites: ['Authorized fixture identity'], dependencies: ['Python standard library'], parameters: ['Read TEST_IDENTITY from environment'],
@@ -116,5 +116,5 @@ try {
     assert.equal(received[0], 'fixture.zip'); assert.deepEqual(Buffer.from(received[1]), Buffer.from([0, 1, 2, 255, 254]));
     assert.equal(received[2], 'application/zip');
   });
-} finally { for (const dispose of disposers.reverse()) await dispose(); releaseChainRefs(); store.close(); fs.rmSync(home, { recursive: true, force: true }); }
+} finally { for (const dispose of disposers.reverse()) await dispose();  store.close(); fs.rmSync(home, { recursive: true, force: true }); }
 process.exitCode = failed ? 1 : 0;

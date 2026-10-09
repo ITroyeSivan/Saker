@@ -9,6 +9,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { preserveDesktopArtifact } from './lib/desktop-artifacts.mjs'
 import { refreshDesktopShortcut } from './lib/desktop-shortcut.mjs'
+import { productPluginDirectories, retireInstalledPlugins } from './lib/product-plugins.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const argv = process.argv.slice(2)
@@ -55,8 +56,7 @@ function invoke(args) {
 }
 const version = invoke(['--version'])
 if (version !== '0.2.0-rc.2') throw new Error(`Desktop ${version} has not been verified by this installer; expected 0.2.0-rc.2.`)
-const directories = readdirSync(join(root, 'plugins')).sort()
-  .filter(name => name.startsWith('dsh-') && statSync(join(root, 'plugins', name)).isDirectory())
+const directories = productPluginDirectories(root)
 const packages = [...directories.map(name => join(root, 'plugins', name)), root].map(dir => {
   const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
   const filename = `${pkg.name.replace(/^@/, '').replaceAll('/', '-')}-${pkg.version}.tgz`
@@ -74,6 +74,8 @@ if (checkOnly) {
 // re-add and even --force otherwise reuse pnpm's previous local tarball snapshot.
 const outputDirectory = join(root, 'dist', 'desktop')
 const artifacts = packages.map(pkg => preserveDesktopArtifact(pkg.artifact, outputDirectory))
+const retired = retireInstalledPlugins(manifestPath, invoke)
+if (retired.length) console.log('Retired plugin packages removed: ' + retired.join(', '))
 invoke(['plugin', '--profile', 'desktop', 'add', ...artifacts.map(artifact => `file:${artifact.replaceAll('\\', '/')}`)])
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
 function verifyTree(source, destination) {

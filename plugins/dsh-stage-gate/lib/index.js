@@ -912,7 +912,7 @@ export function validateAnchor(st, { kind, ref }, resolvers = {}, sessionId = ""
 		if (typeof resolvers.findingExists === "function") {
 			try {
 				if (resolvers.findingExists(sessionId, r)) return "";
-				return `finding 不存在（当前会话）：${r}——成果 id 形如 pentest-3（本会话 redteam_finding_register 登记；跨会话成果不可锚，改用 chain 或材料路径）`;
+				return `finding 不存在（当前会话）：${r}——成果 id 形如 pentest-3（本会话 redteam_finding_register 登记；跨会话成果不可锚，请提供本任务证据引用）`;
 			} catch {
 				return ""; // 解析器故障降级放行（不 brick 意图登记）
 			}
@@ -923,7 +923,7 @@ export function validateAnchor(st, { kind, ref }, resolvers = {}, sessionId = ""
 		if (typeof resolvers.chainExists === "function") {
 			try {
 				if (resolvers.chainExists(sessionId, mode, r)) return "";
-				return `链路节点不存在（当前会话）：${r}——链路节点由 redteam_chain_node 登记，查「链路」标签页或 redteam_chain_list`;
+				return `链路节点不存在（当前会话）：${r}——旧图谱节点不再提供，请使用本任务的 finding 或 scope 引用`;
 			} catch {
 				return ""; // 同上降级
 			}
@@ -1482,7 +1482,9 @@ export function conclusionVerdict(st) {
 /** 跨库锚点解析器（默认实现：动态 import 同 bundle 兄弟插件 store；不可达的键缺省——
  *  validateAnchor 对缺省解析器走格式校验降级，不 brick 意图登记）。 */
 async function defaultResolvers() {
-	const out = {};
+	// Legacy records may contain chain anchors. Without the retired graph service,
+	// their node IDs cannot be verified and must not pass by syntax alone.
+	const out = { chainExists: () => false };
 	try {
 		const { openStore: openResults } = await import("@dsh-external/dsh-redteam-results/store");
 		const results = openResults(path.join(DSH_HOME, "redteam-results", "results.db"));
@@ -1496,19 +1498,7 @@ async function defaultResolvers() {
 			finally { reader?.close(); }
 		};
 	} catch { /* 成果库不可达：finding 锚走格式校验降级 */ }
-	try {
-		const { openStore: openAtlas, listChain } = await import("@dsh-external/dsh-attack-atlas/store");
-		const atlas = openAtlas(path.join(DSH_HOME, "attack-atlas", "atlas.db"));
-		atlas.close();
-		out.chainExists = (sessionId, mode, id) => {
-			let reader;
-			try {
-				reader = openAtlas(path.join(DSH_HOME, "attack-atlas", "atlas.db"));
-				return listChain(reader, sessionId, mode).nodes.some((n) => n.id === id);
-			} catch { return false; }
-			finally { reader?.close(); }
-		};
-	} catch { /* 图谱库不可达：chain 锚走格式校验降级 */ }
+
 	return out;
 }
 let resolverCache;
@@ -1906,12 +1896,12 @@ function apply(ctx) {
 	}));
 	ctx.tools.register(defineTool({
 		name: "operation_intent",
-		description: "登记一条工作方向及其依据（开局 / 完成标准 / 覆盖范围 / 本次发现 / 攻击链）。可带 stage / bucket_id / target_ids / reuse_score / parent_task_id，让项目工作台按作业进度和父子任务展示。结束时用 operation_progress；受阻或放弃必须写原因，未结束的方向会拦住报告。",
+		description: "登记一条工作方向及其依据（开局 / 完成标准 / 覆盖范围 / 本次发现）。可带 stage / bucket_id / target_ids / reuse_score / parent_task_id，让项目工作台按作业进度和父子任务展示。结束时用 operation_progress；受阻或放弃必须写原因，未结束的方向会拦住报告。",
 		parameters: {
 			workspace: { type: "string", required: true, description: "Task workspace root" },
 			summary: { type: "string", required: true, description: "一句话方向（做什么、追什么线索）≤200 字符" },
-			anchor_kind: { type: "string", required: true, enum: ANCHOR_KINDS, description: "锚点类型（boot=开局豁免，其余须带 anchor_ref）" },
-			anchor_ref: { type: "string", description: "锚点 id（boot 省略；criterion/scope/finding/chain 必填）" },
+			anchor_kind: { type: "string", required: true, enum: ANCHOR_KINDS.filter(kind => kind !== 'chain'), description: "锚点类型（boot=开局豁免，其余须带 anchor_ref）" },
+			anchor_ref: { type: "string", description: "锚点 id（boot 省略；criterion/scope/finding 必填）" },
 			note: { type: "string", description: "备注（派单对象/预期产出等 ≤300 字符）" },
 			owner: { type: "string", description: "负责人（可选；填了就建立执行状态）" },
 			max_attempts: { type: "number", description: "最大尝试次数（1-20，默认 1）" },

@@ -1,0 +1,371 @@
+{
+  "sessionId": "session-907fa719-5bd1-4bb5-90b4-44cefb05bd45",
+  "headers": [
+    {
+      "tools": [
+        "ask_user_question",
+        "attack_plan",
+        "create_goal",
+        "edit",
+        "exit_plan_mode",
+        "gates_list",
+        "get_goal",
+        "glob",
+        "grep",
+        "job_kill",
+        "job_list",
+        "job_output",
+        "knowledge_list",
+        "knowledge_read",
+        "knowledge_search",
+        "load_workspace_dependencies",
+        "oob_probe",
+        "present",
+        "pwsh",
+        "read",
+        "read_image",
+        "redteam_checks",
+        "redteam_context",
+        "redteam_delivery",
+        "redteam_execution",
+        "redteam_finding_delete",
+        "redteam_finding_register",
+        "redteam_finding_update",
+        "redteam_method",
+        "redteam_research",
+        "redteam_task",
+        "saker_method",
+        "skill",
+        "stage_gate",
+        "todo_write",
+        "tool_pack",
+        "update_goal",
+        "web_fetch",
+        "web_search",
+        "write",
+        "zday_pattern"
+      ],
+      "toolBytes": 35680,
+      "config": {
+        "provider": "deepseek-official",
+        "model": "deepseek-flash",
+        "reasoningEffort": "low"
+      }
+    },
+    {
+      "tools": [
+        "ask_user_question",
+        "attack_plan",
+        "create_goal",
+        "edit",
+        "exit_plan_mode",
+        "gates_list",
+        "get_goal",
+        "glob",
+        "grep",
+        "job_kill",
+        "job_list",
+        "job_output",
+        "knowledge_list",
+        "knowledge_read",
+        "knowledge_search",
+        "load_workspace_dependencies",
+        "nday_catalog",
+        "nday_coverage",
+        "nday_draft",
+        "nday_handoff",
+        "nday_learn",
+        "nday_match",
+        "nday_metrics",
+        "nday_policy_get",
+        "nday_policy_set",
+        "nday_priority_plan",
+        "nday_scope_hunt",
+        "nday_source_collect",
+        "nday_source_fetch",
+        "nday_source_radar",
+        "oob_probe",
+        "present",
+        "pwsh",
+        "read",
+        "read_image",
+        "redteam_checks",
+        "redteam_context",
+        "redteam_delivery",
+        "redteam_execution",
+        "redteam_finding_delete",
+        "redteam_finding_register",
+        "redteam_finding_update",
+        "redteam_method",
+        "redteam_research",
+        "redteam_task",
+        "saker_method",
+        "skill",
+        "stage_gate",
+        "todo_write",
+        "tool_pack",
+        "update_goal",
+        "web_fetch",
+        "web_search",
+        "write",
+        "zday_pattern"
+      ],
+      "toolBytes": 46696,
+      "config": {
+        "provider": "deepseek-official",
+        "model": "deepseek-flash",
+        "reasoningEffort": "low"
+      }
+    },
+    {
+      "tools": [
+        "ask_user_question",
+        "attack_plan",
+        "create_goal",
+        "edit",
+        "exit_plan_mode",
+        "gates_list",
+        "get_goal",
+        "glob",
+        "grep",
+        "job_kill",
+        "job_list",
+        "job_output",
+        "knowledge_list",
+        "knowledge_read",
+        "knowledge_search",
+        "load_workspace_dependencies",
+        "oob_probe",
+        "present",
+        "pwsh",
+        "read",
+        "read_image",
+        "redteam_checks",
+        "redteam_context",
+        "redteam_delivery",
+        "redteam_execution",
+        "redteam_finding_delete",
+        "redteam_finding_register",
+        "redteam_finding_update",
+        "redteam_method",
+        "redteam_research",
+        "redteam_task",
+        "saker_method",
+        "skill",
+        "stage_gate",
+        "todo_write",
+        "tool_pack",
+        "update_goal",
+        "web_fetch",
+        "web_search",
+        "write",
+        "zday_pattern"
+      ],
+      "toolBytes": 35680,
+      "config": {
+        "provider": "deepseek-official",
+        "model": "deepseek-flash",
+        "reasoningEffort": "low"
+      }
+    },
+    {
+      "tools": [
+        "ask_user_question",
+        "attack_plan",
+        "create_goal",
+        "edit",
+        "exit_plan_mode",
+        "gates_list",
+        "get_goal",
+        "glob",
+        "grep",
+        "job_kill",
+        "job_list",
+        "job_output",
+        "knowledge_list",
+        "knowledge_read",
+        "knowledge_search",
+        "load_workspace_dependencies",
+        "oob_probe",
+        "operation_conclude",
+        "operation_constraints",
+        "operation_goal",
+        "operation_intent",
+        "operation_progress",
+        "operation_scope",
+        "operation_task",
+        "present",
+        "pwsh",
+        "read",
+        "read_image",
+        "redteam_checks",
+        "redteam_context",
+        "redteam_delivery",
+        "redteam_execution",
+        "redteam_finding_delete",
+        "redteam_finding_register",
+        "redteam_finding_update",
+        "redteam_method",
+        "redteam_research",
+        "redteam_task",
+        "saker_method",
+        "skill",
+        "stage_gate",
+        "todo_write",
+        "tool_pack",
+        "update_goal",
+        "web_fetch",
+        "web_search",
+        "write",
+        "zday_pattern"
+      ],
+      "toolBytes": 42362,
+      "config": {
+        "provider": "deepseek-official",
+        "model": "deepseek-flash",
+        "reasoningEffort": "low"
+      }
+    }
+  ],
+  "calls": [
+    {
+      "name": "tool_pack",
+      "callId": "call_00_ZdWgza1jRB9dNeYOq1y96276",
+      "arguments": "{\"action\": \"load\", \"pack\": \"nday\"}"
+    },
+    {
+      "name": "nday_policy_get",
+      "callId": "call_00_ET_NDkl3osuwxl9Ukw3392j8993",
+      "arguments": "{}"
+    },
+    {
+      "name": "tool_pack",
+      "callId": "call_00_ET_zRPG1BiP326LMR8KW8pr0561",
+      "arguments": "{\"action\": \"load\", \"pack\": \"task-workflow\"}"
+    }
+  ],
+  "results": [
+    {
+      "isError": false,
+      "contentTypes": [
+        "text"
+      ],
+      "preview": "工具包 nday：已加载"
+    },
+    {
+      "isError": false,
+      "contentTypes": [
+        "text"
+      ],
+      "preview": "{\n  \"recentDays\": 730,\n  \"domesticBoost\": 30,\n  \"trendKeywords\": [\n    \"信创\",\n    \"国产化\",\n    \"护网\",\n    \"攻防演练\"\n  ],\n  \"excludeVendors\": [],\n  \"maxCandidates\": 12,\n  \"queriesPerNday\": 2,\n  \"concurrency\": 4\n}"
+    },
+    {
+      "isError": false,
+      "contentTypes": [
+        "text"
+      ],
+      "preview": "工具包 task-workflow：已加载"
+    }
+  ],
+  "assistant": [
+    {
+      "usage": {
+        "inputTokens": 5633,
+        "outputTokens": 120,
+        "cacheReadTokens": 11776,
+        "cacheWriteTokens": 0,
+        "totalTokens": 17529
+      },
+      "keys": [
+        "turn",
+        "step",
+        "message",
+        "usage",
+        "stream"
+      ]
+    },
+    {
+      "usage": {
+        "inputTokens": 3250,
+        "outputTokens": 25,
+        "cacheReadTokens": 17408,
+        "cacheWriteTokens": 0,
+        "totalTokens": 20683
+      },
+      "keys": [
+        "turn",
+        "step",
+        "message",
+        "usage",
+        "stream"
+      ]
+    },
+    {
+      "usage": {
+        "inputTokens": 173,
+        "outputTokens": 201,
+        "cacheReadTokens": 20608,
+        "cacheWriteTokens": 0,
+        "totalTokens": 20982
+      },
+      "keys": [
+        "turn",
+        "step",
+        "message",
+        "usage",
+        "stream"
+      ]
+    },
+    {
+      "usage": {
+        "inputTokens": 1607,
+        "outputTokens": 57,
+        "cacheReadTokens": 17408,
+        "cacheWriteTokens": 0,
+        "totalTokens": 19072
+      },
+      "keys": [
+        "turn",
+        "step",
+        "message",
+        "usage",
+        "stream"
+      ]
+    },
+    {
+      "usage": {
+        "inputTokens": 1894,
+        "outputTokens": 86,
+        "cacheReadTokens": 19072,
+        "cacheWriteTokens": 0,
+        "totalTokens": 21052
+      },
+      "keys": [
+        "turn",
+        "step",
+        "message",
+        "usage",
+        "stream"
+      ]
+    }
+  ],
+  "intentAnchors": [
+    [
+      "boot",
+      "criterion",
+      "scope",
+      "finding"
+    ]
+  ],
+  "intentToolKeys": [
+    [
+      "name",
+      "description",
+      "parameters"
+    ]
+  ],
+  "retiredToolNamesPresent": false,
+  "retiredPromptReferencePresent": false,
+  "ended": true,
+  "limitations": "Native model request headers/context only; no new HTTP transport capture or fair cost comparison."
+}

@@ -13,7 +13,7 @@ async function test(name, fn) {
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-checked-'));
 process.env.DSH_HOME = home;
 process.env.DSH_ATLAS_DB = path.join(home, 'unused-atlas.db');
-const { apply, dispatch, releaseChainRefs } = await import('../plugins/dsh-redteam-results/lib/index.js');
+const { apply, dispatch } = await import('../plugins/dsh-redteam-results/lib/index.js');
 let store = openStore(path.join(home, 'redteam-results', 'results.db'));
 const disposers = [];
 const base = { assetId: 'a', asset: 'api.example.test', entryId: 'CVE-fixture', check: '受控检查',
@@ -114,6 +114,6 @@ try {
   });
 } finally {
   for (const dispose of disposers.reverse()) await dispose();
-  releaseChainRefs(); store.close(); fs.rmSync(home, { recursive: true, force: true });
+   store.close(); fs.rmSync(home, { recursive: true, force: true });
 }
 process.exitCode = failed ? 1 : 0;
