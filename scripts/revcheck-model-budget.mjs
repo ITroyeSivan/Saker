@@ -12,6 +12,9 @@ const variants=[
   {id:'unknown-is-zero',from:'unknownCalls||unresolvedCalls ? null : knownTokens',to:'knownTokens',fail:'shared root admission'},
   {id:'no-token-hold',from:'heldTokens+=row.reservedTokens ?? 0',to:'heldTokens+=0',fail:'strict token reservations'},
   {id:'trust-estimate',from:"['exact','upper-bound'].includes(counter.quality)",to:"['exact','upper-bound','estimate'].includes(counter.quality)",fail:'estimated, stale or incomplete'},
+  {id:'optional-stop',from:'if(stopped(owner))return stoppedResult();',to:'if((owner.policy.budget.modelCalls!==undefined||owner.policy.budget.tokens!==undefined)&&stopped(owner))return stoppedResult();',fail:'cancellation and deadlines'},
+  {id:'cancel-child-poisons-root',from:'if(stopped(owner))return stoppedResult();',to:"if(stopped(owner))return block(store,owner,'task_stopped',stoppedResult().message);",fail:'a stopped child cannot poison'},
+  {id:'count-after-stop',from:'if(stopped(owner)){',to:'if(false){',fail:'stopped streams invoke neither'},
 ];
 try{
   for(const variant of variants){

@@ -30,7 +30,7 @@ Saker 是 [DeepSeek Harness Desktop](https://github.com/deepseek-ai/deepseek-har
 
 ## 安装
 
-当前版本 **0.4.101**，适用于官方 Windows Desktop **0.2.0-rc.2**。
+当前版本 **0.4.102**，适用于官方 Windows Desktop **0.2.0-rc.2**。
 
 1. 安装官方 Desktop，完成初始化和模型配置，然后完全退出应用。
 2. 从 [Releases](https://github.com/ITroyeSivan/Saker/releases/latest) 下载桌面安装包，解压到长期保留的目录。

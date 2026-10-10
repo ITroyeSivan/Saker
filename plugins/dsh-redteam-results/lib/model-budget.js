@@ -74,14 +74,21 @@ function block(store, owner, code, message) {
   store.db.prepare('UPDATE task_policy SET record=?,updated_at=? WHERE session_id=?').run(JSON.stringify(next),new Date().toISOString(),owner.root);
   return {ok:false,code,message};
 }
+function stopped(owner, now=Date.now()) {
+  return [owner.policy,owner.sessionPolicy].some(p=>p.cancelled ||
+    (p.budget.deadline !== null && p.budget.deadline !== undefined && now>=p.budget.deadline));
+}
+function stoppedResult() {
+  // Child cancellation is local. It must not become a persistent root-wide
+  // budget failure and disable siblings that are still allowed to run.
+  return {ok:false,code:'task_stopped',message:'任务已取消或超过时间额度，未发出新的模型请求。'};
+}
 export function reserveModelCall(store,sessionId,options,{counter,runtimeId='unknown-runtime'}={}) {
   return transaction(store,()=>{
     const owner=modelBudgetOwner(store,sessionId);if(!owner)return {ok:true,unmanaged:true};
+    if(stopped(owner))return stoppedResult();
     const status=overview(store,owner), p=owner.policy;
     if(p.modelBudgetBlock)return {ok:false,...p.modelBudgetBlock};
-    const enforced=status.limits.modelCalls!==null || status.limits.tokens!==null;
-    if(enforced && (p.cancelled || owner.sessionPolicy.cancelled || (p.budget.deadline !== null && p.budget.deadline !== undefined && Date.now()>=p.budget.deadline)))
-      return block(store,owner,'task_stopped','任务已取消或超过时间额度，未发出新的模型请求。');
     if(status.counterViolation)return block(store,owner,'counter_violation','实际用量超过预计数上界，停止该任务模型请求并核实计数路线。');
     if(status.limits.modelCalls !== null && status.chargedCalls>=status.limits.modelCalls)
       return block(store,owner,'model_calls_exhausted','主代理、子代理及辅助调用的共享模型调用额度已用完。');
@@ -108,10 +115,8 @@ export function reserveModelCall(store,sessionId,options,{counter,runtimeId='unk
 export function dispatchModelCall(store,id) {
   return transaction(store,()=>{const row=read(store,id);if(row.state!=='reserved')throw new Error('model_budget_call_not_reserved');
     const owner=modelBudgetOwner(store,row.sessionId);
-    const enforced=owner && (owner.policy.budget.modelCalls!==undefined || owner.policy.budget.tokens!==undefined);
     const veto=owner?.policy.modelBudgetBlock && !['model_calls_exhausted','tokens_exhausted'].includes(owner.policy.modelBudgetBlock.code);
-    if(!owner || owner.root!==row.root || owner.round!==row.round || veto || (enforced && (owner.policy.cancelled || owner.sessionPolicy.cancelled
-      || (owner.policy.budget.deadline !== null && owner.policy.budget.deadline !== undefined && Date.now()>=owner.policy.budget.deadline)))){
+    if(!owner || owner.root!==row.root || owner.round!==row.round || veto || stopped(owner)){
       save(store,{...row,state:'cancelled',settledAt:Date.now(),reason:'task stopped before dispatch'});return false;
     }
     save(store,{...row,state:'dispatched',dispatchedAt:Date.now()});return true;});
@@ -176,6 +181,9 @@ export function registerModelAdmission(ctx,getStore,{countInput}={}) {
     try {
     const store=getStore();let counter;
     const owner=modelBudgetOwner(store,String(options.sessionId));
+    if(stopped(owner)){
+      yield {type:'finish',reason:{kind:'error',failure:{code:'TASK_MODEL_BUDGET',message:stoppedResult().message}}};return;
+    }
     if(owner.policy.budget.tokens !== undefined && owner.policy.budget.tokens !== null && countInput){
       try {counter=await countInput(options);}catch{ /* admission reports unsupported/unavailable counting, without leaking an endpoint or secret */ }
     }

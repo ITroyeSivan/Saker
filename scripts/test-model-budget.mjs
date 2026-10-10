@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
-import { startTaskPolicy, readTaskPolicy, taskPolicyStatus } from '../plugins/dsh-redteam-results/lib/task-policy.js';
+import { startTaskPolicy, readTaskPolicy, taskPolicyStatus, updateTaskProgress } from '../plugins/dsh-redteam-results/lib/task-policy.js';
 import { modelBudgetOverview, modelRequestDigest, reserveModelCall, dispatchModelCall, settleModelCall,
   cancelModelReservation, recoverModelRuntime, normalizedModelUsage, registerModelAdmission } from '../plugins/dsh-redteam-results/lib/model-budget.js';
 let failures=0;
@@ -103,6 +103,49 @@ await test('already admitted work survives another request exhausting the ceilin
     const p=readTaskPolicy(other,'main');p.cancelled=true;other.db.prepare('UPDATE task_policy SET record=? WHERE session_id=?').run(JSON.stringify(p),'main');
     assert.equal(dispatchModelCall(other,a.id),false);assert.equal(modelBudgetOverview(other,'main').chargedCalls,0);
   }finally{other.close();}
+});
+await test('cancellation and deadlines veto reservations and dispatch without optional model ceilings',()=>{
+  for(const cause of ['root-cancel','child-cancel','root-deadline','child-deadline']){
+    const store=openStore(':memory:');try{
+      start(store);child(store);
+      const pending=reserveModelCall(store,'child',{...options,sessionId:'child'});assert(pending.ok);
+      const id=cause.startsWith('root')?'main':'child';
+      if(cause.endsWith('cancel'))updateTaskProgress(store,id,{cancelled:true});
+      else {const p=readTaskPolicy(store,id);p.budget.deadline=Date.now()-1;
+        store.db.prepare('UPDATE task_policy SET record=? WHERE session_id=?').run(JSON.stringify(p),id);}
+      assert.equal(reserveModelCall(store,'child',{...options,sessionId:'child'}).code,'task_stopped',cause);
+      assert.equal(dispatchModelCall(store,pending.id),false,cause);
+      assert.equal(modelBudgetOverview(store,'main').chargedCalls,0,cause);
+      if(id==='child'){
+        assert.equal(readTaskPolicy(store,'main').modelBudgetBlock,undefined,cause);
+        assert.equal(reserveModelCall(store,'main',options).ok,true,cause);
+      }
+    }finally{store.close();}
+  }
+});
+await test('a stopped child cannot poison the parent budget even when a shared model ceiling exists',()=>{
+  const store=openStore(':memory:');try{
+    start(store,{modelCalls:3});child(store);updateTaskProgress(store,'child',{cancelled:true});
+    assert.equal(reserveModelCall(store,'child',{...options,sessionId:'child'}).code,'task_stopped');
+    assert.equal(readTaskPolicy(store,'main').modelBudgetBlock,undefined);
+    assert.equal(reserveModelCall(store,'main',options).ok,true);
+  }finally{store.close();}
+});
+await test('stopped streams invoke neither counting nor provider, and cancellation during counting is rechecked',async()=>{
+  for(const timing of ['before-count','during-count']){
+    const store=openStore(':memory:');let registration;
+    try{
+      start(store,{tokens:100});let hook,counts=0,dispatches=0;
+      registration=registerModelAdmission({on(_name,handler){hook=handler;return ()=>{};}},()=>store,{countInput:async(o)=>{
+        counts++;updateTaskProgress(store,'main',{cancelled:true});return certificate(o);
+      }});
+      if(timing==='before-count')updateTaskProgress(store,'main',{cancelled:true});
+      const chunks=[];for await(const chunk of hook(options,()=>{dispatches++;throw Error('stopped provider reached');}))chunks.push(chunk);
+      assert.equal(counts,timing==='before-count'?0:1,timing);assert.equal(dispatches,0,timing);
+      assert.equal(chunks[0].reason.failure.code,'TASK_MODEL_BUDGET',timing);
+      assert.equal(modelBudgetOverview(store,'main').chargedCalls,0,timing);
+    }finally{await registration?.dispose();store.close();}
+  }
 });
 await test('missing certified counter stops strict native dispatch without invoking the provider or charging a call',async()=>{
   const store=openStore(':memory:');try{start(store,{tokens:100});let hook,calls=0;
