@@ -4,6 +4,10 @@ Saker（猎隼）是基于 [DeepSeek Harness Desktop](https://github.com/deepsee
 
 [下载](https://github.com/ITroyeSivan/Saker/releases/latest) · [安装说明](docs/getting-started.md) · [功能说明](docs/features.md) · [插件清单](docs/plugin-list.md) · [问题反馈](https://github.com/ITroyeSivan/Saker/issues)
 
+![Saker 聊天界面：直接设置测试方向、协作方式、进度汇报和子代理人数](docs/media/chat-settings.jpg)
+
+*在聊天框上方设置这次怎么测试、什么时候需要你参与。*
+
 ## 使用方式
 
 新建会话选择「Saker 渗透测试」，说明练习目标、具体问题和允许的操作范围，再设置任务方向与额度。
@@ -15,6 +19,15 @@ Saker（猎隼）是基于 [DeepSeek Harness Desktop](https://github.com/deepsee
 | 0Day 挖掘 | 分析页面、JS、请求和业务逻辑，寻找新的漏洞 |
 
 聊天框上方可直接调整协作方式：共同研判、关键节点确认或自主推进；进度汇报单独设置。提示词提供简短示例，支持编辑、插入、复制和保存个人模板。子代理上限可设置为 0–16，按需创建、同站复用、结束释放。
+
+<details>
+<summary>查看提示词示例</summary>
+
+选择手头已有的资料，填写必要信息，再编辑或复制提示词。
+
+![Saker 提示词编辑器：选择示例、填写资料、编辑并插入或复制](docs/media/prompt-editor.jpg)
+
+</details>
 
 常规测试可选择仅当前方向、收集后接 Nday 或与 Nday 一起推进，共用资料、操作额度和截止时间。支持导入请求、流量、JS 和已有扫描结果，保存复现步骤、证据和报告材料。
 
