@@ -1,7 +1,7 @@
 {
   "name": "@dsh-external/dsh-method-stack",
-  "version": "0.1.23",
-  "description": "测试方法目录按当前问题读取正文；桌面可编辑、保存组合和恢复默认。",
+  "version": "0.1.24",
+  "description": "选择 AI 可以参考的测试方法，编辑方法说明和默认提示词。",
   "type": "module",
   "main": "./lib/index.js",
   "exports": {

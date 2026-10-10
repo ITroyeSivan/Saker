@@ -1896,7 +1896,7 @@ function apply(ctx) {
 	}));
 	ctx.tools.register(defineTool({
 		name: "operation_intent",
-		description: "登记一条工作方向及其依据（开局 / 完成标准 / 覆盖范围 / 本次发现）。可带 stage / bucket_id / target_ids / reuse_score / parent_task_id，让项目工作台按作业进度和父子任务展示。结束时用 operation_progress；受阻或放弃必须写原因，未结束的方向会拦住报告。",
+		description: "登记一条工作方向及其依据（开局 / 完成标准 / 覆盖范围 / 本次发现）。可带 stage / bucket_id / target_ids / reuse_score / parent_task_id，让工作区执行记录关联作业进度和父子任务。结束时用 operation_progress；受阻或放弃必须写原因，未结束的方向会拦住报告。",
 		parameters: {
 			workspace: { type: "string", required: true, description: "Task workspace root" },
 			summary: { type: "string", required: true, description: "一句话方向（做什么、追什么线索）≤200 字符" },

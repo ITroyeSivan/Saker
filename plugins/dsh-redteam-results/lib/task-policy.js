@@ -143,7 +143,7 @@ export function startTaskPolicy(store, sessionId, input, now = Date.now()) {
     .map(key=>[key,integer(input.budget[key],'budget.'+key,1,key==='modelCalls'?10000:1000000000000)]));
   if(parentId && Object.entries(modelLimits).some(([key,value])=>value!==readTaskPolicy(store,parentId)?.budget[key]))
     throw Error('子代理不能更改主任务共享模型额度');
-  const question = input.question === undefined ? '有限观察已有目标，向用户建议具体研究问题' : boundedText(input.question, 'question', 600);
+  const question = input.question === undefined ? '' : boundedText(input.question, 'question', 600);
   const target = input.target === undefined ? '' : siteOrigin(input.target);
   const workerLimit = integer(input.budget?.workers ?? choice?.workers ?? 1, 'budget.workers', 0, MAX_SITE_WORKERS);
   if (parentId && workerLimit !== 0) throw Error('子代理不能再派子代理');

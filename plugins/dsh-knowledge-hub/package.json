@@ -1,7 +1,7 @@
 {
   "name": "@dsh-external/dsh-knowledge-hub",
-  "version": "0.3.20",
-  "description": "Saker knowledge hub: curated sparse knowledge packs, offline SQLite FTS5 hybrid retrieval, layered refs, and knowledge_search/read/list model tools.",
+  "version": "0.3.21",
+  "description": "搜索安全资料，管理内置手册、个人笔记和导入的资料。",
   "type": "module",
   "main": "./lib/index.js",
   "exports": {

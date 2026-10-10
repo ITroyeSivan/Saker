@@ -64,38 +64,11 @@ DSH 宿主平面插件：把各安全预设（Saker 的 pentest / code-audit / c
 
 使用官方桌面端的插件管理入口选择本插件打包产物。整套 Saker 安装在仓库根目录运行 `node scripts/install-desktop.mjs --desktop-dir "C:/path/to/DeepSeek Harness"`：首次打开官方桌面端初始化后，完全退出应用再安装。安装器调用桌面端随附 CLI 管理 desktop profile，不直接修改 profile 文件。重新打开桌面端后检查当前预设中的 `stage_gate` / `gates_list` 工具。
 
-## 项目工作台（1.7.0）
+## 工作区文件与执行记录
 
-会话标签页「项目工作台」按**工作区**只读展示：目标契约、完成标准收尾进度、方向/任务状态
-（含结果冲突 `⚠` 与 `interrupted`）、产物索引（证据行 / 扫描待处置 / 最近门禁 / `reports/`）
-与需要处理的 attention 清单。
+报告和复现材料集中在「进度与发现 → 文件」，显示标题、类型、更新时间和可复制路径。文件按工作区共享；存在文件不等于漏洞已确认。工作区目标、完成要求、任务结果与 Nday 候选计划放在按需展开的执行记录中。当前会话的任务、预算和发现分别由概览与发现页呈现。
 
-- 服务端：`lib/project-snapshot.mjs` 只读本工作区文件；
-  `lib/project-channel.mjs` 通过宿主 connection 注册 `/dsh-stage-gate-project`，
-  使用宿主鉴权与同源保护，端点 `status`（只接受绝对路径且存在的工作区）。
-  Desktop 与 Web 客户端共用 connection RPC，避免直接 fetch 在 Desktop 返回空响应。
-- 客户端：`lib/client.js` 注册 `conversation.view`。注意必须
-  `ctx.slots.inject("conversation.view", () => ctx.slots.register(...))`——
-  直接 `register` 不会出现在标签栏（实测）。
-- 与其它标签页的分工：finding 台账在「redteam 成果」，跨会话记忆在「战役记忆」，
-  覆盖矩阵在「AttackAtlas」；本页只管项目契约与执行状态。
-
-## 作业进度（1.8.0）
-
-项目工作台新增 7 步进度条：确认目标 → 快速摸底 → 整理合并 → 按指纹归类 → 排优先级 →
-先验证再铺开 → 出结果/转下一目标。页面和资产组表只读同一份工作区文件：
-
-- `asset-inventory.json` 提供资产数；
-- `fingerprint-buckets.json` 提供资产组、资产 ID 与优先分；
-- `operation-state.json` 的方向/任务提供阶段、`bucketId`、负责人与进行中/排队/受阻状态；
-- `reports/` 决定最后一步是否进入当前阶段。
-
-`attack_plan` 生成的资产组会自动登记为带 `bucketId` 的排队任务（已有 `operation-state.json`
-时），子代理领取或完成后状态回流到同一张图，不在界面里另造一套进度。任务区同时显示
-`parentTaskId` 父子树，至少支持两级：资产组任务为父、验证/复核子代理为子。
-
-`operation_intent` 模型工具现可显式携带 `stage` / `bucket_id` / `target_ids` /
-`reuse_score` / `parent_task_id`，与作业进度和攻击清单共用一套字段。
+服务端 `lib/project-snapshot.mjs` 只读工作区文件，`lib/project-channel.mjs` 通过宿主 connection 提供 `/dsh-stage-gate-project` 的 `status` 端点。Desktop 与 Web 共用宿主 RPC。候选计划保留代表目标的验证状态和条件记录；未知或尚未验证不代表适用，其他目标仍须逐个核对。
 
 ## 标签页进度状态（1.9.6）
 
@@ -117,7 +90,7 @@ DSH 宿主平面插件：把各安全预设（Saker 的 pentest / code-audit / c
 结果冲突只记不覆盖（1.6.3）：终态任务再收到**不同**结果时写 `task.conflicts[]`
 （最多留最近 5 条），**不改已落库的终态**；同结果重复上报按幂等处理（`updatedAt` 也不动）。
 `subagent/start` 时记 `runId→taskId`，`subagent/end` 按 runId 精确回收，
-并发同 provider 的子代理也能对上号。冲突会出现在项目工作台的 `任务结果冲突` attention 里。
+并发同 provider 的子代理也能对上号。冲突会显示在工作区执行记录中，须重新核对。
 
 > 实现注意：`subagent/start|end` 是**作用域事件**，监听器只拿得到 `info`、拿不到 parent，
 > 所以必须挂 `agent/created` → `agent.ctx.on(...)` 把 agent 闭包进作用域监听；

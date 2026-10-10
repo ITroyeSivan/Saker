@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runInNewContext } from 'node:vm';
-import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
+import { openStore, registerFinding } from '../plugins/dsh-redteam-results/lib/store.js';
 import { readTaskPolicy, updateTaskProgress, checkpointTask, chosenTaskOptions } from '../plugins/dsh-redteam-results/lib/task-policy.js';
 import { saveTaskContext } from '../plugins/dsh-redteam-results/lib/task-context.js';
 import { siteWorkerView } from '../plugins/dsh-redteam-results/lib/site-workers.js';
@@ -29,9 +29,11 @@ const componentSource = source.slice(source.indexOf('function exampleTemplates('
 function harness(name, sessionId, props = {}, extras = {}) {
   const state = [], calls = [], effects = [], timers = []; let cursor = 0;
   const sandbox = { useState: value => { const index = cursor++; if (!(index in state)) state[index] = value; return [state[index], next => { state[index] = typeof next === 'function' ? next(state[index]) : next; }]; },
-    useEffect: effect => effects.push(effect), setInterval: fn => { timers.push(fn); return timers.length; }, clearInterval: () => {}, useRef: initial => { const index=cursor++; if (!(index in state))state[index]={current:initial};return state[index]; }, Btn: 'button', React: { createElement: (type, props, ...children) => ({ type, props: props || {}, children }) },
+    useEffect: effect => effects.push(effect), setInterval: fn => { timers.push(fn); return timers.length; }, clearInterval: () => {}, useRef: initial => { const index=cursor++; if (!(index in state))state[index]={current:initial};return state[index]; }, Btn: 'button', Detail: 'finding-detail', MODE_META: {pentest:{}}, React: { createElement: (type, props, ...children) => ({ type, props: props || {}, children }) },
     api: async (endpoint, payload) => { calls.push([endpoint, payload]); try { return await results.dispatch(ctx, store, endpoint, payload); } catch (error) { return { ok: false, error: error.message }; } } };
   Object.assign(sandbox, extras);
+  sandbox.STATUS_LABEL = { pending: '待验证', verified: '已验证' };
+  runInNewContext(source.slice(source.indexOf('function statusTextFor('), source.indexOf('function download(', source.indexOf('function statusTextFor('))), sandbox);
   runInNewContext(componentSource + '; this.component = ' + name, sandbox);
   function render() { cursor = 0; return sandbox.component({ sessionId, ...props }); }
   function nodes(node) { if (!node || typeof node !== 'object') return []; return [node, ...node.children.flat(Infinity).flatMap(nodes)]; }
@@ -95,27 +97,59 @@ try {
     await assert.rejects(results.dispatch({ ...ctx, tools: {} }, store, 'task.start', { sessionId: 'ui', policy: { mode: 'nday', budget: { toolCalls: 10 } } }), /守卫/);
     assert.equal(readTaskPolicy(store, 'ui'), null);
   });
+  await test('task overview reads actual session findings and displays missing evidence without a model call', async () => {
+    const id='overview-records';sessionMap.set(id,{id,header:{agentPreset:'pentest'}});
+    await results.dispatch(ctx,store,'task.start',{sessionId:id,policy:{mode:'regular',question:'Local permission check',budget:{toolCalls:5}}});
+    registerFinding(store,id,'pentest',{title:'Local object access candidate',type:'access',severity:'high',target:'https://fixture.test/local'});
+    const queuedBefore=queued.length,ui=harness('TaskPanel',id);await ui.mount();
+    const rendered=JSON.stringify(ui.render());assert(rendered.includes('Local object access candidate'));assert(rendered.includes('https://fixture.test/local'));assert(rendered.includes('待验证'));
+    const reads=ui.calls.filter(([endpoint])=>endpoint==='findings.list');assert.equal(reads.length,1);assert.equal(reads[0][1].scope,'session');assert.equal(reads[0][1].pageSize,5);assert.equal(queued.length,queuedBefore);
+    assert(!ui.calls.some(([endpoint])=>endpoint==='checks.list'),'overview should not repeatedly read the full check ledger');
+  });
+  await test('overview distinguishes missing task details, excluded records and unavailable result counts', async () => {
+    const id='overview-empty-details';sessionMap.set(id,{id,header:{agentPreset:'pentest'}});
+    await results.dispatch(ctx,store,'task.start',{sessionId:id,policy:{mode:'regular',budget:{toolCalls:5}}});
+    assert.equal(readTaskPolicy(store,id).question,'','an omitted task must not be replaced with invented intent');
+    registerFinding(store,id,'pentest',{title:'Excluded fixture',type:'access',severity:'low',status:'false-positive'});
+    const ui=harness('TaskPanel',id);await ui.mount();
+    const resultsNode=ui.find(n=>n.props['aria-label']==='本会话测试结果');
+    const digits=resultsNode.children.flat(Infinity).flatMap(n=>n?.children||[]).filter(n=>n?.type==='span').flatMap(n=>n.children).filter(n=>n?.type==='strong').map(n=>n.children[0]);
+    assert.deepEqual(digits,[0,0],'excluded findings must not count as awaiting verification');
+    assert(JSON.stringify(ui.render()).includes('目标：未填写'));assert(!JSON.stringify(ui.render()).includes('聊天中约定'));
+    const actual=await results.dispatch(ctx,store,'task.status',{sessionId:id});
+    const legacy=harness('TaskPanel',id,{}, {api:async endpoint=>endpoint==='task.status'?{...actual,policy:{...actual.policy,question:'有限观察已有目标，向用户建议具体研究问题'}}:{ok:false,error:'fixture read failed'}});
+    await legacy.mount();const failedView=JSON.stringify(legacy.render());
+    assert(failedView.includes('结果读取失败'));assert(!failedView.includes('有限观察已有目标'));assert(!failedView.includes('个已确认'),'read errors must not turn into zero results');
+  });
+  await test('finding summaries explain expired verification and preserve excluded outcomes', () => {
+    const sandbox={};runInNewContext(source.slice(source.indexOf('function findingSummary('),source.indexOf('function download(')),sandbox);
+    assert.equal(sandbox.findingSummary({executionEvidence:{reason:'执行证据已过期，请在当前身份下重新采集完整对照。'}}),'上次验证已超过 15 分钟，需要重新验证。');
+    assert.match(sandbox.findingSummary({executionEvidence:{reason:'HTTP requests recorded',impactReason:'执行证据已过期'}}),/超过 15 分钟/);
+    assert.match(sandbox.findingSummary({status:'false-positive',executionEvidence:{reason:'执行证据已过期'}}),/已排除/);
+    assert.match(sandbox.findingSummary({delivery:{gaps:['request-response-evidence-missing']}}),/请求或响应/);
+  });
   await test('three actual workflow buttons apply explicit research budget and cancellation persists without reset', async () => {
     const ui = harness('TaskPanel', 'ui');
+    await ui.mount();
     for (const label of ['Nday发现', '常规测试', '0Day挖掘']) assert(ui.button(label));
     await ui.button('0Day挖掘').props.onClick();
     ui.find(node => node.type === 'input' && node.props['aria-label'] === '操作预算').props.onChange({ target: { value: '40' } });
     ui.find(node => node.type === 'input' && node.props['aria-label'] === '初步观察预算').props.onChange({ target: { value: '7' } });
     ui.find(node => node.type === 'input' && node.props['aria-label'] === '这一轮要查什么').props.onChange({ target: { value: 'Inspect the controlled fixture permission only' } });
-    await ui.button('开始这个小任务').props.onClick();
+    await ui.button('开始测试').props.onClick();
     assert.equal(readTaskPolicy(store, 'ui').mode, '0day');
     assert.equal(readTaskPolicy(store, 'ui').budget.toolCalls, 40);
     assert.equal(readTaskPolicy(store, 'ui').budget.discoveryCalls, 7);
     const uiQueued=queued.filter(row=>row.id==='ui');assert.equal(uiQueued.length, 1);
     assert.match(uiQueued[0].message.content[0].text, /Inspect the controlled fixture permission only/);
     assert.equal(ui.calls.at(-1)[1].sessionId, 'ui');
-    assert(!ui.button('开始这个小任务'));
+    assert(!ui.button('开始测试'));
     await ui.button('停止本轮与子代理').props.onClick();
     assert.equal(readTaskPolicy(store, 'ui').cancelled, true);
     assert.deepEqual(cancellations, [{ id: 'ui', cause: { kind: 'user' } }]);
     assert(!ui.button('停止本轮与子代理'));
     await ui.button('刷新状态').props.onClick();
-    assert(ui.find(node => node.type === 'p' && node.children.some(value => String(value).includes('用户已停止'))));
+    assert(ui.find(node => node.type === 'span' && node.children.some(value => String(value).includes('你已停止测试'))));
   });
   await test('Desktop refuses unavailable or running agents before storing a task and failed enqueue is stopped', async () => {
     for (const agent of [undefined, { status: 'running', followup() {} }]) {
@@ -141,13 +175,13 @@ try {
     saveTaskContext(store,'ui',{assets:[{id:'retained',url:'https://fixture.test',inScope:true,reachable:true}]});
     const old=readTaskPolicy(store,'ui'),ui=harness('TaskPanel','ui');
     await ui.button('刷新状态').props.onClick();
-    await ui.button('保留资料，选择下一轮问题').props.onClick();
+    await ui.button('新建测试').props.onClick();
     assert.equal(readTaskPolicy(store,'ui'),null);
     assert.equal(store.db.prepare('SELECT count(*) AS n FROM task_rounds WHERE session_id=?').get('ui').n,1);
     assert((await results.dispatch(ctx,store,'context.index',{sessionId:'ui'})).text.includes('retained'));
     await ui.button('Nday发现').props.onClick();
     ui.find(node=>node.props['aria-label']==='这一轮要查什么').props.onChange({target:{value:'Check only the provided product prerequisite'}});
-    await ui.button('开始这个小任务').props.onClick();
+    await ui.button('开始测试').props.onClick();
     assert.equal(readTaskPolicy(store,'ui').mode,'nday');assert(readTaskPolicy(store,'ui').startedAt>=old.startedAt);
     await assert.rejects(results.dispatch(ctx,store,'task.new-round',{sessionId:'ui'}),/先结束/);
     await results.dispatch(ctx,store,'task.cancel',{sessionId:'ui'});
@@ -181,7 +215,7 @@ try {
   await test('chat workflow selector persists choice without starting budgets or exposing task details', async () => {
     const ui = harness('ChatSetup', 'hero');ui.render();ui.state[0]=await results.dispatch(ctx,store,'chat.settings',{sessionId:'hero'});
     assert(ui.find(n=>n.props['aria-label']==='任务方向'));
-    assert(!ui.button('开始这个小任务')); assert(!ui.button('刷新状态'));
+    assert(!ui.button('开始测试')); assert(!ui.button('刷新状态'));
     await ui.find(n=>n.props['aria-label']==='任务方向').props.onChange({target:{value:'regular'}});
     assert.equal(readTaskPolicy(store, 'hero'), null);
     assert.equal((await results.dispatch(ctx, store, 'task.status', { sessionId: 'hero' })).choice, 'regular');
@@ -253,7 +287,7 @@ try {
     for(const blank of [true,false]) assert.equal(sandbox.component({sessionId:'ui',blank,useProjection:()=> 'pentest'}).props.sessionId,'ui');
     assert.equal(sandbox.component({sessionId:'audit',useProjection:()=> 'code-audit'}),null);
     const injects=[], slots=[];
-    const scope={effect(){},slots:{inject:(name,fn)=>{injects.push(name);if(name==='conversation.input.dock')fn();},register:(options,component)=>{slots.push({options,component});}}};
+    const scope={effect(){},inject(_keys,fn){return fn({sessions:{}});},slots:{inject:(name,fn)=>{injects.push(name);if(name==='conversation.input.dock')fn();},register:(options,component)=>{slots.push({options,component});}}};
     const applySource=source.slice(source.lastIndexOf('function apply(ctx)'),source.indexOf('module.exports =',source.lastIndexOf('function apply(ctx)')));
     const apply=runInNewContext(applySource+';this.apply=apply;', {...sandbox,installStyles(){},installChatSetupStyles(){},injectVisibleConversationView(){}});apply(scope);
     assert(injects.includes('conversation.input.dock'));assert.equal(slots[0].options.id,'saker-chat-setup');
@@ -277,10 +311,10 @@ try {
     assert(ui.find(n=>n.props.role==='alert'&&n.children.some(value=>String(value).includes('先关闭'))));
     assert.equal(readTaskPolicy(store,id).workerLimit,2);store.db.prepare('DELETE FROM site_workers WHERE child_id=?').run(child.childId);
     checkpointTask(store,id,'Offline checkpoint');ui.state[0]=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
-    assert(!ui.button('保留资料，设置下一轮'));
+    assert(!ui.button('新建测试'));
     await ui.button('确认并继续').props.onClick();
     updateTaskProgress(store,id,{planComplete:true});ui.state[0]=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
-    await ui.button('保留资料，设置下一轮').props.onClick();
+    await ui.button('新建测试').props.onClick();
     assert.equal(readTaskPolicy(store,id),null);assert.equal(chosenTaskOptions(store,id).workers,2);assert.equal(chosenTaskOptions(store,id).interaction,'confirm');
   });
   await test('cooperation and progress reporting are independent, and guided decisions remain guarded',async()=>{
@@ -394,8 +428,8 @@ try {
     const firstEnd = source.indexOf('\n}', source.indexOf('function statusTextFor(')) + 2;
     runInNewContext(source.slice(source.indexOf('function statusTextFor('), firstEnd) + '\n' + source.slice(start, end), sandbox);
     for (const row of [{ status: 'verified' }, { status: 'verified', delivery: { ready: false } }]) {
-      assert.equal(sandbox.statusTextFor(row, 'pentest', sandbox.STATUS_LABEL), '待补证·不可交付');
-      assert.equal(sandbox.statusTextForExport(row, 'pentest'), '待补证·不可交付');
+      assert.equal(sandbox.statusTextFor(row, 'pentest', sandbox.STATUS_LABEL), '需重新验证');
+      assert.equal(sandbox.statusTextForExport(row, 'pentest'), '需重新验证');
     }
     const complete = { status: 'verified', delivery: { ready: true } };
     assert.equal(sandbox.statusTextFor(complete, 'pentest', sandbox.STATUS_LABEL), '已验证');

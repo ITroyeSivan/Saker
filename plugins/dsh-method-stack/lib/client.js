@@ -17,7 +17,7 @@ var PRESETS = [
   { id: 'pentest', label: '渗透测试' },
 ];
 var GROUP_LABELS = { recon: '侦察', exploit: '攻击', evidence: '证据与复核', report: '报告', intranet: '内网' };
-function groupLabel(g) { return (GROUP_LABELS[g] || g) + ' · ' + g; }
+function groupLabel(g) { return GROUP_LABELS[g] || g; }
 function keyOf(group, id) { return group + '/' + id; }
 
 function Btn(props) {
@@ -63,7 +63,7 @@ function MethodRow(props) {
   function save() {
     rpc(props.connection, 'save-prompt', { group: g, id: m.id, text: draft }).then(function (res) {
       if (res && res.ok) {
-        setMsg('已保存（派生到用户层，下一次模型请求即生效）');
+        setMsg('已保存，下次提问时生效。');
         setDirty(false);
         props.onChanged && props.onChanged();
       } else {
@@ -81,14 +81,14 @@ function MethodRow(props) {
     React.createElement('div', { style: { flex: '0 0 165px', fontSize: 13, fontWeight: 600, fontFamily: 'ui-monospace, Consolas, monospace' } }, m.id),
     m.hasUser ? React.createElement('span', { style: { fontSize: 10, padding: '1px 6px', borderRadius: 999, background: '#dafbe1', color: '#1a7f37', fontWeight: 600 } }, '已自定义') : null,
     React.createElement('div', { style: { flex: 1, fontSize: 12, color: 'var(--dsw-alias-label-secondary,#4a4a4f)', lineHeight: 1.5 } }, m.description),
-    iconBtn(m.hasUser ? '编辑' : '查看/自定义', '查看当前正文；编辑即派生到用户层（官方版本不受影响）', openModal),
+    iconBtn(m.hasUser ? '编辑' : '查看/自定义', '查看或修改方法说明，可恢复默认内容', openModal),
     m.hasUser ? iconBtn('还原官方', '放弃用户版，恢复官方默认', restore) : null);
   var editor = React.createElement(Modal, { open: open },
     React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
       React.createElement('div', { style: { fontSize: 14, fontWeight: 700 } }, '方法正文：' + k),
       m.hasUser
         ? React.createElement('span', { style: { fontSize: 11, padding: '1px 7px', borderRadius: 999, background: '#dafbe1', color: '#1a7f37', fontWeight: 600 } }, '用户版（编辑它；还原官方可恢复）')
-        : React.createElement('span', { style: { fontSize: 11, padding: '1px 7px', borderRadius: 999, background: '#eef2f6', color: '#4a5568', fontWeight: 600 } }, '官方版 · 保存将自动派生到用户层')),
+        : React.createElement('span', { style: { fontSize: 11, padding: '1px 7px', borderRadius: 999, background: '#eef2f6', color: '#4a5568', fontWeight: 600 } }, '默认内容 · 保存后使用你的版本')),
     React.createElement('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', margin: '6px 0' } }, '模型按当前问题读取相关方法正文。修改只影响该方法，工具和知识库配置不受影响。'),
     React.createElement('textarea', { value: draft, onChange: function (e) { setDraft(e.target.value); setDirty(true); }, rows: 20, style: { width: '100%', boxSizing: 'border-box', fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 12, lineHeight: 1.6 } }),
     React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 } },
@@ -170,9 +170,7 @@ function Page(props) {
   return React.createElement('div', { style: { maxWidth: 780 } },
     React.createElement('div', { style: { fontSize: 14, fontWeight: 700, margin: '0 0 4px' } }, '方法编排'),
     React.createElement('div', { style: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', lineHeight: 1.7, marginBottom: 8 } },
-      '按 模式 → 模块组 → 子方法 组织测试逻辑。勾选即启用（下一次模型请求即注入 <saker-methods>，无需重启）。' +
-      '点「查看/自定义」可看并编辑正文——编辑自动派生到用户层，官方版本保留可还原。' +
-      '工具路径、MCP、知识库等配置不在此（见安全配置/知识库）。'),
+      '勾选 AI 可以参考的测试方法。点“查看/自定义”修改说明，或将当前选择保存为组合。'),
     React.createElement(OpeningCard, { connection: props.connection, presetId: presetId }),
     React.createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' } },
       PRESETS.map(function (p) {
@@ -181,7 +179,7 @@ function Page(props) {
           style: { padding: '4px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer', border: 'none', background: active ? '#2f81f7' : 'var(--dsw-alias-bg-layer-2,#eef0f3)', color: active ? '#fff' : 'var(--dsw-alias-label-primary,#1a1a1a)' } }, p.label);
       }),
       React.createElement('div', { style: { flex: 1 } }),
-      React.createElement(Btn, { onClick: function () { rpc(props.connection, 'render-preview', { presetId: presetId }).then(function (r) { if (r && r.ok) setNote('将注入 ' + r.value.count + ' 个方法，正文约 ' + r.value.chars + ' 字符（rev ' + r.value.rev + '）'); else setNote((r && r.error && r.error.message) || '预览失败'); }); } }, '注入预览'),
+      React.createElement(Btn, { onClick: function () { rpc(props.connection, 'render-preview', { presetId: presetId }).then(function (r) { if (r && r.ok) setNote('已选择 ' + r.value.count + ' 个方法，目录约 ' + r.value.chars + ' 字符。'); else setNote((r && r.error && r.error.message) || '预览失败'); }); } }, '查看已选方法'),
       note ? React.createElement('span', { style: { fontSize: 12, color: 'var(--dsw-alias-label-secondary,#555)' } }, note) : null),
     data.groups.map(function (g) { return React.createElement(GroupSection, { key: g.group, group: g, connection: props.connection, onToggle: toggle, onToggleGroup: toggleGroup, onChanged: function () { load(presetId); }, openKey: openKey, setOpenKey: setOpenKey }); }),
     React.createElement('div', { style: { marginTop: 10, borderTop: '1px solid var(--dsw-alias-border-l2,#e4e4e7)', paddingTop: 10 } },
@@ -237,13 +235,13 @@ function OpeningCard(props) {
     });
   }
   if (text === null) return null;
-  return React.createElement('div', { style: { border: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', borderRadius: 8, padding: '8px 12px', margin: '0 0 10px', background: 'var(--dsw-alias-bg-layer-2,#fafafb)' } },
-    React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 } },
-      React.createElement('span', { style: { fontSize: 13, fontWeight: 700 } }, '模式开场（可自定义）'),
+  return React.createElement('details', { style: { border: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', borderRadius: 6, padding: '8px 10px', margin: '0 0 10px' } },
+    React.createElement('summary', { style: { cursor: 'pointer', fontSize: 12 } },
+      React.createElement('span', { style: { marginRight: 8, fontWeight: 600 } }, '自定义 AI 的工作说明'),
       React.createElement('span', { style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary,#6e6e73)' } }, isCustom ? '自定义' : '默认'),
       React.createElement('div', { style: { flex: 1 } })),
     React.createElement('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', marginBottom: 4, lineHeight: 1.6 } },
-      '直接编辑当前模式的完整开场；保存后下轮生效。'),
+      '修改当前模式的默认提示词，下次提问时生效。'),
     React.createElement('textarea', { value: text, onChange: function (e) { setText(e.target.value); }, rows: 10, spellCheck: false, placeholder: '输入当前模式的开场内容', style: { width: '100%', boxSizing: 'border-box', fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 12, lineHeight: 1.6, marginBottom: 6 } }),
     React.createElement('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: 6 } },
       React.createElement(Btn, { onClick: restore, disabled: !isCustom }, '恢复默认'),
@@ -355,7 +353,7 @@ function MethodDock(props) {
               React.createElement('span', { style: { fontSize: 10, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 } }, ' ' + (m.description || '').slice(0, 60)));
           }));
       }),
-      React.createElement('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', marginTop: 6 } }, '变更即时生效（下一次模型请求即注入，无需重启）；完整自定义见 设置 → 方法编排。'))
+      React.createElement('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', marginTop: 6 } }, '下次提问时生效。编辑方法说明：设置 → 方法编排。'))
       : null);
 }
 

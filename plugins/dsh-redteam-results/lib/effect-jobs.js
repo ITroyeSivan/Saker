@@ -80,7 +80,8 @@ function summary(store, sid, job, cached = false) {
   let effect;
   if (job.effectId) effect = readEffectVerification(store, sid, job.effectId);
   const isCurrent = current(store, sid, job);
-  return { id: job.id, source: 'host-recorded-effect-job', state: job.state, reason: job.reason || '', cached,
+  const reason = job.state === 'completed' && effect && !effect.current ? effect.currentReason : job.reason;
+  return { id: job.id, source: 'host-recorded-effect-job', state: job.state, reason: reason || '', cached,
     current: isCurrent, coverage: job.state === 'completed' && isCurrent && effect?.current ? 'recipe-verified' : 'partial-or-unknown',
     effectId: job.effectId ?? null, impactVerified: isCurrent && effect?.current === true,
     ...(effect?.current ? { proofKind: effect.proofKind, endpoint: effect.endpoint, identity: effect.identity,

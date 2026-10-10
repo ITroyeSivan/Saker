@@ -18,6 +18,9 @@ try {
   const integrityBlock = receiptSource.slice(receiptSource.indexOf('  let current = false, integrityValid = false'),
     receiptSource.indexOf('\n}\nexport function executionReceiptSummary'));
   const cases = [
+    ['effect-verifications.js', 'currentVerdict = evaluate(store, sessionId, record.input);', 'currentVerdict = evaluate(store, sessionId, record.input, Date.parse(record.recordedAt));', 'expired evidence revokes current confirmation manual review ready counts and export while retaining history without HTTP'],
+    ['impact-reviews.js', 'requireFreshExecutions(receipts);', '/* allow expired human review */', 'expired evidence revokes current confirmation manual review ready counts and export while retaining history without HTTP'],
+    ['delivery-evidence.js', 'requireFreshExecutions([control, probe]);', '/* allow expired reproduction pair */', 'expired evidence revokes current confirmation manual review ready counts and export while retaining history without HTTP'],
     ['execution-receipts.js', integrityBlock, `  let current = false;
   try { current = basis(requestRow(store, sessionId, result.requestId, result.requestRevision)) === result.requestBasis; } catch {}
   return { ...result, current, integrityValid: true, currentReason: '' };`, 'damaged captured bytes and metadata revoke independent effects and delivery without deleting historical records or sending HTTP'],

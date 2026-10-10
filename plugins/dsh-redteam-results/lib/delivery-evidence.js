@@ -1,4 +1,4 @@
-import { readExecutionReceipt, executionMethodBasis } from './execution-receipts.js';
+import { readExecutionReceipt, executionMethodBasis, requireFreshExecutions } from './execution-receipts.js';
 import { readTaskContext } from './task-context.js';
 import { parseReproduction, deliveryMaterialDigest } from './delivery.js';
 import { readEffectVerification } from './effect-verifications.js';
@@ -17,6 +17,7 @@ export function attachDeliveryEvidence(store, sessionId, finding) {
     const currentMethod = readTaskContext(store, sessionId)?.methods.find(item => item.id === method.methodId && item.version === method.methodVersion && item.reviewed === true);
     if (!currentMethod) throw new Error('current reviewed reproduction method required');
     const [control, probe] = [controlReceiptId, probeReceiptId].map(id => readExecutionReceipt(store, sessionId, id));
+    requireFreshExecutions([control, probe]);
     if ([control, probe].some(receipt => receipt.source !== 'host-http-execution' || receipt.current !== true || receipt.outcome !== 'response'
       || receipt.endpoint !== method.endpoint || receipt.authContext !== row.identity) || control.hypothesisId !== probe.hypothesisId) throw new Error('current complete execution pair does not match finding endpoint and identity');
     if ([control, probe].some(receipt => receipt.methodId !== method.methodId || receipt.methodVersion !== method.methodVersion

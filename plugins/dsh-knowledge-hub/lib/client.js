@@ -58,9 +58,9 @@ var SOURCE_META = {
   import: { label: '导入', bg: '#f3e8ff', fg: '#7c3aed' },
 };
 var SOURCE_TABS = [
-  { id: 'patt', title: '随包 PATT', writable: false },
-  { id: 'bundle', title: '随包手册', writable: false },
-  { id: 'user', title: '用户积累', writable: true },
+  { id: 'patt', title: 'PATT 资料', writable: false },
+  { id: 'bundle', title: '内置手册', writable: false },
+  { id: 'user', title: '我的笔记', writable: true },
   { id: 'import', title: '导入知识源', writable: true },
 ];
 
@@ -468,7 +468,7 @@ function Editor(props) {
 
   if (!props.file) {
     return React.createElement('div', { style: { color: '#9a9aa0', fontSize: 13, padding: 40, textAlign: 'center', border: '1px dashed var(--dsw-alias-border-l1,#e4e4e7)', borderRadius: 8, height: '100%', minHeight: 340, boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center' } },
-      '左侧选择文件。随包手册 / 随包 PATT 只读预览；用户 / 导入层可编辑、新建与删除。');
+      '左侧选择文件。内置手册 / PATT 资料 只读预览；用户 / 导入层可编辑、新建与删除。');
   }
 
   function save() {
@@ -516,7 +516,7 @@ function Editor(props) {
         ? React.createElement(MarkdownPreview, { content: content })
         : React.createElement(TextArea, { value: content, readOnly: !writable, disabled: busy, spellCheck: false, onChange: function (v) { setContent(v); setDirty(true); } })),
     React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 } },
-      writable ? React.createElement('button', { type: 'button', disabled: busy, style: btn(true), onClick: save }, busy ? '保存中…' : '保存（写用户层）') : null,
+      writable ? React.createElement('button', { type: 'button', disabled: busy, style: btn(true), onClick: save }, busy ? '保存中…' : '保存') : null,
       writable ? (confirmDel
         ? React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12 } },
           '删除 ' + props.file.path + ' ？（仅删除 ' + meta.label + ' 层文件，不可恢复）',
@@ -840,9 +840,9 @@ function Page(props) {
   var statsLine = null;
   if (statsV) {
     statsLine = React.createElement('div', { style: { display: 'flex', gap: 10, margin: '2px 0 10px', fontSize: 12, color: '#6e6e73', flexWrap: 'wrap' } },
-      React.createElement('span', null, '随包手册 ' + statsV.bundleMd + ' 篇'),
+      React.createElement('span', null, '内置手册 ' + statsV.bundleMd + ' 篇'),
       React.createElement('span', null, '规则 ' + statsV.bundleRules + ' 条'),
-      React.createElement('span', { style: { color: '#c2410c', fontWeight: 600 } }, '随包 PATT ' + statsV.patt + ' 篇'),
+      React.createElement('span', { style: { color: '#c2410c', fontWeight: 600 } }, 'PATT 资料 ' + statsV.patt + ' 篇'),
       React.createElement('span', null, '用户 ' + statsV.user + ' 篇'),
       React.createElement('span', null, '导入 ' + statsV.imports + ' 篇'),
       statsV.index ? React.createElement('span', null, '索引 ' + statsV.index.docs + ' 文档 / ' + statsV.index.chunks + ' chunks') : null,
@@ -921,7 +921,7 @@ function Page(props) {
     React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 12 } },
       React.createElement('div', { style: { fontSize: 14, fontWeight: 700 } }, '知识库'),
       React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } }, modeTabs),
-      React.createElement('button', { type: 'button', style: btn(false, { padding: '5px 10px', fontSize: 12 }), onClick: function () { setShowNew(!showNew); setPageMsg(''); } }, showNew ? '取消新建' : '+ 新建（用户层）')),
+      React.createElement('button', { type: 'button', style: btn(false, { padding: '5px 10px', fontSize: 12 }), onClick: function () { setShowNew(!showNew); setPageMsg(''); } }, showNew ? '取消新建' : '+ 新建笔记')),
     showNew ? React.createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'center', margin: '6px 0 10px', fontSize: 12, flexWrap: 'wrap' } },
       '文件名：',
       React.createElement('input', { value: newName, onChange: function (e) { setNewName(e.target.value); }, placeholder: 'my-note.md', style: { padding: '4px 8px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', fontSize: 12 } }),
@@ -945,7 +945,7 @@ function Page(props) {
       React.createElement('div', { style: { display: activeFile ? 'block' : 'none', minWidth: 0, height: 'min(620px, 68vh)', overflowY: 'auto' } },
         React.createElement(Editor, { connection: conn, file: activeFile, onChanged: onChanged, onDeleted: onDeleted, onBack: function () { setActiveFile(null); } }))),
     activeFile ? null : React.createElement('div', { style: { marginTop: 6, fontSize: 11.5, color: '#9a9aa0', lineHeight: 1.6 } },
-      '选择左侧文件即可预览/编辑；随包手册与随包 PATT 只读，用户 / 导入层可编辑、新建与删除。'),
+      '点击文件查看内容。我的笔记和导入资料可编辑。'),
     showImport ? React.createElement('div', { style: { marginTop: 12 } },
       React.createElement(ImportBox, { connection: conn, onChanged: onChanged })) : null);
 }

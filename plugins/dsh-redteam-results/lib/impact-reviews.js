@@ -1,6 +1,6 @@
 // Explicit Desktop review is a human judgment, not an automated effect verifier.
 import { deliveryMaterialDigest, parseReproduction } from './delivery.js';
-import { readExecutionReceipt } from './execution-receipts.js';
+import { readExecutionReceipt, requireFreshExecutions } from './execution-receipts.js';
 export const IMPACT_REVIEW_SCHEMA = `CREATE TABLE IF NOT EXISTS impact_reviews (
  session_id TEXT NOT NULL, finding_id TEXT NOT NULL, record TEXT NOT NULL,
  PRIMARY KEY(session_id,finding_id));`;
@@ -10,6 +10,7 @@ function validate(store, sid, finding, review) {
   if (!Array.isArray(review.receiptIds) || new Set(review.receiptIds).size !== review.receiptIds.length
     || review.receiptIds.length < (review.proofKind === 'write' ? 4 : 2) || review.receiptIds.length > 12) throw new Error('distinct current effect receipts required');
   const receipts = review.receiptIds.map(id => readExecutionReceipt(store, sid, id));
+  requireFreshExecutions(receipts);
   if (receipts.some(receipt => !receipt.current || receipt.source !== 'host-http-execution' || receipt.outcome !== 'response'
     || new URL(receipt.endpoint).origin !== new URL(parseReproduction(finding.reproduction).endpoint).origin)) throw new Error('effect review needs current complete same-site host receipts');
   if (!finding.executionEvidence?.verified || !finding.executionEvidence.receiptIds.every(id => review.receiptIds.includes(id))) throw new Error('include the finding\'s actual normal/probe executions');

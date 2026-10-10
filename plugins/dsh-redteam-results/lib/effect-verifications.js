@@ -1,6 +1,6 @@
 // Deterministic effect recipes operate on host executions, never model verdicts.
 import { createHash, randomUUID } from 'node:crypto';
-import { readExecutionReceipt, executionMethodBasis } from './execution-receipts.js';
+import { readExecutionReceipt, executionMethodBasis, requireFreshExecutions } from './execution-receipts.js';
 import { readTaskContext } from './task-context.js';
 export const EFFECT_VERIFICATION_SCHEMA = `CREATE TABLE IF NOT EXISTS effect_verifications (
  session_id TEXT NOT NULL, id TEXT NOT NULL, record TEXT NOT NULL,
@@ -52,11 +52,11 @@ function evaluate(store, sessionId, input, referenceTime = Date.now(), singleRou
   const comparisons = [], valueDigest = value => createHash('sha256').update(String(value)).digest('hex');
   let identity, ownerIdentity, protectedObject, subjectObject, credential, ownerCredential;
   for (const round of rounds) {
+    requireFreshExecutions(Object.values(round), referenceTime);
     for (const receipt of Object.values(round)) {
       if (!receipt.current || receipt.source !== 'host-http-execution' || receipt.outcome !== 'response'
         || receipt.endpoint !== method.endpoint || receipt.methodId !== method.id || receipt.methodVersion !== method.version
-        || receipt.methodBasis !== methodBasis || !Number.isFinite(Date.parse(receipt.completedAt))
-        || referenceTime - Date.parse(receipt.completedAt) > 15 * 60 * 1000 || Date.parse(receipt.completedAt) > referenceTime + 60000) fail('current fresh complete executions of the reviewed method required');
+        || receipt.methodBasis !== methodBasis) fail('current fresh complete executions of the reviewed method required');
     }
     const owner = fields(round.owner, method.effectSpec), normal = fields(round.normal, method.effectSpec), probe = fields(round.probe, method.effectSpec);
     const subjectAuth = transportIdentity(round.normal), probeAuth = transportIdentity(round.probe), ownerAuth = transportIdentity(round.owner);
@@ -104,7 +104,7 @@ export function readEffectVerification(store, sessionId, id) {
   if (!row) fail('effect verification not found in current session');
   const record = JSON.parse(row.record);
   let currentVerdict;
-  try { currentVerdict = evaluate(store, sessionId, record.input, Date.parse(record.recordedAt)); }
+  try { currentVerdict = evaluate(store, sessionId, record.input); }
   catch (error) { currentVerdict = { verified: false, reason: error.message }; }
   return { ...record, current: record.verified === true && currentVerdict.verified === true, currentReason: currentVerdict.reason || record.reason || '' };
 }

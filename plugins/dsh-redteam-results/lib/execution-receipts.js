@@ -11,6 +11,18 @@ export const EXECUTION_RECEIPT_SCHEMA = `CREATE TABLE IF NOT EXISTS execution_re
  PRIMARY KEY(session_id,id)
 );`;
 const digest = value => createHash('sha256').update(value).digest('hex');
+// Current confirmation uses the execution time, never the date on which an
+// operator reread or reviewed the saved bytes. Historical receipts stay intact.
+export function requireFreshExecutions(receipts, referenceTime = Date.now()) {
+  if (!Number.isFinite(referenceTime)) throw new Error('invalid verification timestamp');
+  for (const receipt of receipts) {
+    const completed = Date.parse(receipt.completedAt);
+    if (!Number.isFinite(completed) || completed > referenceTime + 60000)
+      throw new Error('执行证据时间无效，请核对原始回执。');
+    if (referenceTime - completed > 15 * 60 * 1000)
+      throw new Error('执行证据已过期，请在当前身份下重新采集完整对照。');
+  }
+}
 const basis = row => digest(JSON.stringify([row.id, row.revision, row.endpoint, row.authContext, row.request]));
 export const executionMethodBasis = method => {
   const { reviewed, reviewedAt, reviewer, reviewNotes, ...content } = method;
