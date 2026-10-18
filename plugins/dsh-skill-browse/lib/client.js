@@ -12,6 +12,10 @@
 window.__ModuleLoader__.load({ id: '@dsh-external/dsh-skill-browse', factory: (require) => {
 var module = { exports: {} }; var exports = module.exports;
 'use strict';
+/* SAKER-UI-KIT:BEGIN */
+var SAKER_UI_KIT_CSS = "/* 5.7 共享组件层：Button / Input / Select / Badge / DataTable / Drawer / InlineNotice / EmptyState\n   单一来源：shared/ui-kit/ui-kit.css（令牌见 shared/ui-kit/ui-kit.json）。\n   由 scripts/sync-ui-kit.mjs 注入到各产品插件；插件里的同类尺寸规则应删除，避免双写。 */\n.saker-ui-btn{height:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px}\n.saker-ui-input{height:36px;border-radius:6px}\n.saker-ui-select{height:32px;border-radius:6px}\n.saker-ui-table td{height:38px}\n.saker-ui-badge{border-radius:6px;font-size:12px;line-height:1.5}\n.saker-ui-drawer{border-radius:12px}\n.saker-ui-notice{border-radius:6px;font-size:13px;line-height:1.5}\n.saker-ui-empty{border-radius:6px;font-size:13px;line-height:1.5}\n/* 现有插件类别名：与 canonical 类共用同一套尺寸 */\n.dsh-chat-panel-head button,.dsh-chat-actions button,.dsh-chat-task-status button,.dsh-task-nav button,.dsh-task-actions button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-prompt-io button,.dsh-prompt-more,.dsh-prompt-scopes button,.dsh-prompt-modes button,.dsh-prompt-foot button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-tools button,.dsh-materials-types button,.dsh-materials-foot button,.dsh-materials-table td button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-new button,.dsh-materials-import-actions button,.dsh-execution-tools>button,.dsh-test-content-actions button,.dsh-rtr-btn{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-task-nav select,.dsh-materials-tools select,.dsh-rtr-select{height:32px}\n.dsh-prompt-saveas input,.dsh-prompt-list input[type=search],.dsh-prompt-field input{height:36px}\n.dsh-materials-tools input[type=search],.dsh-materials-import input,.dsh-task-field input,.dsh-rtr-search{height:36px}\n.dsh-materials-table td{height:38px}\n.dsh-chat-setup svg,.dsh-task-workspace svg{width:16px;height:16px}\n.dsh-hnt-btn,.dsh-hnt-tab{height:32px}\n.dsh-hnt-input{height:36px}\n.dsh-hnt-select{height:32px}\n.dsh-mcs-btn,.dsh-mcs-iconbtn,.dsh-mcs-toolscount--btn{height:32px}\n.dsh-mcs-field input,.dsh-mcs-pairrow input,.dsh-mcs-search{height:36px}\n.dsh-mcs-field select,.dsh-mcs-seg button{height:32px}\n.dsh-sp-chip.is-btn{height:32px}\n.dsh-mg-chip{height:32px}\n/* 内联 style 插件（knowledge-hub / sec-config / skill-browse）：根容器打 data-saker-ui，\n   控件尺寸由共享层统一给，插件自己的 helper 不再写 height。 */\n[data-saker-ui] button{height:32px}\n[data-saker-ui] input:not([type=checkbox]):not([type=radio]):not([type=file]){height:36px}";
+/* SAKER-UI-KIT:END */
+(function(){try{if(document.getElementById('saker-ui-kit-style'))return;var st=document.createElement('style');st.id='saker-ui-kit-style';st.textContent=SAKER_UI_KIT_CSS;document.head.appendChild(st);}catch(e){}})();
 var React = require('react');
 var useState = React.useState, useEffect = React.useEffect;
 
@@ -21,9 +25,9 @@ function rpc(connection, endpoint, payload) {
   return connection.rpc.call(CHANNEL, endpoint, payload);
 }
 
-function hintStyle() { return { fontSize: 12, color: 'var(--dsw-alias-label-tertiary, #6e6e73)', marginBottom: 6, lineHeight: 1.7 }; }
+function hintStyle() { return { fontSize: 12, color: 'var(--dsw-alias-label-tertiary, #6e6e73)', marginBottom: 8, lineHeight:1.5}; }
 function msgStyle(ok) { return { marginTop: 8, fontSize: 12, color: ok ? '#1a7f37' : '#d1242f' }; }
-function btnStyle(primary) { return { padding: '7px 14px', borderRadius: 6, border: '1px solid ' + (primary ? 'transparent' : 'var(--dsw-alias-border-l1,#d9d9de)'), background: primary ? '#2f81f7' : 'transparent', color: primary ? '#fff' : 'var(--dsw-alias-label-primary,#1a1a1a)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }; }
+function btnStyle(primary) { return { padding: '7px 14px', borderRadius: 6, border: '1px solid ' + (primary ? 'transparent' : 'var(--dsw-alias-border-l1,#d9d9de)'), background: primary ? 'var(--dsw-alias-state-business-primary,#4c6ef5)' : 'transparent', color: primary ? '#fff' : 'var(--dsw-alias-label-primary,#1a1a1a)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }; }
 function originBadge(origin) {
   if (origin === 'user') return { label: '已安装', bg: '#dafbe1', fg: '#1a7f37' };
   if (origin === 'preset') return { label: '模式专属', bg: '#fef3c7', fg: '#92400e' };
@@ -53,7 +57,7 @@ function CopyButton(props) {
   return React.createElement('button', {
     type: 'button', title: '复制到剪贴板；在会话输入框粘贴后按 /name 注入该技能正文',
     onClick: copy,
-    style: { padding: '4px 10px', fontSize: 12, borderRadius: 6, border: '1px solid #2f81f7', background: state === 'copied' ? '#dafbe1' : 'transparent', color: state === 'copied' ? '#1a7f37' : '#2f81f7', cursor: 'pointer', flex: '0 0 auto' },
+    style: { padding: '4px 10px', fontSize: 12, borderRadius: 6, border: '1px solid var(--dsw-alias-state-business-primary,#4c6ef5)', background: state === 'copied' ? '#dafbe1' : 'transparent', color: state === 'copied' ? '#1a7f37' : 'var(--dsw-alias-state-business-primary,#4c6ef5)', cursor: 'pointer', flex: '0 0 auto' },
   }, label);
 }
 
@@ -63,10 +67,10 @@ function SkillRow(props) {
   return React.createElement('div', { style: { padding: '10px 12px', border: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', borderRadius: 8, marginBottom: 8, background: 'var(--dsw-alias-bg-base,#fff)' } },
     React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 } },
       React.createElement('span', { style: { fontWeight: 600, fontSize: 13, fontFamily: 'ui-monospace, Consolas, monospace' } }, '/' + skill.name),
-      React.createElement('span', { style: { fontSize: 10, padding: '1px 6px', borderRadius: 999, background: badge.bg, color: badge.fg, fontWeight: 600 } }, badge.label),
+      React.createElement('span', { style: { fontSize: 12, padding: '1px 6px', borderRadius: 999, background: badge.bg, color: badge.fg, fontWeight: 600 } }, badge.label),
       React.createElement('div', { style: { flex: 1 } }),
       skill.origin === 'user' ? (props.confirming
-        ? React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, flex: '0 0 auto' } },
+        ? React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12, flex: '0 0 auto' } },
           '卸载 /' + skill.name + ' ？',
           React.createElement('button', {
             type: 'button', onClick: props.onRemove,
@@ -82,7 +86,7 @@ function SkillRow(props) {
           style: { padding: '4px 10px', fontSize: 12, borderRadius: 6, border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: 'transparent', color: '#d1242f', cursor: 'pointer', flex: '0 0 auto' },
         }, '卸载')) : null,
       React.createElement(CopyButton, { name: skill.name })),
-    skill.description ? React.createElement('div', { style: { fontSize: 12, color: 'var(--dsw-alias-label-secondary,#4a4a4f)', lineHeight: 1.55 } }, skill.description) : null);
+    skill.description ? React.createElement('div', { style: { fontSize: 12, color: 'var(--dsw-alias-label-secondary,#4a4a4f)', lineHeight:1.5} }, skill.description) : null);
 }
 
 // ── 上传安装（zip / tgz / tar.gz）──────────────────────────────────────────
@@ -164,14 +168,14 @@ function Page(props) {
     }).catch(function (e) { setMsg({ ok: false, text: String(e && e.message || e) }); });
   }
 
-  return React.createElement('div', { style: { maxWidth: 640 } },
+  return React.createElement('div', { style: { maxWidth: 640 }, 'data-saker-ui': 'skill-browse' },
     React.createElement('div', { style: { fontSize: 13, fontWeight: 600, margin: '0 0 4px' } }, '技能'),
     React.createElement('div', { style: hintStyle() },
       '选择一份操作指南供 AI 使用。在聊天中输入 ',
-      React.createElement('code', { style: { background: 'var(--dsw-alias-bg-layer-2,#f6f6f7)', padding: '1px 5px', borderRadius: 4, fontSize: 11 } }, '/技能名'),
+      React.createElement('code', { style: { background: 'var(--dsw-alias-bg-layer-2,#f6f6f7)', padding: '1px 5px', borderRadius: 4, fontSize: 12 } }, '/技能名'),
       ' 即可调用，也可以上传自己的技能包。'),
     React.createElement(UploadBox, { connection: props.connection, onInstalled: function () { setReloadTick(function (t) { return t + 1; }); } }),
-    React.createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'center', marginBottom: 12 } },
+    React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 } },
       React.createElement('span', { style: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#6e6e73)' } }, '范围筛选：'),
       React.createElement('button', { type: 'button', onClick: function () { setPresetId(''); }, style: { padding: '4px 10px', fontSize: 12, borderRadius: 6, border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: presetId === '' ? '#dbeafe' : 'transparent', cursor: 'pointer' } }, '全部'),
       React.createElement('button', { type: 'button', onClick: function () { setPresetId('pentest'); }, style: { padding: '4px 10px', fontSize: 12, borderRadius: 6, border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: presetId === 'pentest' ? '#dbeafe' : 'transparent', cursor: 'pointer' } }, '渗透测试'),

@@ -173,6 +173,10 @@ function apply(ctx, config) {
 	// 插件重载/HMR 会因此留下永不回收的句柄（实测同进程二次 openStore 会 EBUSY）。
 	ctx.effect(() => () => { try { store?.close?.(); } catch { /* 已关或句柄失效 */ } store = undefined; }, "dsh-trace-vault: store handle");
 	const cfg = { capture: true, tools: true, envelope: true, retentionDays: 14, maxRows: 50000, ...config };
+	// 失败归因信封在**回合内冻结**：宿主 runtime-context 只要文本变化就替换整份快照，
+	// 回合中途更新 blocked 计数会让缓存后缀失效。冻结到下一次 turn/start 再更新，
+	// 信封功能保留，但不会在一次工具调用后把整段缓存打掉。
+	const envelopeTurns = new Map();
 	let capture;
 	if (cfg.capture) {
 		capture = createCapture(ctx, theStore());
@@ -188,6 +192,7 @@ function apply(ctx, config) {
 			clearInterval(recover);
 		}, "dsh-trace-vault: running heartbeat");
 		ctx.on("session/event", (subject, event) => {
+			if (event?.type === "turn/start") envelopeTurns.set(sessionKey(subject), { turn: event.data?.turn ?? null, frozen: undefined });
 			if (event?.type === "tool/call") {
 				capture.onCall(sessionKey(subject), event);
 			} else if (event?.type === "tool/result") {
@@ -199,6 +204,9 @@ function apply(ctx, config) {
 	}
 	// 失败归因信封节：每轮装配重渲染本会话近窗口的 blocked 聚集，变化才投递
 	if (cfg.envelope) {
+		if (!cfg.capture) ctx.on("session/event", (subject, event) => {
+			if (event?.type === "turn/start") envelopeTurns.set(sessionKey(subject), { turn: event.data?.turn ?? null, frozen: undefined });
+		});
 		ctx.systemPrompt.context({
 			name: "trace-vault",
 			order: 560,
@@ -213,7 +221,13 @@ function apply(ctx, config) {
 				if (!sessionId) return "";
 				try {
 					const since = new Date(Date.now() - 30 * 60_000).toISOString().replace("T", " ").slice(0, 19);
-					return buildOutcomeHint(statsTraces(theStore(), { sessionId: String(sessionId), since }));
+					const hint = buildOutcomeHint(statsTraces(theStore(), { sessionId: String(sessionId), since }));
+					const state = envelopeTurns.get(String(sessionId));
+					if (state) {
+						if (state.frozen === undefined) state.frozen = hint;
+						return state.frozen;
+					}
+					return hint;
 				} catch { return ""; }
 			}
 		});

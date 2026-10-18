@@ -84,6 +84,48 @@ try {
     const files = buildDeliveryFiles([row], []).files;
     assert.deepEqual(zipContents(zipDelivery(files)), files);
   });
+  await test('libarchive (tar) extracts the same archive byte-for-byte, independent of both writers', () => {
+    // 上面那条用 .NET 读；这条换成 libarchive（Windows 自带 tar.exe）——
+    // 与插件的写端、与 .NET 的读端都是不同实现，两边都能无损取回才算"归档可恢复"。
+    const files = buildDeliveryFiles([row], []).files;
+    const archive = path.join(home, 'libarchive-drill.zip');
+    const out = path.join(home, 'libarchive-drill-out');
+    fs.writeFileSync(archive, zipDelivery(files));
+    fs.rmSync(out, { recursive: true, force: true });
+    fs.mkdirSync(out, { recursive: true });
+    const result = spawnSync('tar', ['-xf', archive, '-C', out], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    for (const [name, text] of Object.entries(files)) {
+      assert.equal(fs.readFileSync(path.join(out, name), 'utf8'), text, `libarchive round-trip mismatch: ${name}`);
+    }
+  });
+  await test('the delivery bundle is a redacted delivery artifact, not a backup to restore originals from', () => {
+    const bundle = buildDeliveryFiles([row], []).files;
+    // 本地原始证据里有凭据，交付包里必须已经脱敏 —— 也就是说它**不是**原件的副本。
+    assert(row.requestPkt.includes('cookie-secret'), 'fixture must carry a credential for this boundary to mean anything');
+    assert(!bundle['delivery/evidence/finding-1-request.txt'].includes('cookie-secret'));
+    assert.notEqual(bundle['delivery/evidence/finding-1-request.txt'], row.requestPkt,
+      'a shareable bundle must differ from the local evidence it came from');
+    // 设计后果（写在这里防止以后有人拿它当备份）：要"恢复原件"必须另做一个不脱敏的归档格式，
+    // 不能把 delivery/ 这个交付格式当 restore 源。
+  });
+  await test('the independent round-trip detects a corrupted archive instead of rubber-stamping it', () => {
+    // 证明上面那条"取回一致"不是空断言：把第一个条目的数据字节翻掉，取回的内容必须对不上。
+    const files = buildDeliveryFiles([row], []).files;
+    const firstName = Object.keys(files)[0];
+    const corrupted = Buffer.from(zipDelivery(files));
+    const dataAt = 30 + Buffer.byteLength(firstName, 'utf8');
+    corrupted[dataAt] = corrupted[dataAt] ^ 0xff;
+    const file = path.join(home, 'corrupt-drill.zip');
+    const out = path.join(home, 'corrupt-drill-out');
+    fs.writeFileSync(file, corrupted);
+    fs.rmSync(out, { recursive: true, force: true });
+    fs.mkdirSync(out, { recursive: true });
+    spawnSync('tar', ['-xf', file, '-C', out], { encoding: 'utf8' });
+    const extracted = path.join(out, firstName);
+    assert.notEqual(fs.existsSync(extracted) ? fs.readFileSync(extracted, 'utf8') : null, files[firstName],
+      'a corrupted archive must not compare equal to the original');
+  });
   await test('archive refuses traversal absolute paths and excessive contents', () => {
     for (const name of ['delivery/../escape', 'C:/escape', 'delivery/a\\b', 'delivery/a:b']) assert.throws(() => zipDelivery({ [name]: 'x' }), /unsafe/);
     assert.throws(() => zipDelivery({ 'delivery/huge': 'x'.repeat(32 * 1024 * 1024 + 1) }), /size limit/);

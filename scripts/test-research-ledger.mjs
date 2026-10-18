@@ -39,7 +39,7 @@ const doc = (id, patch = {}) => ({ id, requestId: 'baseline', requestRevision: '
   nextInformation: 'Compare own and other owner fixture objects', knownCheck: { outcome: 'none-found', rationale: 'Only a synthetic fixture; this is a local search result, no novelty claim.',
     sources: [{ reference: 'local-fixture:source-v1', observation: 'No real product vulnerability is represented by the synthetic handler.' }] }, ...patch });
 function start(id, mode = '0day', current = context) {
-  startTaskPolicy(store, id, { mode, budget: { toolCalls: 30, discoveryCalls: 3 } });
+  startTaskPolicy(store, id, { mode, budget: { toolCalls: 30, discoveryCalls: 3, unmeteredToolCalls: 30 } });
   saveTaskContext(store, id, current);
 }
 async function observation(id, outcome = 'support', patch = {}) {
@@ -85,9 +85,7 @@ try {
     assert.equal(result.observations.length, 2); assert.equal(result.observations[0].probe.response, once.probe.response);
     assert.equal(allFindings(store, 'actual', 'pentest').length, 0);
     assert.equal(researchNext(store, 'actual').action, 'independently-verify-impact');
-    assert.equal(taskExecutionGuard(store, 'actual', 'fetch'), undefined);
-    assert.equal(taskExecutionGuard(store, 'actual', 'fetch'), undefined);
-    assert.match(taskExecutionGuard(store, 'actual', 'fetch'), /direction_observation_required/);
+    for (let index = 0; index < 3; index += 1) assert.equal(taskExecutionGuard(store, 'actual', 'fetch'), undefined, 'a supported direction keeps probing on the task budget');
     assert.throws(() => observeResearch(store, 'actual', 'h1', { ...once, id: 'after-support' }), /closed/);
   });
   await test('normal-response counterevidence refutes direction while expired controls never masquerade as negative evidence', async () => {
@@ -157,7 +155,7 @@ try {
     assert.throws(() => observeResearch(store, 'stale', 'h', wrongPath), /endpoint boundary/);
   });
   await test('functional grouping needs confirmed input and permission evidence and never transfers results across members', () => {
-    startTaskPolicy(store, 'groups', { mode: '0day', budget: { toolCalls: 30, discoveryCalls: 3 } });
+    startTaskPolicy(store, 'groups', { mode: '0day', budget: { toolCalls: 30, discoveryCalls: 3, unmeteredToolCalls: 30 } });
     const second = { ...context.requests[0], id: 'second', inputs: [{ name: 'object', location: 'query', evidenceIds: ['second'] }] };
     saveTaskContext(store, 'groups', { ...context, requests: [context.requests[0], second] }); assert.equal(researchGroups(store, 'groups').total, 2);
     const group = { verified: true, function: 'Object lookup', inputStructure: 'object=query:string', permissionBoundary: 'same fixture owner check', evidenceIds: ['handler-observation', 'permission-control'] };
@@ -166,7 +164,7 @@ try {
     saveTaskContext(store, 'groups', { ...context, requests: [{ ...context.requests[0], researchGroup: group }, { ...second, researchGroup: { ...group, permissionBoundary: 'different tenant boundary' } }] });
     assert.equal(researchGroups(store, 'groups').total, 2);
   });
-  await test('regular and nday preserve two-operation observation gates across restart and continue another actual input', async () => {
+  await test('regular and nday keep probing on the task budget across restart, and a recorded observation still drives the next actual input', async () => {
     const otherEndpoint = endpoint.replace('/api/object', '/api/second');
     const second = { ...context.requests[0], id: 'second-route', endpoint: otherEndpoint,
       request: normal.request.replace('/api/object', '/api/second'), inputs: [{ name: 'object', location: 'query', evidenceIds: ['second-route'] }] };
@@ -174,12 +172,13 @@ try {
       const sid = 'adaptive-' + mode;
       start(sid, mode, { ...context, requests: [{ ...context.requests[0], kind: 'web' }, second] });
       createResearch(store, sid, doc('first'));
-      assert.equal(guards[0]({ ...exec(sid), name: 'fetch' }), undefined);
-      assert.equal(guards[0]({ ...exec(sid), name: 'pwsh' }), undefined);
+      // 一个真实假设常常要试十几下：探测**不再按次数**打断，只受任务工具预算约束。
+      for (let index = 0; index < 5; index += 1) assert.equal(guards[0]({ ...exec(sid), name: 'fetch' }), undefined, 'probe ' + index + ' must not be count-blocked');
       store.close(); store = openStore(file);
-      assert.match(guards[0]({ ...exec(sid), name: 'fetch' }), /direction_observation_required/);
-      assert.equal(readTaskPolicy(store, sid).used.toolCalls, 2);
-      assert.equal((await tools.get('redteam_task').execute({ action: 'next' }, exec(sid))).next.action, 'record-observation-or-close');
+      assert.equal(readTaskPolicy(store, sid).used.toolCalls, 5, 'operation counters survive a restart');
+      assert.equal(guards[0]({ ...exec(sid), name: 'fetch' }), undefined, 'a restarted session keeps probing under the same budget');
+      assert(readTaskPolicy(store, sid).used.toolCalls <= readTaskPolicy(store, sid).budget.toolCalls, 'the task budget remains the bound');
+      assert.equal((await tools.get('redteam_task').execute({ action: 'next' }, exec(sid))).next.action, 'record-observation-or-close', 'the hint still suggests recording after repeated probes');
       observeResearch(store, sid, 'first', await observation('valid-negative', 'counterevidence'));
       const next = researchNext(store, sid);
       assert.equal(next.action, 'create-direction-on-observed-input'); assert.equal(next.requests.length, 1);

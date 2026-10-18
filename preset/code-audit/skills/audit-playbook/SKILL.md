@@ -614,7 +614,7 @@ trivy config --config-policy ./policy --namespaces user <dir>
 | 语义门禁：复核 gate-pass（无 stage_gate 编号） | 复核记录（+关键项跨 harness 复核建议项） | 无复核记录的报告条目拒收 |
 | **Gate A3 覆盖度** | audit-coverage-matrix.md + scan-reconcile.md（扫描命中对账表落盘文件名） | 每格每命中都有终态；无终态格子/对账不守恒 = 报告不完整退回 |
 
-> **结构校验走运行时门禁工具**：开工门禁清单优先看 route-boost 信封（已含门禁与 canonical 文件名）；信封缺失或不确定时再调 `gates_list`（mode=code-audit）读门禁清单与 canonical 文件名；产物齐后调 `stage_gate(mode, stage, workspace[, file])` 做结构校验（判定自动落 `<workspace>/gate-log.md`）。**校验物与标记以下表为准，不要去找插件源码文件。** 结构 PASS ≠ 全过——manual 项（语义）由复核员判定。
+> **结构校验走运行时门禁工具**：需要开工门禁清单时直接调 `gates_list`（mode=code-audit）读门禁与 canonical 文件名；产物齐后调 `stage_gate(mode, stage, workspace[, file])` 做结构校验（判定自动落 `<workspace>/gate-log.md`）。旧会话里若还看到 route-boost 信封，只当历史说明；缺失时不影响本流程。**校验物与标记以下表为准，不要去找插件源码文件。** 结构 PASS ≠ 全过——manual 项（语义）由复核员判定。
 
 > **覆盖记录（operation-state 扩展，与门禁同源）**：用 `operation_goal` 登记任务目标和完成标准后，先用 `operation_constraints` 登记用户约束（deny/allow 每行一条，带匹配词的 deny 命中 bash/fetch 即拦；约束每轮都会带进上下文，防压缩丢失），再用 `operation_scope` 登记本次覆盖范围——每行一个目标单元（资产/路由/模块/账号/题目；「id: 标签」可固定 id；**只登记目标明确点到或确实必需的面，绝不擅自扩大**）；每测完一项用 `operation_progress tested=<id> evidence=<evidence 编号/矩阵行/输出文件>` 记录，重复记录会刷新证据。范围登记后，报告会按「覆盖：已测/总数」核对——没测完可以照实声明，虚报或漏报会被拦。开新方向（派单/追线/阶段切换）前用 `operation_intent` 登记依据（anchor=boot 开局 / criterion 完成标准 / scope 范围 / finding 本次发现 / chain 攻击链节点 + id）：方向必须有已确认的证据作依据；结束时用 `operation_progress intent_done/intent_blocked/intent_dropped`（受阻或放弃要写原因）；未结束的方向会拦住报告落盘。
 >

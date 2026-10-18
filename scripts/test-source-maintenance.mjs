@@ -129,4 +129,34 @@ await check('real subscription RPC persists selection and removing a subscriptio
     assert(!removed.collector.sources.includes(source)); assert.equal(pipeline.readSourceRecord(source, 'file:example', home).id, 'file:example');
   } finally { store.close(); closeSharedStore(); }
 });
+// v6 第 6.4 节「更正、撤回与失效关联当前候选」：原文在**整理之前**就被更正/移除时，
+// 旧的待整理记录必须标成 superseded，而不是拿旧哈希去整理一份已经变了的正文。
+// 此前这条分支（source-reviews.js 的 superseded）没有任何测试。
+// 放在最后：这两条会消耗模型调用，前面几条用例按绝对调用数断言，不能被打乱。
+await check('corrected source supersedes the stale pending review instead of reviewing the old hash', async () => {
+  const id = 'file:superseded';
+  await collect([material(original, { id, commit: 'e'.repeat(40) })]);
+  // reviewPer24Hours=0 只入队、不整理：留下一条 sha=旧正文 的待整理记录。
+  const queued = await runSourceReviews({ ...config, reviewPer24Hours: 0 }, { home, review });
+  assert.equal(queued.processed, 0);
+  await collect([material(original + ' Corrected version.', { id, commit: 'f'.repeat(40) })]);
+  const before = sourceReviewStatus(home).counts.superseded ?? 0;
+  const callsBefore = calls;
+  const result = await runSourceReviews(config, { home, review });
+  assert.equal(sourceReviewStatus(home).counts.superseded ?? 0, before + 1, '旧 sha 的待整理记录必须被标成 superseded');
+  assert.equal(calls, callsBefore + 1, '只对当前正文花一次模型调用');
+  assert(result.processed >= 1, JSON.stringify(result));
+  assert.equal(sourceReviewStatus(home).counts.pending ?? 0, 0, '不能留下永远整理不完的待办');
+});
+await check('removed source supersedes its pending review without a model call', async () => {
+  const id = 'file:superseded-removed';
+  await collect([material(original, { id, commit: '1'.repeat(40) })]);
+  await runSourceReviews({ ...config, reviewPer24Hours: 0 }, { home, review });
+  await collect([material(original, { id, commit: '2'.repeat(40), status: 'removed-from-current-repository' })]);
+  const before = sourceReviewStatus(home).counts.superseded ?? 0;
+  const callsBefore = calls;
+  await runSourceReviews(config, { home, review });
+  assert.equal(sourceReviewStatus(home).counts.superseded ?? 0, before + 1, '已移除来源的待整理记录必须标成 superseded');
+  assert.equal(calls, callsBefore, '已移除来源不再花模型调用');
+});
 console.log(`${passed} passed, ${failed} failed`); process.exitCode = failed ? 1 : 0;

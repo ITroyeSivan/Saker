@@ -1,0 +1,33 @@
+/* 5.7 共享组件层：Button / Input / Select / Badge / DataTable / Drawer / InlineNotice / EmptyState
+   单一来源：shared/ui-kit/ui-kit.css（令牌见 shared/ui-kit/ui-kit.json）。
+   由 scripts/sync-ui-kit.mjs 注入到各产品插件；插件里的同类尺寸规则应删除，避免双写。 */
+.saker-ui-btn{height:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px}
+.saker-ui-input{height:36px;border-radius:6px}
+.saker-ui-select{height:32px;border-radius:6px}
+.saker-ui-table td{height:38px}
+.saker-ui-badge{border-radius:6px;font-size:12px;line-height:1.5}
+.saker-ui-drawer{border-radius:12px}
+.saker-ui-notice{border-radius:6px;font-size:13px;line-height:1.5}
+.saker-ui-empty{border-radius:6px;font-size:13px;line-height:1.5}
+/* 现有插件类别名：与 canonical 类共用同一套尺寸 */
+.dsh-chat-panel-head button,.dsh-chat-actions button,.dsh-chat-task-status button,.dsh-task-nav button,.dsh-task-actions button{height:32px;display:inline-flex;align-items:center;justify-content:center}
+.dsh-prompt-io button,.dsh-prompt-more,.dsh-prompt-scopes button,.dsh-prompt-modes button,.dsh-prompt-foot button{height:32px;display:inline-flex;align-items:center;justify-content:center}
+.dsh-materials-tools button,.dsh-materials-types button,.dsh-materials-foot button,.dsh-materials-table td button{height:32px;display:inline-flex;align-items:center;justify-content:center}
+.dsh-materials-new button,.dsh-materials-import-actions button,.dsh-execution-tools>button,.dsh-test-content-actions button,.dsh-rtr-btn{height:32px;display:inline-flex;align-items:center;justify-content:center}
+.dsh-task-nav select,.dsh-materials-tools select,.dsh-rtr-select{height:32px}
+.dsh-prompt-saveas input,.dsh-prompt-list input[type=search],.dsh-prompt-field input{height:36px}
+.dsh-materials-tools input[type=search],.dsh-materials-import input,.dsh-task-field input,.dsh-rtr-search{height:36px}
+.dsh-materials-table td{height:38px}
+.dsh-chat-setup svg,.dsh-task-workspace svg{width:16px;height:16px}
+.dsh-hnt-btn,.dsh-hnt-tab{height:32px}
+.dsh-hnt-input{height:36px}
+.dsh-hnt-select{height:32px}
+.dsh-mcs-btn,.dsh-mcs-iconbtn,.dsh-mcs-toolscount--btn{height:32px}
+.dsh-mcs-field input,.dsh-mcs-pairrow input,.dsh-mcs-search{height:36px}
+.dsh-mcs-field select,.dsh-mcs-seg button{height:32px}
+.dsh-sp-chip.is-btn{height:32px}
+.dsh-mg-chip{height:32px}
+/* 内联 style 插件（knowledge-hub / sec-config / skill-browse）：根容器打 data-saker-ui，
+   控件尺寸由共享层统一给，插件自己的 helper 不再写 height。 */
+[data-saker-ui] button{height:32px}
+[data-saker-ui] input:not([type=checkbox]):not([type=radio]):not([type=file]){height:36px}

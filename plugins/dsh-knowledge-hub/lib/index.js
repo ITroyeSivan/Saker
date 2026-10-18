@@ -16,13 +16,206 @@
 import path from 'node:path'
 import fs from 'node:fs'
 import os from 'node:os'
+import { randomUUID } from 'node:crypto'
 import { spawn, spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { KnowledgeIndex, TEXT_EXTS } from './index-engine.js'
+import { DatabaseSync } from 'node:sqlite'
+import { INDEX_VERSION, KnowledgeIndex, TEXT_EXTS } from './index-engine.js'
 import { getSyncMode, loadCatalog, packRoots, packsStatus, setSyncMode, syncPacks } from './packs.js'
-import { indexBuildStatus, indexDbPath, startBackgroundIndexBuild } from './index-build.js'
+import { aliasCatalogPaths, indexBuildStatus, indexDbPath, startBackgroundIndexBuild } from './index-build.js'
+import { AUTO_BATCH_MAX_ITEMS, extractFacts, packAutoItems, renderAutoBlock, autoBudgetAllows } from './auto-provide.js'
+
+// 任务级知识库开关（v6 第 5.6 节）：唯一布尔来源在 redteam-results 的 task_knowledge 表。
+// 这里只读该表；读不到（库不存在、表未迁移、会话未知）时不误拦，交由其它开关。
+// 工具失败要给人话：结构化错误（{code,message}）以前被插值成 "[object Object]"，
+// 模型和用户都看不出到底是"被知识库开关拦下"还是"真的检索失败"。
+function renderToolError(error) {
+  if (error === undefined || error === null || error === '') return ''
+  if (typeof error === 'string') return error
+  const code = error.code ? `[${error.code}] ` : ''
+  return code + (error.message !== undefined ? String(error.message) : JSON.stringify(error))
+}
+function taskKnowledgeDisabled(sessionId) {
+  if (!sessionId || typeof sessionId !== 'string') return false
+  const file = path.join(process.env.DSH_HOME || path.join(os.homedir(), '.dsh'), 'redteam-results', 'results.db')
+  if (!fs.existsSync(file)) return false
+  let db
+  try {
+    db = new DatabaseSync(file, { readOnly: true })
+    const row = db.prepare('SELECT enabled FROM task_knowledge WHERE session_id=?').get(sessionId)
+    return row ? row.enabled !== 1 : false
+  } catch { return false }
+  finally { try { db?.close() } catch { /* 句柄已失效 */ } }
+}
+
+// 真实使用记录（v6 第 6.3 节）：内容确实交给模型时才记一次。best-effort——
+// 记录失败不影响检索；动态 import 避免把这个跨插件依赖变成装载期硬依赖。
+async function recordUsage(sessionId, entry) {
+  if (!sessionId) return
+  const home = process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
+  try {
+    const [storeModule, usageModule] = await Promise.all([
+    import('@dsh-external/dsh-redteam-results/store'),
+    import('@dsh-external/dsh-redteam-results/knowledge-usage'),
+    ])
+    const store = storeModule.openStore(path.join(home, 'redteam-results', 'results.db'))
+    try { usageModule.recordKnowledgeUsage(store, sessionId, entry) }
+    finally { try { store.close() } catch { /* 句柄已失效 */ } }
+  } catch { /* 记录失败不影响检索 */ }
+}
+
+// ── 知识自动补充（v6 第 6.1/6.2 节）────────────────────────────────────────
+// 装配热路径：只在出现**新事实**时才检索一次，且每批最多 3 条 / ≤3000 字节。
+// 扫描游标在内存里；跨进程去重靠 knowledge_usage 账本里的
+// 事实键、发送状态与 chunkId，避免重启后重复补同一份正文。
+const AUTO_CURSOR = new Map()   // sessionId → 已扫描到的 surface seq
+const AUTO_SCAN_LIMIT = 40      // 只看最近 40 条用户消息，别把整段历史当触发源
+
+function redteamResultsDbPath() {
+  return path.join(process.env.DSH_HOME || path.join(os.homedir(), '.dsh'), 'redteam-results', 'results.db')
+}
+
+/** 当前任务的问题文本（用于「同一问题」累计额度）；读不到就是空串。 */
+function taskPolicyQuestion(sessionId) {
+  if (!sessionId) return ''
+  const file = redteamResultsDbPath()
+  if (!fs.existsSync(file)) return ''
+  let db
+  try {
+    db = new DatabaseSync(file, { readOnly: true })
+    const row = db.prepare('SELECT record FROM task_policy WHERE session_id=?').get(sessionId)
+    if (!row) return ''
+    const record = JSON.parse(row.record)
+    return typeof record?.question === 'string' ? record.question : ''
+  } catch { return '' }
+  finally { try { db?.close() } catch { /* 句柄已失效 */ } }
+}
+
+/** 自动补充账本：已提供的事实、已提供的 chunkId，以及问题级/任务级已用字节。 */
+function readAutoLedger(sessionId, question) {
+  const out = { facts: new Set(), providedChunks: new Set(), questionBytes: 0, taskBytes: 0 }
+  if (!sessionId) return out
+  const file = redteamResultsDbPath()
+  if (!fs.existsSync(file)) return out
+  let db
+  try {
+    db = new DatabaseSync(file, { readOnly: true })
+    const rows = db.prepare('SELECT record FROM knowledge_usage WHERE session_id=?').all(sessionId)
+    for (const row of rows) {
+      let record
+      try { record = JSON.parse(row.record) } catch { continue }
+      const bytes = Number.isFinite(record.renderedBytes) ? record.renderedBytes
+        : (Number.isFinite(record.contentBytes) ? record.contentBytes : 0)
+      const state = record.state ?? 'legacy'
+      const counted = state === 'sent' || state === 'legacy'
+      if (record.chunkId && (counted || state === 'reserved' || state === 'dispatched')) out.providedChunks.add(String(record.chunkId))
+      if (record.trigger !== 'auto-provide') continue
+      if (counted) out.taskBytes += bytes
+      if (record.query) out.facts.add(String(record.query).toLowerCase())
+      if (counted && question && String(record.reason || '').includes(question)) out.questionBytes += bytes
+    }
+    return out
+  } catch { return out }
+  finally { try { db?.close() } catch { /* 句柄已失效 */ } }
+}
+
+/** 自上次扫描以来、新出现的用户消息里的可检索事实（CVE/EDB/产品+版本）。 */
+function recentFactsFromSession(session) {
+  const id = session?.id
+  if (!id || !session.surface || typeof session.eventAt !== 'function') return []
+  const last = AUTO_CURSOR.get(id) ?? -1
+  const texts = []
+  let cursor = last
+  // 首次扫描只回看最近 200 个节点：长会话不该因为第一回合就全量遍历整段历史。
+  const nodes = session.surface.nodes || []
+  const window = last < 0 ? nodes.slice(Math.max(0, nodes.length - 200)) : nodes
+  for (const seq of window) {
+    if (!(seq > last)) continue
+    if (seq > cursor) cursor = seq
+    let event
+    try { event = session.eventAt(seq) } catch { continue }
+    // 用户消息与工具结果都算触发源（v6 第 6.1 节）：导入结果和工具返回的新识别事实
+    // 落在 `tool/result`（role=tool）上，只扫用户消息会漏掉这两路。
+    const type = event?.type
+    if (type !== 'user/message' && type !== 'tool/result') continue
+    const message = type === 'tool/result' ? event.data?.message : event.data
+    if (!message) continue
+    if (type === 'user/message' && (message.role !== 'user' || message.source?.kind === 'runtime-context')) continue
+    const text = (message.content || []).filter(part => part?.type === 'text').map(part => part.text).join('\n')
+    if (text) texts.push(text)
+  }
+  AUTO_CURSOR.set(id, cursor)
+  const facts = []
+  const seen = new Set()
+  for (const text of texts.slice(-AUTO_SCAN_LIMIT)) {
+    for (const fact of extractFacts(text)) {
+      const key = fact.value.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      facts.push(fact)
+    }
+  }
+  return facts
+}
+
+/**
+ * 计算本轮要自动补充的知识块。返回空串表示不补充（关闭、无新事实、全部已提供或额度用尽）。
+ * 内容确实进入请求时才写使用记录；已在上下文里的同版片段只留引用、不重复正文。
+ */
+function autoProvideText(assembly) {
+  const session = assembly?.agent?.session
+  const sessionId = session?.id
+  if (!sessionId) return ''
+  const preset = session.header?.agentPreset
+  if (!MODE_IDS.includes(preset)) return ''
+  if (taskKnowledgeDisabled(sessionId)) return ''
+  const facts = recentFactsFromSession(session)
+  if (!facts.length) return ''
+  const question = taskPolicyQuestion(sessionId)
+  const ledger = readAutoLedger(sessionId, question)
+  const fresh = facts.filter(fact => {
+    const key = fact.value.toLowerCase()
+    return !ledger.facts.has(key)
+  })
+  if (!fresh.length) return ''
+  const candidates = []
+  for (const fact of fresh) {
+    let hits = []
+    try { hits = searchAll(fact.value, preset, AUTO_BATCH_MAX_ITEMS) } catch { hits = [] }
+    for (const hit of hits) {
+      const chunkId = String(hit.chunkId || '')
+      if (chunkId && ledger.providedChunks.has(chunkId)) continue
+      candidates.push({ ...hit, fact: fact.value })
+    }
+  }
+  if (!candidates.length) return ''
+  const items = candidates.map(hit => {
+    const preview = String(hit.preview || '').slice(0, 600)
+    return { source: hit.source, path: hit.path, line: hit.line, chunkId: hit.chunkId, fact: hit.fact,
+      title: hit.title || '', preview, text: (hit.title ? hit.title + ' · ' : '') + preview,
+      deliveryId: 'kh-' + randomUUID(), docVersion: hit.docVersion || hit.version || '' }
+  })
+  const packed = packAutoItems(items)
+  if (!packed.items.length) return ''
+  if (!autoBudgetAllows({ questionBytes: ledger.questionBytes, taskBytes: ledger.taskBytes }, packed.bytes).allowed) return ''
+  const text = renderAutoBlock(packed.items)
+  // 记账：事实键（去重）+ 每条片段的最终渲染字节数（累计额度）。
+  // 这里只写 prepared；真实请求绑定和发送边界由 model-budget 转 reserved/dispatched/sent。
+  for (const fact of fresh) {
+    recordUsage(sessionId, { trigger: 'auto-provide', query: fact.value, reason: '自动补充 ' + question,
+      state: 'prepared', source: 'knowledge-hub' })
+  }
+  for (const item of packed.items) {
+    recordUsage(sessionId, { trigger: 'auto-provide', query: item.fact || '', reason: '自动补充 ' + question,
+      docPath: item.path, chunkId: item.chunkId, title: item.title, excerpt: item.text,
+      docVersion: item.docVersion, deliveryId: item.deliveryId, state: 'prepared',
+      contentBytes: Buffer.byteLength(item.text, 'utf8'),
+      renderedBytes: Buffer.byteLength(renderAutoBlock([item]), 'utf8'), source: 'knowledge-hub' })
+  }
+  return text
+}
 
 export const name = 'dsh-knowledge-hub'
 export const inject = ['connection', 'tools', 'systemPrompt', 'webServer']
@@ -32,6 +225,8 @@ const MODE_IDS = ['pentest', 'code-audit', 'ctf-solver']
 const MODE_LABELS = { pentest: '渗透测试', 'code-audit': '代码审计', 'ctf-solver': 'CTF 解题' }
 const SEARCH_SOURCES = new Set(['bundle', 'patt', 'user', 'import'])
 const MAX_READ_BYTES = 1024 * 1024 // 1 MiB single-file read cap
+// 主动精读每段最多 6000 UTF-8 字节（v6 第 6.2 节）：与 80 行先到分页，避免单条知识灌爆上下文。
+const READ_EXCERPT_BYTES = 6000
 const MAX_SEARCH_FILES = 500 // per search call
 const SMALL_FILE_LIMIT = 200 * 1024 // ≤200 KiB scanned fully; larger scans head + filename only
 const HEAD_LINES = 1000 // lines scanned from large files
@@ -298,6 +493,7 @@ function getKnowledgeIndex() {
     dbPath: indexDbPath(),
     roots: indexRoots(),
     logger: console,
+    aliasCatalogPaths: aliasCatalogPaths(),
   })
   return knowledgeIndex
 }
@@ -401,7 +597,7 @@ function closeKnowledgeIndex() {
 function knowledgeIndexStatus() {
   const build = indexBuildStatus()
   if (!fs.existsSync(indexDbPath())) {
-    return { ready: false, version: 2, docs: 0, chunks: 0, build }
+    return { ready: false, version: INDEX_VERSION, docs: 0, chunks: 0, build }
   }
   const status = getKnowledgeIndex().status()
   return { ...status, ready: true, build }
@@ -1332,7 +1528,7 @@ export function apply(ctx, config = {}) {
           query: { type: 'string', required: true, description: '关键词、CVE/EDB-ID 或自然语言问题' },
           mode: { type: 'string', enum: MODE_IDS, description: '预设模式（缺省 pentest）' },
           source: { type: 'string', enum: ['bundle', 'patt', 'user', 'import'], description: '限定来源层（缺省全部）' },
-          limit: { type: 'number', description: '返回条数（默认 8，最大 20）' },
+          limit: { type: 'number', description: '返回条数（默认 5，最大 20）' },
         },
         output: {
           schema: {
@@ -1344,23 +1540,33 @@ export function apply(ctx, config = {}) {
             {
               type: 'text',
               text: v.ok
-                ? `知识库命中 ${v.value.hits.length} 条` + (v.value.hits.length
-                    ? '\n' + v.value.hits.map((h) => {
+                ? (v.value.hits.length
+                    ? `知识库命中 ${v.value.hits.length} 条 ref=${v.value.deliveryId || ''}\n` + v.value.hits.map((h) => {
                         const pack = h.packId ? ` pack=${h.packId}` : ''
                         const title = h.title ? `${h.title} · ` : ''
                         return `${h.lowConfidence ? '[低置信] ' : ''}[${h.source}${pack}] ${h.path}:${h.line} chunk=${h.chunkId}\n${title}${h.preview}`
                       }).join('\n---\n')
-                    : '')
-                : `检索失败：${v.error || ''}`,
+                    // v6 第 6.2 节「空结果」：主动检索要返回**没有命中的具体查询**，不生成资料。
+                    : `知识库没有命中：${v.value.query || ''}`)
+                : `检索失败：${renderToolError(v.error)}`,
             },
           ],
         },
-        async execute(args) {
+        async execute(args, exec) {
+          if (taskKnowledgeDisabled(exec?.agent?.session?.id)) return { ok: false, error: { code: 'knowledge_disabled', message: '本任务已关闭知识库读取；需要时请在聊天工具行重新开启。' } }
           const mode = MODE_IDS.includes(args && args.mode) ? args.mode : 'pentest'
-          const limit = Math.min(20, Math.max(1, Number((args && args.limit) || 8)))
+          // 主动搜索默认最多 5 条（v6 第 6.2 节）：短片段用于定位，需要正文再 knowledge_read。
+          const limit = Math.min(20, Math.max(1, Number((args && args.limit) || 5)))
           const source = SEARCH_SOURCES.has(args && args.source) ? args.source : ''
-          const hits = searchAll(String((args && args.query) || ''), mode, limit, source)
-          return { ok: true, value: { hits, index: knowledgeIndexStatus() } }
+          const query = String((args && args.query) || '')
+          const hits = searchAll(query, mode, limit, source)
+          // 记实际送出的短片段（v6 第 6.3 节）：条目列表能直接看片段、来源与用量。
+          const deliveryId = 'kh-' + randomUUID()
+          const excerpt = hits.map(h => `[${h.source}] ${h.path}:${h.line}\n${h.title ? h.title + ' · ' : ''}${h.preview}`).join('\n---\n')
+          await recordUsage(exec?.agent?.session?.id, { trigger: 'knowledge_search', query,
+            reason: '按需检索', title: '检索命中 ' + hits.length + ' 条', excerpt, deliveryId, state: 'prepared',
+            contentBytes: Buffer.byteLength(excerpt, 'utf8'), source: 'knowledge-hub' })
+          return { ok: true, value: { hits, query, index: knowledgeIndexStatus(), deliveryId } }
         },
       }),
       'dsh-knowledge-hub: knowledge_search',
@@ -1376,7 +1582,7 @@ export function apply(ctx, config = {}) {
           mode: { type: 'string', enum: MODE_IDS, description: 'bundle/user 层需要' },
           path: { type: 'string', description: '相对路径（/ 分隔；未给 hitId 时必填）' },
           offset: { type: 'number', description: '起始行（1 起）' },
-          limit: { type: 'number', description: '读多少行（默认 80，最大 240）' },
+          limit: { type: 'number', description: '读多少行（默认 80，最大 240；每段最多 6000 字节，先到分页）' },
         },
         output: {
           schema: {
@@ -1388,12 +1594,16 @@ export function apply(ctx, config = {}) {
             {
               type: 'text',
               text: v.ok
-                ? `[${v.value.source}] ${v.value.path} 行 ${v.value.from}-${v.value.to}\n文件：${v.value.absPath}\n${v.value.text}`
-                : `读取失败：${v.error || ''}`,
+                ? `[${v.value.source}] ${v.value.path} 行 ${v.value.from}-${v.value.to}（${v.value.bytes} 字节） ref=${v.value.deliveryId || ''}`
+                  + (v.value.nextOffset ? `\n下面还有内容，用 offset=${v.value.nextOffset} 续读。` : '')
+                  + (v.value.lineTruncated ? '\n（本行超过 6000 字节，已截断；该行剩余部分需按更小范围重读。）' : '')
+                  + `\n文件：${v.value.absPath}\n${v.value.text}`
+                : `读取失败：${renderToolError(v.error)}`,
             },
           ],
         },
-        async execute(args) {
+        async execute(args, exec) {
+          if (taskKnowledgeDisabled(exec?.agent?.session?.id)) return { ok: false, error: { code: 'knowledge_disabled', message: '本任务已关闭知识库读取；需要时请在聊天工具行重新开启。' } }
           let source = String((args && args.source) || '')
           const mode = MODE_IDS.includes(args && args.mode) ? args.mode : 'pentest'
           let rel = String((args && args.path) || '')
@@ -1422,6 +1632,30 @@ export function apply(ctx, config = {}) {
             const from = Math.max(1, offset || 1)
             const limit = Math.min(240, Math.max(1, Number((args && args.limit) || 80)))
             const slice = lines.slice(from - 1, from - 1 + limit)
+            // 行数与字节两个上限谁先到按谁分页（v6 第 6.2 节）：默认 80 行、每段 ≤6000 字节。
+            const kept = []
+            let bytes = 0
+            let lineTruncated = false
+            for (const line of slice) {
+              const cost = Buffer.byteLength(line, 'utf8') + (kept.length ? 1 : 0)
+              if (bytes + cost > READ_EXCERPT_BYTES) {
+                if (kept.length === 0) {
+                  // 单行本身就超过预算：截到预算内并如实标注（该行剩余部分无法按行号续读）。
+                  kept.push(Buffer.from(line, 'utf8').subarray(0, READ_EXCERPT_BYTES).toString('utf8'))
+                  lineTruncated = true
+                }
+                break
+              }
+              kept.push(line)
+              bytes += cost
+            }
+            const text = kept.join('\n')
+            const to = from - 1 + kept.length
+            const nextOffset = to < lines.length ? to + 1 : null
+            const deliveryId = 'kh-' + randomUUID()
+            await recordUsage(exec?.agent?.session?.id, { trigger: 'knowledge_read', query: rel, docPath: rel, chunkId: String((args && args.hitId) || ''),
+              reason: '按需精读', title: rel, excerpt: text, deliveryId, state: 'prepared',
+              chunkRange: `${from}-${to}`, contentBytes: Buffer.byteLength(text), source: 'knowledge-hub' })
             return {
               ok: true,
               value: {
@@ -1430,8 +1664,14 @@ export function apply(ctx, config = {}) {
                 root,
                 absPath: target,
                 from,
-                to: from - 1 + slice.length,
-                text: slice.join('\n'),
+                to,
+                bytes,
+                limit: READ_EXCERPT_BYTES,
+                nextOffset,
+                lineTruncated,
+                truncated: nextOffset !== null || lineTruncated,
+                deliveryId,
+                text,
               },
             }
           } catch (e) {
@@ -1456,7 +1696,7 @@ export function apply(ctx, config = {}) {
             additionalProperties: true,
             properties: { ok: { type: 'boolean', required: true } },
           },
-          render: (_a, v) => [{ type: 'text', text: v.ok ? v.value.summary : `失败：${v.error || ''}` }],
+          render: (_a, v) => [{ type: 'text', text: v.ok ? v.value.summary : `失败：${renderToolError(v.error)}` }],
         },
         async execute(args) {
           const mode = MODE_IDS.includes(args && args.mode) ? args.mode : 'pentest'
@@ -1503,6 +1743,13 @@ export function apply(ctx, config = {}) {
       order: 560,
       // 走缓存版本：这条文本每个回合都会被装配一次，全量遍历知识目录的代价不能放在热路径上。
       text: () => knowledgeManifest(),
+    })
+    // 自动补充（v6 第 6.1/6.2 节）：消息里出现新事实时按上限补一次知识，关闭知识库即停。
+    // 没有新事实时返回空串，装配不会追加快照——稳态零成本。
+    ctx.systemPrompt.context({
+      name: 'knowledge-hub-auto',
+      order: 561,
+      text: assembly => autoProvideText(assembly),
     })
   } catch (error) {
     console.error('[dsh-knowledge-hub] systemPrompt unavailable: %s', error && error.message ? error.message : String(error))

@@ -22,6 +22,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { readSettingsSection } from "dsh-saker/settings-compat";
+import { sessionWorkingDirectory } from "dsh-saker/working-directory";
 
 function sessionIdOf(exec) {
 	return String(exec?.agent?.session?.id ?? exec?.agent?.id ?? "");
@@ -41,7 +42,7 @@ function sessionIdOf(exec) {
 function resolveWorkspaceArg(value, exec) {
 	if (typeof value !== "string" || value === "") return path.resolve(".");
 	if (path.isAbsolute(value)) return path.resolve(value);
-	const sessionCwd = exec?.agent?.session?.header?.cwd;
+	const sessionCwd = sessionWorkingDirectory(exec?.agent?.ctx, exec?.agent?.session);
 	return sessionCwd ? path.resolve(sessionCwd, value) : path.resolve(value);
 }
 

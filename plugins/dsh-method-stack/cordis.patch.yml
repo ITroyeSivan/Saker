@@ -1,5 +1,5 @@
-# dsh-method-stack：设置页「方法编排」（host 方法引擎 + web 客户端 settings.section）
-# 单一安装行：host 通道 + web 客户端共用同一 bundle 入口。
+# dsh-method-stack：host 侧方法引擎（模型可读的方法库，按需读取正文）。
+# v6 第 4.1 节起不再注册设置页/工具栏入口；web 客户端只剩装载契约，不挂任何插槽。
 - insert:
     - id: dsh-method-stack
       name: '@dsh-external/dsh-method-stack'

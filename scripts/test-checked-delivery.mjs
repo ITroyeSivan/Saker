@@ -98,17 +98,26 @@ try {
       download: (...args) => downloads.push(args), downloadArchive: (...args) => archives.push(args) };
     runInNewContext(component + '; this.component = CheckedList;', context);
     const tree = context.component({ sessionId: 'states' });
-    await tree.children[0].props.onClick();
+    const button = label => {
+      const pending = [tree];
+      while (pending.length) {
+        const node = pending.shift();
+        if (node && node.type === 'button' && node.children.includes(label)) return node;
+        if (node && Array.isArray(node.children)) pending.push(...node.children);
+      }
+      throw new Error('button not found: ' + label);
+    };
+    await button('读取检查记录').props.onClick();
     assert.equal(state[0][0].length, 4);
-    await tree.children[1].props.onClick();
+    await button('导出检查清单').props.onClick();
     assert.equal(downloads[0][0], 'checked.tsv');
     assert.equal(downloads[0][1], renderCheckedTsv(readChecks(store, 'states')));
     assert.equal(calls[1][1].sessionId, 'states');
-    await tree.children[2].props.onClick();
+    await button('导出本会话完整交付包').props.onClick();
     assert.equal(archives[0][0], 'saker-delivery.zip');
     assert.equal(Buffer.from(archives[0][1], 'base64').readUInt32LE(0), 0x04034b50);
     failing = true;
-    await tree.children[1].props.onClick();
+    await button('导出检查清单').props.onClick();
     assert.equal(state[1][0], 'Fixture denied');
     assert.equal(downloads.length, 1);
   });

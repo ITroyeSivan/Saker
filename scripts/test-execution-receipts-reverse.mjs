@@ -8,7 +8,7 @@ const root = fileURLToPath(new URL('..', import.meta.url)), boundary = path.reso
 assert.equal(path.resolve(os.tmpdir()), boundary);
 const copy = fs.mkdtempSync(path.join(boundary, 'receipt-reverse-'));
 try {
-  for (const file of ['package.json', 'lib', 'plugins/dsh-redteam-results/lib', 'plugins/dsh-nday-hunter/lib', 'scripts/test-execution-receipts.mjs',
+  for (const file of ['package.json', 'lib', 'plugins/dsh-method-stack/lib', 'plugins/dsh-redteam-results/lib', 'plugins/dsh-nday-hunter/lib', 'scripts/test-execution-receipts.mjs',
     'scripts/test-home-isolation.mjs', 'scripts/test-stub-loader.mjs', 'scripts/test-stub-register.mjs']) {
     fs.mkdirSync(path.dirname(path.join(copy, file)), { recursive: true }); fs.cpSync(path.join(root, file), path.join(copy, file), { recursive: true });
   }
@@ -16,9 +16,10 @@ try {
     ['delivery-evidence.js', 'impactVerified = false,', 'impactVerified = true,', 'finding delivery derives current execution binding but cannot count HTTP responses or supplied impact verdicts as confirmed effects'],
     ['research.js', "&& receiptPair[0].status === receiptPair[1].status", "&& false && receiptPair[0].status === receiptPair[1].status", 'changing response headers alone cannot promote identical host response bodies to support'],
     ['execution-receipts.js', "responseBodyBase64: body.toString('base64')", "responseBodyBase64: Buffer.from('invented response').toString('base64')", 'registered host execution captures actual wire response without accepting a supplied receipt or impact verdict'],
-    ['execution-receipts.js', 'if (denied) throw new Error(denied);', 'if (false) throw new Error(denied);', 'direction and task budgets stop real HTTP execution; restricted directions cannot dispatch'],
+    ['execution-receipts.js', 'if (denied) throw new Error(denied);', 'if (false) throw new Error(denied);', 'repeated probes run on the task budget, and a restricted direction cannot dispatch'],
     ['execution-receipts.js', 'target.pathname !== endpoint.pathname', 'false', 'parser rejects endpoint Host framing and identity errors before requests or budget are consumed'],
     ['research.js', 'if (receiptPair && previous.some(row => receiptPair.some', 'if (false && receiptPair && previous.some(row => receiptPair.some', 'research observations derive packets and times from two distinct session-bound host receipts without reusing executions'],
+    ['execution-receipts.js', "['ip-blocked', 'normal-access-failed', 'login-expired'].includes(code)", "['ip-blocked', 'normal-access-failed'].includes(code)", '身份失效（login-expired）沿任务树传播到父任务，父任务一并暂停'],
   ];
   for (const [file, anchor, mutation, label] of cases) {
     const target = path.join(copy, 'plugins/dsh-redteam-results/lib', file), source = fs.readFileSync(target, 'utf8');

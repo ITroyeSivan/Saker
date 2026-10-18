@@ -7,6 +7,9 @@
 window.__ModuleLoader__.load({ id: "@dsh-external/dsh-mode-group", factory: (require) => {
 var module = { exports: {} }; var exports = module.exports;
 "use strict";
+/* SAKER-UI-KIT:BEGIN */
+var SAKER_UI_KIT_CSS = "/* 5.7 共享组件层：Button / Input / Select / Badge / DataTable / Drawer / InlineNotice / EmptyState\n   单一来源：shared/ui-kit/ui-kit.css（令牌见 shared/ui-kit/ui-kit.json）。\n   由 scripts/sync-ui-kit.mjs 注入到各产品插件；插件里的同类尺寸规则应删除，避免双写。 */\n.saker-ui-btn{height:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px}\n.saker-ui-input{height:36px;border-radius:6px}\n.saker-ui-select{height:32px;border-radius:6px}\n.saker-ui-table td{height:38px}\n.saker-ui-badge{border-radius:6px;font-size:12px;line-height:1.5}\n.saker-ui-drawer{border-radius:12px}\n.saker-ui-notice{border-radius:6px;font-size:13px;line-height:1.5}\n.saker-ui-empty{border-radius:6px;font-size:13px;line-height:1.5}\n/* 现有插件类别名：与 canonical 类共用同一套尺寸 */\n.dsh-chat-panel-head button,.dsh-chat-actions button,.dsh-chat-task-status button,.dsh-task-nav button,.dsh-task-actions button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-prompt-io button,.dsh-prompt-more,.dsh-prompt-scopes button,.dsh-prompt-modes button,.dsh-prompt-foot button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-tools button,.dsh-materials-types button,.dsh-materials-foot button,.dsh-materials-table td button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-new button,.dsh-materials-import-actions button,.dsh-execution-tools>button,.dsh-test-content-actions button,.dsh-rtr-btn{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-task-nav select,.dsh-materials-tools select,.dsh-rtr-select{height:32px}\n.dsh-prompt-saveas input,.dsh-prompt-list input[type=search],.dsh-prompt-field input{height:36px}\n.dsh-materials-tools input[type=search],.dsh-materials-import input,.dsh-task-field input,.dsh-rtr-search{height:36px}\n.dsh-materials-table td{height:38px}\n.dsh-chat-setup svg,.dsh-task-workspace svg{width:16px;height:16px}\n.dsh-hnt-btn,.dsh-hnt-tab{height:32px}\n.dsh-hnt-input{height:36px}\n.dsh-hnt-select{height:32px}\n.dsh-mcs-btn,.dsh-mcs-iconbtn,.dsh-mcs-toolscount--btn{height:32px}\n.dsh-mcs-field input,.dsh-mcs-pairrow input,.dsh-mcs-search{height:36px}\n.dsh-mcs-field select,.dsh-mcs-seg button{height:32px}\n.dsh-sp-chip.is-btn{height:32px}\n.dsh-mg-chip{height:32px}\n/* 内联 style 插件（knowledge-hub / sec-config / skill-browse）：根容器打 data-saker-ui，\n   控件尺寸由共享层统一给，插件自己的 helper 不再写 height。 */\n[data-saker-ui] button{height:32px}\n[data-saker-ui] input:not([type=checkbox]):not([type=radio]):not([type=file]){height:36px}";
+/* SAKER-UI-KIT:END */
 var React = require("react");
 var useState = React.useState, useEffect = React.useEffect, useRef = React.useRef, useCallback = React.useCallback;
 
@@ -193,21 +196,21 @@ function Chip(props) {
 function installStyles() {
 	if (document.getElementById("dsh-mg-style")) return function () {};
 	var css = [
-		".dsh-mg-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--dsw-alias-border-l1,#e9e9ec);background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#1a1a1a);border-radius:8px;padding:5px 10px;font-size:13px;cursor:pointer;max-width:min(260px,60vw);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;transition:background .12s ease}",
+		".dsh-mg-chip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--dsw-alias-border-l1,#e9e9ec);background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#1a1a1a);border-radius:6px;padding:5px 10px;font-size:13px;cursor:pointer;max-width:min(260px,60vw);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;transition:background .12s ease}",
 		".dsh-mg-chip:hover{background:var(--dsw-alias-interactive-bg-hover,#f4f4f5)}",
 		".dsh-mg-chip:disabled{opacity:.5;cursor:default}",
 		".dsh-mg-chip:focus-visible,.dsh-mg-item:focus-visible{outline:2px solid var(--dsw-alias-accent,#4c6ef5);outline-offset:1px}",
-		".dsh-mg-caret{font-size:10px;color:var(--dsw-alias-label-tertiary,#8a8a8f);flex:none}",
-		".dsh-mg-menu{position:fixed;z-index:300;width:min(max-content,92vw);min-width:min(300px,92vw);max-width:min(440px,92vw);overflow:auto;overscroll-behavior:contain;background:var(--dsw-specific-menu,var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-base,#fff)));border:1px solid var(--dsw-alias-border-l2,#e4e4e7);border-radius:10px;box-shadow:0 10px 32px rgba(0,0,0,.14);padding:6px;display:none;animation:dsh-mg-in .1s ease}",
+		".dsh-mg-caret{font-size:12px;color:var(--dsw-alias-label-tertiary,#8a8a8f);flex:none}",
+		".dsh-mg-menu{position:fixed;z-index:300;width:min(max-content,92vw);min-width:min(300px,92vw);max-width:min(440px,92vw);overflow:auto;overscroll-behavior:contain;background:var(--dsw-specific-menu,var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-base,#fff)));border:1px solid var(--dsw-alias-border-l2,#e4e4e7);border-radius:12px;box-shadow:0 10px 32px rgba(0,0,0,.14);padding:8px;display:none;animation:dsh-mg-in .1s ease}",
 		"@keyframes dsh-mg-in{from{opacity:0;transform:translateY(2px)}to{opacity:1;transform:none}}",
 		".dsh-mg-sub{min-width:min(320px,92vw)}",
-		".dsh-mg-item{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;border:none;background:none;border-radius:7px;padding:7px 10px;cursor:pointer;font-size:13px;color:var(--dsw-alias-label-primary,#1a1a1a)}",
+		".dsh-mg-item{display:flex;flex-direction:column;gap:4px;width:100%;text-align:left;border:none;background:none;border-radius:6px;padding:7px 10px;cursor:pointer;font-size:13px;color:var(--dsw-alias-label-primary,#1a1a1a)}",
 		".dsh-mg-item:hover{background:var(--dsw-alias-interactive-bg-hover,#f4f4f5)}",
 		".dsh-mg-item.is-cur{outline:1px solid color-mix(in srgb,var(--dsw-alias-accent,#4c6ef5) 45%,transparent)}",
 		".dsh-mg-group{position:relative;align-items:baseline;flex-direction:row;justify-content:space-between;gap:8px}",
 		".dsh-mg-group .dsh-mg-desc{flex:1}",
 		".dsh-mg-name{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}",
-		".dsh-mg-desc{font-size:11.5px;color:var(--dsw-alias-label-tertiary,#8a8a8f);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}",
+		".dsh-mg-desc{font-size:12px;color:var(--dsw-alias-label-tertiary,#8a8a8f);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}",
 		".dsh-mg-group.is-open{background:var(--dsw-alias-interactive-bg-hover,#f4f4f5)}",
 		"@media (pointer:coarse){.dsh-mg-item{padding:11px 12px}.dsh-mg-chip{padding:8px 12px}}",
 		"@media (prefers-reduced-motion:reduce){.dsh-mg-menu{animation:none}}"
@@ -215,6 +218,7 @@ function installStyles() {
 	var style = document.createElement("style");
 	style.id = "dsh-mg-style";
 	style.textContent = css;
+	style.textContent += SAKER_UI_KIT_CSS;
 	document.head.appendChild(style);
 	return function () { style.remove(); };
 }

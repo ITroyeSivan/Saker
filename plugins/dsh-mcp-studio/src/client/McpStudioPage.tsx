@@ -252,7 +252,7 @@ export function createStudioPage(face: StudioCardFace, t: Translate, pollStatus:
           </div>
         )}
         {pasteNote !== undefined && (
-          <div className={pasteNote.kind === 'ok' ? 'dsh-mcs-sub' : 'dsh-mcs-errors'} style={pasteNote.kind === 'ok' ? undefined : { padding: '6px 10px' }}>
+          <div className={pasteNote.kind === 'ok' ? 'dsh-mcs-sub' : 'dsh-mcs-errors'} style={pasteNote.kind === 'ok' ? undefined : { padding: '8px 12px' }}>
             {pasteNote.text}
           </div>
         )}

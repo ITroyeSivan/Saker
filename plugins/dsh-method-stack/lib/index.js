@@ -6,8 +6,8 @@ const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
 // dsh-method-stack — host.
 // 提示词"方法"化：把可切换的测试逻辑组织成 模块组(group)→子方法(method) 两级。
 // 模型侧：注册固定 systemPrompt context（order 460，位于 route-boost 500 之前），
-// text 回调按 agent→preset 读取该模式的"方法组合"，把启用方法正文按 order 拼装注入
-// 每轮 —— 用户改动组合后下一轮即生效（agent-loop 每轮重渲染 contexts）。
+// Web 会话只提供当前任务的简短模块目录，正文通过 saker_method 按需读取。
+// 其他预设沿用原有组合；模块筛选不能改变任务范围、预算和确认要求。
 // 自定义：官方默认方法集随本插件 methods/（只读，可克隆到用户层）；用户层
 // ~/.dsh/methods/<group>/<id>/ 同名 shadow 官方（与宿主 scoped section 同构思想）。
 // 组合持久化：~/.dsh/method-stack/profiles/<presetId>.json（默认组合+自定义组合）。
@@ -19,6 +19,11 @@ import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { webCatalog, webSelection, saveWebSelection } from './web-selection.js'
+import { methodCatalogEntries } from './selection-config.js'
+import { TEST_CONTENT_KEYS, TEST_CONTENT_ITEMS, LEGACY_METHOD_TO_CONTENT, testContentCatalog } from '@dsh-external/dsh-redteam-results/test-catalog'
+import { openStore } from '@dsh-external/dsh-redteam-results/store'
+import { stageMethodClassification, readMethodClassification, listMethodClassifications, methodModuleRequirement, builtinMethodClassification, methodFingerprint } from '@dsh-external/dsh-redteam-results/method-classification'
 
 export const name = 'dsh-method-stack'
 // webServer 必须显式声明：宿主 0.1.5-rc.1 起 connection 服务自身不再 inject webServer，
@@ -26,7 +31,7 @@ export const name = 'dsh-method-stack'
 // 第 617 行 `owner.effect(() => owner.webServer.register(route))`）。0.1.3-alpha.2 时
 // connection 自己声明了它，所以旧代码不需要；0.1.5 不声明即抛
 // `cannot get property "webServer" without inject`。
-export const inject = ['connection', 'systemPrompt', 'agentPresets', 'webServer', 'tools']
+export const inject = ['connection', 'systemPrompt', 'agentPresets', 'webServer', 'tools', 'sessions']
 
 const CHANNEL = '/dsh-method-stack'
 const Config = z.object({ enable: z.boolean().default(true) })
@@ -182,22 +187,53 @@ function currentProfile(presetId) {
   // 改为按需勾选；仍保留「全部启用」组合，想全开的人一键即可（UI 里也有该快捷）。
   const all = []
   for (const g of fullCatalog()) for (const m of g.methods) all.push(`${g.group}/${m.id}`)
-  const def = { preset: presetId, active: [], combos: { '全部启用': all } }
+  // Pentest 的新默认是 17 项测试内容全选（由 test-catalog 声明）；模型再按当前问题挑相关的。
+  // 其他预设保留原来的“默认关闭、按需启用”语义。
+  const def = presetId === 'pentest'
+    ? { preset: presetId, active: [...TEST_CONTENT_KEYS], combos: { '全部启用': [...TEST_CONTENT_KEYS] } }
+    : { preset: presetId, active: [], combos: { '全部启用': all } }
   writeProfile(presetId, def)
   return def
 }
 
+/** 稳定测试内容 ID → 目录条目；旧 group/id 键也接受（迁移期 UI）。 */
+function contentByKey(key) {
+  const id = TEST_CONTENT_KEYS.includes(key) ? key : LEGACY_METHOD_TO_CONTENT[key]
+  return id ? TEST_CONTENT_ITEMS.find(item => item.id === id) : null;
+}
+const contentGroup = item => TEST_CONTENT_ITEMS.includes(item)
+  ? (item.group === 'recon' ? '信息收集' : 'Web 检查') : '';
+
 /** 把 active（group/id 数组）渲染成按目录实际存在过滤后的正文拼装（按组分节，避免标题堆叠）。 */
-function renderActive(presetId, { compact = false } = {}) {
+function renderActive(presetId, { compact = false, selection } = {}) {
   const profile = currentProfile(presetId)
+  if (presetId === 'pentest') {
+    const activeIds = (selection?.active || profile.active || []).map(key => contentByKey(key)).filter(Boolean).map(item => item.id)
+    const unique = [...new Set(activeIds)]
+    if (!unique.length) return { rev: profile.rev || 1, active: unique, count: 0, text: '' }
+    if (compact) {
+      const groups = new Map();
+      for (const id of unique) { const item = contentByKey(id); const g = contentGroup(item); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(item); }
+      const listed = [...groups.entries()].map(([g, items]) => g + '：' + items.map(i => i.label).join('、')).join('\n');
+      return { rev: profile.rev || 1, active: unique, count: unique.length,
+        text: `<saker-methods mode="${selection?.mode || presetId}" rev="${selection?.rev || profile.rev || 1}" count="${unique.length}">\n当前允许的测试内容（由用户设置；knowledge_search 定位、knowledge_read 精读，不要依次全读；全选=允许按需采用，不等于逐项扫描）：\n${listed}\n</saker-methods>` }
+    }
+    const groups = new Map();
+    for (const id of unique) { const item = contentByKey(id); const g = contentGroup(item); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(item); }
+    const body = [...groups.entries()].map(([g, items]) => g + '：\n' + items.map(i => '· ' + i.label + '（' + i.id + '）——' + i.purpose).join('\n')).join('\n\n');
+    return { rev: profile.rev || 1, active: unique, count: unique.length,
+      text: `<saker-methods mode="${presetId}" rev="${profile.rev || 1}" count="${unique.length}">\n当前允许的测试内容（按具体问题选用；全选=允许按需采用，不等于逐项扫描）：\n${body}\n</saker-methods>` }
+  }
   const catalog = fullCatalog()
   const byGroup = new Map()
   for (const g of catalog) {
     for (const m of g.methods) byGroup.set(`${g.group}/${m.id}`, { group: g.group, m })
   }
-  const activeIds = (profile.active || []).filter((key) => byGroup.has(key))
+  const activeIds = (selection?.active || profile.active || []).filter((key) => byGroup.has(key))
   if (compact && activeIds.length) return { rev: profile.rev || 1, active: activeIds, count: activeIds.length,
-    text: `<saker-methods mode="${presetId}" rev="${profile.rev || 1}" count="${activeIds.length}">\n已启用方法目录，按本轮问题选择相关方法，调用saker_method read key=组/方法读取正文。不要依次全读或把目录当扫描清单。\n${activeIds.slice(0, 24).map(key => key + ': ' + String(byGroup.get(key).m.description || '').slice(0, 100)).join('\n')}${activeIds.length > 24 ? '\n其余方法用saker_method list offset=24查询。' : ''}\n</saker-methods>` }
+    // 常驻只留目录本身：怎么读正文、怎么找资料、证据要求都已在 saker_method/knowledge_* 的工具描述与
+    // 模式 skill 里，重复一遍就是每轮白付。保留"全选=允许按需采用"这条容易误解的语义。
+    text: `<saker-methods mode="${selection?.mode || presetId}" rev="${selection?.rev || profile.rev || 1}" count="${activeIds.length}">\n当前允许的Web测试方向（saker_method read 按需读正文；knowledge_search 定位、knowledge_read 精读，不要依次全读；全选=允许按需采用，不等于逐项扫描）：\n${activeIds.slice(0, 24).map(key => key + ': ' + String(byGroup.get(key).m.description || '').slice(0, 100)).join('\n')}${activeIds.length > 24 ? '\n其余方法用saker_method list offset=24查询。' : ''}\n</saker-methods>` }
   const groupOrder = []
   for (const key of activeIds) { const grp = key.split('/')[0]; if (!groupOrder.includes(grp)) groupOrder.push(grp) }
   const groupSeq = new Map(groupOrder.map((g, i) => [g, i + 1]))
@@ -269,7 +305,31 @@ function audit(presetId, action, detail) {
 }
 
 function ok(value) { return { ok: true, value } }
-function failure(message) { return { ok: false, error: { code: 'method-stack', message: String(message), details: {} } } }
+function failure(message, code = 'method-stack', details = {}) { return { ok: false, error: { code, message: String(message), details } } }
+
+/** 分类读写只碰离线元数据；不开长事务，也不执行任何请求。 */
+function withClassificationStore(work) {
+  const store = openStore(path.join(DSH_HOME, 'redteam-results', 'results.db'))
+  try { return work(store) } finally { store.close() }
+}
+
+/**
+ * 内置目录映射是**确定**的（目录键即模块键），程序负责把它写进分类表。
+ * 幂等：已存在的 (id,version,digest,revision) 直接跳过；失败不阻断插件装载。
+ */
+function stageBuiltinClassifications() {
+  return withClassificationStore((store) => {
+    const entries = methodCatalogEntries(DSH_HOME)
+    let staged = 0
+    for (const entry of Object.values(entries)) {
+      const record = builtinMethodClassification(entry)
+      if (readMethodClassification(store, record.id, record.version, record.digest, record.revision)) continue
+      stageMethodClassification(store, record)
+      staged += 1
+    }
+    return { catalog: Object.keys(entries).length, staged }
+  })
+}
 
 /** 覆盖写用户文本前保留的份数上限。 */
 const BACKUP_KEEP = 5
@@ -303,6 +363,20 @@ export function apply(ctx, config = {}) {
   if (!cfg.enable) return
   console.log('[method-stack] apply begin (enable)')
   const { connection, systemPrompt } = ctx
+  // 内置分类在装载时落地：执行闸要按它判断"用户关掉的模块"。失败只降级，不阻断插件。
+  try { console.log('[method-stack] builtin classifications', JSON.stringify(stageBuiltinClassifications())) }
+  catch (error) { ctx.logger?.warn?.('dsh-method-stack: 内置方法分类未能写入（执行闸会按未分类拒绝）：' + String(error && error.message ? error.message : error)) }
+  function selectionFor(sessionId) {
+    return webSelection(DSH_HOME, sessionId, fullCatalog(), currentProfile('pentest').webDefaults)
+  }
+  function renderedFor(presetId, agent) {
+    if (presetId !== 'pentest') return renderActive(presetId)
+    const selection = selectionFor(agent?.session?.id || 'unbound-preview')
+    if (!selection.available) return { ...selection, count: 0, text: '' }
+    const rendered = renderActive(presetId, { compact: true, selection })
+    if (!rendered.count) rendered.text = '<saker-methods>用户已关闭所有Web测试模块。不要主动展开模块测试；可整理已有资料并回应用户明确提出的问题。证据与独立复核要求仍然有效。</saker-methods>'
+    return { ...rendered, rev: selection.rev }
+  }
   ctx.tools.register(defineTool({
     name: 'saker_method', description: '读取当前启用的测试方法，按具体问题选用；不执行请求。',
     parameters: { action: { type: 'string', enum: ['list', 'read'], required: true }, key: { type: 'string', description: 'read: group/id' }, offset: { type: 'integer', description: 'list偏移，默认0' } },
@@ -311,15 +385,24 @@ export function apply(ctx, config = {}) {
       try {
         const presetId = ctx.agentPresets.composedPreset(exec.agent.ctx);
         if (!PRESET_IDS.has(presetId)) throw new Error('仅安全测试会话可读取方法');
-        const rendered = renderActive(presetId, { compact: true }), catalog = new Map(fullCatalog().flatMap(group => group.methods.map(method => [group.group + '/' + method.id, method])));
+        const rendered = renderedFor(presetId, exec.agent), catalog = new Map(fullCatalog().flatMap(group => group.methods.map(method => [group.group + '/' + method.id, method])));
         if (args.action === 'read') {
-          if (!rendered.active.includes(args.key)) throw new Error('当前组合未启用此方法');
+          if (!rendered.active.includes(args.key)) throw new Error('当前组合未启用此测试内容');
+          if (presetId === 'pentest') {
+            const item = contentByKey(args.key);
+            if (!item) throw new Error('测试内容不存在：' + args.key);
+            return Promise.resolve({ ok: true, key: item.id, rev: rendered.rev, label: item.label,
+              prompt: item.purpose || '本版本不为该测试内容维护单独正文，直接按当前问题选择检查方式。', truncated: false });
+          }
           const method = catalog.get(args.key);
           return Promise.resolve({ ok: true, key: args.key, rev: rendered.rev, origin: method.origin, prompt: method.prompt.slice(0, MAX_TEXT), truncated: method.prompt.length > MAX_TEXT });
         }
         if (args.action !== 'list' || !Number.isInteger(args.offset ?? 0) || (args.offset ?? 0) < 0) throw new Error('invalid method query');
         const offset = args.offset ?? 0;
-        return Promise.resolve({ ok: true, total: rendered.count, offset, items: rendered.active.slice(offset, offset + 24).map(key => ({ key, description: catalog.get(key).description })), more: Math.max(0, rendered.count - offset - 24) });
+        const describe = key => presetId === 'pentest'
+          ? (contentByKey(key)?.purpose || '')
+          : (catalog.get(key)?.description || '');
+        return Promise.resolve({ ok: true, total: rendered.count, offset, items: rendered.active.slice(offset, offset + 24).map(key => ({ key, description: describe(key) })), more: Math.max(0, rendered.count - offset - 24) });
       } catch (error) { return Promise.resolve({ ok: false, error: error.message }); }
     }
   }));
@@ -336,11 +419,27 @@ export function apply(ctx, config = {}) {
     connection.register(ctx, CHANNEL, async (endpoint, payload) => {
     try {
       const p = payload && typeof payload === 'object' ? payload : {}
+      if (endpoint === 'session-list' || endpoint === 'session-set') {
+        if (typeof p.sessionId !== 'string' || !p.sessionId.trim()) return failure('请选择会话')
+        const session = ctx.sessions.get(p.sessionId)
+        if (!session) return failure('会话不存在，请重新选择')
+        if (session.header?.agentPreset !== 'pentest') return failure('仅 Web 测试会话可设置测试模块')
+        const catalog = fullCatalog()
+        const defaults = currentProfile('pentest').webDefaults
+        const selection = endpoint === 'session-set'
+          ? saveWebSelection(DSH_HOME, p.sessionId, p.mode, p.active, p.rev, catalog, defaults, p.policyRev)
+          : selectionFor(p.sessionId)
+        // 后台键已是 test-catalog 的稳定 ID，界面不再拼接 group 前缀。
+        return ok({ ...selection, groups: webCatalog(catalog).map(group => ({ group: group.group, methods: group.methods.map(method => ({
+          id: method.id, label: method.label, description: method.description, active: selection.active.includes(method.id)
+        })) })) })
+      }
       if (endpoint === 'list') {
         const presetId = typeof p.presetId === 'string' && p.presetId ? p.presetId : 'pentest'
         const profile = currentProfile(presetId)
-        const active = new Set(profile.active || [])
-        const groups = fullCatalog().map((g) => ({
+        const catalog = presetId === 'pentest' ? webCatalog(fullCatalog()) : fullCatalog()
+        const active = new Set(presetId === 'pentest' ? profile.webDefaults ?? catalog.flatMap(g => g.methods.map(m => g.group + '/' + m.id)) : profile.active || [])
+        const groups = catalog.map((g) => ({
           group: g.group,
           methods: g.methods.map((m) => ({
             id: m.id, description: m.description, order: m.order, origin: m.origin,
@@ -349,13 +448,16 @@ export function apply(ctx, config = {}) {
             hasUser: userHasMethod(g.group, m.id),
           })),
         }))
-        return ok({ presetId, groups, combos: profile.combos || {}, active: profile.active || [] })
+        return ok({ presetId, groups, combos: profile.combos || {}, active: [...active] })
       }
       if (endpoint === 'set-active') {
         const presetId = typeof p.presetId === 'string' && p.presetId ? p.presetId : 'pentest'
-        if (!Array.isArray(p.active)) return failure('active 需为数组（["group/id", ...]）')
+        if (!Array.isArray(p.active)) return failure('active 需为数组（["sqli", ...]）')
         const profile = currentProfile(presetId)
-        profile.active = p.active.filter((x) => typeof x === 'string' && x.includes('/') && ID_RE.test(x.split('/')[1]))
+        // 稳定测试内容 ID 直接接受；旧 "group/id" 方法键仍兼容（迁移期 UI）。
+        profile.active = p.active.filter((x) => typeof x === 'string'
+          && (TEST_CONTENT_KEYS.includes(x) || (x.includes('/') && ID_RE.test(x.split('/')[1]))))
+        if (presetId === 'pentest') profile.webDefaults = profile.active.filter(key => webCatalog(fullCatalog()).some(g => g.methods.some(m => m.id === key)))
         profile.rev = (profile.rev || 1) + 1
         writeProfile(presetId, profile)
         audit(presetId, 'set-active', `${profile.active.length} methods`)
@@ -379,6 +481,7 @@ export function apply(ctx, config = {}) {
         const combo = (profile.combos || {})[name]
         if (!combo) return failure('组合不存在：' + name)
         profile.active = combo
+        if (presetId === 'pentest') profile.webDefaults = combo.filter(key => webCatalog(fullCatalog()).some(g => g.methods.some(m => m.id === key)))
         profile.rev = (profile.rev || 1) + 1
         writeProfile(presetId, profile)
         audit(presetId, 'use-combo', name)
@@ -431,7 +534,7 @@ export function apply(ctx, config = {}) {
       }
       if (endpoint === 'render-preview') {
         const presetId = typeof p.presetId === 'string' && p.presetId ? p.presetId : 'pentest'
-        const rendered = renderActive(presetId, { compact: presetId === 'pentest' })
+        const rendered = presetId === 'pentest' ? renderActive(presetId, { compact: true, selection: { active: currentProfile(presetId).webDefaults ?? webCatalog(fullCatalog()).flatMap(g => g.methods.map(m => m.id)) } }) : renderActive(presetId)
         return ok({ count: rendered.count, chars: rendered.text.length, rev: rendered.rev })
       }
       if (endpoint === 'opening-get') {
@@ -495,9 +598,35 @@ export function apply(ctx, config = {}) {
         audit('user', 'save-prompt', `${group}/${id} (${text.length} chars)`)
         return ok({ saved: `${group}/${id}`, cloned: true, backup })
       }
+      // 方法分类：把"这个方法需要哪些模块"记成版本化记录。
+      // 只读写离线元数据（不执行请求、不读远端正文）；执行侧接线在后续卡。
+      if (endpoint === 'classification-save' || endpoint === 'classification-list' || endpoint === 'classification-get') {
+        return withClassificationStore((store) => {
+          if (endpoint === 'classification-list') return ok(listMethodClassifications(store, Number.isInteger(p.offset) ? p.offset : 0))
+          const group = typeof p.group === 'string' ? p.group : ''
+          const id = typeof p.id === 'string' ? p.id : ''
+          // 指纹必须与装载时写入内置分类用的**同一份原始条目**一致（原始正文 + 原始 manifest），
+          // 否则同一方法会算出两个摘要，读回就变成"未分类"。
+          const entries = methodCatalogEntries(DSH_HOME)
+          const entry = entries[group + '/' + id] ?? null
+          if (!entry) return failure('方法不存在：' + group + '/' + id)
+          const fingerprint = methodFingerprint(entry)
+          if (endpoint === 'classification-get') {
+            return ok({ fingerprint, requirement: methodModuleRequirement(store, fingerprint, { knownModules: Object.keys(entries) }),
+              record: readMethodClassification(store, fingerprint.id, fingerprint.version, fingerprint.digest) })
+          }
+          // 不带 modules/status/source 时给出内置确定映射（目录键即模块键，status=verified）。
+          const explicit = p.modules !== undefined || p.status !== undefined || p.source !== undefined
+          const requested = explicit
+            ? { schema: 'saker.method-classification/1', ...fingerprint, revision: Number.isInteger(p.revision) ? p.revision : 1,
+                modules: p.modules, status: p.status, source: p.source, reason: p.reason, notes: p.notes }
+            : builtinMethodClassification(entry)
+          return ok({ fingerprint, record: stageMethodClassification(store, requested) })
+        })
+      }
       return failure('unknown endpoint: ' + endpoint)
     } catch (error) {
-      return failure(error instanceof Error ? error.message : String(error))
+      return failure(error instanceof Error ? error.message : String(error), error.code || 'method-stack', error.details || {})
     }
   }, { authority: 'loopback' })
     } catch (error) {
@@ -518,7 +647,7 @@ export function apply(ctx, config = {}) {
           let presetId = ''
           try { presetId = ctx.agentPresets.composedPreset(agent.ctx) } catch { /* ignore */ }
           if (!presetId) return ''
-          const rendered = renderActive(presetId, { compact: presetId === 'pentest' })
+          const rendered = renderedFor(presetId, agent)
           return rendered.text // renderActive 已带 <saker-methods> 标签与分节
         },
       })

@@ -22,8 +22,9 @@ import { createSourceMaintenance } from "./source-maintenance.js";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { parseScope, scopeSafeAsset, upsertAssets } from "dsh-saker/asset-inventory";
 import { parseQueryExpression, everyBranchHasField } from "dsh-saker/query-expression";
+import { sessionWorkingDirectory } from "dsh-saker/working-directory";
 import { openHunterStore, configView, getKey, nowIso } from "./store.js";
-import { buildQueries, parseDsl, searchFofaPage, searchHunterPage, searchQuakePage, mergeAssets, fofaGuard, LIMITS, daysAgoStamp, nowStamp } from "./adapters.js";
+import { buildQueries, parseDsl, searchFofaPage, searchHunterPage, searchQuakePage, mergeAssets, fofaGuard, LIMITS, daysAgoStamp, nowStamp, SearchError, classifySearchError, SEARCH_STATUS } from "./adapters.js";
 import { parseFingerprint, fingerprintQuery, fingerprintLadder, searchWithRelax, verifyPipeline, SEARCH_BUDGET } from "./verify.js";
 import { openStore as openResultsStore, getFinding, updateFinding } from "@dsh-external/dsh-redteam-results/store";
 
@@ -39,7 +40,7 @@ import { openStore as openResultsStore, getFinding, updateFinding } from "@dsh-e
  */
 function resolveWorkspaceArg(workspace, exec) {
 	const raw = String(workspace ?? "").trim();
-	const base = exec?.agent?.session?.header?.cwd;
+	const base = sessionWorkingDirectory(exec?.agent?.ctx, exec?.agent?.session);
 	if (raw === "") return path.resolve(base ?? ".");
 	return path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(base ?? ".", raw);
 }
@@ -131,6 +132,12 @@ function isTrustedRequest(req, trustedHosts) {
 }
 
 const SEARCH_PLATFORMS = ["fofa", "hunter", "quake"];
+// 平台结局的中文标签：模型/用户要能一眼分辨无密钥、无权限、额度用尽、语法错、网络失败与无命中。
+const SEARCH_STATUS_LABEL = {
+	ok: "成功", "no-hits": "无命中", "no-key": "未配置密钥", "field-forbidden": "字段无权限",
+	"quota-exhausted": "额度用尽", syntax: "语法错误", network: "网络失败",
+	auth: "密钥或账号无效", "rate-limited": "被限流", unknown: "未知错误"
+};
 const MAX_SCOPED_QUERY_CHARS = 3500;
 const FOFA_MIN_REQUEST_INTERVAL_MS = 1100;
 let fofaLastRequestAt = 0;
@@ -201,7 +208,7 @@ function scopeTermGroups(query, terms, platform) {
 	return groups;
 }
 
-async function searchFofaRateLimited(key, query, size) {
+async function searchFofaRateLimited(key, query, size, nextCursor = "") {
 	let release;
 	const previous = fofaRequestTail;
 	fofaRequestTail = new Promise((resolve) => { release = resolve; });
@@ -210,7 +217,7 @@ async function searchFofaRateLimited(key, query, size) {
 		const waitMs = Math.max(0, FOFA_MIN_REQUEST_INTERVAL_MS - (Date.now() - fofaLastRequestAt));
 		if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
 		fofaLastRequestAt = Date.now();
-		return await searchFofaPage(key, fofaGuard(query), size);
+		return await searchFofaPage(key, fofaGuard(query), size, nextCursor);
 	} finally {
 		release();
 	}
@@ -234,12 +241,21 @@ async function runSearch(p, st) {
 	const termsByPlatform = new Map(supportedPlatforms.map((platform) => [platform, scopeTermGroups(queries[platform], scopeTerms, platform)]));
 	const maxGroups = Math.max(0, ...[...termsByPlatform.values()].map((groups) => groups.length));
 	if (maxGroups > size) throw new Error(`授权范围拆成 ${maxGroups} 组，超过本次 ${size} 条结果预算；请分批提交 scope 或提高 size`);
+	// 分页游标（v6 第 7.3 节）：首轮只取一页，需要更多时用上一轮返回的 next 继续。
+	// 游标只对 FOFA 的 search/next 有效，且必须与唯一一个查询组一起用，否则"翻的是哪一页"说不清。
+	const nextCursor = typeof p.next === "string" ? p.next.trim() : "";
+	if (nextCursor) {
+		if (platforms.length !== 1 || platforms[0] !== "fofa") throw new Error("next 游标只支持 FOFA 单平台翻页；Hunter 用 page、Quake 用 start");
+		if (maxGroups > 1) throw new Error("有多个授权范围查询组时不能翻页；请先缩小 scope 或分平台单查");
+		if (!getKey(st, "fofa")) throw new SearchError("未配置 FOFA API key；未执行搜索", SEARCH_STATUS.NO_KEY);
+	}
 	const jobs = [];
 	const push = (platform, terms, budget, query, fn) => {
 		const key = getKey(st, platform);
 		if (!key) return;
-		jobs.push(fn(key, query, budget).then((result) => ({ platform, scopeTerms: terms, query, rows: result.rows, total: result.total }))
-			.catch((e) => ({ platform, scopeTerms: terms, query, rows: [], error: String(e?.message ?? e) })));
+		jobs.push(fn(key, query, budget).then((result) => ({ platform, scopeTerms: terms, query, rows: result.rows, total: result.total, next: result.next ?? "" }))
+			.catch((e) => { const info = classifySearchError(e);
+				return { platform, scopeTerms: terms, query, rows: [], error: info.message, status: info.status, retriable: info.retriable }; }));
 	};
 	for (const platform of supportedPlatforms) {
 		const groups = termsByPlatform.get(platform);
@@ -247,20 +263,29 @@ async function runSearch(p, st) {
 		for (const [index, terms] of groups.entries()) {
 			const budget = budgets[index] ?? size;
 			const q = joinScopedQuery(queries[platform], terms, platform);
-			if (platform === "fofa") push(platform, terms, budget, q, searchFofaRateLimited);
+			if (platform === "fofa") push(platform, terms, budget, q, (key, queryText, resultSize) => searchFofaRateLimited(key, queryText, resultSize, nextCursor));
 			else if (platform === "hunter") push(platform, terms, budget, q, (key, queryText, resultSize) => searchHunterPage(key, queryText, 1, Math.min(resultSize, LIMITS.hunter.pageSize)).then((r) => ({ rows: r.rows.slice(0, resultSize), total: r.total })));
 			else push(platform, terms, budget, q, (key, queryText, resultSize) => searchQuakePage(key, queryText, 0, Math.min(resultSize, LIMITS.quake.pageSize)).then((r) => ({ rows: r.rows.slice(0, resultSize), total: r.total })));
 		}
 	}
 	if (jobs.length === 0) {
 		if (unsupported.length) throw new Error(`没有所选平台能执行这组字段；${unsupported.map((item) => `${item.platform}: ${item.error}`).join("；")}`);
-		throw new Error("未配置任何可执行该查询的平台 API——先配置对应 FOFA/Hunter/Quake key");
+		throw new SearchError("未配置任何可执行该查询的平台 API——先配置对应 FOFA/Hunter/Quake key", SEARCH_STATUS.NO_KEY);
 	}
 	const results = [...unsupported, ...await Promise.all(jobs)];
 	const errors = results.filter((r) => r.error);
 	const successful = results.filter((r) => !r.error);
+	// 每个平台的可读结局：成功但 0 条记为 no-hits（不是失败，也不是"已完成全量"）。
+	const platformStatuses = results.map((r) => (r.error
+		? { platform: r.platform, status: r.status || SEARCH_STATUS.UNKNOWN, rows: 0, total: null, error: r.error, retriable: Boolean(r.retriable) }
+		: { platform: r.platform, status: (r.rows?.length ? SEARCH_STATUS.OK : SEARCH_STATUS.NO_HITS), rows: (r.rows || []).length, total: r.total ?? null, nextCursor: r.next || "", error: "", retriable: false }));
 	if (successful.length === 0) {
-		throw new Error(`所有已配置平台搜索失败：${errors.map((r) => `${r.platform}=${r.error}`).join("；")}`);
+		// 全部失败时把各平台状态一并抛出，调用方能分辨"额度用尽/无权限/语法错/网络失败"。
+		const distinct = [...new Set(errors.map((r) => r.status || SEARCH_STATUS.UNKNOWN))];
+		const failure = new SearchError(`所有已配置平台搜索失败：${errors.map((r) => `${r.platform}=${r.error}`).join("；")}`,
+			distinct.length === 1 ? distinct[0] : SEARCH_STATUS.UNKNOWN, { retriable: errors.some((r) => r.retriable) });
+		failure.platformStatuses = platformStatuses;
+		throw failure;
 	}
 	const providerRows = results.filter((r) => !r.error).map((r) => normalizeRows(r.platform, r.rows));
 	const scopedRows = providerRows.map((rows) => scopeTerms.length ? scopeFilteredAssets(rows, p.scope) : { inScope: rows, outOfScope: [] });
@@ -273,7 +298,8 @@ async function runSearch(p, st) {
 		assets,
 		scopedAssets,
 		outOfScopeCount,
-		platformErrors: errors.map((r) => ({ platform: r.platform, scopeTerms: r.scopeTerms, error: r.error })),
+		platformErrors: errors.map((r) => ({ platform: r.platform, scopeTerms: r.scopeTerms, error: r.error, status: r.status || SEARCH_STATUS.UNKNOWN, retriable: Boolean(r.retriable) })),
+		platformStatuses,
 		configuredPlatforms: platforms.filter((platform) => Boolean(getKey(st, platform))),
 		successfulPlatforms: [...new Set(successful.map((r) => r.platform))]
 	};
@@ -330,7 +356,9 @@ function assetSearchText(result) {
 		`- 账本：${result.inventoryFile}（累计 ${result.inventoryTotal} 条）`,
 		`- 范围内结果：${result.rawFile}`,
 	];
-	if (result.platformErrors?.length) {
+	if (result.platformStatuses?.length) {
+		lines.push(`- 平台状态：${result.platformStatuses.map((item) => `${item.platform}=${SEARCH_STATUS_LABEL[item.status] || item.status}（${item.rows} 条${item.error ? `，${item.error}` : ""}）`).join("；")}`);
+	} else if (result.platformErrors?.length) {
 		lines.push(`- 平台告警：${result.platformErrors.map((item) => `${item.platform}:${item.error}`).join("；")}`);
 	}
 	lines.push("", "前 10 条范围内资产：");
@@ -593,16 +621,27 @@ export async function dispatch(ctx, st, endpoint, payload) {
 		return { ok: true, metrics: metrics.summarizeMetrics(DSH_HOME) };
 	}
 	if (endpoint === "search") {
-		const { queries, assets, platformErrors } = await runSearch(p, st);
-		return { ok: true, queries, assets, platformErrors, limits: LIMITS };
+		const result = await runSearch(p, st);
+		const queryOriginal = String(p.query ?? "").trim();
+		const effective = result.effectiveQueries || [];
+		// 保存 queryOriginal 与 queryEffective（v6 第 7.3 节）：用户原始输入与真正发到各平台的表达式
+		// 分开存，回看时能看清范围是怎么拼上去的。记录失败不影响本次搜索结果。
+		try {
+			st.insertSearchRun.run(nowIso(), queryOriginal, JSON.stringify(effective),
+				[...new Set(effective.map((q) => q.platform))].join(","),
+				JSON.stringify((result.platformStatuses || []).map((s) => ({ platform: s.platform, status: s.status, rows: s.rows, total: s.total ?? null }))));
+		} catch { /* 记录失败不影响本次搜索结果 */ }
+		return { ok: true, queryOriginal, queryEffective: effective, queries: result.queries, assets: result.assets,
+			platformErrors: result.platformErrors, platformStatuses: result.platformStatuses || [], limits: LIMITS };
 	}
+	if (endpoint === "search.runs") return { ok: true, runs: st.listSearchRuns.all(Number(p.limit) || 20) };
 	if (endpoint === "export") {
-		const { assets, platformErrors } = await runSearch(p, st);
+		const { assets, platformErrors, platformStatuses } = await runSearch(p, st);
 		const format = p.format === "json" ? "json" : "csv";
-		if (format === "json") return { ok: true, format, text: JSON.stringify(assets, null, 2) };
+		if (format === "json") return { ok: true, format, text: JSON.stringify(assets, null, 2), platformStatuses: platformStatuses || [] };
 		const head = ["host", "ip", "port", "protocol", "title", "server", "domain", "isp", "time", "platforms"];
 		const lines = [head.join(","), ...assets.map((a) => head.map((h) => `"${String(a[h] ?? (h === "platforms" ? (a.platforms ?? [a.platform]).join("|") : "")).replace(/"/g, '""')}"`).join(","))];
-		return { ok: true, format, text: lines.join("\n"), platformErrors };
+		return { ok: true, format, text: lines.join("\n"), platformErrors, platformStatuses: platformStatuses || [] };
 	}
 	if (endpoint === "verify.live") return runVerify(ctx, p);
 	if (endpoint === "history.list") return { ok: true, history: st.listHistory.all(Number(p.limit) || 50) };
@@ -654,7 +693,8 @@ function apply(ctx) {
 				const result = await dispatch(ctx, theStore(), endpoint, payload);
 				send(200, result);
 			} catch (e) {
-				send(400, { ok: false, error: e?.message ?? String(e) });
+				send(400, { ok: false, status: e?.status || classifySearchError(e).status, retriable: Boolean(e?.retriable),
+					error: e?.message ?? String(e), platformStatuses: e?.platformStatuses || [] });
 			}
 		}
 	}), "dsh-hunter: web route");
@@ -669,6 +709,7 @@ function apply(ctx) {
 			mode: { type: "string", enum: ["dsl", "native"], description: "dsl converts unified fields; native sends the query to each platform as-is" },
 			platform: { type: "string", enum: ["all", "fofa", "hunter", "quake"], description: "Search all configured platforms or only one; default all" },
 			size: { type: "integer", description: "Per-platform result budget (default platform search budget, max 500)" },
+			nextCursor: { type: "string", description: "FOFA pagination cursor. Leave empty for the first page; to continue, pass the nextCursor returned by the previous call (FOFA single-platform only, one scope group)." },
 		},
 		output: {
 			schema: { type: "object", additionalProperties: true },
@@ -702,6 +743,7 @@ function apply(ctx) {
 					mode: args.mode === "native" ? "native" : "dsl",
 					platform: args.platform,
 					size: args.size,
+					next: args.nextCursor,
 				}, st);
 				const filtered = scopeFilteredAssets(result.assets, args.scope);
 				const rawFile = path.join("artifacts", "recon", `asset-search-${stamp()}.json`);
@@ -730,6 +772,7 @@ function apply(ctx) {
 					successfulPlatforms: result.successfulPlatforms,
 					effectiveQueries: result.effectiveQueries,
 					platformErrors: result.platformErrors || [],
+					platformStatuses: result.platformStatuses || [],
 					inScope: filtered.inScope.length,
 					outOfScope: filtered.outOfScope.length + result.outOfScopeCount,
 					assets: filtered.inScope,
@@ -740,7 +783,8 @@ function apply(ctx) {
 					merged: written.merged,
 				};
 			} catch (error) {
-				return { ok: false, error: String(error?.message || error) };
+				return { ok: false, status: error?.status || classifySearchError(error).status, retriable: Boolean(error?.retriable),
+					error: String(error?.message || error), platformStatuses: error?.platformStatuses || [] };
 			}
 		},
 	}));
@@ -788,7 +832,7 @@ function apply(ctx) {
 			const workspace = resolveWorkspaceArg(args.workspace, exec);
 			const st = theStore();
 			const configuredPlatforms = platforms.filter((platform) => getKey(st, platform));
-			if (configuredPlatforms.length === 0) return { ok: false, degraded: true, error: `未配置所选平台 API key（${platforms.join("/")}）；未执行搜索` };
+			if (configuredPlatforms.length === 0) return { ok: false, degraded: true, status: SEARCH_STATUS.NO_KEY, error: `未配置所选平台 API key（${platforms.join("/")}）；未执行搜索` };
 			const seenIds = new Set();
 			const queries = [];
 			for (const [index, item] of args.queries.entries()) {
@@ -834,15 +878,17 @@ function apply(ctx) {
 							assets: filtered.inScope,
 							outOfScopeCount: filtered.outOfScope.length + result.outOfScopeCount,
 							platformErrors: result.platformErrors || [],
+							platformStatuses: result.platformStatuses || [],
 						};
 					} catch (error) {
-						queryResults[index] = { id: item.id, query: item.query, basis: item.basis, entryIds: item.entryIds, ok: false, error: String(error?.message || error), assets: [] };
+						queryResults[index] = { id: item.id, query: item.query, basis: item.basis, entryIds: item.entryIds, ok: false, status: error?.status || classifySearchError(error).status, error: String(error?.message || error), assets: [] };
 					}
 				}
 			}));
 			const successfulQueries = queryResults.filter((result) => result?.ok);
 			if (successfulQueries.length === 0) {
-				return { ok: false, error: `全部 ${queries.length} 个查询组失败；没有把失败伪报成零资产`, queryResults };
+				const statuses = [...new Set(queryResults.map((result) => result?.status).filter(Boolean))];
+				return { ok: false, status: statuses.length === 1 ? statuses[0] : SEARCH_STATUS.UNKNOWN, error: `全部 ${queries.length} 个查询组失败；没有把失败伪报成零资产`, queryResults };
 			}
 			const allAssets = successfulQueries.flatMap((result) => result.assets);
 			const merged = mergeAssets(allAssets);
@@ -927,7 +973,7 @@ function apply(ctx) {
       } catch (error) { return { ok: false, error: String(error?.message || error) }; }
       const workspace = resolveWorkspaceArg(args.workspace, exec);
       const st = theStore();
-      if (!getKey(st, "fofa")) return { ok: false, degraded: true, error: "未配置 FOFA API key；未执行搜索" };
+      if (!getKey(st, "fofa")) return { ok: false, degraded: true, status: SEARCH_STATUS.NO_KEY, error: "未配置 FOFA API key；未执行搜索" };
       const size = Math.max(1, Math.min(200, Math.floor(Number(args.size) || 50)));
       const queryResults = await Promise.all(queries.map(async (item) => {
         try {

@@ -1,12 +1,13 @@
 {
   "name": "@dsh-external/dsh-method-stack",
-  "version": "0.1.24",
-  "description": "选择 AI 可以参考的测试方法，编辑方法说明和默认提示词。",
+  "version": "0.1.25",
+  "description": "为模型提供按需读取的测试方法库；方法正文只读，不执行请求。",
   "type": "module",
   "main": "./lib/index.js",
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
+    "./selection-config": "./lib/selection-config.js",
     "./package.json": "./package.json"
   },
   "files": [

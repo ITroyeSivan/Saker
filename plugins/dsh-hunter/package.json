@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-hunter",
-  "version": "1.5.5",
+  "version": "1.5.16",
   "description": "查询 FOFA、Hunter、Quake 资产，设置平台 API，并更新公开漏洞资料。",
   "files": [
     "lib",
@@ -46,5 +46,9 @@
         "@deepseek-ai/dsh-client-ui-settings"
       ]
     }
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": "0.2.0-rc.2 || 0.2.1-rc.2"
   }
 }

@@ -11,6 +11,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { PROOF_KINDS, normalizeReproduction, findingDeliveryState, outcomeSummary } from './delivery.js';
 import { METHOD_PACKAGE_SCHEMA } from './method-packages.js';
+import { METHOD_CLASSIFICATION_SCHEMA } from './method-classification.js';
 import { RESEARCH_SCHEMA } from './research.js';
 import { EXECUTION_RECEIPT_SCHEMA } from './execution-receipts.js';
 import { attachDeliveryEvidence } from './delivery-evidence.js';
@@ -21,7 +22,16 @@ import { BUSINESS_MATERIAL_SCHEMA } from './business-materials.js';
 import { IMPACT_REVIEW_SCHEMA } from './impact-reviews.js';
 import { TASK_COST_SCHEMA } from './task-cost.js';
 import { CHAT_SETUP_SCHEMA } from './chat-setup.js';
+import { ACCOUNTS_SCHEMA } from './accounts.js';
+import { PROMPT_LIBRARY_SCHEMA } from './prompt-store.js';
+import { KNOWLEDGE_SWITCH_SCHEMA } from './knowledge-switch.js';
+import { KNOWLEDGE_USAGE_SCHEMA } from './knowledge-usage.js';
+import { WORK_LEASE_SCHEMA } from './work-lease.js';
 import { MODEL_BUDGET_SCHEMA } from './model-budget.js';
+import { RETEST_SCHEMA, requireCurrentRepairRetest } from './retest.js';
+import { MATERIAL_READS_SCHEMA, MATERIAL_VIEWS_SCHEMA } from './material-reads.js';
+import { INTERACTION_RECORD_SCHEMA } from './server-side-access.js';
+import { BROWSER_RECEIPT_SCHEMA } from './browser-execution.js';
 
 const SEVERITIES = ["critical", "high", "medium", "low"];
 const STATUSES = ["pending", "code-reviewed", "suspect", "verified", "false-positive", "fixed"];
@@ -53,6 +63,9 @@ const MODE_STATUSES = {
 	"binary-analysis": ["pending", "suspect", "verified"]
 	};
 const ALL_STATUSES = Array.from(new Set([].concat(...Object.values(MODE_STATUSES))));
+/** fixed=「已修复/已处置」语义的模式：这些模式标记 fixed 必须有「本次未复现」的复测记录（第 9.2 节）。
+ *  attack-defense（已交付）、redteam（已路由）等语义不同，不适用。 */
+const REPAIR_FIXED_MODES = new Set(["pentest", "code-audit", "cloud-security", "incident-response"]);
 const statusesOf = (mode) => MODE_STATUSES[mode] ?? STATUSES;
 /** 证据等级四档（自高到低）：impact 影响已证（数据实际获取/业务动作实际达成）＞ confirmed 可复现（对照三件套齐）＞ partial 部分证据（工具输出/间接推断）＞ unknown 未知。 */
 const EVIDENCE_LEVELS = ["impact", "confirmed", "partial", "unknown"];
@@ -70,6 +83,7 @@ const MODES = ["pentest", "code-audit", "ctf-solver"];
 // Build after module initialization: execution/policy/store references form a cycle.
 function schema() { return `
 ${METHOD_PACKAGE_SCHEMA}
+${METHOD_CLASSIFICATION_SCHEMA}
 ${RESEARCH_SCHEMA}
 ${EXECUTION_RECEIPT_SCHEMA}
 ${EFFECT_VERIFICATION_SCHEMA}
@@ -79,7 +93,17 @@ ${BUSINESS_MATERIAL_SCHEMA}
 ${IMPACT_REVIEW_SCHEMA}
 ${TASK_COST_SCHEMA}
 ${CHAT_SETUP_SCHEMA}
+${ACCOUNTS_SCHEMA}
+${PROMPT_LIBRARY_SCHEMA}
+${KNOWLEDGE_SWITCH_SCHEMA}
+${KNOWLEDGE_USAGE_SCHEMA}
+${WORK_LEASE_SCHEMA}
 ${MODEL_BUDGET_SCHEMA}
+${RETEST_SCHEMA}
+${MATERIAL_READS_SCHEMA}
+${MATERIAL_VIEWS_SCHEMA}
+${INTERACTION_RECORD_SCHEMA}
+${BROWSER_RECEIPT_SCHEMA}
 CREATE TABLE IF NOT EXISTS task_rounds (
  session_id TEXT NOT NULL, started_at INTEGER NOT NULL, record TEXT NOT NULL,
  PRIMARY KEY(session_id,started_at)
@@ -136,6 +160,7 @@ CREATE TABLE IF NOT EXISTS findings (
 	second_rating_note TEXT NOT NULL DEFAULT '',
 	proof_kind TEXT NOT NULL DEFAULT '',
 	reproduction TEXT NOT NULL DEFAULT '',
+	evidence_refs TEXT NOT NULL DEFAULT '[]',
 	PRIMARY KEY (session_id, id)
 );
 CREATE INDEX IF NOT EXISTS idx_findings_session_mode ON findings(session_id, mode, seq);
@@ -153,6 +178,8 @@ CREATE TABLE IF NOT EXISTS task_context (
 );
 CREATE TABLE IF NOT EXISTS task_policy (
  session_id TEXT NOT NULL PRIMARY KEY,
+ parent_session TEXT NOT NULL DEFAULT '',
+ task_kind TEXT NOT NULL DEFAULT '',
  record TEXT NOT NULL,
  updated_at TEXT NOT NULL
 );
@@ -164,6 +191,14 @@ CREATE TABLE IF NOT EXISTS task_flow_choice (
  session_id TEXT NOT NULL PRIMARY KEY,
  record TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS task_module_choices (
+ session_id TEXT NOT NULL PRIMARY KEY, record TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS task_policy_events (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, revision INTEGER NOT NULL,
+ kind TEXT NOT NULL, record TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_task_policy_events_session ON task_policy_events(session_id,id);
 CREATE TABLE IF NOT EXISTS task_context_records (
  session_id TEXT NOT NULL,
  kind TEXT NOT NULL,
@@ -187,7 +222,7 @@ CREATE TABLE IF NOT EXISTS session_meta (
 );
 `; }
 
-const COLS = "session_id,id,seq,mode,title,severity,status,evidence_level,type,target,summary,description,poc,chain,evidence,fix,verify_note,created_at,updated_at,verified_at,baseline,diff_evidence,marker_echo,impact,cvss,retest_note,retest_at,request_pkt,response_pkt,snippet_entry,snippet_sink,chain_tracer,chain_verdict,cwe,patch,source_origin,sample_hash,family,packer,iocs,detection_rule,timeline_at,entry,identity,permission,resource,audit_mode,second_rating,second_rating_note,proof_kind,reproduction";
+const COLS = "session_id,id,seq,mode,title,severity,status,evidence_level,type,target,summary,description,poc,chain,evidence,fix,verify_note,created_at,updated_at,verified_at,baseline,diff_evidence,marker_echo,impact,cvss,retest_note,retest_at,request_pkt,response_pkt,snippet_entry,snippet_sink,chain_tracer,chain_verdict,cwe,patch,source_origin,sample_hash,family,packer,iocs,detection_rule,timeline_at,entry,identity,permission,resource,audit_mode,second_rating,second_rating_note,proof_kind,reproduction,evidence_refs";
 const N_COLS = COLS.split(",").length;
 
 /** 存量库新列（逐列 ALTER，已存在则忽略）。 */
@@ -197,8 +232,51 @@ const MIGRATION_COLUMNS = [
 	"cwe", "patch", "source_origin", "chain", "sample_hash", "family", "packer", "iocs", "detection_rule", "timeline_at",
 	"entry", "identity", "permission", "resource"
 
-	, "audit_mode", "second_rating", "second_rating_note", "proof_kind", "reproduction"
+	, "audit_mode", "second_rating", "second_rating_note", "proof_kind", "reproduction", "evidence_refs"
 ];
+
+/** 库结构版本。写入 `PRAGMA user_version`，供后续迁移按版本排序与回退。 */
+export const SCHEMA_VERSION = 4;
+
+/**
+ * 库比本构建新时的拒绝错误。
+ *
+ * 为什么不"顺手把版本号写回去"：旧构建不认识新表/新列，覆盖 `user_version` 会抹掉
+ * "这份数据来自更新版本"这条唯一线索 —— 之后新构建再打开时会把它当成旧库，
+ * 按旧结构去读新语义的列。真正危险的不是读不懂，而是**读不懂还照写**。
+ * 真正的数据回退（把新结构降回旧结构）会丢数据，所以这里明确选择"拒绝 + 说清怎么办"。
+ */
+export class SchemaTooNewError extends Error {
+	constructor(dbPath, storedVersion, supportedVersion) {
+		super(`数据库结构版本 ${storedVersion} 高于本构建支持的 ${supportedVersion}（${dbPath}）。`
+			+ '这份数据由更新的 Saker 写过；请升级到相应版本再打开，不要用旧版本继续写入。'
+			+ '若确认要放弃新数据，请先备份该文件再删除。');
+		this.name = 'SchemaTooNewError';
+		this.code = 'schema-too-new';
+		this.dbPath = dbPath;
+		this.storedVersion = storedVersion;
+		this.supportedVersion = supportedVersion;
+	}
+}
+
+/**
+ * 逐列迁移：**只有"列已存在"可以忽略**，其它错误必须带上下文抛出。
+ *
+ * 2026-10-11 修：原来是 `catch { /* 列已存在 *\/ }` 吞掉一切 —— 磁盘满、库被锁、
+ * 结构损坏都会静默跳过，留下一个"半迁移"的库，直到下次查询才以 `no such column` 炸开，
+ * 而那时已经看不到真正的原因了。
+ * @returns {'added'|'existing'}
+ */
+export function applyColumnMigration(db, table, column, declaration = "TEXT NOT NULL DEFAULT ''") {
+	try {
+		db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`);
+		return 'added';
+	} catch (error) {
+		const message = String(error?.message ?? error);
+		if (/duplicate column name/i.test(message)) return 'existing';
+		throw new Error(`${table} 迁移列 ${column} 失败：${message}`);
+	}
+}
 
 /** 打开（或创建）库并预编译语句。dbPath 传 ":memory:" 供测试。 */
 export function openStore(dbPath) {
@@ -214,18 +292,20 @@ export function openStore(dbPath) {
 		if (dbPath === ':memory:') return;
 		let head = '';
 		try { head = fs.readFileSync(dbPath).subarray(0, 16).toString("latin1"); } catch { return; }
-		if (!force && head.startsWith("SQLite format 3")) return;   // 正常的库头
+		// 正常库头直接放行；0 字节文件是"还没写过的新库"，不是坏库。
+		if (!force && (head === "" || head.startsWith("SQLite format 3"))) return;
 		let bak = dbPath + ".corrupt-" + Date.now();
 		let n = 1;
 		while (fs.existsSync(bak)) bak = dbPath + ".corrupt-" + Date.now() + "-" + n++;   // 绝不覆盖已有备份
 		try {
 			fs.renameSync(dbPath, bak);
-			// WAL/SHM 属于**已损坏的那个库**：留着会被回放到新库上，导致新库也打不开。
-			// 它们只是未落盘的增量，主库已备份，这里一并清掉（清不掉不影响主流程）。
+			// WAL/SHM 属于**已损坏的那个库**：留在原路径会被回放到新库上，导致新库也打不开。
+			// 但它们是未落盘的增量、可能是唯一能找回的数据，**不能删**（v6 第 9.2 节要求保留原件）。
+			// 做法：跟着主库一起改名到备份旁边（`<bak>-wal` / `<bak>-shm`），既不污染新库又保住原件。
 			for (const ext of ["-wal", "-shm"]) {
-				try { fs.rmSync(dbPath + ext, { force: true }); } catch { /* 被占用：留给下次启动 */ }
+				try { if (fs.existsSync(dbPath + ext)) fs.renameSync(dbPath + ext, bak + ext); } catch { /* 被占用：留给下次启动 */ }
 			}
-			console.error("[存储] 数据库文件不是 SQLite 格式，已备份为 " + bak + " 并重建空库（原数据可从此文件找回）");
+			console.error("[存储] 数据库文件不是 SQLite 格式，已备份为 " + bak + "（含 -wal/-shm）并重建空库（原数据可从此文件找回）");
 		} catch (e) {
 			// EBUSY 最常见：同进程内旧句柄还没释放（本插件缓存了 store）。
 			// 这时**不硬来**：原样让调用方抛，用户看到的是真实原因（文件被占用），
@@ -266,21 +346,38 @@ export function openStore(dbPath) {
 		}
 	}
 
+	// 打开前先看文件头：非 SQLite 头（且非空）时立刻备份主库与 -wal/-shm 再重建。
+	// 不能等到 openDatabase 报 NOTADB 才处理——SQLite 打开坏库时已经把 -wal/-shm 当垃圾删了，
+	// 那时再"保留原件"已经晚了（v6 第 9.2 节要求保留原件）。
+	healCorruptDb(dbPath);
 	const db = openDatabase(); // busy_timeout/WAL 已就绪；首开会与其他实例竞争
-	db.exec(schema());
-	for (const col of MIGRATION_COLUMNS) {
-	try { db.exec(`ALTER TABLE findings ADD COLUMN ${col} TEXT NOT NULL DEFAULT ''`); } catch { /* 列已存在 */ }
+	// 回退保护：**先读版本再动手**。库比本构建新时立刻拒绝，
+	// 连 schema()/列迁移/版本戳都不做（原实现无条件写 user_version，会把新库抹成旧库）。
+	const storedVersion = Number(db.prepare('PRAGMA user_version').get()?.user_version ?? 0);
+	if (storedVersion > SCHEMA_VERSION) {
+		try { db.close(); } catch { /* 拒绝时关不掉不影响结论 */ }
+		throw new SchemaTooNewError(dbPath, storedVersion, SCHEMA_VERSION);
 	}
+	db.exec(schema());
+	applyColumnMigration(db, 'task_policy', 'parent_session');
+	applyColumnMigration(db, 'task_policy', 'task_kind');
+	db.exec("UPDATE task_policy SET parent_session=COALESCE(json_extract(record,'$.parentSession'),''), task_kind=CASE WHEN json_extract(record,'$.purposeTask')=1 THEN 'purpose' ELSE '' END WHERE json_valid(record) AND parent_session=''");
+	db.exec('CREATE INDEX IF NOT EXISTS idx_task_policy_parent ON task_policy(parent_session,task_kind)');
+	const migration = { added: 0, existing: 0 };
+	for (const col of MIGRATION_COLUMNS) migration[applyColumnMigration(db, 'findings', col)] += 1;
+	if (storedVersion !== SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 	// 旧库升级：counters 从既有 findings 初始化（INSERT OR IGNORE——已有计数不回退）
 	db.exec("INSERT OR IGNORE INTO counters (session_id, mode, last_seq) SELECT session_id, mode, MAX(seq) FROM findings GROUP BY session_id, mode");
 	return {
 	dbPath,
+	schemaVersion: SCHEMA_VERSION,
+	migration,
 	db,
 	insert: db.prepare(`INSERT INTO findings (${COLS}) VALUES (${"?,".repeat(N_COLS - 1)}?)`),
 	get: db.prepare(`SELECT ${COLS} FROM findings WHERE session_id = ? AND id = ?`),
 	counterGet: db.prepare("SELECT last_seq AS n FROM counters WHERE session_id = ? AND mode = ?"),
 	counterSet: db.prepare("INSERT INTO counters (session_id, mode, last_seq) VALUES (?, ?, ?) ON CONFLICT(session_id, mode) DO UPDATE SET last_seq = excluded.last_seq"),
-	update: db.prepare(`UPDATE findings SET title=?, severity=?, status=?, evidence_level=?, type=?, target=?, summary=?, description=?, poc=?, chain=?, evidence=?, fix=?, verify_note=?, updated_at=?, verified_at=?, baseline=?, diff_evidence=?, marker_echo=?, impact=?, cvss=?, retest_note=?, retest_at=?, request_pkt=?, response_pkt=?, snippet_entry=?, snippet_sink=?, chain_tracer=?, chain_verdict=?, cwe=?, patch=?, source_origin=?, sample_hash=?, family=?, packer=?, iocs=?, detection_rule=?, timeline_at=?, entry=?, identity=?, permission=?, resource=?, audit_mode=?, second_rating=?, second_rating_note=?, proof_kind=?, reproduction=? WHERE session_id=? AND id=?`),
+	update: db.prepare(`UPDATE findings SET title=?, severity=?, status=?, evidence_level=?, type=?, target=?, summary=?, description=?, poc=?, chain=?, evidence=?, fix=?, verify_note=?, updated_at=?, verified_at=?, baseline=?, diff_evidence=?, marker_echo=?, impact=?, cvss=?, retest_note=?, retest_at=?, request_pkt=?, response_pkt=?, snippet_entry=?, snippet_sink=?, chain_tracer=?, chain_verdict=?, cwe=?, patch=?, source_origin=?, sample_hash=?, family=?, packer=?, iocs=?, detection_rule=?, timeline_at=?, entry=?, identity=?, permission=?, resource=?, audit_mode=?, second_rating=?, second_rating_note=?, proof_kind=?, reproduction=?, evidence_refs=? WHERE session_id=? AND id=?`),
 	remove: db.prepare("DELETE FROM findings WHERE session_id = ? AND id = ?"),
 	listAll: db.prepare(`SELECT ${COLS} FROM findings WHERE session_id = ? AND mode = ? ORDER BY seq DESC`),
 	listAllAll: db.prepare(`SELECT ${COLS} FROM findings WHERE session_id = ? ORDER BY updated_at DESC, seq DESC`),
@@ -343,6 +440,38 @@ export function secondReviewVerdict(finding) {
 	}
 
 /** 追加的可选富字段（camelCase → 列名映射）。 */
+const EVIDENCE_REF_KINDS = new Set(["request", "file", "asset", "execution"]);
+/**
+ * 证据引用（v6 第 14 节「问题用 evidenceRefs 引用原始请求或文件」）：`[{kind,id}]`。
+ * 接受数组或 JSON 字符串，最多 50 条；id 用资料行 id（请求是 `id:revision`，文件是材料 id）。
+ */
+export function normalizeEvidenceRefs(value) {
+	if (value === undefined || value === null || value === "") return "[]";
+	let list = value;
+	if (typeof value === "string") {
+		try { list = JSON.parse(value); }
+		catch { throw new Error('evidenceRefs 需要 JSON 数组，例如 [{"kind":"request","id":"r1:v1"}]'); }
+	}
+	if (!Array.isArray(list)) throw new Error("evidenceRefs 需要数组");
+	if (list.length > 50) throw new Error("evidenceRefs 最多 50 条");
+	const out = [];
+	for (const item of list) {
+		if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("evidenceRefs 每条需要 {kind,id}");
+		const kind = String(item.kind ?? "").trim();
+		const id = String(item.id ?? "").trim();
+		if (!EVIDENCE_REF_KINDS.has(kind)) throw new Error(`evidenceRefs 的 kind 只能是 ${[...EVIDENCE_REF_KINDS].join("/")}`);
+		if (!id || id.length > 200) throw new Error("evidenceRefs 的 id 需要 1–200 字");
+		out.push({ kind, id });
+	}
+	return JSON.stringify(out);
+}
+
+/** 读回 evidenceRefs：坏 JSON 按空数组处理（坏行隔离，不拖垮列表）。 */
+export function parseEvidenceRefs(raw) {
+	try { const list = JSON.parse(raw ?? "[]"); return Array.isArray(list) ? list : []; }
+	catch { return []; }
+}
+
 const EXTRA_FIELDS = ["baseline", "diffEvidence", "markerEcho", "impact", "cvss", "retestNote", "retestAt", "requestPkt", "responsePkt", "snippetEntry", "snippetSink", "chainTracer", "chainVerdict", "cwe", "patch", "sampleHash", "family", "packer", "iocs", "detectionRule", "timelineAt", "entry", "identity", "permission", "resource", "auditMode"];
 const COL_OF = {
 	proofKind: 'proof_kind', reproduction: 'reproduction',
@@ -364,7 +493,7 @@ function rowToFinding(row, store) {
 	sourceOrigin: row.source_origin || "manual",
 	secondRating: row.second_rating ?? "",
 	secondRatingNote: row.second_rating_note ?? "",
-	proofKind: row.proof_kind ?? '', reproduction: row.reproduction ?? ''
+	proofKind: row.proof_kind ?? '', reproduction: row.reproduction ?? '', evidenceRefs: parseEvidenceRefs(row.evidence_refs)
 	};
 	for (const k of EXTRA_FIELDS) f[k] = row[COL_OF[k]] ?? "";
 	if (f.mode === 'pentest') {
@@ -380,6 +509,7 @@ function rowToFinding(row, store) {
 export function registerFinding(store, sessionId, mode, input) {
 	if (input.proofKind !== undefined && input.proofKind !== '' && !PROOF_KINDS.includes(input.proofKind)) throw new Error('invalid proofKind');
 	const reproduction = normalizeReproduction(input.reproduction);
+	const evidenceRefs = normalizeEvidenceRefs(input.evidenceRefs);
 	// 状态词表按模式取（产物型=各自本体词）——与 update/mark 同源。
 	const status = cleanStatus(input.status, mode, "pending");
 	// 漏洞生命周期模式：fixed=已修复终态，不可在登记时直接写入（先登记、验证成立后经 update 流转）；
@@ -411,7 +541,7 @@ export function registerFinding(store, sessionId, mode, input) {
 	createdAt: now, updatedAt: now, verifiedAt: "",
 	sourceOrigin: cleanEnum(input.sourceOrigin, SOURCE_ORIGINS, "manual"),
 	secondRating: "",
-	secondRatingNote: "", proofKind: input.proofKind || '', reproduction
+	secondRatingNote: "", proofKind: input.proofKind || '', reproduction, evidenceRefs: parseEvidenceRefs(evidenceRefs)
 	};
 	for (const k of EXTRA_FIELDS) f[k] = cleanText(input[k]);
 	if (mode === "code-audit") f.auditMode = ["static", "dynamic"].includes(f.auditMode) ? f.auditMode : ""; // 枚举清洗：错值清空（Web 通道无 schema 闸）
@@ -421,7 +551,7 @@ export function registerFinding(store, sessionId, mode, input) {
 	f.baseline, f.diffEvidence, f.markerEcho, f.impact, f.cvss, f.retestNote, f.retestAt, f.requestPkt,
 	f.responsePkt, f.snippetEntry, f.snippetSink, f.chainTracer, f.chainVerdict, f.cwe, f.patch, f.sourceOrigin,
 	f.sampleHash, f.family, f.packer, f.iocs, f.detectionRule, f.timelineAt, f.entry, f.identity, f.permission, f.resource, f.auditMode,
-	f.secondRating, f.secondRatingNote, f.proofKind, f.reproduction
+	f.secondRating, f.secondRatingNote, f.proofKind, f.reproduction, evidenceRefs
 	);
 	return f;
 	}
@@ -433,6 +563,7 @@ export function updateFinding(store, sessionId, mode, id, patch = {}) {
 	const row = store.get.get(sessionId, id);
 	if (row === undefined || row.mode !== mode) return undefined;
 	const prev = rowToFinding(row, store);
+	const evidenceRefs = patch.evidenceRefs === undefined ? JSON.stringify(prev.evidenceRefs ?? []) : normalizeEvidenceRefs(patch.evidenceRefs);
 	const statusSet = statusesOf(mode);
 	// 状态是报告结论的一部分，不能像普通展示字段一样静默回落。旧实现把
 	// 模型请求的 suspect 悄悄写成 pending，工具却返回成功，导致复核结论与
@@ -440,9 +571,19 @@ export function updateFinding(store, sessionId, mode, id, patch = {}) {
 	cleanStatus(patch.status, mode, prev.status);
 	// fixed 只接受"此前已验证真实存在"的流转：先 verified、修复后复测不成功才可标记——
 	// 仅漏洞生命周期模式适用；redteam 台账语义 fixed=已路由（收口的替代路径），无此前置。
-	if (mode !== "redteam" && statusSet.includes("fixed") && cleanEnum(patch.status, statusSet, prev.status) === "fixed" && prev.status !== "verified") {
+	// 只在**状态真的流转到 fixed**时校验；已经是 fixed 的发现再改别的字段（如补复测说明）
+	// 不该被这条守卫误伤（否则"已修复"的发现永远改不了任何内容）。
+	const movingToFixed = mode !== "redteam" && statusSet.includes("fixed") && prev.status !== "fixed"
+		&& cleanEnum(patch.status, statusSet, prev.status) === "fixed";
+	if (movingToFixed && prev.status !== "verified") {
 	throw new Error("fixed 仅可用于此前已验证（verified）真实存在的 finding——先验证成立再流转标记（渗透/代审=已修复（修复复测不成功）；攻防=已交付；应急=已处置）");
 	}
+	// 第 9.2 节：只有"可达且正常功能有效、修复条件明确并完成相应检查"才提出已修复建议。
+	// 因此 fixed 还必须有本次"未复现"的复测记录——登录失败/不可达/接口迁移只能记"无法确认"，
+	// 不能拿一次没打中冒充已修复（retest.js 已在录入时挡掉这类结论）。
+	// 只有 fixed=「已修复/已处置」语义的模式才要求复测；attack-defense 的 fixed=已交付、
+	// redteam 的 fixed=已路由都不走这条（它们不是"修好了"的结论）。
+	if (movingToFixed && REPAIR_FIXED_MODES.has(mode)) requireCurrentRepairRetest(store, sessionId, id);
 	// 二次复核成对校验：首次流转到 verified 必须同时给出独立二次评级与足量依据。
 	// 强制在"同一次调用"里给齐——分两次写等于把复核变成事后补笔记。
 	const reviewError = secondReviewError(mode, prev, patch);
@@ -477,7 +618,8 @@ export function updateFinding(store, sessionId, mode, id, patch = {}) {
 	secondRating: patch.secondRating !== undefined ? cleanEnum(patch.secondRating, SECOND_RATINGS, prev.secondRating) : prev.secondRating,
 	secondRatingNote: patch.secondRatingNote !== undefined ? cleanText(patch.secondRatingNote) : prev.secondRatingNote,
 	proofKind: patch.proofKind !== undefined ? patch.proofKind : prev.proofKind,
-	reproduction: reproduction !== undefined ? reproduction : prev.reproduction
+	reproduction: reproduction !== undefined ? reproduction : prev.reproduction,
+	evidenceRefs: parseEvidenceRefs(evidenceRefs)
 	};
 	for (const k of EXTRA_FIELDS) next[k] = patch[k] !== undefined ? cleanText(patch[k]) : prev[k];
 	if (mode === "code-audit") next.auditMode = ["static", "dynamic"].includes(next.auditMode) ? next.auditMode : "";
@@ -487,7 +629,7 @@ export function updateFinding(store, sessionId, mode, id, patch = {}) {
 	next.baseline, next.diffEvidence, next.markerEcho, next.impact, next.cvss, next.retestNote, next.retestAt,
 	next.requestPkt, next.responsePkt, next.snippetEntry, next.snippetSink, next.chainTracer, next.chainVerdict,
 	next.cwe, next.patch, next.sourceOrigin, next.sampleHash, next.family, next.packer, next.iocs, next.detectionRule, next.timelineAt,
-	next.entry, next.identity, next.permission, next.resource, next.auditMode, next.secondRating, next.secondRatingNote, next.proofKind, next.reproduction, sessionId, id
+	next.entry, next.identity, next.permission, next.resource, next.auditMode, next.secondRating, next.secondRatingNote, next.proofKind, next.reproduction, evidenceRefs, sessionId, id
 	);
 	return getFinding(store, sessionId, id);
 	}
@@ -505,6 +647,15 @@ export function getFinding(store, sessionId, id) {
 export function allFindings(store, sessionId, mode) {
 	return store.listAll.all(sessionId, mode).map(row => rowToFinding(row, store));
 	}
+
+/** 引用了某条资料原文的发现（v6 第 14 节：问题用 evidenceRefs 引用原文）：跨模式按会话查。 */
+export function findingsReferencing(store, sessionId, kind, id) {
+	const k = String(kind || ''), key = String(id || '');
+	if (!k || !key) return [];
+	return store.listAllAll.all(sessionId).map(row => rowToFinding(row, store))
+		.filter(f => (f.evidenceRefs || []).some(ref => ref && ref.kind === k && ref.id === key))
+		.map(f => ({ id: f.id, seq: f.seq, mode: f.mode, title: f.title, severity: f.severity, status: f.status }));
+}
 
 function matchesDelivery(finding, mode, filter) {
   if (!['all', 'ready', 'incomplete'].includes(filter)) throw new Error('invalid delivery filter');

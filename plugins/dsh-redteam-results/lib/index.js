@@ -27,25 +27,47 @@ import { saveTaskContext, readTaskContext, readTaskRecord, taskContextView } fro
 import { stageMethodPackage, readMethodPackage, methodPackageState, recordMethodReview, activateMethodPackage, listMethodPackages, activeMethodPackage } from './method-packages.js';
 import { createResearch, observeResearch, assessResearch, closeResearch, researchDetail, researchIndex, researchGroups, researchNext, compactResearchResult } from './research.js';
 import { executeRecordedRequest, readExecutionReceipt, executionReceiptSummary } from './execution-receipts.js';
+import { recordRetest, listRetests, retestSummary, RETEST_VERDICTS, markVerifyStarted, clearVerifyStarted, listVerifyStarted } from './retest.js';
 import { verifyEffect, readEffectVerification } from './effect-verifications.js';
+import { readOobConfig, issueCallbackHost, fetchOobRecords, recordInteraction, readInteractionRecord, interactionSummary } from './server-side-access.js';
+import { runBrowserExecution, recordBrowserReceipt, readBrowserReceipt } from './browser-execution.js';
 import { runEffectJob, readEffectJob } from './effect-jobs.js';
-import { startTaskPolicy, updateTaskProgress, taskPolicyStatus, taskExecutionGuard, taskPrompt, taskOverview, chooseTaskMode, pauseTaskPolicy, resumeTaskPolicy, archiveTaskRound, takeTaskContinuation, checkpointTask, setTaskInteraction, setTaskWorkers, confirmTaskCheckpoint } from './task-policy.js';
+import { startTaskPolicy, updateTaskProgress, taskPolicyStatus, readTaskPolicy, taskExecutionGuard, taskPrompt, taskPromptStable, taskOverview, chooseTaskMode, pauseTaskPolicy, resumeTaskPolicy, archiveTaskRound, takeTaskContinuation, finishTaskOnTurnEnd, checkpointTask, setTaskInteraction, setTaskWorkers, setTaskExplain, setTaskActionLimits, updateTaskFromChat, targetTrafficDenial, effectivePolicy, confirmTaskCheckpoint } from './task-policy.js';
 import { taskStartInput, taskProgressInput } from './task-inputs.js';
 import { chatDefaults, saveChatDefaults, promptDraft, promptTemplates } from './chat-setup.js';
+import { listAccounts, saveAccount, removeAccount, ACCOUNT_STATUSES } from './accounts.js';
+import { builtinTemplates, promptFields, searchTemplates, renderTemplate, missingRequired, importTemplates, validateTemplate } from './prompt-templates.js';
+import { listUserTemplates, upsertUserTemplate, deleteUserTemplate, saveAsTemplate, readDraft, listDrafts, saveDraft } from './prompt-store.js';
+import { materialsList, materialsDetail, searchMaterials, readMaterialExcerpt, removeMaterial } from './materials-view.js';
+import { importPastedMaterial } from './materials-import.js';
+import { listWorkDependingOnMaterial } from './work-lease.js';
+import { executionLedger } from './execution-view.js';
+import { knowledgeSwitchView, setKnowledgeEnabled } from './knowledge-switch.js';
+import { testContentCatalog, TEST_CONTENT_KEYS } from './test-catalog.js';
+import { taskModuleSelection, saveTaskModules } from './task-modules.js';
+import { rootModuleSelection } from './execution-modules.js';
+import { listKnowledgeUsage, recordKnowledgeUsage } from './knowledge-usage.js';
+import { createPurposeTasks } from './purpose-tasks.js';
+import { breakdownFromEvents, maskedRecord, diagnosticsDelta } from './request-diagnostics.js';
+import { recordMaterialRead, recordMaterialView, materialReadKey } from './material-reads.js';
 import { captureTaskCost, taskCostOverview } from './task-cost.js';
 import { registerModelAdmission, recoverModelRuntime, modelBudgetOverview } from './model-budget.js';
-import { createSiteWorkers, siteWorkerView, siteWorkerRows, siteWorkerParent } from './site-workers.js';
+import { createSiteWorkers, siteWorkerView, siteWorkerRows, siteWorkerParent, hostWorkerLimit } from './site-workers.js';
 import { indexBusinessMaterials, businessMaterialView } from './business-materials.js';
 import { runComparisonJob, readComparisonJob, comparisonFindingInput } from './comparison-jobs.js';
 import { recordImpactReview } from './impact-reviews.js';
 import { PROOF_KINDS, parseReproduction, renderReproduction, renderFindingDelivery } from './delivery.js';
 import { registerTaskPrompt } from './task-prompt.js';
+import { writeTaskPolicy, listTaskEvents } from './task-policy-record.js';
 import { defineTool } from "@deepseek-ai/dsh-tools";
+import { sessionWorkingDirectory, ensureWorkingDirectory } from 'dsh-saker/working-directory';
 import { saveChecks, readChecks, compactChecks, renderCheckedTsv } from './checked.js';
 import { openStore, registerFinding, updateFinding, removeFinding, getFinding, allFindings, listFindings, listFindingsAll, groupByTarget, groupByTargetAll, computeStats, computeStatsAll, modeCounts, modeCountsAll, ledgerOverview, ledgerOverviewAll, getMeta, setMeta, SEVERITIES, STATUSES, REGISTER_STATUSES, MODE_STATUSES, ALL_STATUSES, EVIDENCE_LEVELS, SOURCE_ORIGINS, SECOND_RATINGS, secondReviewError, secondReviewVerdict, statusesOf } from "./store.js";
 
 const name = "dsh-redteam-results";
-const inject = ["tools", "webServer", "webRuntime", "agentPresets", "systemPrompt", "sessions", "agents", "subagents", "llm"];
+// webServer/webRuntime 在 0.2.1 web profile 里可能由 host 平面后注册；
+// 不把它们放进硬 inject，否则整个插件会因缺少一个可选路由服务而不激活。
+const inject = ["tools", "agentPresets", "systemPrompt", "sessions", "agents", "subagents", "llm"];
 
 const ROUTE_PATH = "/dsh-redteam-results";
 /** 进程级 CSRF token：GET <route>/csrf 由同源页取走（跨源响应不可读），POST 须回带 x-dsh-csrf 头。 */
@@ -57,6 +79,7 @@ export function checkCsrf(req, token) {
 const VERIFY_SENT = new Map();
 const VERIFY_WINDOW_MS = 10 * 60 * 1000;
 const workerManagers = new WeakMap();
+const purposeManagers = new WeakMap();
 const modelAdmissions = new WeakMap();
 
 const MODES = ["pentest", "code-audit", "ctf-solver"];
@@ -78,7 +101,7 @@ function theStore() {
 /** 一键验证的注入文案（用户消息；进入会话后由模型按模式验证纪律复核并回写状态）。 */
 export function verifyMessage(finding) {
 	const lines = [
-		`[成果验证请求] 复核「redteam 成果」页 finding #${finding.seq}：${finding.title}`,
+		`复核「发现的问题」中的 #${finding.seq}：${finding.title}`,
 		finding.mode === "ctf-solver"
 			? `模块 ${finding.type || "（未填）"} ｜ 题目地址 ${finding.target || "（未填）"} ｜ 当前状态 ${finding.status} ｜ 证据等级 ${finding.evidenceLevel}`
 			: finding.mode === "incident-response"
@@ -185,6 +208,42 @@ function sessionOf(ctx, exec) {
 	return { id: String(id), mode: MODES.includes(preset) ? preset : "" };
 }
 
+// A purpose task owns a bounded child policy but reads the parent task's
+// evidence snapshot. Only the parent recorded at admission is readable, and
+// the parent round must still match, so a stale child cannot read a new round.
+export function purposeReadSessionId(store, session) {
+	const own = readTaskPolicy(store, session.id);
+	if (own?.purposeTask !== true || !own.parentSession) return session.id;
+	const parent = readTaskPolicy(store, String(own.parentSession));
+	if (!parent) throw new Error('父任务不存在或已归档，不能读取复核资料');
+	if (own.parentRound !== parent.startedAt) throw new Error('父任务轮次已变化，请重新派发复核或报告');
+	return String(own.parentSession);
+}
+export function findingReadView(store, sessionId, args = {}) {
+  const offset = args.id ? (args.read ?? args.offset ?? 0) : (args.offset ?? 0);
+  if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('发现读取偏移必须是非负整数');
+  if (!args.id) {
+    if (args.read !== undefined) throw new Error('发现详情分段需要id');
+    const rows = store.db.prepare("SELECT id,substr(title,1,60) AS title,status,severity,substr(target,1,80) AS target FROM findings WHERE session_id=? AND mode='pentest' ORDER BY seq DESC LIMIT 10 OFFSET ?").all(sessionId, offset);
+    const total = store.db.prepare("SELECT count(*) AS n FROM findings WHERE session_id=? AND mode='pentest'").get(sessionId).n;
+    const index = { rows, total, nextOffset: offset + rows.length < total ? offset + rows.length : null };
+    return { ...index, text: JSON.stringify(index) };
+  }
+  const finding = getFinding(store, sessionId, args.id);
+  if (!finding || finding.mode !== 'pentest') throw new Error('发现不存在于当前可读任务');
+  const content = Buffer.from(JSON.stringify(finding, null, 2));
+  if (offset > content.length) throw new Error('发现读取偏移超过正文');
+  let end = Math.min(content.length, offset + 6000), text;
+  for (let trim = 0; trim < 4; trim++) {
+    try { text = new TextDecoder('utf-8', { fatal: true }).decode(content.subarray(offset, end)); break; }
+    catch { end--; }
+  }
+  if (text === undefined) throw new Error('读取偏移落在字符中间，请使用上次返回的nextOffset');
+  const nextOffset = end < content.length ? end : null;
+  return { id: args.id, offset, nextOffset, totalBytes: content.length,
+    text: `发现 ${args.id}；正文UTF-8字节 ${offset}–${end}/${content.length}；nextOffset=${nextOffset}\n` + text };
+}
+
 function resolveAgents(ctx) {
 	try { return ctx.get("agents"); } catch { /* 该 fiber 未声明 agents */ }
 	try { return ctx.agents; } catch { /* 同上 */ }
@@ -251,6 +310,82 @@ function methodAction(st, args, actor) {
   throw new Error('invalid method action');
 }
 
+/**
+ * 错误里的「可恢复操作」（v6 第 9.3 节）：返回错误时同时告诉调用方下一步能做什么，
+ * 而不是只丢一句报错。code 缺失时给通用提示，并建议把 requestId 一并反馈。
+ */
+function recoverableHint(code) {
+  const value = String(code || '');
+  if (/-conflict$/.test(value) || value === 'work-lease-held') return '现状和你手上的版本对不上：刷新后重试，本地未提交的内容仍保留。';
+  if (/csrf/.test(value)) return '令牌可能已过期：关闭并重新打开面板后再试。';
+  if (/untrusted-host/.test(value)) return '只允许本机同源页面调用：重新打开 Saker 面板后再试。';
+  if (/method-not-allowed/.test(value)) return '这是客户端内部接口；重新打开面板会重新发起正确的请求。';
+  if (/not-found|missing/.test(value)) return '检查端点和参数名；可用端点见插件 README。';
+  return '按提示修正后重试；若持续失败，把 requestId 一并反馈。';
+}
+
+/**
+ * v6 第 9.3 节统一返回契约：保留旧顶层字段（旧客户端继续可用），
+ * 同时补 data / revision / requestId。没有版本号的端点返回 revision: null，
+ * 不拿别的修订号冒充。
+ */
+export function contractEnvelope(body, requestId) {
+  const id = requestId === undefined ? 'rtr-' + crypto.randomUUID() : String(requestId);
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { ok: false, error: String(body ?? ''), revision: null, requestId: id };
+  }
+  const { ok: okValue, data: explicitData, revision: explicitRevision, requestId: _requestId, ...legacy } = body;
+  const ok = okValue !== false;
+  const revision = explicitRevision === undefined ? null : explicitRevision;
+  if (!ok) return { ...legacy, ok: false, revision, requestId: id };
+  return { ...legacy, ok: true, data: explicitData === undefined ? legacy : explicitData, revision, requestId: id };
+}
+
+/**
+ * 本次模型输入分项（v6 第 6.3 节）：读当前会话最近一次装配的事件，拆成六类字节数，
+ * 并把**已遮蔽**的原始记录写进私有目录（<home>/saker-diagnostics/），不随公开内容发布。
+ */
+function requestDiagnosticsView(session, sessionId) {
+  // 先只取当前 surface（本次仍可见的消息）；request/header 不是 surface 事件，
+  // 单独从完整日志里取最近一条工具定义。不能把完整日志的所有旧消息都累加成本次输入。
+  let events = [];
+  if (session?.surface && typeof session.eventAt === 'function') {
+    for (const seq of session.surface.nodes || []) {
+      try { events.push(session.eventAt(seq)); } catch { /* 坏节点隔离，不拖垮整页 */ }
+    }
+  }
+  let toolEvent = null;
+  if (typeof session?.snapshotEvents === 'function') {
+    try {
+      const all = [...session.snapshotEvents()];
+      for (let i = all.length - 1; i >= 0; i--) if (all[i]?.type === 'request/header') { toolEvent = all[i]; break; }
+      if (!events.length) events = all; // surface 不可用时才退回完整日志，并保留这一限制。
+    } catch { /* 读取失败不编造 */ }
+  }
+  if (toolEvent && !events.includes(toolEvent)) events.push(toolEvent);
+  const breakdown = breakdownFromEvents(events);
+  let rawPath = '';
+  let previous = null, history = [];
+  try {
+    const dir = path.join(DSH_HOME, 'saker-diagnostics');
+    fs.mkdirSync(dir, { recursive: true });
+    rawPath = path.join(dir, String(sessionId).replace(/[^A-Za-z0-9._-]/g, '_') + '.json');
+    // 上下文增长（v6 第 10.5 节）：读上一次记录做逐项差，再把本次追加进最多 20 条的历史。
+    try {
+      const existing = JSON.parse(fs.readFileSync(rawPath, 'utf8'));
+      if (existing && existing.breakdown) previous = existing.breakdown;
+      else if (existing && Array.isArray(existing.history) && existing.history.length) previous = existing.history[existing.history.length - 1].breakdown;
+      if (existing && Array.isArray(existing.history)) history = existing.history.slice(-19);
+    } catch { /* 首次诊断或旧文件损坏：没有上一次基线，不编造 */ }
+    const at = new Date().toISOString();
+    history.push({ at, breakdown });
+    fs.writeFileSync(rawPath, JSON.stringify({ sessionId, at, breakdown, history, events: maskedRecord(events) }, null, 1), 'utf8');
+  } catch { rawPath = ''; }
+  return { ...breakdown, previous, delta: diagnosticsDelta(previous, breakdown), rawPath,
+    note: '按实际装配的事件分项计量；单位是 UTF-8 字节（当前没有可用的 token 计量器，不冒充精确 token）。'
+      + '敏感字段已遮蔽，原始记录在私有目录。' };
+}
+
 /** 通道端点分发（纯逻辑，供路由与测试复用）。 */
 export async function dispatch(ctx, st, endpoint, payload) {
   const p = payload ?? {};
@@ -281,18 +416,191 @@ export async function dispatch(ctx, st, endpoint, payload) {
     if (!session || session.header?.agentPreset !== 'pentest') throw new Error('请选择当前可用的渗透会话');
     return { ok: true, ...methodAction(st, p, 'desktop-user') };
   }
-  if (['chat.settings', 'chat.defaults', 'chat.draft', 'chat.templates'].includes(endpoint)) {
+  if (['chat.settings', 'chat.defaults', 'chat.draft', 'chat.templates', 'chat.models'].includes(endpoint)) {
     const sessionId = String(p.sessionId || '');
     const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
     if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
     if (endpoint === 'chat.draft') return { ok: true, draft: promptDraft(st, sessionId, p.mode, p.draft) };
     if (endpoint === 'chat.templates') return { ok: true, templates: promptTemplates(st, p.template) };
     if (endpoint === 'chat.defaults') return { ok: true, defaults: saveChatDefaults(st, p) };
+    // v6 5.5「给助手选择模型」：可选模型来自宿主自己的授权偏好，不在这里另造一份。
+    if (endpoint === 'chat.models') {
+      let enabled = false, models = [];
+      try {
+        const selection = (ctx.get?.('subagentModelSelection') ?? ctx.subagentModelSelection)?.current?.();
+        if (selection?.enabled && Array.isArray(selection.allowedModels)) {
+          enabled = true;
+          models = selection.allowedModels
+            .filter(row => row && typeof row.provider === 'string' && typeof row.model === 'string' && row.provider && row.model)
+            .map(row => ({ provider: row.provider, model: row.model }));
+        }
+      } catch { enabled = false; models = []; }
+      return { ok: true, enabled, models };
+    }
     const state = taskPolicyStatus(st, sessionId), workers = siteWorkerView(st, sessionId);
-    return { ok: true, ...state, active: workers.active, defaults: chatDefaults(st),
+    return { ok: true, ...state, active: workers.active, hostWorkerLimit: hostWorkerLimit(ctx), defaults: chatDefaults(st),
+      attention: taskAttention(st, sessionId),
+      currentAction: taskCurrentAction(st, sessionId),
+      // 「暂停中」：已请求停止但代理还在收尾（v6 第 8.2 节）；收尾结束才是「已暂停」。
+      phase: state.phase === 'paused' && (ctx.agents || ctx.get?.('agents'))?.get(sessionId)?.status === 'running' ? 'pausing' : state.phase,
       agentRunning: (ctx.agents || ctx.get?.('agents'))?.get(sessionId)?.status === 'running' };
   }
-  if (['task.status', 'task.choose', 'task.start', 'task.cancel', 'task.resume', 'task.cleanup', 'task.new-round', 'task.interaction', 'task.workers', 'task.continue'].includes(endpoint)) {
+  // v6 5.5「登录账号（可选）」：列表只给名称与状态，秘密单独保存、永不随列表返回。
+  if (['account.list', 'account.save', 'account.remove'].includes(endpoint)) {
+    const sessionId = String(p.sessionId || '');
+    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
+    if (endpoint === 'account.list') return { ok: true, accounts: listAccounts(st, sessionId), statuses: ACCOUNT_STATUSES };
+    if (endpoint === 'account.save') return { ok: true, account: saveAccount(st, sessionId, p), accounts: listAccounts(st, sessionId) };
+    return { ok: true, accounts: removeAccount(st, sessionId, p.id) };
+  }
+  if (['prompt.library', 'prompt.draft', 'prompt.render'].includes(endpoint)) {
+    const sessionId = String(p.sessionId || '');
+    if (endpoint !== 'prompt.render' && !sessionId) throw new Error('sessionId required');
+    const action = p.action || 'list';
+    if (endpoint === 'prompt.library') {
+      const user = listUserTemplates(st, { offset: p.offset, limit: p.limit });
+      if (action === 'list') return { ok: true, builtin: builtinTemplates(), fields: promptFields(), user };
+      if (action === 'search') {
+        const all = [...builtinTemplates(), ...user.templates];
+        return { ok: true, query: String(p.query ?? ''), results: searchTemplates(p.query, all) };
+      }
+      if (action === 'upsert') return { ok: true, template: upsertUserTemplate(st, p.template) };
+      if (action === 'delete') return { ok: true, ...deleteUserTemplate(st, p.id, p.expectedRevision) };
+      if (action === 'save-as') return { ok: true, template: saveAsTemplate(st, validateTemplate(p.template), p.newId) };
+      if (action === 'import') return { ok: true, ...importTemplates(p.document, new Set(user.templates.map(t => t.id))) };
+      if (action === 'export') return { ok: true, document: { schemaVersion: 1, templates: user.templates.filter(t => !t.builtin) } };
+      throw new Error('未知 prompt.library 动作：' + action);
+    }
+    if (endpoint === 'prompt.render') {
+      const template = builtinTemplates().find(t => t.id === p.templateId) || listUserTemplates(st, { offset: 0, limit: 200 }).templates.find(t => t.id === p.templateId);
+      if (!template) throw new Error('模板不存在：' + (p.templateId ?? ''));
+      const values = p.values && typeof p.values === 'object' ? p.values : {};
+      return { ok: true, ...renderTemplate(template, values), missing: missingRequired(template, values) };
+    }
+    // prompt.draft
+    if (action === 'read') return { ok: true, draft: readDraft(st, sessionId, String(p.templateId ?? '')) };
+    if (action === 'list') return { ok: true, drafts: listDrafts(st, sessionId) };
+    if (action === 'save') return { ok: true, draft: saveDraft(st, sessionId, { ...p, templateId: p.templateId }) };
+    throw new Error('未知 prompt.draft 动作：' + action);
+  }
+  if (endpoint === 'materials.list') {
+    const sessionId = String(p.sessionId || '');
+    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
+    // 带上会话工作区：资料列表要把工作区资产账本里"已收集"的资产也列出来（第 7.2 节）。
+    const workspace = sessionWorkingDirectory(ctx, session, '');
+    return { ok: true, ...materialsList(st, sessionId, { ...p, workspace }) };
+  }
+  if (endpoint === 'materials.detail') {
+    const sessionId = String(p.sessionId || '');
+    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
+    return { ok: true, detail: materialsDetail(st, sessionId, { kind: String(p.kind || ''), id: String(p.id || ''),
+      offset: Number.isInteger(p.offset) ? p.offset : undefined, limit: Number.isInteger(p.limit) ? p.limit : undefined }) };
+  }
+  if (endpoint === 'materials.import') {
+    const sessionId = String(p.sessionId || '');
+    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
+    const material = importPastedMaterial(st, sessionId, { name: p.name, text: p.text });
+    // 资料更新后按 ID 唤醒依赖它的工作（v6 第 8.3 节）：只叫声明过这条资料的工作，不广播。
+// 完全相同原文只是「合并来源」（第 5.4 节），不是新版本 —— 不能假称「有新版本」去唤醒工作。
+const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 'file:' + material.id);
+    return { ok: true, material, woken };
+  }
+  if (endpoint === 'materials.remove') {
+    const sessionId = String(p.sessionId || '');
+    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
+    return { ok: true, ...removeMaterial(st, sessionId, { id: p.id }) };
+  }
+  if (endpoint === 'materials.viewed') {
+    const sessionId = String(p.sessionId || '');
+    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
+    // 本地查看是普通数据动作：只记本地状态，不创建模型回合、不增加模型输入（v6 第 5.4.1 节）。
+    // 与 materials.detail 分开，读取详情保持纯读。
+    const kind = String(p.kind || ''), id = String(p.id || '');
+    if (!kind || !id) throw Error('记录本地查看需要材料类型与 id');
+    return { ok: true, view: recordMaterialView(st, sessionId, { materialId: materialReadKey(kind, id) }) };
+  }
+  if (endpoint === 'execution.list') {
+    const sessionId = String(p.sessionId || '');
+    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
+    return { ok: true, ...executionLedger(st, sessionId, p) };
+  }
+  if (endpoint === 'usage.get') {
+    const sessionId = String(p.sessionId || '');
+    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
+    const overview = taskOverview(st, sessionId), cost = taskCostOverview(ctx, st, sessionId);
+    const policy = overview.policy;
+    return { ok: true, configured: overview.configured, elapsedSeconds: policy
+        ? Math.max(0, Math.floor((Math.min(Date.now(), policy.finishedAt ?? Infinity, policy.budget.deadline ?? Infinity) - policy.startedAt) / 1000)) : 0,
+      operations: policy ? { used: policy.used.toolCalls, budget: policy.budget.toolCalls } : null,
+      unmetered: policy ? { used: policy.used.unmeteredToolCalls ?? 0, budget: policy.budget.unmeteredToolCalls ?? 0 } : null,
+      // 网站回执数：宿主真正落库的目标执行回执。工具调用数不等于目标请求数——
+      // 用宿主 shell 发的请求不会进这里，这一列让"请求发生了但没证据"看得见（第 8.2 节分列计量）。
+      receipts: { total: Number(st.db.prepare('SELECT COUNT(*) AS n FROM execution_receipts WHERE session_id=?').get(sessionId)?.n ?? 0) },
+      // 本地/规划类工具调用（status/context/research/读写/检索）：不占目标预算，但要如实显示。
+      localTools: { used: policy?.used?.localToolCalls ?? 0 },
+      modelBudget: modelBudgetOverview(st, sessionId),
+      refused: modelBudgetOverview(st, sessionId)?.blocked ?? null,
+      cost: { modelCalls: cost.modelCalls, toolCalls: cost.toolCalls, unknownUsageCalls: cost.unknownUsageCalls,
+        totalTokens: cost.totalTokens, inputTokens: cost.inputTokens, outputTokens: cost.outputTokens, cacheReadTokens: cost.cacheReadTokens,
+        elapsedModelMs: cost.elapsedModelMs, unavailableSessions: cost.unavailableSessions,
+        sessions: cost.sessions.map(row => ({ sessionId: row.sessionId, role: row.role, available: row.available, modelCalls: row.modelCalls,
+          toolCalls: row.toolCalls, unknownUsageCalls: row.unknownUsageCalls, totalTokens: row.totalTokens })) } };
+  }
+  if (endpoint === 'knowledge.status' || endpoint === 'knowledge.toggle') {
+    const sessionId = String(p.sessionId || '');
+    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
+    // 能力标志随开关视图一起给（v6 第 5.6 节）：缺自动匹配时浮层要如实说明。
+    if (endpoint === 'knowledge.status') return { ok: true, knowledge: { ...knowledgeSwitchView(st, sessionId), autoMatch: knowledgeAutoMatchAvailable() } };
+    return { ok: true, knowledge: setKnowledgeEnabled(st, sessionId, p.enabled, 'desktop-user') };
+  }
+  if (endpoint === 'knowledge.usage') {
+    const sessionId = String(p.sessionId || '');
+    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
+    // 能力探测结果随用量一起返回（v6 第 5.6 节）：缺自动匹配时界面要如实说明。
+    return { ok: true, knowledgeAutoMatch: knowledgeAutoMatchAvailable(),
+      ...listKnowledgeUsage(st, sessionId, { page: Number.isInteger(p.page) ? p.page : 1, pageSize: Number.isInteger(p.pageSize) ? p.pageSize : 50 }) };
+  }
+  if (endpoint === 'diagnostics.request') {
+    const sessionId = String(p.sessionId || '');
+    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
+    return { ok: true, ...requestDiagnosticsView(session, sessionId) };
+  }
+  if (endpoint === 'task.events') {
+    const sessionId = String(p.sessionId || '');
+    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
+    return { ok: true, ...listTaskEvents(st, sessionId, { afterCursor: Number.isInteger(p.afterCursor) ? p.afterCursor : 0, limit: Number.isInteger(p.limit) ? p.limit : 50 }) };
+  }
+  if (endpoint === 'test.content') {
+    const sessionId = String(p.sessionId || '');
+    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
+    const { selection, config } = rootModuleSelection(st, sessionId);
+    if (p.action === 'save') {
+      const next = saveTaskModules(st, sessionId, { mode: p.mode ?? selection.mode, active: p.active,
+        rev: p.rev ?? selection.rev, policyRev: p.policyRev ?? selection.policyRev }, config);
+      // 第 4.3 节：全不选必须同时关闭本任务的网站访问；再次选择项目不暗中恢复，由用户明确打开。
+      if (Array.isArray(next.active) && next.active.length === 0)
+        setTaskActionLimits(st, sessionId, { allowTargetNetwork: false }, 'test-content-empty');
+			// 返回**写完之后**的选择：全不选会顺带写一次动作限制（policyRev +1），返回旧对象会让界面
+			// 拿着过期 revision 再点「全选」时被乐观并发挡下。真机实测报「任务状态已变化，请刷新后重试」，
+			// 而且不重开设置面板就一直失败。
+			return { ok: true, selection: rootModuleSelection(st, sessionId).selection, catalog: testContentCatalog() };
+    }
+    return { ok: true, selection, catalog: testContentCatalog(), keys: TEST_CONTENT_KEYS };
+  }
+  if (['task.status', 'task.choose', 'task.start', 'task.cancel', 'task.resume', 'task.cleanup', 'task.new-round', 'task.interaction', 'task.workers', 'task.explain', 'task.limits', 'task.continue'].includes(endpoint)) {
     const sessionId = String(p.sessionId || '');
     if (!sessionId) throw new Error('sessionId required');
     let sessions;
@@ -301,9 +609,23 @@ export async function dispatch(ctx, st, endpoint, payload) {
     if (endpoint !== 'task.status') {
       if (!session || session.header?.agentPreset !== 'pentest') throw new Error('请选择当前可用的渗透会话');
       if (typeof ctx.tools?.guard !== 'function') throw new Error('桌面宿主缺少任务预算守卫');
-      if (endpoint === 'task.choose') chooseTaskMode(st, sessionId, p.mode, { workflow: p.workflow, workers: p.workers, interaction: p.interaction, reporting: p.reporting });
+      if (endpoint === 'task.choose') {
+        const hostLimit = hostWorkerLimit(ctx);
+        if (p.workers !== undefined && Number(p.workers) > hostLimit) throw new Error(`worker limit exceeds host maxActiveSubagents (${hostLimit}); allowed 0 and ${hostLimit}`);
+        chooseTaskMode(st, sessionId, p.mode, { workflow: p.workflow, workers: p.workers, interaction: p.interaction, reporting: p.reporting, startMode: p.startMode, explain: p.explain,
+          workerModel: p.workerModel, reviewModel: p.reviewModel, reportModel: p.reportModel,
+          allowTargetNetwork: p.allowTargetNetwork, readOnly: p.readOnly, excludedPaths: p.excludedPaths, requestRatePerMinute: p.requestRatePerMinute, requestConcurrency: p.requestConcurrency });
+      }
       else if (endpoint === 'task.interaction') setTaskInteraction(st, sessionId, p.interaction, 'desktop-user', p.reporting);
-      else if (endpoint === 'task.workers') setTaskWorkers(st, sessionId, p.workers, 'desktop-user');
+      else if (endpoint === 'task.workers') {
+        const hostLimit = hostWorkerLimit(ctx);
+        if (Number(p.workers) > hostLimit) throw new Error(`worker limit exceeds host maxActiveSubagents (${hostLimit}); allowed 0 and ${hostLimit}`);
+        setTaskWorkers(st, sessionId, p.workers, 'desktop-user');
+      }
+      else if (endpoint === 'task.explain') setTaskExplain(st, sessionId, p.explain, 'desktop-user');
+      else if (endpoint === 'task.limits') setTaskActionLimits(st, sessionId,
+        { allowTargetNetwork: p.allowTargetNetwork, readOnly: p.readOnly, excludedPaths: p.excludedPaths,
+          requestRatePerMinute: p.requestRatePerMinute, requestConcurrency: p.requestConcurrency }, 'desktop-user');
       else if (endpoint === 'task.continue') {
         if (p.note !== undefined && (typeof p.note !== 'string' || p.note.length > 2000)) throw Error('补充思路应为2000字以内文本');
         const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
@@ -315,7 +637,7 @@ export async function dispatch(ctx, st, endpoint, payload) {
           agent.followup({ id: `saker-confirm-${sessionId}-${before.awaitingConfirmation.at}`, role: 'user', source: { kind: 'user' },
             content: [{ type: 'text', text: '[Saker 用户确认继续] '+taskPrompt(taskPolicyStatus(st, sessionId))+(p.note?.trim()?'\n用户补充思路：'+p.note.trim()+'\n':'')+'沿用户指定的思路继续，保留原预算与资料。' }] });
         } catch (error) {
-          st.db.prepare('UPDATE task_policy SET record=? WHERE session_id=?').run(JSON.stringify({ ...policy, awaitingConfirmation: before.awaitingConfirmation }), sessionId);
+          writeTaskPolicy(st, sessionId, { ...policy, awaitingConfirmation: before.awaitingConfirmation }, 'confirmation-delivery-failed');
           throw new Error('未能投递继续消息，仍等待确认：'+error.message);
         }
       }
@@ -325,7 +647,10 @@ export async function dispatch(ctx, st, endpoint, payload) {
         const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
         if (typeof agent?.followup !== 'function') throw new Error('当前代理不可用，任务尚未开始；请打开该会话后重试');
         if (agent.status === 'running') throw new Error('当前模型仍在运行，请先停止或等待完成');
-        const policy = startTaskPolicy(st, sessionId, p.policy);
+        const policyInput = { ...(p.policy || {}) };
+        if (policyInput.budget && policyInput.budget.workers !== undefined && Number(policyInput.budget.workers) > hostWorkerLimit(ctx))
+          throw new Error(`worker limit exceeds host maxActiveSubagents (${hostWorkerLimit(ctx)}); allowed 0 and ${hostWorkerLimit(ctx)}`);
+        const policy = startTaskPolicy(st, sessionId, policyInput);
         try {
           // 注入安全：由桌面 task.start RPC 在空闲代理上触发，不在 Session.append 临界区内。
           agent.followup({ id: `saker-task-${sessionId}-${policy.startedAt}`, role: 'user',
@@ -351,7 +676,12 @@ export async function dispatch(ctx, st, endpoint, payload) {
         const manager = workerManagers.get(ctx), agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
         if (siteWorkerView(st, sessionId).active) {
           if (!manager || !agent) throw new Error('当前代理不可用；子代理释放尚未确认，请刷新或重启宿主后核对');
-          await manager.cleanup(agent, p.childId, endpoint === 'task.cancel' ? 'desktop-user cancelled' : 'desktop-user cleanup');
+          const purposeManager = purposeManagers.get(ctx);
+          if (!purposeManager) throw new Error('用途助手管理器尚未就绪，释放未确认');
+          const retained = await purposeManager.cleanup(agent, p.childId);
+          if (!p.childId || !readTaskPolicy(st, p.childId)?.purposeTask)
+            await manager.cleanup(agent, p.childId, endpoint === 'task.cancel' ? 'desktop-user cancelled' : 'desktop-user cleanup');
+          if (retained.length) throw new Error('部分助手释放未确认，名额已保留；请重试清理');
         }
       }
     }
@@ -359,7 +689,10 @@ export async function dispatch(ctx, st, endpoint, payload) {
     const manager = workerManagers.get(ctx), agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
     if (manager && agent && workers.workers.length) workers = await manager.status(agent);
     const overview = taskOverview(st, sessionId), cost = taskCostOverview(ctx, st, sessionId);
-    return { ok: true, isPentest: session?.header?.agentPreset === 'pentest', ...overview, ...workers, cost,
+    return { ok: true, isPentest: session?.header?.agentPreset === 'pentest', hostWorkerLimit: hostWorkerLimit(ctx), ...overview, ...workers, cost,
+      attention: taskAttention(st, sessionId),
+      // 「暂停中」：已请求停止但代理还在收尾（v6 第 8.2 节）。
+      phase: overview.phase === 'paused' && agent?.status === 'running' ? 'pausing' : overview.phase,
       roundCost: overview.policy ? taskCostOverview(ctx, st, sessionId, overview.policy.startedAt) : null,
       modelBudget: overview.policy ? modelBudgetOverview(st,sessionId) : null,
       previousRounds: st.db.prepare('SELECT count(*) AS n FROM task_rounds WHERE session_id=?').get(sessionId).n,
@@ -393,16 +726,24 @@ export async function dispatch(ctx, st, endpoint, payload) {
 	}
 	if (endpoint === "findings.list") {
 		const mode = String(p.mode ?? "redteam");
+		// 列表行带复测摘要（第 9.2 节）：三结论的最新一次 + 次数，不覆盖历史发现。
+		// 同时带「复测中」标记（第 5.3 节）：复核消息已投递但还没有复测结论。
+		const verifyCache = new Map();
+		const verifyingFor = (sid) => { if (!verifyCache.has(sid)) verifyCache.set(sid, listVerifyStarted(st, sid)); return verifyCache.get(sid); };
+		const attachRetests = (fallbackSessionId, list) => (list && Array.isArray(list.rows))
+			? { ...list, rows: list.rows.map(row => { const sid = String(row.sessionId || fallbackSessionId || '');
+				return { ...row, retest: retestSummary(st, sid, row.id), verifying: verifyingFor(sid).has(String(row.id)) }; }) }
+			: list;
 		if (p.scope === "all") {
 			// 跨会话模式页：该模式全表 + created_at 范围过滤；counts=全时域侧栏计数；行带 sessionId；
 			// meta 取请求会话（标签页所属会话）——模式页元数据栏不为空。
 			const range = { from: String(p.from ?? ""), to: String(p.to ?? "") };
-			const out = { list: listFindingsAll(st, mode, { ...p, ...range }), stats: computeStatsAll(st, mode, range), counts: modeCountsAll(st), meta: p.sessionId ? getMeta(st, String(p.sessionId)) : undefined };
+			const out = { list: attachRetests(String(p.sessionId ?? ''), listFindingsAll(st, mode, { ...p, ...range })), stats: computeStatsAll(st, mode, range), counts: modeCountsAll(st), meta: p.sessionId ? getMeta(st, String(p.sessionId)) : undefined };
 			return out;
 		}
 		const sessionId = String(p.sessionId ?? "");
 		if (!sessionId) throw new Error("sessionId required");
-		return { list: listFindings(st, sessionId, mode, p), stats: computeStats(st, sessionId, mode), counts: modeCounts(st, sessionId), meta: getMeta(st, sessionId) };
+		return { list: attachRetests(sessionId, listFindings(st, sessionId, mode, p)), stats: computeStats(st, sessionId, mode), counts: modeCounts(st, sessionId), meta: getMeta(st, sessionId) };
 	}
 	if (endpoint === "findings.groups") {
 		const mode = String(p.mode ?? "redteam");
@@ -451,6 +792,13 @@ export async function dispatch(ctx, st, endpoint, payload) {
 		if (!finding || finding.mode !== 'pentest') return { ok: false, error: 'pentest finding not found' };
 		return { ok: true, text: renderFindingDelivery(finding), filename: finding.id + '-reproduction.md' };
 	}
+	if (endpoint === 'finding.retest') {
+		// 复测：新建版本记录，引用原发现与本次 execution；三结论（第 9.2 节）。不覆盖历史发现。
+		const sessionId = String(p.sessionId ?? '');
+		if (!sessionId) throw new Error('sessionId required');
+		if (String(p.action ?? 'list') === 'record') return { ok: true, retest: recordRetest(st, sessionId, p) };
+		return { ok: true, retests: listRetests(st, sessionId, String(p.id ?? ''), { limit: Number.isInteger(p.limit) ? p.limit : 20 }) };
+	}
 	if (endpoint === "finding.verify") {
 		const sessionId = String(p.sessionId ?? "");
 		const finding = getFinding(st, sessionId, String(p.id ?? ""));
@@ -464,6 +812,9 @@ export async function dispatch(ctx, st, endpoint, payload) {
 		if (!agent || typeof agent.followup !== "function") return { ok: false, unreachable: true, error: "原会话不可达（会话可能已删除或代理未运行）——可人工复核后使用「标记验证结果」兜底" };
 		// 注入安全：本调用在 RPC 端点处理器内（UI 点「复核」触发），不在 Session.append 临界区里。
 		agent.followup({ id: `rtr-${Date.now()}-${finding.seq}`, role: "user", content: [{ type: "text", text: verifyMessage(finding) }], source: { kind: "user" } });
+		// 登记「复测中」（v6 第 5.3 节）：详情据此显示状态和运行记录入口；
+		// 写入复测结论或人工标记后由 clearVerifyStarted 清掉。
+		markVerifyStarted(st, sessionId, finding.id);
 		VERIFY_SENT.set(vkey, Date.now());
 		if (VERIFY_SENT.size > 500) for (const [k, t] of VERIFY_SENT) if (Date.now() - t >= VERIFY_WINDOW_MS) VERIFY_SENT.delete(k);
 		return { ok: true };
@@ -487,6 +838,8 @@ export async function dispatch(ctx, st, endpoint, payload) {
 			secondRating: p.secondRating !== undefined && String(p.secondRating) !== "" ? String(p.secondRating) : undefined,
 			secondRatingNote: reviewNote || undefined,
 		});
+		// 人工标记已经有结论，不再显示「复测中」（v6 第 5.3 节）。
+		clearVerifyStarted(st, sessionId, id);
 		return { ok: true, id: updated.id, status: updated.status, verifyNote: updated.verifyNote, secondRating: updated.secondRating, verdict: secondReviewVerdict(updated) };
 	}
 	throw new Error(`unknown endpoint ${endpoint}`);
@@ -496,6 +849,73 @@ export async function dispatch(ctx, st, endpoint, payload) {
 
 //#region host wiring
 
+/**
+ * 知识适配器能力探测（v6 第 5.6 节）：自动匹配从 knowledge-hub 0.3.23 起提供。
+ * 缺能力时界面要如实显示「本版本由 AI 主动查询」，不能默认自动匹配存在。结果按进程缓存。
+ */
+let knowledgeAutoMatchCache = null;
+function knowledgeAutoMatchAvailable() {
+  if (knowledgeAutoMatchCache !== null) return knowledgeAutoMatchCache;
+  knowledgeAutoMatchCache = (() => {
+    try {
+      const home = process.env.DSH_HOME || path.join(os.homedir(), '.dsh');
+      const pkgPath = path.join(home, 'profiles', 'desktop', 'node_modules', '@dsh-external', 'dsh-knowledge-hub', 'package.json');
+      const version = String(JSON.parse(fs.readFileSync(pkgPath, 'utf8')).version || '');
+      const parts = version.split('.').map(Number);
+      if (parts.length < 3 || !parts.slice(0, 3).every(Number.isInteger)) return false;
+      const [major, minor, patch] = parts;
+      return major > 0 || minor > 3 || (minor === 3 && patch >= 23);
+    } catch { return false; }
+  })();
+  return knowledgeAutoMatchCache;
+}
+
+/** 「需要你处理」的单条事项（v6 第 5.2 节）：目前只有账号失效一类，不替用户猜原因。 */
+function taskAttention(store, sessionId) {
+  return listAccounts(store, sessionId)
+    .filter((account) => account.status === 'expired')
+    .map((account) => ({ kind: 'account-expired', accountId: account.id, accountName: account.name,
+      message: account.name + ' 已失效，相关验证暂停' }));
+}
+
+/**
+ * 标题栏的「当前动作」（v6 第 5.1 节）：取最近一条真实执行回执，不额外调用模型生成口号。
+ * 没有回执时返回空串，界面就不显示，避免堆零指标。
+ */
+function taskCurrentAction(store, sessionId) {
+  try {
+    const row = store.db.prepare('SELECT record FROM execution_receipts WHERE session_id=? ORDER BY rowid DESC LIMIT 1').get(sessionId);
+    if (!row) return '';
+    const record = JSON.parse(row.record || '{}');
+    const endpoint = String(record.endpoint || '').trim();
+    if (!endpoint) return '';
+    return '最近动作：' + endpoint;
+  } catch { return ''; }
+}
+
+/**
+ * 资料更新后唤醒依赖它的工作（v6 第 8.3 节）：只给声明过该 materialId 的子代理投递一条具体说明，
+ * 不广播给无关工作；投递失败的工作保持原状，不伪造唤醒。
+ */
+function wakeWorkersForMaterial(ctx, store, sessionId, materialId) {
+  const dependent = listWorkDependingOnMaterial(store, sessionId, materialId);
+  if (!dependent.length) return [];
+  let agents; try { agents = ctx.agents || ctx.get?.('agents'); } catch { agents = null; }
+  const woken = [];
+  for (const work of dependent) {
+    if (work.state !== 'claimed') continue;
+    const child = agents?.get?.(work.worker);
+    if (!child || typeof child.followup !== 'function') continue;
+    try {
+      child.followup({ id: 'saker-material-wake-' + work.workKey + '-' + Date.now(), role: 'user',
+        content: [{ type: 'text', text: '[Saker 资料更新] 你依赖的资料 ' + materialId + ' 有新版本；请重新读取后再下结论，不要沿用旧版本。' }],
+        source: { kind: 'user' } });
+      woken.push({ workKey: work.workKey, worker: work.worker });
+    } catch { /* 投递失败的工作保持原状，不假装已唤醒 */ }
+  }
+  return woken;
+}
+
 function apply(ctx) {
   const modelAdmission=registerModelAdmission(ctx,theStore,{countInput:options=>{
     let counter;try{counter=ctx.get?.('sakerInputCounter');}catch{ /* optional certified provider counter is unavailable */ }
@@ -503,7 +923,8 @@ function apply(ctx) {
   }});
   modelAdmissions.set(ctx,modelAdmission);
   ctx.on?.('session/event', (session, event) => {
-    if (session?.header?.agentPreset !== 'pentest' && !siteWorkerParent(theStore(), session?.id || '')) return;
+    if (session?.header?.agentPreset !== 'pentest' && !siteWorkerParent(theStore(), session?.id || '')
+      && !readTaskPolicy(theStore(), session?.id || '')?.purposeTask) return;
     captureTaskCost(theStore(), session, event);
   });
   ctx.on?.('agent/turn-stopping', ({ agent, signal }) => {
@@ -514,43 +935,71 @@ function apply(ctx) {
       // 注入安全：agent/turn-stopping 在回合停止检查中派发，不在 Session.append 发布临界区内；steer 使宿主继续当前回合。
       try { agent.steer(message); }
       catch (error) { pauseTaskPolicy(theStore(), session.id, { code: 'needs-user', reason: '自动衔接未能继续', evidence: String(error.message || error) }, 'host-continuation-failure'); }
+      return;
     }
+    try { finishTaskOnTurnEnd(theStore(), session.id); }
+    catch (error) { pauseTaskPolicy(theStore(), session.id, { code: 'needs-user', reason: '回合结束收口失败', evidence: String(error.message || error) }, 'host-turn-end-failure'); }
   });
   const siteWorkers = createSiteWorkers(ctx, theStore);
   workerManagers.set(ctx, siteWorkers);
+  const purposeTasks = createPurposeTasks(ctx, theStore);
+  purposeManagers.set(ctx, purposeTasks);
+  // 受控工具面（效果基准或宿主限制）只暴露 exercise_request/exercise_submit 时，
+  // 常驻提示必须跟着实际工具面走，不能继续引用被隐藏的 Saker 工具。
+  const controlledInterface = agent => {
+    try {
+      const names = new Set((ctx.tools?.schemas?.(agent) || []).map(tool => tool.name));
+      return names.has('exercise_request') && !names.has('redteam_context');
+    } catch { return false; }
+  };
   registerTaskPrompt(ctx, assembly => sessionOf(ctx, { agent: assembly?.agent })?.mode === 'pentest',
     assembly => {
       const session = sessionOf(ctx, { agent: assembly?.agent });
       if (!session || session.mode !== 'pentest') return '';
-      try { return taskPrompt(taskPolicyStatus(theStore(), session.id)); }
+      try {
+        const store = theStore();
+        // v6 第 4.3 节：把当前测试内容选择一起交给提示，筛过才发一行已选重点。
+        const selection = rootModuleSelection(store, session.id).selection;
+        return taskPromptStable(taskPolicyStatus(store, session.id), { controlledInterface: controlledInterface(assembly?.agent), selection });
+      }
       catch { return '本会话任务状态无法读取，停止目标操作并报告原因；不要重建或重置历史。'; }
     });
   const enforcementAvailable = typeof ctx.tools.guard === 'function';
   if (enforcementAvailable) ctx.tools.guard(exec => {
     const session = sessionOf(ctx, exec);
     if (!session || session.mode !== 'pentest') return undefined;
-    try { return taskExecutionGuard(theStore(), session.id, exec.name); }
+    try { return taskExecutionGuard(theStore(), session.id, exec.name, Date.now(), { args: exec.arguments }); }
     catch (error) { return '任务策略无法读取，停止目标操作：' + error.message; }
   });
 	// 插件卸载时释放库句柄。句柄悬着会锁住 -wal/-shm —— Windows 上表现为这个库文件
 	// 既删不掉也改不了名（备份/迁移/损坏自愈都要 rename 它）。
 	// 对照 campaign-memory：它一直有这条 ctx.effect，其余插件此前都缺，
 	// 插件重载/HMR 会因此留下永不回收的句柄（实测同进程二次 openStore 会 EBUSY）。
-	ctx.effect(() => async () => { await siteWorkers.dispose(); workerManagers.delete(ctx); await modelAdmission.dispose(); modelAdmissions.delete(ctx); if(store)recoverModelRuntime(store,modelAdmission.runtimeId); try { store?.close?.(); } catch { /* 已关或句柄失效 */ } store = undefined; }, "dsh-redteam-results: store handle");
+  async function disposeTaskRuntime() {
+    await purposeTasks.dispose();
+    await siteWorkers.dispose();
+    workerManagers.delete(ctx);
+    purposeManagers.delete(ctx);
+    await modelAdmission.dispose();
+    modelAdmissions.delete(ctx);
+    if (store) recoverModelRuntime(store, modelAdmission.runtimeId);
+  }
+	ctx.effect(() => async () => { await disposeTaskRuntime(); try { store?.close?.(); } catch { /* 已关或句柄失效 */ } store = undefined; }, "dsh-redteam-results: store handle");
 	//#region 模型工具（宿主平面，三种安全模式可见）
 	ctx.tools.register(defineTool({
 		name: "redteam_finding_register",
-		description: "登记本会话成果。弱配置须有真实影响和利用链；登记后独立复核才能交付。子代理成果保存在子会话。",
+		description: "登记本会话成果。弱配置须有真实影响和利用链；独立复核后才能交付。子代理成果存子会话。",
 		parameters: {
 			title: { type: "string", required: true, description: "名称（简短）" },
 			severity: { type: "string", enum: SEVERITIES, description: "等级；漏洞型必填，其他模式可省略（默认 medium）" },
 			target: { type: "string", required: true, description: "地址/目标/位置" },
 			summary: { type: "string", required: true, description: "一句话简介" },
-			type: { type: "string", description: "类型标签；按当前模式词表填写，详见 finding-fields.md" },
+			type: { type: "string", description: "类型标签；词表见 finding-fields.md" },
 			description: { type: "string", description: "描述（影响与成因）" },
-			poc: { type: "string", description: "测试过程+完整 EXP；复杂场景写 exp/<id>.py，简单场景写可直接复现的请求/命令" },
+			poc: { type: "string", description: "测试过程+完整EXP；复杂场景写 exp/<id>.py，简单场景写可复现的请求/命令" },
 			proofKind: { type: "string", enum: PROOF_KINDS, description: "证据类型；interaction 不代表 execution" },
 			reproduction: { type: "string", description: "旧完整方法JSON；reviewSteps为字符串。已有对照优先用comparisonId" },
+			evidenceRefs: { type: "string", description: 'JSON：[{kind:"request"|"file",id}]，引用原文' },
       comparisonId: { type: 'string', description: 'run-pair的id（pair-…）：自动填回执和方法，保留待复核读取线索' },
 			chain: { type: "string", description: "调用链 entry→sink（审计双链之一，每行一链）" },
 			chainTracer: { type: "string", description: "追踪员独立重追链（双链另一侧）" },
@@ -559,7 +1008,7 @@ function apply(ctx) {
 			snippetSink: { type: "string", description: "sink 关键代码片段" },
 			cwe: { type: "string", description: "CWE 编号" },
 			patch: { type: "string", description: "修复 diff 建议（可选）" },
-			sourceOrigin: { type: "string", enum: SOURCE_ORIGINS, description: "来源：manual / scan-confirmed / scan-false-positive" },
+			sourceOrigin: { type: "string", enum: SOURCE_ORIGINS, description: "来源；语义见 finding-fields.md" },
 			sampleHash: { type: "string", description: "样本 SHA256（二进制）" },
 			family: { type: "string", description: "家族/变种（二进制）" },
 			packer: { type: "string", description: "壳/保护（二进制）" },
@@ -579,8 +1028,8 @@ function apply(ctx) {
 			identity: { type: "string", description: "利用身份（云）" },
 			permission: { type: "string", description: "权限（云）" },
 			resource: { type: "string", description: "目标资源（云）" },
-			status: { type: "string", enum: REGISTER_STATUSES, description: "默认pending，登记拒绝verified；复核用finding_update同时给secondRating及≥40字secondRatingNote。fixed仅redteam模式，详见finding-fields.md" },
-			evidenceLevel: { type: "string", enum: EVIDENCE_LEVELS, description: "impact / confirmed / partial / unknown；语义见 finding-fields.md" },
+			status: { type: "string", enum: REGISTER_STATUSES, description: "默认pending，登记拒绝verified；复核用finding_update给secondRating及≥40字secondRatingNote。fixed仅redteam模式，详见finding-fields.md" },
+			evidenceLevel: { type: "string", enum: EVIDENCE_LEVELS, description: "证据等级；语义见 finding-fields.md" },
 			auditMode: { type: "string", enum: ["static", "dynamic"], description: "代码审计必填：static=静态，dynamic=动态复现成功" }
 		},
 		output: {
@@ -618,11 +1067,12 @@ function apply(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "redteam_finding_update",
-		description: "按 id 更新 finding：状态流转、字段修订、复核/复测注记。首次流转 verified 时必须同时给 secondRating 与至少 40 字的 secondRatingNote；完整语义见 shared/refs/finding-fields.md。",
+		description: "按 id 更新 finding：状态、字段、复核/复测注记；首次转 verified 须给 secondRating 与 ≥40 字 secondRatingNote。",
 		parameters: {
 			id: { type: "string", required: true, description: "finding id（如 pentest-3）" },
 			status: { type: "string", enum: ALL_STATUSES, description: "新状态；按当前模式终态规则，详见 finding-fields.md" },
 			verifyNote: { type: "string", description: "复核注记（结论+依据，简短）" },
+			evidenceRefs: { type: "string", description: 'JSON：[{kind:"request"|"file",id}]，引用原文' },
 			secondRating: { type: "string", enum: SECOND_RATINGS, description: "复核独立给出的二次评级；首次流转 verified 时必填" },
 			secondRatingNote: { type: "string", description: "二次评级依据（≥40 字）：复核方式与观察现象" },
 			severity: { type: "string", enum: SEVERITIES },
@@ -654,7 +1104,10 @@ function apply(ctx) {
 			cvss: { type: "string" },
 			requestPkt: { type: "string" },
 			responsePkt: { type: "string" },
-			retestNote: { type: "string", description: "复测注记（修复后复测结论+依据）" },
+			retestNote: { type: "string", description: "复测注记（结论+依据）" },
+			retestVerdict: { type: "string", enum: RETEST_VERDICTS, description: "结构化复测结论；给了它就同时留一条复测记录" },
+			retestExecutionId: { type: "string", description: "本次复测的执行回执 ID" },
+			retestControlExecutionId: { type: "string", description: "「本次未复现」必填：正常功能对照回执 ID" },
 			evidence: { type: "string" },
 			fix: { type: "string" },
 			timelineAt: { type: "string", description: "攻击时间节点（ISO 或 YYYY-MM-DD HH:MM）" },
@@ -679,21 +1132,40 @@ function apply(ctx) {
 		execute(args, exec) {
 			const session = sessionOf(ctx, exec);
 			if (!session) return Promise.resolve({ ok: false, error: "无法解析当前会话" });
+			const store = theStore();
 			if (args.severity !== undefined) {
-				const current = getFinding(theStore(), session.id, args.id);
+				const current = getFinding(store, session.id, args.id);
 				const policyError = findingAdmissionError(session.mode, { ...(current || {}), ...args });
 				if (policyError) return Promise.resolve({ ok: false, error: policyError });
 			}
-			const finding = updateFinding(theStore(), session.id, session.mode, args.id, args);
-			if (finding === undefined) return Promise.resolve({ ok: false, error: `finding ${args.id} 不存在（本会话 ${session.mode} 页）` });
+			let finding, retest;
+			store.db.exec('BEGIN IMMEDIATE');
+			try {
+				if (args.retestVerdict !== undefined) {
+					retest = recordRetest(store, session.id, { findingId: args.id, verdict: args.retestVerdict,
+						note: args.retestNote || args.verifyNote || '', executionId: args.retestExecutionId,
+						controlExecutionId: args.retestControlExecutionId });
+				}
+				finding = updateFinding(store, session.id, session.mode, args.id, args);
+				if (finding === undefined) {
+					store.db.exec('ROLLBACK');
+					return Promise.resolve({ ok: false, error: "finding " + args.id + " 不存在（本会话 " + session.mode + " 页）" });
+				}
+				store.db.exec('COMMIT');
+			} catch (error) {
+				try { store.db.exec('ROLLBACK'); } catch { /* 事务可能已因错误结束 */ }
+				return Promise.resolve({ ok: false, id: args.id,
+					error: '本次更新与复测均未生效：' + error.message + '（可补齐依据后重试，或改走 finding.retest）' });
+			}
 			return Promise.resolve({ ok: true, id: finding.id, status: finding.status, verifyNote: finding.verifyNote, secondRating: finding.secondRating, severity: finding.severity, verdict: secondReviewVerdict(finding),
+				...(retest ? { retest: { verdict: retest.verdict, verdictLabel: retest.verdictLabel, id: retest.id } } : {}),
         ...(finding.delivery ? { delivery: { ready: finding.delivery.ready, executionVerified: finding.delivery.executionVerified, gaps: finding.delivery.gaps } } : {}) });
 		}
 	}));
 
 	ctx.tools.register(defineTool({
 		name: "redteam_finding_delete",
-		description: "按 id 删除本会话「redteam 成果」页的一条 finding（直接删除数据库行，统计同步更新）。",
+		description: "按 id 删除本会话成果页的一条 finding（直接删库行，统计同步更新）。",
 		parameters: { id: { type: "string", required: true, description: "finding id" } },
 		output: {
 			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
@@ -711,7 +1183,7 @@ function apply(ctx) {
 	//#region Web 通道路由（better-sidebar 同款：webServer 自注册 + 同源栅栏）
   ctx.tools.register(defineTool({
     name: 'redteam_method',
-    description: '精选方法包：按摘要读取离线资料，暂存固定版本与审阅/正反例证据。激活和回退由成果页明确审阅操作完成。',
+    description: '精选方法包：按摘要读取离线资料，暂存固定版本与正反例证据。激活/回退由成果页审阅操作完成。',
     parameters: {
       action: { type: 'string', required: true, enum: ['list', 'detail', 'active', 'stage', 'review', 'verify'], description: '方法资料操作，契约见README' },
       digest: { type: 'string', description: '固定版本SHA256摘要' },
@@ -732,14 +1204,16 @@ function apply(ctx) {
   }));
   ctx.tools.register(defineTool({
     name: 'redteam_execution',
-    description: '执行已存请求。run-pair批次保存正常/异常对照与事实差异；run-effect核对已审阅效果；回执不是漏洞。契约见README。',
+    description: '执行已存请求。run-pair保存正常/异常对照；run-effect核对已审阅效果；回执不是漏洞，见README。',
     parameters: {
-      action: { type: 'string', required: true, enum: ['run', 'detail', 'run-pair', 'pair-detail', 'run-effect', 'job-detail', 'verify-effect', 'effect-detail'] },
-      document: { type: 'string', description: 'JSON：run-pair含hypothesisId、normal/probe请求引用；run-effect含methodId/version、roles；verify-effect含rounds，见README' },
+      action: { type: 'string', required: true, enum: ['run', 'detail', 'run-pair', 'pair-detail', 'run-effect', 'job-detail', 'verify-effect', 'effect-detail', 'oob-issue', 'oob-check', 'browser-run'] },
+      document: { type: 'string', description: 'JSON：run-pair含hypothesisId与请求引用；run-effect含methodId/version；verify-effect含rounds' },
+      label: { type: 'string', description: 'oob-check：issue 的 label' },
+      host: { type: 'string', description: 'oob-check：载荷回调域名' },
       hypothesisId: { type: 'string', description: 'run：当前验证方向ID' },
       requestId: { type: 'string', description: 'run：redteam_context中已保存的请求ID' },
       requestRevision: { type: 'string', description: 'run：已保存请求版本' },
-      purpose: { type: 'string', enum: ['baseline'], description: 'run：用户处理阻碍后复查正常GET/HEAD' },
+      purpose: { type: 'string', enum: ['baseline', 'first-contact'], description: 'baseline复查；first-contact取基线/同级GET（5次）' },
       methodId: { type: 'string', description: 'run：用于复现绑定时提供当前已审阅方法ID' },
       methodVersion: { type: 'string', description: 'run：与methodId同时提供，绑定当前方法版本' },
       id: { type: 'string', description: 'detail：宿主生成的回执ID' },
@@ -755,25 +1229,55 @@ function apply(ctx) {
       if (!session || session.mode !== 'pentest') return { ok: false, error: '仅当前渗透会话可执行已保存请求' };
       try {
         const store = theStore();
-        if (args.action === 'run') return { ok: true, ...await executeRecordedRequest(store, session.id, args, undefined, exec.signal) };
-        if (args.action === 'run-pair') return { ok: true, ...await runComparisonJob(store, session.id, JSON.parse(args.document), exec.signal) };
-        if (args.action === 'pair-detail') return { ok: true, ...readComparisonJob(store, session.id, args.id) };
-        if (args.action === 'detail') return { ok: true, ...readExecutionReceipt(store, session.id, args.id) };
-        if (args.action === 'run-effect') return { ok: true, ...await runEffectJob(store, session.id, JSON.parse(args.document), exec.signal) };
-        if (args.action === 'job-detail') return { ok: true, ...readEffectJob(store, session.id, args.id) };
+        const readId = purposeReadSessionId(store, session);
+        if (args.action === 'run') return { ok: true, ...await executeRecordedRequest(store, session.id, { ...args, callId: exec.callId }, undefined, exec.signal) };
+        if (args.action === 'run-pair') return { ok: true, ...await runComparisonJob(store, session.id, { ...JSON.parse(args.document), callId: exec.callId }, exec.signal) };
+        if (args.action === 'pair-detail') return { ok: true, ...readComparisonJob(store, readId, args.id) };
+        if (args.action === 'detail') {
+          // 按 ID 前缀读宿主回执：execution-* 是 HTTP 回执，interaction-* 是回连记录，browser-* 是浏览器执行。
+          const id = String(args.id || '');
+          if (id.startsWith('interaction-')) return { ok: true, ...readInteractionRecord(store, readId, id) };
+          if (id.startsWith('browser-')) return { ok: true, ...readBrowserReceipt(store, readId, id) };
+          return { ok: true, ...readExecutionReceipt(store, readId, args.id) };
+        }
+        if (args.action === 'run-effect') return { ok: true, ...await runEffectJob(store, session.id, { ...JSON.parse(args.document), callId: exec.callId }, exec.signal) };
+        if (args.action === 'job-detail') return { ok: true, ...readEffectJob(store, readId, args.id) };
         if (args.action === 'verify-effect') return { ok: true, ...verifyEffect(store, session.id, JSON.parse(args.document)) };
-        if (args.action === 'effect-detail') return { ok: true, ...readEffectVerification(store, session.id, args.id) };
+        if (args.action === 'effect-detail') return { ok: true, ...readEffectVerification(store, readId, args.id) };
+        if (args.action === 'oob-issue') {
+          const issued = issueCallbackHost(readOobConfig(ctx.settings), { label: args.label });
+          return { ok: true, ...issued, note: '把该域名注入载荷；目标回连后用 oob-check 回查（回连只证明服务端发起过访问，不等于漏洞影响）。' };
+        }
+        if (args.action === 'oob-check') {
+          const config = readOobConfig(ctx.settings);
+          const rows = (await fetchOobRecords({ base: config.base, token: config.token, filter: args.label || args.host })).rows;
+          const record = recordInteraction(store, session.id, { label: args.label, host: args.host, rows, provider: 'dnslog' });
+          return { ok: true, ...interactionSummary(record), note: '命中由宿主回查平台后落库；回连只证明载荷被处理并触发外连，不能当权限或影响。' };
+        }
+        if (args.action === 'browser-run') {
+          // 动作限制：关闭“允许访问网站”后，浏览器执行同样是目标网络操作，必须在开浏览器前拒绝。
+          // 缩范围沿任务树传播（v6 第 8.3 节）：子代理同样受主任务当前限制约束。
+          const ownPolicy = readTaskPolicy(store, session.id);
+          const browserDenial = targetTrafficDenial(ownPolicy ? effectivePolicy(store, ownPolicy) : ownPolicy);
+          if (browserDenial) return { ok: false, error: browserDenial };
+          const doc = JSON.parse(args.document);
+          const denied = taskExecutionGuard(store, session.id, 'recorded-browser-execution', Date.now(), { args: { url: doc.url } });
+          if (denied) return { ok: false, error: denied };
+          const receipt = await runBrowserExecution({ url: doc.url, marker: doc.marker, executablePath: doc.executablePath, timeoutMs: doc.timeoutMs });
+          const stored = recordBrowserReceipt(store, session.id, receipt);
+          return { ok: true, ...stored, note: '宿主真开浏览器留下的回执；仅回显、被转义或被 CSP 拦下都不会让 probe 生效。执行现象不等于权限或 RCE。' };
+        }
         throw new Error('invalid execution action');
       } catch (error) { return { ok: false, error: error.message }; }
     }
   }));
   ctx.tools.register(defineTool({
     name: 'redteam_research',
-    description: '围绕实际输入研究具体问题，自动保留对照证据；无新信息停止当前方向。结论须独立复核，detail读完整记录。',
+    description: '围绕实际输入研究具体问题，自动保留对照证据；无新信息即停。结论须独立复核，detail读完整记录。',
     parameters: {
       action: { type: 'string', required: true, enum: ['groups', 'list', 'detail', 'create', 'observe', 'assess', 'close'], description: '契约见README' },
       id: { type: 'string', description: 'detail/observe/assess/close必填：验证方向ID；不是观察id' },
-      document: { type: 'string', description: 'create JSON：id/requestId/requestRevision/question/expectedEffect/negativeResult/nextStep。observe绑定两张回执；close写理由。assess旧JSON兼容。' },
+      document: { type: 'string', description: 'create JSON：id/requestId/requestRevision/question/expectedEffect/negativeResult/nextStep。observe绑定两张回执；close写理由；assess兼容旧JSON。' },
       observationId: { type: 'string', description: 'assess：run-pair返回的观察ID，不重发请求' },
       outcome: { type: 'string', enum: ['support', 'counterevidence', 'no-information'], description: 'assess：支持/反证/无新信息；difference不能作为结论' },
       interpretation: { type: 'string', description: 'assess：身份、对象和实际效果如何支持或反驳；回执已保存，不另填阴性台账' },
@@ -809,7 +1313,7 @@ function apply(ctx) {
 		name: 'redteam_task',
 		description: 'start用独立字段。progress：单模式planComplete，衔接regularComplete/ndayComplete。checkpoint按频率等待；delegate说明必要性，结束cleanup。',
 		parameters: {
-			action: { type: 'string', enum: ['start', 'status', 'next', 'progress', 'checkpoint', 'cancel', 'pause', 'delegate', 'workers', 'send', 'report', 'cleanup'], required: true },
+			action: { type: 'string', enum: ['start', 'status', 'next', 'progress', 'checkpoint', 'cancel', 'pause', 'delegate', 'workers', 'send', 'report', 'review', 'report-draft', 'cleanup', 'update'], required: true },
 			mode: { type: 'string', enum: ['regular', 'nday', '0day'] },
 			target: { type: 'string' },
 			question: { type: 'string', description: '问题≤600字' },
@@ -818,6 +1322,7 @@ function apply(ctx) {
 			minutes: { type: 'integer', description: '时间上限1–10080分钟' },
 			workers: { type: 'integer', description: '子代理0–16，≤桌面上限；小任务0' },
 			discoveryCalls: { type: 'integer', description: '0day探路额度0至toolCalls' },
+			unmeteredToolCalls: { type: 'integer', description: '未计量扫描额度0–100，默认0拒绝' },
 			workflow: { type: 'string', enum: ['single', 'regular-to-nday', 'regular-with-nday'], description: '省略沿用桌面；衔接限regular' },
 			stop: { type: 'string', enum: ['budget', 'queue', 'first-high', 'first-rce'] },
 			policy: { type: 'string', description: '旧JSON，与独立字段互斥' },
@@ -826,11 +1331,14 @@ function apply(ctx) {
       queueComplete: { type: 'boolean' },
       regularComplete: { type: 'boolean' },
       ndayComplete: { type: 'boolean' },
-      document: { type: 'string', description: 'JSON：delegate site/question/need/reason/focus；send childId/message；report state/summary；pause code/reason/evidence；checkpoint note；cleanup可选childId' }
+      document: { type: 'string', description: '子代理：delegate(site/question/need/reason/focus)、send(childId/message)、report、pause、checkpoint、cleanup、update(交互/汇报/解释/助手数/预算/范围)' }
 		},
 		output: {
 			schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
-			render: (_args, value) => [{ type: 'text', text: value.ok ? JSON.stringify(value, null, 2) : `错误：${value.error}${value.recovery ? '\n' + value.recovery : ''}` }]
+			// update 的变更摘要放在最前面：这一行就是「消息旁显示的变更摘要」（v6 第 4.2 节）。
+			render: (_args, value) => [{ type: 'text', text: value.ok
+				? (value.summary ? `设置已更新：${value.summary}\n` : '') + JSON.stringify(value, null, 2)
+				: `错误：${value.error}${value.recovery ? '\n' + value.recovery : ''}` }]
 		},
 		async execute(args, exec) {
 			const session = sessionOf(ctx, exec);
@@ -845,35 +1353,62 @@ function apply(ctx) {
 				} else if (args.action === 'progress') {
           updateTaskProgress(theStore(), session.id, taskProgressInput(args));
         }
+        // 聊天里明确要求改设置（v6 第 4.2 节）：只允许收紧，放宽返回具体缺项。
+        else if (args.action === 'update') {
+          const updated = updateTaskFromChat(theStore(), session.id, JSON.parse(args.document));
+          const state = taskPolicyStatus(theStore(), session.id);
+          return { ok: true, ...updated, phase: state.phase, stopped: state.stopped, reason: state.reason };
+        }
         else if (args.action === 'checkpoint') checkpointTask(theStore(), session.id, JSON.parse(args.document).note);
         else if (args.action === 'pause') pauseTaskPolicy(theStore(), session.id, JSON.parse(args.document));
         else if (args.action === 'delegate') return { ok: true, ...await siteWorkers.delegate(exec.agent, JSON.parse(args.document), exec.signal) };
         else if (args.action === 'workers') return { ok: true, ...await siteWorkers.status(exec.agent, exec.signal) };
         else if (args.action === 'send') return { ok: true, ...await siteWorkers.send(exec.agent, JSON.parse(args.document), exec.signal) };
         else if (args.action === 'report') return { ok: true, ...await siteWorkers.report(exec.agent, JSON.parse(args.document), exec.signal) };
-        else if (args.action === 'cleanup') { const input = args.document ? JSON.parse(args.document) : {}; return { ok: true, ...await siteWorkers.cleanup(exec.agent, input.childId, input.reason || 'task ended') }; }
+        else if (args.action === 'review') return { ok: true, ...await purposeTasks.run(exec.agent, 'review', exec.signal) };
+        else if (args.action === 'report-draft') return { ok: true, ...await purposeTasks.run(exec.agent, 'report', exec.signal) };
+        else if (args.action === 'cleanup') {
+          const input = args.document ? JSON.parse(args.document) : {};
+          const purpose = input.childId && readTaskPolicy(theStore(), input.childId)?.purposeTask;
+          const remainingPurposeTasks = await purposeTasks.cleanup(exec.agent, input.childId);
+          return { ok: remainingPurposeTasks.length === 0, remainingPurposeTasks,
+            ...(!purpose ? await siteWorkers.cleanup(exec.agent, input.childId, input.reason || 'task ended') : {}) };
+        }
 				else if (args.action === 'cancel') {
           updateTaskProgress(theStore(), session.id, { cancelled: true });
           if (siteWorkerParent(theStore(), session.id)) await siteWorkers.report(exec.agent, { state: 'blocked', summary: '子任务已取消；保留实际证据并释放子代理。' }, exec.signal);
-          else await siteWorkers.cleanup(exec.agent, undefined, 'cancelled');
+          else { await purposeTasks.cleanup(exec.agent); await siteWorkers.cleanup(exec.agent, undefined, 'cancelled'); }
         }
 				else if (!['status', 'next'].includes(args.action)) throw new Error('invalid task action');
 				const state = taskPolicyStatus(theStore(), session.id);
 				return Promise.resolve({ ok: true, enforcementAvailable, ...state, ...(args.action === 'next' && state.configured && !state.stopped ? { next: researchNext(theStore(), session.id) } : {}) });
-			} catch (error) { return Promise.resolve({ ok: false, error: error.message,
-        ...(args.action === 'start' ? { recovery: '使用start独立字段：mode=regular/nday/0day，target=实际URL，question=当前问题，toolCalls=有限额度；workflow通常省略，人数沿用桌面上限。已有任务不能重启或重置预算。' } : {}) }); }
+      } catch (error) { return Promise.resolve({ ok: false, error: error?.message ?? String(error),
+        ...(args.action === 'start' ? { recovery: '使用start独立字段：mode=regular/nday/0day，target=实际URL，question=当前问题，toolCalls=有限额度；workflow通常省略，人数沿用桌面上限。已有任务不能重启或重置预算。' } : {}),
+        ...(args.action === 'update' ? { recovery: 'update 只收紧：interaction/reporting/explain/workers/allowTargetNetwork/readOnly/excludedPaths/requestRatePerMinute/requestConcurrency/toolCalls/minutes。放宽（重开网站访问、取消只读、提高速率或助手上限、换目标）必须由用户在桌面设置里操作。' } : {}) }); }
 		}
 	}));
 	ctx.tools.register(defineTool({
 		name: 'redteam_context',
-		description: '保存或读取本渗透会话共享资产、入口条件、请求及方法上下文；供Nday/常规/研究复用。',
+		description: '保存或读取本会话共享资产、入口条件、请求及方法上下文；供Nday/常规/研究复用。',
 		parameters: {
-			context: { type: 'string', description: '省略读索引；JSON快照assets/checks/requests/methods/maxSupplementAttempts；契约见README。' },
-			kind: { type: 'string', description: 'asset/request/method详情；material读业务材料索引或详情' },
+			context: { type: 'string', description: '旧快照JSON；assets/requests增量；省略读索引' },
+      assets: { type: 'array', items: { type: 'object', additionalProperties: true, properties: {
+        id: { type: 'string', required: true }, url: { type: 'string', required: true },
+        inScope: { type: 'boolean' }, reachable: { type: 'boolean' }
+      } } },
+      requests: { type: 'array', items: { type: 'object', additionalProperties: true, properties: {
+        id: { type: 'string', required: true }, revision: { type: 'string', required: true },
+        endpoint: { type: 'string', required: true }, authContext: { type: 'string', required: true },
+        method: { type: 'string' }, headers: { type: 'object', additionalProperties: true },
+        body: { type: 'string' }, request: { type: 'string' }, valid: { type: 'boolean' }, responseReceiptId: { type: 'string' }
+      } } },
+			kind: { type: 'string', description: 'asset/request/method详情；finding无id列索引、有id读详情；material索引或原文' },
       materials: { type: 'string', description: 'JSON：site、files[{path,url}]；离线索引选定JS，增量摘要不证明接口可用' },
 			id: { type: 'string', description: '详情记录ID，仅本会话' },
 			version: { type: 'string', description: '请求revision或方法version；多版本时必填' },
-			offset: { type: 'integer', description: '索引偏移，默认0，每次20条' }
+			search: { type: 'string', description: '按关键词在测试资料里定位：每页最多 5 条短结果（来源/身份/时间）' },
+			read: { type: 'integer', description: 'material/finding正文UTF-8偏移，默认0；续读用nextOffset' },
+			offset: { type: 'integer', description: '索引偏移；search 时是下一页游标' }
 		},
 		output: {
 			schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
@@ -883,21 +1418,74 @@ function apply(ctx) {
 			const session = sessionOf(ctx, exec);
 			if (!session || session.mode !== 'pentest') return Promise.resolve({ ok: false, error: '仅当前渗透会话可读写共享上下文' });
 		try {
+        if (args.assets !== undefined || args.requests !== undefined) {
+          if (args.context !== undefined) throw new Error('assets/requests 与旧 context 不可同时提供');
+          const patch = { ...(readTaskContext(theStore(), session.id) || {}) };
+          for (const field of ['assets', 'requests']) {
+            if (args[field] === undefined) continue;
+            if (!Array.isArray(args[field])) throw new Error(field + ' 必须是数组');
+            const key = row => JSON.stringify(field === 'requests' ? [row?.id, row?.revision] : [row?.id]);
+            const incoming = new Set(), rows = new Map((patch[field] || []).map(row => [key(row), row]));
+            for (const row of args[field]) {
+              const identity = key(row);
+              if (incoming.has(identity)) throw new Error('duplicate ' + field + ' identity');
+              incoming.add(identity);
+              rows.set(identity, { ...rows.get(identity), ...row });
+            }
+            patch[field] = [...rows.values()];
+          }
+          args = { ...args, context: JSON.stringify(patch) };
+        }
+        const readId = purposeReadSessionId(theStore(), session);
+        if (args.kind === 'finding') {
+          if ([args.context, args.materials, args.search, args.version].some(value => value !== undefined)) throw new Error('发现查询只传kind、id和offset；详情支持read字节偏移');
+          return Promise.resolve({ ok: true, ...findingReadView(theStore(), readId, args) });
+        }
         if (args.materials !== undefined && ([args.context, args.id, args.version].some(value => value !== undefined)
           || (args.kind !== undefined && args.kind !== 'material') || (args.offset !== undefined && args.offset !== 0)))
           throw new Error('索引只传materials；可附kind=material和offset=0。不要context/id/version；files需要选定文件的path和url。');
+        // 模型侧资料搜索（v6 第 5.4.1 节）：最多 5 条短结果 + 下一页游标，和快照/索引/详情分开调用。
+        if (args.search !== undefined && [args.context, args.materials, args.kind, args.id, args.version].some(value => value !== undefined))
+          throw new Error('搜索测试资料只传search（可附offset游标）；不要和快照、索引或详情混在一起。');
+        if (args.search !== undefined) return Promise.resolve({ ok: true, ...searchMaterials(theStore(), readId, { query: args.search, offset: args.offset ?? 0, workspace: sessionWorkingDirectory(ctx, exec.agent.session) }) });
         if (args.materials === undefined && args.kind === 'material' && [args.context, args.version, args.offset].some(value => value !== undefined)) throw new Error('材料详情不能与快照或版本查询混用');
-        if (args.materials !== undefined) return Promise.resolve({ ok: true, ...indexBusinessMaterials(theStore(), session.id, exec.agent.session.header.cwd, JSON.parse(args.materials)) });
-        if (args.kind === 'material') return Promise.resolve({ ok: true, ...businessMaterialView(theStore(), session.id, { id: args.id }) });
+        if (args.materials !== undefined) {
+          // 站点材料更新同样是「资料事件」（v6 第 8.3 节）：同一 URL 换了内容会写回同一 id 的新版本，
+          // 这里按更新过的 id 唤醒依赖它的工作；只被复用、内容没变的材料不算事件。
+          const indexed = indexBusinessMaterials(theStore(), session.id, sessionWorkingDirectory(ctx, exec.agent.session), JSON.parse(args.materials));
+          const woken = (indexed.updatedIds || []).flatMap(id => wakeWorkersForMaterial(ctx, theStore(), session.id, 'file:' + id));
+          return Promise.resolve({ ok: true, ...indexed, woken });
+        }
+        // 模型读原文（v6 第 5.4.1 节）：kind=material + id + read=字节偏移；每段 ≤6000 字节，代码 ≤80 行，HTTP 分头/体。
+        if (args.read !== undefined && (args.kind !== 'material' || !args.id))
+          throw new Error('读材料原文要 kind=material、id 和 read=字节偏移，不要和索引或搜索混用。');
+        if (args.read !== undefined) {
+          const excerpt = readMaterialExcerpt(theStore(), readId, { id: args.id, offset: args.read });
+          // 模型真的读了原文才记「已读过」（v6 第 5.4 节）：本地浏览详情、引用到输入框都不算。
+          if (!excerpt.missing) {
+            const bytes = (excerpt.kind === 'code' || excerpt.kind === 'text')
+              ? Buffer.byteLength(excerpt.content || '', 'utf8')
+              : Buffer.byteLength((excerpt.head || '') + (excerpt.body || ''), 'utf8');
+            recordMaterialRead(theStore(), session.id, { materialId: materialReadKey('file', args.id), bytes, offset: excerpt.offset });
+          }
+          return Promise.resolve({ ok: true, ...excerpt });
+        }
+        if (args.kind === 'material') return Promise.resolve({ ok: true, ...businessMaterialView(theStore(), readId, { id: args.id }) });
 				if (args.context !== undefined && (args.kind !== undefined || args.id !== undefined || args.version !== undefined)) throw new Error('保存快照与详情查询应分开调用');
-				const context = args.context === undefined ? readTaskContext(theStore(), session.id) : saveTaskContext(theStore(), session.id, JSON.parse(args.context));
+				const context = args.context === undefined ? readTaskContext(theStore(), readId) : saveTaskContext(theStore(), session.id, JSON.parse(args.context));
 				if (args.version !== undefined && ['request', 'method'].includes(args.kind)) {
 					const field = args.kind === 'request' ? 'requests' : 'methods';
 					if (!context?.[field].some(row => row.id === args.id && (row.revision || row.version) === args.version)) {
-						const item = readTaskRecord(theStore(), session.id, args.kind, args.id, args.version);
+						const item = readTaskRecord(theStore(), readId, args.kind, args.id, args.version);
 						if (!item) throw new Error('record not found in current session');
 						return Promise.resolve({ ok: true, item, historical: true, text: '历史版本，须核对当前身份和基线后使用：\n' + JSON.stringify(item, null, 2) });
 					}
+				}
+				// 模型读请求原文也算「已读过」（v6 第 5.4 节）：本地浏览详情与引用到输入框都不算。
+				if (args.kind === 'request' && args.id) {
+					const row = (context?.requests || []).find(item => item.id === args.id && (!args.version || item.revision === args.version));
+					if (row) recordMaterialRead(theStore(), session.id, { materialId: materialReadKey('request', row.id + ':' + row.revision),
+						bytes: Buffer.byteLength(String(row.request || '') + String(row.response || ''), 'utf8') });
 				}
 				return Promise.resolve({ ok: true, context, ...taskContextView(context, args) });
 			} catch (error) { return Promise.resolve({ ok: false, error: error.message }); }
@@ -905,22 +1493,23 @@ function apply(ctx) {
 	}));
 	ctx.tools.register(defineTool({
 		name: 'redteam_delivery',
-		description: '将本会话已复核有效漏洞、完整复现材料、脱敏关键证据和极简已测清单打为ZIP，保存到会话工作目录；不完整成果不计入。',
+		description: '将已复核有效漏洞、复现材料与脱敏证据打为ZIP到会话工作目录；不完整成果不计入。',
 		parameters: {},
 		output: {
 			schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
 			render: (_args, value) => [{ type: 'text', text: value.ok ? `交付包：${value.path}；有效漏洞 ${value.confirmedFindings}，检查 ${value.checkedCount}，待补齐 ${value.incompleteRecords}` : value.error }]
 		},
-		execute(_args, exec) {
+		async execute(_args, exec) {
 			const session = sessionOf(ctx, exec);
 			if (!session || session.mode !== 'pentest') return Promise.resolve({ ok: false, error: '仅当前渗透会话可生成交付包' });
 			try {
-				let cwd = exec.agent.session.header?.cwd;
+				const readId = purposeReadSessionId(theStore(), session);
+				let cwd = await ensureWorkingDirectory(ctx, exec.agent, exec.signal);
 				if (typeof cwd !== 'string' || !cwd) throw new Error('会话工作目录缺失');
 				if (cwd.startsWith('file:')) cwd = fileURLToPath(cwd);
 				if (!path.isAbsolute(cwd)) throw new Error('会话工作目录必须为绝对路径');
 				cwd = fs.realpathSync(cwd);
-				const bundle = buildDeliveryFiles(allFindings(theStore(), session.id, 'pentest'), readChecks(theStore(), session.id));
+				const bundle = buildDeliveryFiles(allFindings(theStore(), readId, 'pentest'), readChecks(theStore(), readId));
 				const target = path.join(cwd, 'saker-delivery-' + crypto.randomUUID() + '.zip');
 				fs.writeFileSync(target, zipDelivery(bundle.files), { flag: 'wx' });
 				return Promise.resolve({ ok: true, path: target, confirmedFindings: bundle.confirmedFindings, incompleteRecords: bundle.incompleteRecords, checkedCount: bundle.checkedCount });
@@ -929,8 +1518,8 @@ function apply(ctx) {
 	}));
 	ctx.tools.register(defineTool({
 		name: 'redteam_checks',
-		description: '本会话渗透检查记录：批量保存或读取。未命中需有效请求、观察及执行证据；详细原因留本地，交付仅三列。',
-		parameters: { records: { type: 'string', description: '省略读取；JSON数组，含assetId/entryId/endpoint/methodVersion/authContext/requestRevision、status(not-hit/not-applicable/blocked/not-tested)、executed/requestValid/observationValid、evidenceIds、reason；可附asset/check及supplementAttempts。' } },
+		description: '本会话渗透检查记录：批量保存或读取。未命中需有效请求、观察及执行证据；原因留本地，交付仅三列。',
+		parameters: { records: { type: 'string', description: '省略读取；JSON数组，字段见README（status 只有 not-hit/not-applicable/blocked/not-tested）。' } },
 		output: {
 			schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
 			render: (_args, value) => [{ type: 'text', text: value.ok ? value.text : value.error }]
@@ -939,7 +1528,8 @@ function apply(ctx) {
 			const session = sessionOf(ctx, exec);
 			if (!session || session.mode !== 'pentest') return Promise.resolve({ ok: false, error: '仅当前渗透会话可读写检查记录' });
 			try {
-				const rows = args.records === undefined ? readChecks(theStore(), session.id) : saveChecks(theStore(), session.id, JSON.parse(args.records));
+				const readId = purposeReadSessionId(theStore(), session);
+				const rows = args.records === undefined ? readChecks(theStore(), readId) : saveChecks(theStore(), session.id, JSON.parse(args.records));
 				return Promise.resolve({ ok: true, rows, text: renderCheckedTsv(rows) });
 			} catch (error) { return Promise.resolve({ ok: false, error: error.message }); }
 		}
@@ -947,34 +1537,49 @@ function apply(ctx) {
 	const trustedHosts = () => {
 		try { return ctx.webRuntime?.trustedHosts ?? []; } catch { return []; }
 	};
-	ctx.effect(() => ctx.webServer.register({
+	const registerWebRoute = (webCtx) => {
+		const webServer = webCtx?.webServer ?? ctx.get?.('webServer') ?? ctx.webServer;
+		if (!webServer?.register) return;
+		ctx.effect(() => webServer.register({
 		kind: "prefix",
 		path: ROUTE_PATH,
 		handler: async (req, res) => {
+			// 统一返回契约（v6 第 9.3 节）：旧字段保持兼容，另补 data / revision / requestId。
+			const requestId = "rtr-" + crypto.randomUUID();
 			const send = (code, body) => {
-				const text = JSON.stringify(body);
+				const payload = contractEnvelope(body, requestId);
+				const text = JSON.stringify(payload);
 				res.writeHead(code, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
 				res.end(text);
 			};
-			if (!isTrustedRequest(req, trustedHosts())) { res.writeHead(403); res.end("forbidden"); return; }
+			if (!isTrustedRequest(req, trustedHosts())) { send(403, { ok: false, code: "route-untrusted-host", error: "请求来源不是受信主机", hint: recoverableHint("route-untrusted-host") }); return; }
 			let csrfPath = "";
 			try { csrfPath = new URL(req.url ?? "/", "http://x").pathname; } catch { csrfPath = ""; }
 			if (req.method === "GET" && csrfPath === ROUTE_PATH + "/csrf") { send(200, { token: CSRF_TOKEN }); return; }
-			if (req.method !== "POST") { res.writeHead(405); res.end("method not allowed"); return; }
-			if (!checkCsrf(req, CSRF_TOKEN)) { res.writeHead(403); res.end("csrf token missing or invalid"); return; }
+			if (req.method !== "POST") { send(405, { ok: false, code: "route-method-not-allowed", error: "只接受 POST", hint: recoverableHint("route-method-not-allowed") }); return; }
+			if (!checkCsrf(req, CSRF_TOKEN)) { send(403, { ok: false, code: "route-csrf", error: "csrf token missing or invalid", hint: recoverableHint("route-csrf") }); return; }
 			let endpoint = "";
 			try { endpoint = decodeURIComponent(new URL(req.url ?? "/", "http://x").pathname.slice(ROUTE_PATH.length)).replace(/^\/+/, ""); } catch { endpoint = ""; }
-			if (endpoint === "") { res.writeHead(404); res.end("not found"); return; }
+			if (endpoint === "") { send(404, { ok: false, code: "route-endpoint-missing", error: "not found", hint: recoverableHint("route-endpoint-missing") }); return; }
 			try {
 				const raw = await readBody(req);
 				const payload = raw === "" ? {} : JSON.parse(raw);
 				const result = await dispatch(ctx, theStore(), endpoint, payload);
 				send(200, result);
 			} catch (e) {
-				send(400, { ok: false, error: e?.message ?? String(e) });
+				// 版本冲突用 409（v6 第 9.3 节「版本冲突 409 语义」）：模板 CAS、任务策略 CAS、
+				// 工作租约被别人持有都属于"现状和你手上的版本对不上"，客户端要能据此刷新重试，
+				// 而不是当成普通的参数错误。其余业务错误仍是 400。
+				const code = e?.code === undefined ? "" : String(e.code);
+				const status = /-conflict$/.test(code) || code === "work-lease-held" ? 409 : 400;
+				send(status, { ok: false, ...(code ? { code } : {}), error: e?.message ?? String(e),
+					hint: recoverableHint(code), ...(e?.details ? { details: e.details } : {}) });
 			}
 		}
-	}), "dsh-redteam-results: web route");
+		}), "dsh-redteam-results: web route");
+	};
+	if (typeof ctx.inject === 'function') ctx.inject(['webServer'], registerWebRoute);
+	else registerWebRoute(ctx);
 	// 卸载时释放 atlas 互链句柄——否则 Windows 上库文件被占，插件重装/库迁移会失败。
 	//#endregion
 }

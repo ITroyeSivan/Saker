@@ -1,6 +1,6 @@
 ---
 name: independent-review
-description: 双预设（pentest / code-audit）共用的独立复核员模板：交叉复核子代理的 prompt 构造规则（只给原始材料、独立重算、确认/挑战二选一带证据）、阶段门禁 gate 校验职责、跨 harness 双签流程（DSH=DeepSeek + claude/codex CLI，后端随各自配置：不同源=异构双签，同源=同源互证并在报告注明；用户触发制——不主动执行，报告结尾列为建议项）。任何预设的主会话派复核子代理时按本技能构造 prompt。
+description: 双预设（pentest / code-audit）共用的独立复核员模板：交叉复核子代理的 prompt 构造规则（只给原始材料、独立重算、确认/挑战二选一带证据）、跨 harness 双签流程（DSH=DeepSeek + claude/codex CLI，后端随各自配置：不同源=异构双签，同源=同源互证并在报告注明；用户触发制——不主动执行，报告结尾列为建议项）。任何预设的主会话派复核子代理时按本技能构造 prompt。
 ---
 
 # 独立复核员模板（independent-review）
@@ -44,7 +44,7 @@ partial/unknown 级浅做结论不派复核员（带等级标注直接进总结�
 4. 若被指派 gate 校验（见下节），同时输出 gate-pass / gate-fail 与缺失字段清单。
 ```
 
-## 阶段门禁校验（兼任门禁官，主会话可按需指派）
+## 代码审计/CTF 门禁校验（仅在对应预设按需指派）
 
 复核员在交叉复核之外，可被总控指派对**阶段产物**做 gate 校验：
 

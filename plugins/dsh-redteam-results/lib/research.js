@@ -2,7 +2,10 @@
 // records, not an execution engine or proof of global vulnerability novelty.
 import { createHash } from 'node:crypto';
 import { readTaskContext } from './task-context.js';
+import { parseRowRecord } from './row-record.js';
 import { readExecutionReceipt } from './execution-receipts.js';
+import { sameEndpointPath } from './endpoint-binding.js';
+import { baselineHash } from './research-binding.js';
 
 export const RESEARCH_SCHEMA = `
 CREATE TABLE IF NOT EXISTS research_hypotheses (
@@ -23,10 +26,9 @@ const key = (value, label) => {
   return result;
 };
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-const baselineHash = row => hash([row.id, row.revision, row.endpoint, row.authContext, row.request, row.response, row.inputs]);
 const entryKey = row => hash([row.endpoint, row.authContext, row.request,
   row.response?.replace(/^Date:[^\r\n]*\r?\n/gim, ''),
-  row.inputs.map(input => [input.location, input.name]).sort()]);
+  (row.inputs ?? []).map(input => [input.location, input.name]).sort()]);
 function eligible(context, mode = '0day') {
   const kinds = ['backend', 'api', 'web']
   return (context?.requests || []).filter(row => row.valid === true && kinds.includes(row.kind)
@@ -36,7 +38,9 @@ function eligible(context, mode = '0day') {
 }
 function baseline(store, sessionId, binding) {
   const matches = eligible(readTaskContext(store, sessionId), policy(store, sessionId)).filter(row => row.id === binding.requestId && row.revision === binding.requestRevision);
-  if (matches.length !== 1) throw new Error('current valid research baseline missing');
+  if (matches.length !== 1) throw new Error('current valid research baseline missing：基线必须是**已存请求**，且 valid:true、'
+    + '响应为 2xx、kind 属于 backend/api/web、inputs 里带 {name,location,evidenceIds:[该请求 id]}，'
+    + '并挂在任务里 inScope+reachable 的资产 origin 上。');
   const row = matches[0];
   if (binding.digest && baselineHash(row) !== binding.digest) throw new Error('research baseline changed; create a new hypothesis');
   return row;
@@ -68,7 +72,8 @@ export function researchDetail(store, sessionId, id) {
   const record = raw(store, sessionId, id);
   let current = true, blockedReason = '';
   try { baseline(store, sessionId, record.binding); } catch (error) { current = false; blockedReason = error.message; }
-  const observations = store.db.prepare('SELECT record FROM research_observations WHERE session_id=? AND hypothesis_id=? ORDER BY rowid').all(sessionId, id).map(row => JSON.parse(row.record));
+  const observations = store.db.prepare('SELECT record FROM research_observations WHERE session_id=? AND hypothesis_id=? ORDER BY rowid').all(sessionId, id)
+    .map(row => parseRowRecord(row, { table: 'research_observations', id: sessionId }));
   return { ...record, current, blockedReason, observations, noveltyProven: false,
     evidenceLimit: 'Submitted observations require independent verification; no CVE match is not evidence of global novelty.' };
 }
@@ -91,7 +96,7 @@ export function researchGroups(store, sessionId) {
     const evidence = row.researchGroup;
     const complete = evidence?.verified === true && ['function', 'inputStructure', 'permissionBoundary'].every(field => typeof evidence[field] === 'string' && evidence[field].trim() && evidence[field].length <= 500)
       && Array.isArray(evidence.evidenceIds) && new Set(evidence.evidenceIds).size >= 2 && evidence.evidenceIds.every(id => typeof id === 'string' && id.trim());
-    const structure = row.inputs.map(input => [input.location, input.name]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+    const structure = (row.inputs ?? []).map(input => [input.location, input.name]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
     const method = row.request.split(/\s+/)[0].toUpperCase();
     const groupKey = complete ? hash([new URL(row.endpoint).origin, row.authContext, method, structure, evidence.function, evidence.inputStructure, evidence.permissionBoundary]) : hash([row.id, row.revision]);
     if (!groups.has(groupKey)) groups.set(groupKey, { id: 'research-' + groupKey.slice(0, 16), confirmedGrouping: complete, members: [] });
@@ -166,13 +171,16 @@ export function observeResearch(store, sessionId, id, input) {
     if (store.db.prepare('SELECT 1 FROM research_observations WHERE session_id=? AND hypothesis_id=? AND id=?').get(sessionId, id, observationId)) throw new Error('duplicate observation ID');
     if (!['support', 'counterevidence', 'difference', 'no-information', 'blocked'].includes(input.outcome)) throw new Error('invalid research observation outcome');
     if (input.outcome === 'difference' && !input.controlReceiptId) throw new Error('automatic difference needs host execution receipts');
-    if (input.authContext !== record.binding.authContext || input.endpoint !== record.binding.endpoint) throw new Error('observation must bind the selected endpoint and identity');
+    if (input.authContext !== record.binding.authContext || !sameEndpointPath(input.endpoint, record.binding.endpoint))
+      throw new Error('observation must stay on the selected endpoint path and identity（查询参数可变；路径与身份不能变）：'
+        + '方向基线 ' + record.binding.endpoint + '，观察 ' + input.endpoint);
     let receiptPair;
     if (input.controlReceiptId !== undefined || input.probeReceiptId !== undefined) {
       if (!input.controlReceiptId || !input.probeReceiptId || input.controlReceiptId === input.probeReceiptId) throw new Error('two distinct host execution receipts required');
       receiptPair = [input.controlReceiptId, input.probeReceiptId].map(receiptId => readExecutionReceipt(store, sessionId, receiptId));
-      if (receiptPair.some(receipt => !receipt.current || receipt.hypothesisId !== id || receipt.endpoint !== record.binding.endpoint
-        || receipt.authContext !== record.binding.authContext || receipt.outcome !== 'response')) throw new Error('current complete host responses bound to this direction required');
+      if (receiptPair.some(receipt => !receipt.current || receipt.hypothesisId !== id || !sameEndpointPath(receipt.endpoint, record.binding.endpoint)
+        || receipt.authContext !== record.binding.authContext || receipt.outcome !== 'response'))
+        throw new Error('两条回执必须都命中当前方向、同端点路径、同身份，且是当前仍匹配的完整响应（查询参数可变）');
     }
     const executedAt = receiptPair ? receiptPair.map(receipt => receipt.completedAt).sort().at(-1) : text(input.executedAt, 'executedAt');
     if (!Number.isFinite(Date.parse(executedAt)) || Date.parse(executedAt) > Date.now() + 60000) throw new Error('invalid executedAt');
@@ -190,7 +198,8 @@ export function observeResearch(store, sessionId, id, input) {
       ...(receiptPair ? { controlReceiptId: receiptPair[0].id, probeReceiptId: receiptPair[1].id } : {}),
       ...(receiptPair ? { informationSignature: hash([input.outcome, ...receiptPair.map(receipt => [receipt.status, receipt.responseBodyBase64])]) } : {}),
       interpretation: text(input.interpretation, 'interpretation'), nextInformation: text(input.nextInformation, 'nextInformation'), control, probe };
-    const previous = store.db.prepare('SELECT record FROM research_observations WHERE session_id=? AND hypothesis_id=? ORDER BY rowid').all(sessionId, id).map(row => JSON.parse(row.record));
+    const previous = store.db.prepare('SELECT record FROM research_observations WHERE session_id=? AND hypothesis_id=? ORDER BY rowid').all(sessionId, id)
+      .map(row => parseRowRecord(row, { table: 'research_observations', id: sessionId }));
     if (receiptPair && previous.some(row => receiptPair.some(receipt => [row.controlReceiptId, row.probeReceiptId].includes(receipt.id)))) throw new Error('host execution receipts already used in an observation');
     if (previous.some(row => receiptPair ? Date.parse(row.executedAt) > Date.parse(executedAt) : Date.parse(row.executedAt) >= Date.parse(executedAt))) throw new Error('repeat must be a separately recorded execution');
     const signature = value => value.informationSignature || hash([value.outcome, value.control.sha256, value.probe.sha256]);
@@ -255,7 +264,8 @@ export function researchOperationBlock(store, sessionId, { reserve = false } = {
     const row = researchDetail(store, sessionId, id);
     if (!['active', 'supported'].includes(row.state) || !row.current) continue;
     if (row.observations.at(-1)?.outcome === 'difference' && !row.observations.at(-1).assessment) return 'comparison_interpretation_required：已有实际对照差异；先用redteam_research assess说明其业务含义，再继续原问题，不重复发包。';
-    if ((row.operationCalls || 0) >= 2) return 'direction_observation_required：当前方向已执行两次目标工具操作；先记录实际正常对照与观察，或停止该方向，不能继续盲试。';
+    // 这里**不再按次数**打断探测：一个真实假设常常要试十几下。探测只受任务工具预算约束；
+    // 方向自身的边界由 maxAttempts / noInformationLimit 在**记录观察**时执行，证据引用契约在**提交结论**时校验。
     if (reserve) { const record = raw(store, sessionId, id); record.operationCalls = (record.operationCalls || 0) + 1; write(store, sessionId, record); }
     return '';
   }
@@ -277,7 +287,7 @@ export function researchNext(store, sessionId) {
     : record.current && record.binding.requestId === row.id && record.binding.requestRevision === row.revision))
   return { action: remaining.length ? 'create-direction-on-observed-input' : 'collect-new-entry-or-record-gap',
     requests: remaining.slice(0, 8).map(row => ({ requestId: row.id, requestRevision: row.revision, endpoint: row.endpoint,
-      authContext: row.authContext, inputs: row.inputs.map(input => ({ name: input.name, location: input.location })) })),
+      authContext: row.authContext, inputs: (row.inputs ?? []).map(input => ({ name: input.name, location: input.location })) })),
     moreRequests: Math.max(0, remaining.length - 8), closedDirections: records.filter(row => row.state !== 'active').length,
     restrictedDirections: records.filter(row => row.state === 'restricted').length,
     note: '当前方向结束不代表目标安全；新方向必须绑定实际正常请求与不同输入或边界。仅提交过的观察不能自行成为有效漏洞。' }

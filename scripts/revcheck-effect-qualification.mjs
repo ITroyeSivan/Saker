@@ -14,10 +14,18 @@ const variants = [
   { id: 'no-budget-check', module: 'protocol', suite: 'test-task-effect-benchmark',
     from: 'validBudget && value > limit', to: 'false', fail: 'qualified success excludes overruns' },
   { id: 'trust-stale-qualification', module: 'protocol', suite: 'test-task-effect-benchmark',
-    from: 'const reasons = [];', to: 'if (run?.qualification?.eligible) return run.qualification; const reasons = [];', fail: 'qualified success excludes overruns' },
+    from: 'export function assessRunQualification(run) {\n  const reasons = [];',
+    to: 'export function assessRunQualification(run) {\n  if (run?.qualification?.eligible) return run.qualification; const reasons = [];', fail: 'qualified success excludes overruns' },
   { id: 'usage-overflow-and-conflict', module: 'agent-interface', suite: 'test-effect-agent-interface',
     from: 'if (!Number.isSafeInteger(total) || (usage.totalTokens !== undefined && usage.totalTokens !== total)) return null;', to: '',
     fail: 'usage includes cached input' },
+  { id: 'matrix-always-comparable', module: 'protocol', suite: 'test-task-effect-benchmark',
+    from: 'return { comparable: mismatches.length === 0, mismatches: [...new Set(mismatches)], completed: completed.length,',
+    to: 'return { comparable: true, mismatches: [], completed: completed.length,',
+    fail: 'matrix comparability needs a recorded calibration' },
+  { id: 'matrix-per-group-only', module: 'protocol', suite: 'test-task-effect-benchmark',
+    from: 'if (caseIds.size) {', to: 'if (false) {',
+    fail: 'matrix comparability requires every case, not just every group, to repeat' },
 ];
 try {
   for (const variant of variants) {

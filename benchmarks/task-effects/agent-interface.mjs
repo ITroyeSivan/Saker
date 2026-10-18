@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 
-export const INTERFACE_VERSION = 'saker.effect-interface/2';
+// v3：`confirmed` 的语义从"确认私有读取"改成"确认题面要求的那种效应" ——
+// 类别扩到适用性/越权写入/越界文件读取/输出处理/服务端取件之后，旧措辞会把模型带偏。
+export const INTERFACE_VERSION = 'saker.effect-interface/3';
 export const TOOL_NAMES = ['exercise_request', 'exercise_submit'];
 const sha = value => createHash('sha256').update(value).digest('hex');
 const copy = value => structuredClone(value);
@@ -21,7 +23,9 @@ const requestParameters = {
   body: { type: 'string', description: 'POST 正文；默认无正文' },
 };
 const submitParameters = {
-  outcome: { type: 'string', enum: ['confirmed', 'no-finding', 'inconclusive'], required: true, description: '最终结论：确认私有读取 / 未发现 / 环境或材料不足' },
+  // 描述必须**类别中立**：这里以前写"确认私有读取"，那是"所有用例都是越权读取"时代的措辞。
+  // 它是模型选 `confirmed` 时读到的唯一解释，等于在工具 schema 里加提示。
+  outcome: { type: 'string', enum: ['confirmed', 'no-finding', 'inconclusive'], required: true, description: '最终结论：确认（须由回执证明题面要求的效应） / 未发现 / 环境或材料不足' },
   evidenceIds: { type: 'string', required: true, description: '回执 id 的 JSON 数组，只填写一次；须覆盖支持结论的真实请求及必要对照' },
 };
 const resultOutput = {
@@ -72,7 +76,7 @@ export function createAgentInterface(lab) {
             || !Array.isArray(evidenceIds) || evidenceIds.some(id => typeof id !== 'string')) throw new Error('invalid submission shape');
           // One explicit claim, one evidence list. This records intent, never asserts an effect.
           const value = { outcome: args.outcome, evidenceIds, findings: args.outcome === 'confirmed'
-            ? [{ caseId: lab.runId, kind: 'private-read', status: 'confirmed', evidenceIds: copy(evidenceIds) }] : [] };
+            ? [{ caseId: lab.runId, kind: lab.claimKind, status: 'confirmed', evidenceIds: copy(evidenceIds) }] : [] };
           submission = copy(value); submittedAt = new Date().toISOString();
           return { ok: true, accepted: true, runId: lab.runId };
         } catch (error) { return { ok: false, error: error.message }; }

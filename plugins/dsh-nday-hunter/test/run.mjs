@@ -1417,7 +1417,7 @@ try {
         ndayCtx.tools.execute = originalExecute
       }
       ndayBatchSearchHandler = async (args) => {
-        if (args.platform === 'fofa') return { ok: false, degraded: true, error: '未配置 FOFA key' }
+        if (args.platform === 'fofa') return { ok: false, degraded: true, status: 'no-key', error: '未配置 FOFA key' }
         if (args.platform === 'hunter') {
           return {
             ok: true,
@@ -1452,6 +1452,9 @@ try {
         fallback.fieldWarnings.some((line) => line.includes('icon_hash'))
         && fallback.text.includes('字段差异'),
         JSON.stringify(fallback.fieldWarnings))
+      expect('FOFA 降级时保留可分辨状态（no-key），不混同额度/网络错误',
+        fallback.platformAttempts[0].status === 'no-key',
+        JSON.stringify(fallback.platformAttempts))
     } finally {
       ndayBatchSearchHandler = null
     }

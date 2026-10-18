@@ -49,7 +49,7 @@ try {
     assert.equal(reserved, false, 'denied dispatch cannot create an in-flight marker');
   });
   await test('actual registered task tool and monotonic guard stop extra target operations while keeping delivery available', async () => {
-    const started = await call('actual', { action: 'start', policy: JSON.stringify({ mode: 'regular', budget: { toolCalls: 2 } }) });
+    const started = await call('actual', { action: 'start', policy: JSON.stringify({ mode: 'regular', budget: { toolCalls: 2, unmeteredToolCalls: 2 } }) });
     assert.equal(started.ok, true, started.error); assert.equal(started.enforcementAvailable, true);
     assert.equal(guards[0]({ ...exec('actual'), name: 'fetch' }), undefined);
     assert.equal(guards[0]({ ...exec('actual'), name: 'pwsh' }), undefined);
@@ -66,6 +66,15 @@ try {
     assert.equal(readTaskPolicy(store, 'actual').used.toolCalls, 2);
     assert.equal(readTaskPolicy(store, 'other'), null);
   });
+  await test('method-orchestration and abstract-workbench tools are retired, refused for every session, and never counted as local work', () => {
+    // 批次 A：这些工具已退出运行，任何会话都不再当作本地登记放行。
+    for (const name of ['saker_method', 'operation_goal', 'operation_progress', 'operation_intent',
+      'operation_scope', 'operation_constraints', 'operation_conclude', 'stage_gate', 'gates_list']) {
+      assert.match(taskExecutionGuard(store, 'retired', name), /retired_tool/, name + ' must be refused even without a task policy');
+    }
+    // A retired tool is refused on name alone: the answer never depends on whether a task policy exists.
+    assert.doesNotMatch(String(taskExecutionGuard(store, 'no-policy-here', 'stage_gate')), /task_policy_missing/);
+  });
   await test('Nday default never stops on caller verification claims without host execution and independent impact proof', () => {
     for (const [id, patch, reviewPatch, reason] of [
       ['callback', { proofKind: 'interaction' }, {}, ''],
@@ -73,7 +82,7 @@ try {
       ['low-reviewed', {}, { secondRating: 'low' }, ''],
       ['confirmed', {}, {}, '']
     ]) {
-      startTaskPolicy(store, id, { mode: 'nday', budget: { toolCalls: 20 } }); finding(id, patch, reviewPatch);
+      startTaskPolicy(store, id, { mode: 'nday', budget: { toolCalls: 20, unmeteredToolCalls: 20 } }); finding(id, patch, reviewPatch);
       assert.equal(taskPolicyStatus(store, id).reason, reason, id);
     }
     assert.equal(taskExecutionGuard(store, 'confirmed', 'fetch'), undefined);
@@ -91,13 +100,13 @@ try {
     assert.throws(() => updateTaskProgress(store, 'queue', { queueComplete: false }), /cannot be reopened/);
   });
   await test('independent discovery budget ends portal search and a scoped observed API permits only remaining overall budget', () => {
-    startTaskPolicy(store, 'portal', { mode: '0day', budget: { toolCalls: 5, discoveryCalls: 1 } });
+    startTaskPolicy(store, 'portal', { mode: '0day', budget: { toolCalls: 5, discoveryCalls: 1, unmeteredToolCalls: 5 } });
     assert.equal(taskExecutionGuard(store, 'portal', 'fetch'), undefined);
     assert.equal(taskPolicyStatus(store, 'portal').stopped, false);
     assert.equal(taskPolicyStatus(store, 'portal').observationExhausted, true);
     assert.match(taskExecutionGuard(store, 'portal', 'pwsh'), /observation_budget_exhausted/);
     assert.equal(taskExecutionGuard(store, 'portal', 'read'), undefined);
-    startTaskPolicy(store, 'api', { mode: '0day', budget: { toolCalls: 5, discoveryCalls: 1 } });
+    startTaskPolicy(store, 'api', { mode: '0day', budget: { toolCalls: 5, discoveryCalls: 1, unmeteredToolCalls: 5 } });
     assert.equal(taskExecutionGuard(store, 'api', 'fetch'), undefined);
     saveTaskContext(store, 'api', { assets: [{ id: 'a', url: 'https://fixture.test', inScope: true, reachable: true }], requests: [{
       id: 'baseline', endpoint: 'https://fixture.test/api', authContext: 'fixture-user', revision: 'v1', kind: 'api', valid: true,
@@ -110,9 +119,8 @@ try {
       supportCriterion: 'Another owner fixture object appears', falsifier: 'The handler consistently denies a different owner object', nextInformation: 'Compare own and different owner fixture objects',
       knownCheck: { outcome: 'not-assessed', rationale: 'Fixture has no public product identity; classify observations as unconfirmed.', sources: [] } });
     finding('api'); assert.equal(taskPolicyStatus(store, 'api').stopped, false);
-    for (let i = 0; i < 2; i++) assert.equal(taskExecutionGuard(store, 'api', 'fetch'), undefined);
-    assert.match(taskExecutionGuard(store, 'api', 'fetch'), /direction_observation_required/);
-    for (let i = 0; i < 2; i++) assert.equal(taskExecutionGuard(store, 'api', 'zday_pattern'), undefined);
+    assert.equal(taskExecutionGuard(store, 'api', 'zday_pattern'), undefined);
+    for (let i = 0; i < 3; i++) assert.equal(taskExecutionGuard(store, 'api', 'fetch'), undefined, 'probing runs on the task budget, not on a per-direction count');
     assert.match(taskExecutionGuard(store, 'api', 'fetch'), /tool_budget_exhausted/);
     assert.equal(readTaskPolicy(store, 'api').used.discoveryCalls, 1);
   });

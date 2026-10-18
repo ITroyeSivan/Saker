@@ -8,7 +8,7 @@ const root = fileURLToPath(new URL('..', import.meta.url)), boundary = path.reso
 assert.equal(path.resolve(os.tmpdir()), boundary);
 const copy = fs.mkdtempSync(path.join(boundary, 'effect-reverse-'));
 try {
-  for (const file of ['package.json', 'lib', 'plugins/dsh-redteam-results/lib', 'plugins/dsh-nday-hunter/lib', 'scripts/test-effect-verifications.mjs', 'scripts/fixture-effect-job-worker.mjs',
+  for (const file of ['package.json', 'lib', 'plugins/dsh-method-stack/lib', 'plugins/dsh-redteam-results/lib', 'plugins/dsh-nday-hunter/lib', 'scripts/test-effect-verifications.mjs', 'scripts/fixture-effect-job-worker.mjs',
     'scripts/test-home-isolation.mjs', 'scripts/test-stub-loader.mjs', 'scripts/test-stub-register.mjs']) {
     fs.mkdirSync(path.dirname(path.join(copy, file)), { recursive: true }); fs.cpSync(path.join(root, file), path.join(copy, file), { recursive: true });
   }
@@ -18,9 +18,13 @@ try {
   const integrityBlock = receiptSource.slice(receiptSource.indexOf('  let current = false, integrityValid = false'),
     receiptSource.indexOf('\n}\nexport function executionReceiptSummary'));
   const cases = [
-    ['effect-verifications.js', 'currentVerdict = evaluate(store, sessionId, record.input);', 'currentVerdict = evaluate(store, sessionId, record.input, Date.parse(record.recordedAt));', 'expired evidence revokes current confirmation manual review ready counts and export while retaining history without HTTP'],
-    ['impact-reviews.js', 'requireFreshExecutions(receipts);', '/* allow expired human review */', 'expired evidence revokes current confirmation manual review ready counts and export while retaining history without HTTP'],
-    ['delivery-evidence.js', 'requireFreshExecutions([control, probe]);', '/* allow expired reproduction pair */', 'expired evidence revokes current confirmation manual review ready counts and export while retaining history without HTTP'],
+    ['execution-receipts.js', "current = (canonical !== '' && basis(currentRow, canonical) === result.requestBasis) || basis(currentRow) === result.requestBasis;", 'current = true;', 'unchanged evidence stays current after 16 minutes; request mismatch revokes confirmation without HTTP'],
+    ['impact-reviews.js', "  requireFreshExecutions(receipts);\n  if (receipts.some(receipt => !receipt.current || receipt.source !== 'host-http-execution' || receipt.outcome !== 'response'\n    || new URL(receipt.endpoint).origin !== new URL(parseReproduction(finding.reproduction).endpoint).origin)) throw new Error('人工复核需要当前仍匹配的同源完整执行回执，已失效的回执不能作为依据');",
+      "  if (receipts.some(receipt => receipt.source !== 'host-http-execution' || receipt.outcome !== 'response'\n    || new URL(receipt.endpoint).origin !== new URL(parseReproduction(finding.reproduction).endpoint).origin)) throw new Error('人工复核需要当前仍匹配的同源完整执行回执，已失效的回执不能作为依据');",
+      'unchanged evidence stays current after 16 minutes; request mismatch revokes confirmation without HTTP'],
+    ['delivery-evidence.js', "    requireFreshExecutions([control, probe]);\n    if ([control, probe].some(receipt => receipt.source !== 'host-http-execution' || receipt.current !== true || receipt.outcome !== 'response'\n      || receipt.endpoint !== method.endpoint || receipt.authContext !== row.identity) || control.hypothesisId !== probe.hypothesisId) throw new Error('正常/差分执行对照与当前发现的端点或身份不匹配，请重新采集');",
+      "    if ([control, probe].some(receipt => receipt.source !== 'host-http-execution' || receipt.outcome !== 'response'\n      || receipt.endpoint !== method.endpoint || receipt.authContext !== row.identity) || control.hypothesisId !== probe.hypothesisId) throw new Error('正常/差分执行对照与当前发现的端点或身份不匹配，请重新采集');",
+      'unchanged evidence stays current after 16 minutes; request mismatch revokes confirmation without HTTP'],
     ['execution-receipts.js', integrityBlock, `  let current = false;
   try { current = basis(requestRow(store, sessionId, result.requestId, result.requestRevision)) === result.requestBasis; } catch {}
   return { ...result, current, integrityValid: true, currentReason: '' };`, 'damaged captured bytes and metadata revoke independent effects and delivery without deleting historical records or sending HTTP'],
@@ -32,15 +36,16 @@ try {
     ['delivery-evidence.js', 'effect.proofKind !== row.proofKind', 'false', 'real positive promotes through production stats dedup filters export and high-impact stopping while access cannot masquerade as RCE'],
     ['effect-verifications.js', 'current: record.verified === true && currentVerdict.verified === true', 'current: true', independent],
   ];
-  for (const [file, anchor, mutation, label] of cases) {
+  for (const [index, [file, anchor, mutation, label]] of cases.entries()) {
     const target = path.join(copy, 'plugins/dsh-redteam-results/lib', file), original = fs.readFileSync(target, 'utf8');
     assert.equal(original.split(anchor).length - 1, 1);
     fs.writeFileSync(target, original.replace(anchor, mutation));
     try {
       const result = spawnSync(process.execPath, ['--import', pathToFileURL(path.join(copy, 'scripts/test-stub-register.mjs')).href, 'scripts/test-effect-verifications.mjs'],
         { cwd: copy, env: { ...process.env, SAKER_ROOT: copy }, encoding: 'utf8', timeout: 60000 });
-      assert.notEqual(result.status, 0); assert(result.stdout?.includes('FAIL ' + label + ':'), 'named behavioral failure required: ' + (result.stderr || result.stdout));
-      console.log('ok   reverse caught ' + file + ': ' + label);
+      assert.notEqual(result.status, 0, 'case #' + index + ' ' + file + ' unexpectedly passed: ' + (result.stderr || result.stdout));
+      assert(result.stdout?.includes('FAIL ' + label + ':'), 'case #' + index + ' named behavioral failure required: ' + (result.stderr || result.stdout));
+      console.log('ok   reverse caught #' + index + ' ' + file + ': ' + label);
     } finally { fs.writeFileSync(target, original); }
   }
 } finally { assert(copy.startsWith(boundary + path.sep)); fs.rmSync(copy, { recursive: true, force: true }); }

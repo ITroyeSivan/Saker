@@ -1,7 +1,7 @@
 // Build a Windows Desktop delivery from the exact current pnpm artifacts.
 // Include package contents so install-desktop can verify installed bytes.
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, readFileSync, copyFileSync, existsSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, copyFileSync, existsSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -31,11 +31,21 @@ for (const dir of dirs) {
   copyFileSync(artifact, join(destination, name))
   manifest.push({ name: pkg.name, version: pkg.version, artifact: dir === root ? name : `plugins/${dir.split(/[\\/]/).at(-1)}/${name}`, sha256: createHash('sha256').update(readFileSync(artifact)).digest('hex') })
 }
-for (const file of ['scripts/install-desktop.mjs', 'scripts/update-desktop-shortcut.mjs', 'scripts/lib/product-plugins.mjs', 'scripts/lib/desktop-artifacts.mjs', 'scripts/lib/desktop-shortcut.mjs', 'scripts/lib/desktop-launch.ps1', 'docs/getting-started.md', 'docs/plugin-list.md', 'docs/features.md', 'docs/boundaries.md', 'docs/development.md', 'docs/release-format.md', 'docs/media/chat-settings.jpg', 'docs/media/prompt-editor.jpg', 'docs/media/task-setup.png', 'docs/media/tools.png', 'docs/media/mcp.png', 'docs/media/vulnerability-updates.png', 'docs/media/knowledge.png', 'docs/media/skills.png', 'docs/media/methods.png', 'benchmarks/task-effects/README.md', `docs/release-v${version}.md`]) {
+// 图片按目录整体带走：写死清单曾漏掉新增截图，交付包的 README 就成了坏图。
+const media = readdirSync(join(root, 'docs', 'media'), { withFileTypes: true })
+  .filter(entry => entry.isFile())
+  .map(entry => `docs/media/${entry.name}`)
+  .sort()
+for (const file of ['scripts/install-desktop.mjs', 'scripts/restore-desktop.mjs', 'scripts/update-desktop-shortcut.mjs', 'scripts/lib/product-plugins.mjs', 'scripts/lib/desktop-artifacts.mjs', 'scripts/lib/desktop-backup.mjs', 'scripts/lib/desktop-shortcut.mjs', 'scripts/lib/desktop-launch.ps1', 'docs/getting-started.md', 'docs/plugin-list.md', 'docs/features.md', 'docs/boundaries.md', 'docs/development.md', 'docs/release-format.md', ...media, 'benchmarks/task-effects/README.md', `docs/release-v${version}.md`]) {
   const destination = join(payload, file)
   mkdirSync(dirname(destination), { recursive: true })
   copyFileSync(join(root, file), destination)
 }
+// 打包当场核对：README 引用的每张图都必须真的在包里。
+const readme = readFileSync(join(payload, 'README.md'), 'utf8')
+const missingMedia = [...new Set([...readme.matchAll(/docs\/media\/[A-Za-z0-9._-]+/g)].map(match => match[0]))]
+  .filter(rel => !existsSync(join(payload, rel)))
+if (missingMedia.length) throw new Error(`Release README references media that is not shipped: ${missingMedia.join(', ')}`)
 // Copy only user documentation, never recursive development directories.
 writeFileSync(join(payload, 'packages.json'), JSON.stringify(manifest, null, 2) + '\n')
 const zip = payload + '.zip'

@@ -1,0 +1,28 @@
+{
+  "revision": 1,
+  "source": "PLAN-2026-10-12-v6.md 第 5.7 节",
+  "components": [
+    "Button",
+    "Input",
+    "Select",
+    "Badge",
+    "DataTable",
+    "Drawer",
+    "InlineNotice",
+    "EmptyState"
+  ],
+  "fontSizes": [12, 13, 14, 16],
+  "lineHeight": 1.5,
+  "spacing": [0, 4, 8, 12, 16, 24],
+  "radius": {
+    "control": 6,
+    "drawer": 12,
+    "pill": 999
+  },
+  "height": {
+    "control": 32,
+    "input": 36,
+    "tableRow": 38,
+    "icon": 16
+  }
+}

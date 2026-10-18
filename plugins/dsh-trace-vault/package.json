@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-trace-vault",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "description": "保存工具调用和错误记录，供查询及排查中断原因。",
   "files": [
     "lib",
@@ -32,5 +32,9 @@
     "bundle": {
       "patch": "./cordis.patch.yml"
     }
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": "0.2.0-rc.2 || 0.2.1-rc.2"
   }
 }

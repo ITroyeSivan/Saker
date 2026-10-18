@@ -242,7 +242,7 @@ export function projectSnapshot(workspace, { now = new Date() } = {}) {
 			{ id: "S3", label: "按指纹归类", state: buckets.length > 0 ? "done" : "pending" },
 			{ id: "S4", label: "排优先级", state: buckets.length > 0 ? "done" : "pending" },
 			{ id: "S5", label: "先验证再铺开", state: currentStage === "S5" ? "current" : (currentStage === "S6" ? "done" : "pending") },
-			{ id: "S6", label: "RCE 证据与报告（停止）", state: currentStage === "S6" ? "current" : (reports.length > 0 ? "done" : "pending") },
+			{ id: "S6", label: "结果证据与报告（停止）", state: currentStage === "S6" ? "current" : (reports.length > 0 ? "done" : "pending") },
 		],
 		buckets,
 	};

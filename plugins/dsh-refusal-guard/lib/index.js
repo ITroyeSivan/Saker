@@ -31,6 +31,7 @@
 // the detector stays keyword-only with the same false-positive discipline.
 
 import fs from "node:fs";
+import { sessionWorkingDirectory } from "dsh-saker/working-directory";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import z from "@deepseek-ai/schemastery";
@@ -319,7 +320,7 @@ async function apply(ctx, config) {
 	 * 不得阻塞回合）。只在升级动作落位时写一行。 */
 	const auditHit = (agent, level, detected, lastRequest, presetId) => {
 		try {
-			const cwd = agent?.session?.header?.cwd;
+			const cwd = sessionWorkingDirectory(agent?.ctx, agent?.session);
 			if (!cwd) return;
 			const file = path.join(cwd, "refusal-audit.md");
 			const row = buildAuditRow(new Date().toISOString(), presetId, level, detected, lastRequest);

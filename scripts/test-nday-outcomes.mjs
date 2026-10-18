@@ -136,6 +136,11 @@ try {
   await test('malformed or links-only reproduction rejects without silently truncating or consuming IDs', () => {
     for (const hostHeader of ['example.test\r\nInjected: value', 'name@example.test', 'example.test/other', 42]) assert.throws(() => parseReproduction({ ...method, hostHeader }), /Host/)
     assert.throws(() => parseReproduction({ ...method, steps: ['https://example.test/poc'] }), /actionable/)
+    // 空值/坏 JSON 必须给人话，不能把 JSON.parse 的英文异常漏到发现详情里
+    assert.throws(() => parseReproduction(''), /还没有完整复现方法/)
+    assert.throws(() => parseReproduction(undefined), /还没有完整复现方法/)
+    assert.throws(() => parseReproduction('{坏 json'), /不是有效 JSON/)
+    assert.doesNotThrow(() => { try { parseReproduction('') } catch (error) { assert.ok(!/Unexpected end of JSON input/.test(error.message)) } })
     assert.throws(() => registerFinding(store, 'invalid-session', 'pentest', { ...input, reproduction: '{invalid' }))
     assert.throws(() => registerFinding(store, 'invalid-session', 'pentest', { ...input, reproduction: JSON.stringify({ ...method, steps: ['x'.repeat(21000)] }) }), /20000/)
     assert.equal(registerFinding(store, 'invalid-session', 'pentest', input).seq, 1)

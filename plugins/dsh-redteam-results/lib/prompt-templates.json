@@ -1,0 +1,792 @@
+{
+  "schemaVersion": 1,
+  "kind": "saker-design-catalog",
+  "status": "planned",
+  "locale": "zh-CN",
+  "fields": {
+    "target": {
+      "label": "目标地址",
+      "type": "text",
+      "placeholder": "https://app.example.test",
+      "default": ""
+    },
+    "scope": {
+      "label": "授权范围",
+      "type": "textarea",
+      "placeholder": "example.test 及已获授权的子域；排除项另列",
+      "default": "我在本次任务中说明的范围"
+    },
+    "materials": {
+      "label": "要分析的请求或文件",
+      "type": "material-picker",
+      "placeholder": "选择本任务已添加的请求、代码或文件",
+      "default": "本任务已添加的请求和文件",
+      "help": "还没有内容时，先点“添加测试资料”。文件名和请求名称只用于定位，原文按需要读取。"
+    },
+    "identities": {
+      "label": "使用哪个账号",
+      "type": "identity-picker",
+      "placeholder": "选择已保存的账号名称；密码和 Cookie 不填在这里",
+      "default": "沿用我已提供的账号，缺少其他账号时集中告诉我"
+    },
+    "focus": {
+      "label": "检查重点",
+      "type": "textarea",
+      "placeholder": "例如订单、导出、账号权限或某个接口",
+      "default": "优先检查和当前业务及材料相关的问题"
+    },
+    "product": {
+      "label": "产品名称",
+      "type": "text",
+      "placeholder": "填写产品或组件的准确名称",
+      "default": ""
+    },
+    "version": {
+      "label": "版本",
+      "type": "text",
+      "placeholder": "不知道则留空",
+      "default": "未知，先根据实际材料核对"
+    },
+    "cve": {
+      "label": "漏洞编号或公告",
+      "type": "text",
+      "placeholder": "CVE 编号或原始公告地址",
+      "default": ""
+    },
+    "query": {
+      "label": "FOFA 原生查询",
+      "type": "textarea",
+      "placeholder": "domain=\"example.test\"",
+      "default": ""
+    },
+    "signature": {
+      "label": "已知产品或网站特征",
+      "type": "textarea",
+      "placeholder": "产品、标题、响应头、图标哈希或现有入口",
+      "default": "暂无已核实的产品特征，先从本任务请求和文件中核对"
+    },
+    "repo": {
+      "label": "要检查的代码",
+      "type": "material-picker",
+      "placeholder": "选择已添加的代码文件或目录，注明版本",
+      "default": "",
+      "help": "选择代码文件或目录；仅填写路径不会证明文件已成功添加。"
+    },
+    "change": {
+      "label": "变更或补丁",
+      "type": "material-picker",
+      "placeholder": "选择 diff、变更目录或两个版本",
+      "default": "未提供额外修复说明，按当前环境复测"
+    },
+    "finding": {
+      "label": "已有发现",
+      "type": "finding-picker",
+      "placeholder": "选择发现或填写问题与原始记录",
+      "default": ""
+    },
+    "output": {
+      "label": "希望得到什么",
+      "type": "text",
+      "placeholder": "例如简短结论、复测记录、修复建议",
+      "default": "写清结果、判断依据和还没完成的部分"
+    },
+    "question": {
+      "label": "这次需求",
+      "type": "textarea",
+      "placeholder": "用自己的话描述要完成的事",
+      "default": ""
+    },
+    "sources": {
+      "label": "漏洞资料来源",
+      "type": "source-picker",
+      "placeholder": "选择知识库来源，或填写公开公告/仓库地址",
+      "default": ""
+    },
+    "limits": {
+      "label": "额外限制",
+      "type": "textarea",
+      "placeholder": "排除路径、维护窗口、禁止改动的数据等",
+      "default": "沿用当前任务设置"
+    },
+    "workflow": {
+      "label": "业务操作",
+      "type": "textarea",
+      "placeholder": "例如创建订单、申请审批、下载导出文件",
+      "default": "以材料里的实际操作为准"
+    }
+  },
+  "templates": [
+    {
+      "id": "S01",
+      "title": "从一个网站开始",
+      "group": "开始测试",
+      "required": [
+        "target"
+      ],
+      "optional": [
+        "scope",
+        "focus",
+        "identities"
+      ],
+      "text": "请测试 {{target}}，范围是 {{scope}}。{{focus}}。先看现有请求和文件，挑值得检查的问题验证。写清哪个入口有问题、实际影响和判断依据。账号：{{identities}}。",
+      "keywords": [
+        "网站",
+        "常规",
+        "自动",
+        "全面"
+      ]
+    },
+    {
+      "id": "S02",
+      "title": "用我的请求或代码开始",
+      "group": "开始测试",
+      "required": [
+        "materials"
+      ],
+      "optional": [
+        "scope",
+        "focus"
+      ],
+      "text": "请根据 {{materials}} 开始检查。{{focus}}。先分析现有请求、响应和业务关系，资料足够就直接验证，缺关键条件再集中告诉我。目标操作沿用 {{scope}}。",
+      "keywords": [
+        "HAR",
+        "请求",
+        "Burp",
+        "Yakit",
+        "流量",
+        "已有"
+      ]
+    },
+    {
+      "id": "S03",
+      "title": "检查登录后的功能",
+      "group": "开始测试",
+      "required": [
+        "target"
+      ],
+      "optional": [
+        "identities",
+        "focus"
+      ],
+      "text": "请检查 {{target}} 登录后的功能。账号：{{identities}}。{{focus}}。结合实际页面和接口判断访问权限及敏感操作，登录失效时说明受影响的部分，保留已经完成的结果。",
+      "keywords": [
+        "登录",
+        "账号",
+        "session",
+        "认证",
+        "权限"
+      ]
+    },
+    {
+      "id": "S04",
+      "title": "只检查我指定的问题",
+      "group": "开始测试",
+      "required": [
+        "target",
+        "focus"
+      ],
+      "optional": [
+        "limits"
+      ],
+      "text": "请围绕 {{target}} 的以下问题检查：{{focus}}。利用本次现有请求和文件，验证与这个问题直接相关的条件和影响。额外限制：{{limits}}。最后说明查到了什么、排除了什么、还缺什么。",
+      "keywords": [
+        "单点",
+        "SQL",
+        "注入",
+        "上传",
+        "认证",
+        "会话",
+        "重点",
+        "自定义"
+      ]
+    },
+    {
+      "id": "R01",
+      "title": "整理授权资产和入口",
+      "group": "信息收集",
+      "required": [
+        "scope"
+      ],
+      "optional": [
+        "focus"
+      ],
+      "text": "请整理 {{scope}} 内的 Web 资产和入口。先合并现有请求和文件，再补必要的子域名、端口、服务、站点指纹和接口信息。{{focus}}。给出带来源的资产列表与值得优先检查的入口，本次先完成收集和筛选。",
+      "keywords": [
+        "资产",
+        "侦察",
+        "recon",
+        "测绘"
+      ]
+    },
+    {
+      "id": "R02",
+      "title": "收集子域名",
+      "group": "信息收集",
+      "required": [
+        "scope"
+      ],
+      "optional": [
+        "limits"
+      ],
+      "text": "请收集 {{scope}} 内的子域名，合并已保存的结果，标出来源、解析情况和相关 Web 入口。额外限制：{{limits}}。把范围外关联项单列，不自动开展后续漏洞验证。",
+      "keywords": [
+        "子域",
+        "DNS",
+        "域名"
+      ]
+    },
+    {
+      "id": "R03",
+      "title": "识别端口和服务",
+      "group": "信息收集",
+      "required": [
+        "scope"
+      ],
+      "optional": [
+        "limits"
+      ],
+      "text": "请识别 {{scope}} 内的开放端口和服务。沿用当前扫描强度，优先复用已保存的结果，区分 Web、其他服务和无法确认的项。额外限制：{{limits}}。输出真实协议、端口、识别依据和可用入口。",
+      "keywords": [
+        "端口",
+        "nmap",
+        "服务",
+        "IP",
+        "CIDR"
+      ]
+    },
+    {
+      "id": "R04",
+      "title": "寻找后台和独立登录入口",
+      "group": "信息收集",
+      "required": [
+        "scope"
+      ],
+      "optional": [
+        "signature"
+      ],
+      "text": "请在 {{scope}} 内查找后台、独立登录口和管理系统。已知线索：{{signature}}。结合已有页面、JS、资产和资产平台结果筛选，保存每个入口的发现依据，区分真实入口、历史页面与通用登录页。",
+      "keywords": [
+        "后台",
+        "登录口",
+        "管理入口",
+        "隐藏"
+      ]
+    },
+    {
+      "id": "R05",
+      "title": "运行我写好的 FOFA 查询",
+      "group": "信息收集",
+      "required": [
+        "query"
+      ],
+      "optional": [
+        "scope"
+      ],
+      "text": "请使用 FOFA 原生查询：{{query}}。整理与 {{scope}} 有关的结果，保留原查询、来源时间、协议、端口、分页状态和实际获取数量。本次先查询和筛选，不自动访问全部命中目标。",
+      "keywords": [
+        "FOFA",
+        "原生",
+        "query",
+        "搜索"
+      ]
+    },
+    {
+      "id": "R06",
+      "title": "用产品指纹找相关资产",
+      "group": "信息收集",
+      "required": [
+        "scope",
+        "signature"
+      ],
+      "optional": [
+        "focus"
+      ],
+      "text": "请在 {{scope}} 内，用 FOFA 查找符合以下线索的资产：{{signature}}。用有来源的产品或页面特征组合查询，优先核对与相关 Nday 条件、后台或实际业务入口有关的结果。{{focus}}。输出候选及命中依据，不把搜索命中当成漏洞确认。",
+      "keywords": [
+        "FOFA",
+        "指纹",
+        "Nday",
+        "产品",
+        "FID",
+        "图标"
+      ]
+    },
+    {
+      "id": "R07",
+      "title": "收集 JS 和 API 入口",
+      "group": "信息收集",
+      "required": [
+        "target"
+      ],
+      "optional": [
+        "scope"
+      ],
+      "text": "请从 {{target}} 收集与当前功能有关的 JS 和 API 入口。复用已有文件，区分实际请求、代码中的路径和暂未证实的线索，整理参数、调用位置及可能需要的身份。目标操作范围：{{scope}}。",
+      "keywords": [
+        "JS",
+        "API",
+        "接口",
+        "前端",
+        "路由"
+      ]
+    },
+    {
+      "id": "N01",
+      "title": "验证指定 CVE 或公告",
+      "group": "已知漏洞",
+      "required": [
+        "target",
+        "cve"
+      ],
+      "optional": [
+        "version",
+        "identities"
+      ],
+      "text": "请核对 {{target}} 是否受 {{cve}} 影响。已知版本：{{version}}。账号：{{identities}}。先对照原始公告中的产品、版本和部署前提，再选择能说明实际影响的验证；区分适用、未发现影响和条件不足。",
+      "keywords": [
+        "CVE",
+        "Nday",
+        "指定",
+        "公告"
+      ]
+    },
+    {
+      "id": "N02",
+      "title": "检查某产品的相关 Nday",
+      "group": "已知漏洞",
+      "required": [
+        "target",
+        "product"
+      ],
+      "optional": [
+        "version",
+        "identities"
+      ],
+      "text": "请检查 {{target}} 使用的 {{product}} 相关 Nday。已知版本：{{version}}。账号：{{identities}}。根据实际入口和原始资料筛选少量相关候选，核对条件后验证，说明每个候选的结果和未完成条件。",
+      "keywords": [
+        "产品",
+        "组件",
+        "版本",
+        "Nday"
+      ]
+    },
+    {
+      "id": "N03",
+      "title": "审阅 PoC 和适用条件",
+      "group": "已知漏洞",
+      "required": [
+        "materials"
+      ],
+      "optional": [],
+      "text": "请审阅 {{materials}} 中的 PoC、公告和技术说明。整理产品、版本、身份、配置前提、实际验证内容及可能副作用，核对代码与说明是否一致。本次先做资料和代码分析，给出适用条件、缺项和验证建议。",
+      "keywords": [
+        "PoC",
+        "仓库",
+        "GitHub",
+        "审阅",
+        "代码"
+      ]
+    },
+    {
+      "id": "N04",
+      "title": "分析补丁和相邻问题",
+      "group": "已知漏洞",
+      "required": [
+        "repo",
+        "change"
+      ],
+      "optional": [
+        "focus"
+      ],
+      "text": "请对照 {{repo}} 与 {{change}} 分析安全修复。说明修复了哪条输入或权限路径，检查相同代码模式及相邻分支是否存在遗漏。{{focus}}。区分已经证明的问题、代码线索和需要运行验证的条件。",
+      "keywords": [
+        "补丁",
+        "diff",
+        "绕过",
+        "变体"
+      ]
+    },
+    {
+      "id": "Z01",
+      "title": "深入检查未知问题",
+      "group": "深入研究",
+      "required": [
+        "target"
+      ],
+      "optional": [
+        "focus",
+        "identities"
+      ],
+      "text": "请深入检查 {{target}} 中尚未确定的问题。{{focus}}。账号：{{identities}}。从实际页面、请求、JS 和业务差异中提出并验证问题，根据结果调整方向；已知漏洞检索作为补充，最终结论注明依据与未知项。",
+      "keywords": [
+        "0day",
+        "黑盒",
+        "深挖",
+        "未知"
+      ]
+    },
+    {
+      "id": "Z02",
+      "title": "结合源码与运行结果检查",
+      "group": "深入研究",
+      "required": [
+        "repo",
+        "target"
+      ],
+      "optional": [
+        "focus"
+      ],
+      "text": "请结合 {{repo}} 和 {{target}} 检查安全问题。{{focus}}。把源码中的可达路径与实际接口、配置和身份对应起来，优先验证有影响的线索，区分代码推测与已经观察到的结果。",
+      "keywords": [
+        "白盒",
+        "灰盒",
+        "源码",
+        "运行",
+        "0day"
+      ]
+    },
+    {
+      "id": "Z03",
+      "title": "检查对象和角色权限",
+      "group": "深入研究",
+      "required": [
+        "materials"
+      ],
+      "optional": [
+        "identities",
+        "workflow"
+      ],
+      "text": "请检查 {{materials}} 中对象和角色之间的权限。账号：{{identities}}。业务操作：{{workflow}}。比较正常允许的访问与跨账号、跨角色访问，核对对象归属和实际影响，区分正常共享与权限问题。",
+      "keywords": [
+        "越权",
+        "IDOR",
+        "BOLA",
+        "RBAC",
+        "多账号"
+      ]
+    },
+    {
+      "id": "Z04",
+      "title": "检查业务操作和状态变化",
+      "group": "深入研究",
+      "required": [
+        "workflow"
+      ],
+      "optional": [],
+      "text": "请检查以下业务操作中的安全问题：{{workflow}}。结合本次请求、页面和业务说明，关注前提、顺序、对象归属及状态变化，选择最有依据的问题验证。结果说明操作前后发生了什么变化，以及影响成立的条件。",
+      "keywords": [
+        "逻辑",
+        "业务",
+        "工作流",
+        "竞态",
+        "状态"
+      ]
+    },
+    {
+      "id": "Z05",
+      "title": "检查上传下载和文件处理",
+      "group": "深入研究",
+      "required": [
+        "materials"
+      ],
+      "optional": [
+        "focus"
+      ],
+      "text": "请检查 {{materials}} 中的上传、下载、预览和文件处理功能。{{focus}}。结合存储位置、访问权限、处理方式和实际返回内容判断影响，保留正常行为与异常行为的差异，说明尚未验证的条件。",
+      "keywords": [
+        "文件",
+        "上传",
+        "下载",
+        "路径",
+        "预览"
+      ]
+    },
+    {
+      "id": "Z06",
+      "title": "检查接口输入处理",
+      "group": "深入研究",
+      "required": [
+        "materials"
+      ],
+      "optional": [
+        "focus"
+      ],
+      "text": "请检查 {{materials}} 中接口输入如何进入查询、模板、命令或其他处理过程。{{focus}}。根据实际处理路径选择验证，核对响应变化或其他可观察影响，区分普通报错、参数被忽略与真正的安全问题。",
+      "keywords": [
+        "输入",
+        "SQL",
+        "模板",
+        "命令",
+        "注入",
+        "解析"
+      ]
+    },
+    {
+      "id": "Z07",
+      "title": "检查浏览器与前端安全",
+      "group": "深入研究",
+      "required": [
+        "materials"
+      ],
+      "optional": [
+        "focus"
+      ],
+      "text": "请检查 {{materials}} 涉及的浏览器和前端安全问题。{{focus}}。核对输入到页面或 DOM 的实际路径、浏览器行为和相关防护，区分文本回显与可成立的影响。运行验证时保留当前页面、来源和浏览器观察。",
+      "keywords": [
+        "XSS",
+        "DOM",
+        "CORS",
+        "CSP",
+        "前端",
+        "浏览器"
+      ]
+    },
+    {
+      "id": "Z08",
+      "title": "检查服务端请求与资源访问",
+      "group": "深入研究",
+      "required": [
+        "materials"
+      ],
+      "optional": [
+        "focus"
+      ],
+      "text": "请检查 {{materials}} 中服务端发起请求、加载远程资源或读取本地资源的功能。{{focus}}。核对谁实际发起访问、重定向和解析后的目标，以及能观察到的影响；将客户端可访问与服务端访问分开判断。",
+      "keywords": [
+        "SSRF",
+        "服务端",
+        "请求",
+        "远程资源"
+      ]
+    },
+    {
+      "id": "A01",
+      "title": "分析请求和响应",
+      "group": "分析资料",
+      "required": [
+        "materials"
+      ],
+      "optional": [
+        "focus"
+      ],
+      "text": "请分析 {{materials}} 中的 HTTP 请求和流量。{{focus}}。整理接口、参数、身份及业务关联，指出最值得继续核对的异常，引用具体请求或响应。本次先分析现有请求和文件。",
+      "keywords": [
+        "HTTP",
+        "HAR",
+        "Burp",
+        "Yakit",
+        "流量",
+        "离线"
+      ]
+    },
+    {
+      "id": "A02",
+      "title": "分析 JS 和前端文件",
+      "group": "分析资料",
+      "required": [
+        "materials"
+      ],
+      "optional": [
+        "focus"
+      ],
+      "text": "请分析 {{materials}} 中的 JS 和前端文件。{{focus}}。整理接口、调用关系、敏感配置和可疑输入路径，保留文件位置及判断依据，区分可达功能和未使用代码。本次先分析已有文件。",
+      "keywords": [
+        "JS",
+        "前端",
+        "文件",
+        "sourcemap"
+      ]
+    },
+    {
+      "id": "A03",
+      "title": "审阅源码和配置",
+      "group": "分析资料",
+      "required": [
+        "repo"
+      ],
+      "optional": [
+        "focus"
+      ],
+      "text": "请审阅 {{repo}} 的源码和配置。{{focus}}。沿实际入口、权限和数据流寻找问题，引用文件与位置，说明成立条件及建议的运行验证。本次先完成代码分析。",
+      "keywords": [
+        "源码",
+        "审计",
+        "配置",
+        "白盒"
+      ]
+    },
+    {
+      "id": "A04",
+      "title": "筛选扫描器结果",
+      "group": "分析资料",
+      "required": [
+        "materials"
+      ],
+      "optional": [
+        "focus"
+      ],
+      "text": "请整理 {{materials}} 中扫描器或外部工具的结果。{{focus}}。去重并核对命中依据，区分明显误报、值得验证的候选和资料不足的项；按影响与验证成本给出有理由的顺序。",
+      "keywords": [
+        "Nuclei",
+        "扫描",
+        "误报",
+        "结果",
+        "triage"
+      ]
+    },
+    {
+      "id": "A05",
+      "title": "分析 API 描述和接口设计",
+      "group": "分析资料",
+      "required": [
+        "materials"
+      ],
+      "optional": [
+        "focus"
+      ],
+      "text": "请分析 {{materials}} 中的 API 描述、接口定义和业务约束。{{focus}}。整理对象、输入、角色及敏感操作，指出需要运行验证的问题，引用对应接口定义。本次先分析现有请求和文件。",
+      "keywords": [
+        "OpenAPI",
+        "Swagger",
+        "GraphQL",
+        "RPC",
+        "接口",
+        "设计"
+      ]
+    },
+    {
+      "id": "A06",
+      "title": "查阅漏洞与技术资料",
+      "group": "分析资料",
+      "required": [
+        "question"
+      ],
+      "optional": [],
+      "text": "请围绕以下问题查资料并解释：{{question}}。结合本次现有请求和文件，优先引用原始说明和相关知识片段，分清明确事实、条件差异和仍未知的部分，给出能继续核对的出处。",
+      "keywords": [
+        "知识",
+        "原理",
+        "学习",
+        "文档",
+        "检索"
+      ]
+    },
+    {
+      "id": "F01",
+      "title": "复核一条疑似发现",
+      "group": "结果与继续",
+      "required": [
+        "finding"
+      ],
+      "optional": [
+        "identities"
+      ],
+      "text": "请复核 {{finding}}。账号：{{identities}}。先检查原始依据与声称的影响是否一致，再补必要对照，区分已确认、误报与缺少条件。沿用当前任务范围和用量，保留原始记录。",
+      "keywords": [
+        "复核",
+        "疑似",
+        "误报"
+      ]
+    },
+    {
+      "id": "F02",
+      "title": "复测修复结果",
+      "group": "结果与继续",
+      "required": [
+        "finding"
+      ],
+      "optional": [
+        "change"
+      ],
+      "text": "请复测 {{finding}} 的修复情况。本次修复说明：{{change}}。对照原来的对象、身份和影响条件，记录当前环境与变化；给出仍可复现、本次未复现或无法确认，并说明判断依据。保留原发现和历次复测。",
+      "keywords": [
+        "修复",
+        "回归",
+        "retest",
+        "复测"
+      ]
+    },
+    {
+      "id": "F03",
+      "title": "继续上次没完成的检查",
+      "group": "结果与继续",
+      "required": [],
+      "optional": [
+        "focus"
+      ],
+      "text": "请继续本次任务。先使用已保存的资料、设置和未完成项，核对最后一次调用的实际状态，再推进。{{focus}}。已完成的扫描和已证明的结果沿用，未知写操作先查状态再决定是否重试。",
+      "keywords": [
+        "继续",
+        "暂停",
+        "恢复",
+        "中断"
+      ]
+    },
+    {
+      "id": "F04",
+      "title": "整理报告和修复建议",
+      "group": "结果与继续",
+      "required": [],
+      "optional": [
+        "output"
+      ],
+      "text": "请根据本次已保存的发现整理报告。{{output}}。已确认问题写清入口、影响、复现条件、依据和修复建议；疑似问题与未完成项单列。先展示导出预览，账号凭据和不必要的业务数据脱敏。",
+      "keywords": [
+        "报告",
+        "导出",
+        "修复",
+        "总结"
+      ]
+    },
+    {
+      "id": "F05",
+      "title": "解释这次测试供我学习",
+      "group": "结果与继续",
+      "required": [
+        "question"
+      ],
+      "optional": [],
+      "text": "请结合本次实际记录解释：{{question}}。说明为什么选择这些检查、结果支持什么结论、哪些替代解释还存在；用具体请求、代码或观察举例，最后列出适合我继续核对的资料。",
+      "keywords": [
+        "学习",
+        "讲解",
+        "复盘",
+        "原理"
+      ]
+    },
+    {
+      "id": "F06",
+      "title": "更新选定知识来源",
+      "group": "结果与继续",
+      "required": [
+        "sources"
+      ],
+      "optional": [],
+      "text": "请更新以下知识来源：{{sources}}。只处理新增或有实质变化的内容，保留原文、版本和提取出处，列出更正、撤回、失败及待处理项。沿用知识更新额度，不启动目标验证。",
+      "keywords": [
+        "知识",
+        "更新",
+        "同步",
+        "Nday",
+        "仓库"
+      ]
+    },
+    {
+      "id": "U01",
+      "title": "自由任务",
+      "group": "自定义",
+      "required": [
+        "question"
+      ],
+      "optional": [],
+      "text": "{{question}}",
+      "keywords": [
+        "自定义",
+        "其他",
+        "通用",
+        "空白"
+      ]
+    }
+  ],
+  "designRevision": 2
+}

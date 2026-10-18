@@ -64,6 +64,9 @@ try {
     for (const mutate of cases) { const doc = document('invalid'); mutate(doc); assert.throws(() => stageMethodPackage(store, doc)); }
     assert.equal(listMethodPackages(store).total, before);
     assert.equal(activeMethodPackage(store, 'controlled-fixture'), null);
+    // J11 实测：action=active 不带 id 时曾直接漏出 SQLite 绑定错误（Provided value cannot be bound…）。
+    assert.throws(() => activeMethodPackage(store, undefined), /active 需要方法包 id/, 'active 缺 id 必须是可读契约说明');
+    assert.throws(() => activeMethodPackage(store, '   '), /active 需要方法包 id/, '空白 id 同样按缺 id 处理');
   });
   await test('model review and test receipt cannot impersonate Desktop approval or activate a pending method', () => {
     recordMethodReview(store, v1.digest, 'review', { ...review(v1.digest), actor: 'desktop-user' }, 'model:fixture');

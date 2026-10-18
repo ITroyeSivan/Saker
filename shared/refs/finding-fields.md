@@ -125,7 +125,7 @@
 
 `verification.status` 使用 `verified` 或 `not-run`；已实测必须引用相应复现证据。目标的影响已证实、但生成脚本未运行时用 `not-run`，不得把两者混为一谈。成果页可显示材料完整性并导出完整利用方法；证据不够、复核未完成或仅有交互时，完整成果导出会拒绝。
 
-渗透模式的status和二次评级是记录声明，不能单独晋级为可交付成果。门禁要求宿主执行回执匹配同会话、入口、identity、当前methodId/methodVersion及关键报文；run提供methodId/methodVersion，reproduction.verification提供controlReceiptId/probeReceiptId。派生executionEvidence不接受模型填写。HTTP执行仍不证明影响，必须另有独立效果验证。当前只支持已审阅的private-json-read/v1契约：两轮所有者参考、正常身份/归属、跨身份私有对象探测及匿名拒绝，均用实际回执；通过的effectReceiptId只能证明access，不能称为RCE。其他机制仍待验证。此阶段不代表完整实战检出完成。
+渗透模式的status和二次评级是记录声明，不能单独晋级为可交付成果。门禁要求宿主执行回执匹配同会话、入口、identity、当前methodId/methodVersion及关键报文；run提供methodId/methodVersion，reproduction.verification提供controlReceiptId/probeReceiptId。派生executionEvidence不接受模型填写。HTTP执行仍不证明影响，必须另有独立效果验证。当前支持八条已审阅契约，均用实际回执：private-json-read/v1（两轮所有者参考、正常身份/归属、跨身份私有对象探测及匿名拒绝，proofKind=access）、path-read-disclosure/v1（正常读取与越界读取的实际文件内容对照，proofKind=other-impact）、state-change-impact/v1（写请求带受控marker、独立GET读回看到状态变更，proofKind=write，是否允许行为仍由桌面影响复核确认）、nday-applicability/v1（产品/版本/部署条件原文对应，proofKind=fingerprint，只算适用性、不算漏洞已验证，交付门禁会拒绝它充当影响证据）、config-disclosure/v1（带身份凭据与完全匿名的GET拿到同一份含受控marker的配置正文，proofKind=other-impact，匿名内容不一致或参考未带凭据都不算）、input-processing/v1（受控输入以被处理形态出现在探针响应、对照请求只差这一个输入值，proofKind=other-impact，参数被忽略/普通报错/原始回显都不算）、server-side-access/v1（触发请求带复核回调域名、宿主回查DNSLog平台拿到晚于触发的命中，proofKind=interaction，只证明服务端发起过外连、不算影响）、browser-execution/v1（宿主真开浏览器、载荷把window.__sakerProbe设成复核marker且origin与入口同源，proofKind=other-impact，仅回显/被转义/CSP拦下/本地file都不算）。通过的effectReceiptId只能证明对应proofKind，不能称为RCE。其余机制仍待验证。此阶段不代表完整实战检出完成。
 
 Nday 成果指标从成果库当前状态读取：独立复核、明确影响、关键证据及完整方法齐备才计数；同会话的同机制与实际入口去重。重复反馈不增加成果数，删除、降级和证据撤回立即生效。成果库不存在、未迁移或不可读时报告未知，不写成零；没有唯一筛选/复核记录时不计算指纹误报率。
 

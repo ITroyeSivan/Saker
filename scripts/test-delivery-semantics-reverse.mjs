@@ -9,7 +9,7 @@ const root = fileURLToPath(new URL('..', import.meta.url)), boundary = path.reso
 assert.equal(path.resolve(os.tmpdir()), boundary, 'set TEMP/TMP/TMPDIR to workspace _ref/tmp');
 const copy = fs.mkdtempSync(path.join(boundary, 'delivery-semantics-reverse-'));
 try {
-  for (const file of ['package.json', 'lib', 'plugins/dsh-nday-hunter/lib', 'plugins/dsh-redteam-results/lib',
+  for (const file of ['package.json', 'lib', 'plugins/dsh-method-stack/lib', 'plugins/dsh-nday-hunter/lib', 'plugins/dsh-redteam-results/lib',
     'scripts/test-nday-outcomes.mjs', 'scripts/test-home-isolation.mjs', 'scripts/test-stub-loader.mjs', 'scripts/test-stub-register.mjs']) {
     fs.mkdirSync(path.dirname(path.join(copy, file)), { recursive: true }); fs.cpSync(path.join(root, file), path.join(copy, file), { recursive: true });
   }

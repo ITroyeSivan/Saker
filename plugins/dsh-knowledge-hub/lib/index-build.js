@@ -36,6 +36,20 @@ export function indexDbPath(home = '') {
   return path.join(knowledgeHome(home), 'refs', '.index', 'knowledge.sqlite')
 }
 
+/**
+ * 产品别名词典来源（v6 第 6.1 节）：包层随包发布的 nday catalog + 用户层可写的那一份。
+ *
+ * 放在这里而不是 lib/index.js：后台重建走的是本模块自己的 KnowledgeIndex 实例，
+ * 只在 index.js 里传路径的话，真机点「重建索引」走后台进程，词典永远传不到（2026-10-17 实测踩到）。
+ */
+export function aliasCatalogPaths(home = '') {
+  const base = knowledgeHome(home)
+  return [
+    path.join(resolveSakerRoot(), 'preset', 'pentest', 'refs', 'nday', 'catalog.json'),
+    path.join(base, 'refs', 'pentest', 'nday', 'catalog.json'),
+  ]
+}
+
 export function buildStatePath(home = '') {
   return path.join(knowledgeHome(home), 'refs', '.index', 'build-state.json')
 }
@@ -98,7 +112,7 @@ export function buildKnowledgeIndex(options = {}) {
     startedAt,
     roots: roots.length,
   })
-  const index = new KnowledgeIndex({ dbPath, roots, logger: console })
+  const index = new KnowledgeIndex({ dbPath, roots, logger: console, aliasCatalogPaths: aliasCatalogPaths(home) })
   try {
     const result = index.rebuild({ force: options.force !== false })
     const status = index.status()

@@ -4,7 +4,7 @@ import assert from "node:assert";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseDsl, buildQueries, mergeAssets, fofaGuard, LIMITS, searchFofaPage } from "../lib/adapters.js";
+import { parseDsl, buildQueries, mergeAssets, fofaGuard, LIMITS, searchFofaPage, classifySearchError, SearchError, SEARCH_STATUS } from "../lib/adapters.js";
 import { parseFingerprint, fingerprintQuery, fingerprintLadder, searchWithRelax, fingerprintMatches, verifyPipeline } from "../lib/verify.js";
 import { openHunterStore, configView, getKey } from "../lib/store.js";
 
@@ -272,6 +272,28 @@ await ok("hunter client：主设置页提供三平台 key 配置入口且不回�
 	assert.match(src, /api\("config\.set"/);
 	assert.ok(!/(?:fofa|hunter|quake)[^\n]{0,50}["'][A-Za-z0-9_-]{24,}["']/i.test(src), "客户端不应硬编码长 API key");
 });
+await ok("hunter client：查询编辑器接进宿主设置页，含 7.3 节目的/范围/每页/上限与游标续页", () => {
+	const src = readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
+	// 入口：注册进宿主已有的设置页分区（不新建导航，也不占用 conversation.view 聊天页签）
+	assert.match(src, /name: "settings\.section"/);
+	assert.match(src, /id: "hunter-search"/);
+	assert.match(src, /label: function \(\) \{ return "资产搜索"; \}/);
+	assert.doesNotMatch(src, /name:\s*"conversation\.view"/);
+	// 编辑器初值：每页 50、本次最多 200；四种目的；范围单独一项
+	assert.match(src, /var \[size, setSize\] = useState\(50\)/);
+	assert.match(src, /var \[cap, setCap\] = useState\(200\)/);
+	assert.match(src, /SEARCH_PURPOSES = \[/);
+	assert.match(src, /"授权范围"/);
+	// 续页：用后端返回的游标，只追加不覆盖；并把 scope 一起送后端按括号组合
+	assert.match(src, /doSearch\(undefined, cursor\)/);
+	assert.match(src, /scope: scope, next: continuing \? next : ""/);
+	assert.match(src, /continuing \? previous\.slice\(\) : \[\]/);
+	// 不谎报全量：平台报告总数未知时显示"未知"
+	assert.match(src, /平台报告总数：未知/);
+	// queryOriginal / queryEffective 分开（v6 第 7.3 节）：含范围的实际发送表达式单独显示
+	assert.match(src, /实际发送（含范围）/);
+	assert.match(src, /setEffectiveQueries\(r\.queryEffective \|\| \[\]\)/);
+});
 	await ok("hunter store：历史与授权白名单", () => {
 		const st = openHunterStore(":memory:");
 		st.insertHistory.run("2026-01-01T00:00:00Z", "code-audit-1", "code-audit", 'title:"x"', "fofa,hunter", "l0-confirmed", "{}");
@@ -480,6 +502,139 @@ await ok("CSRF 头校验：匹配放行/缺失或错值拒", () => {
 		} finally {
 			globalThis.fetch = oldFetch;
 		}
+	});
+
+	await ok("平台错误分类：无密钥/无权限/额度/语法/网络/限流 各自可辨（v6 第 7.3 节）", () => {
+		assert.equal(classifySearchError(new SearchError("x", SEARCH_STATUS.NO_KEY)).status, "no-key");
+		assert.equal(classifySearchError("401: invalid key").status, "auth");
+		assert.equal(classifySearchError("403: 该字段需要专业版会员才能查询").status, "field-forbidden");
+		assert.equal(classifySearchError("FOFA: [-700] 账号额度已用尽，请充值").status, "quota-exhausted");
+		assert.equal(classifySearchError("FOFA: 查询语法错误 syntax error near AND").status, "syntax");
+		// 真实 FOFA 返回：查询里的 app 名不存在 —— 属于查询内容错误，不是网络/额度问题。
+		assert.equal(classifySearchError("所有已配置平台搜索失败：fofa=FOFA: [820300] App saker-x 不存在").status, "syntax");
+		assert.equal(classifySearchError("fetch failed").status, "network");
+		assert.equal(classifySearchError("429: too many requests").status, "rate-limited");
+		assert.equal(classifySearchError("429: too many requests").retriable, true, "限流可重试");
+		assert.equal(classifySearchError("something odd").status, "unknown");
+		assert.equal(classifySearchError(new SearchError("held", SEARCH_STATUS.QUOTA_EXHAUSTED)).retriable, false);
+	});
+
+	await ok("asset_search 额度用尽返回 quota-exhausted，不混同无权限或空成功", async () => {
+		const st = openHunterStore(join(TEST_HOME, "hunter", "hunter.db"));
+		st.setKey.run("fofa", "test-key", new Date().toISOString());
+		st.close();
+		const oldFetch = globalThis.fetch;
+		globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ error: true, errmsg: "[-700] 账号额度已用尽，请充值" }) });
+		try {
+			const out = await tools.get("asset_search").execute({ query: 'app:"Tomcat"', scope: "example.com", workspace: TEST_HOME });
+			assert.equal(out.ok, false);
+			assert.equal(out.status, "quota-exhausted", "全部平台因额度失败时状态是 quota-exhausted");
+			assert.equal(out.platformStatuses[0].status, "quota-exhausted");
+		} finally { globalThis.fetch = oldFetch; }
+	});
+
+	await ok("asset_search 字段无权限返回 field-forbidden", async () => {
+		const oldFetch = globalThis.fetch;
+		globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ error: true, errmsg: "免费用户不支持该字段，请升级专业版会员" }) });
+		try {
+			const out = await tools.get("asset_search").execute({ query: 'app:"Tomcat"', scope: "example.com", workspace: TEST_HOME });
+			assert.equal(out.ok, false);
+			assert.equal(out.status, "field-forbidden");
+		} finally { globalThis.fetch = oldFetch; }
+	});
+
+	await ok("asset_search 把 FOFA「app 不存在」归为 syntax，不混同网络/额度", async () => {
+		const oldFetch = globalThis.fetch;
+		globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ error: true, errmsg: "[820300] App saker-verify-nonexistent-app-2026 不存在" }) });
+		try {
+			const out = await tools.get("asset_search").execute({ query: 'app:"saker-verify-nonexistent-app-2026"', scope: "example.com", workspace: TEST_HOME });
+			assert.equal(out.ok, false);
+			assert.equal(out.status, "syntax");
+			assert.equal(out.platformStatuses[0].status, "syntax");
+		} finally { globalThis.fetch = oldFetch; }
+	});
+
+	await ok("search RPC 失败时抛出带 status 的错误，宿主路由据此返回可分辨状态", async () => {
+		const st = openHunterStore(join(TEST_HOME, "hunter", "hunter.db"));
+		st.setKey.run("fofa", "test-key", new Date().toISOString());
+		const oldFetch = globalThis.fetch;
+		globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ error: true, errmsg: "[-700] 账号额度已用尽，请充值" }) });
+		try {
+			await assert.rejects(
+				dispatch(null, st, "search", { query: 'app:"Tomcat"', scope: "example.com", platform: "fofa" }),
+				(error) => error.status === "quota-exhausted" && error.platformStatuses?.[0]?.status === "quota-exhausted",
+				"抛出的错误要带 status/platformStatuses，路由层才不会再退回纯文本",
+			);
+		} finally { globalThis.fetch = oldFetch; st.close(); }
+	});
+
+	await ok("asset_search 成功但零命中记为 no-hits，不伪报全量完成", async () => {
+		const oldFetch = globalThis.fetch;
+		globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ error: false, size: 0, results: [] }) });
+		try {
+			const out = await tools.get("asset_search").execute({ query: 'app:"NoSuchApp"', scope: "example.com", workspace: TEST_HOME });
+			assert.equal(out.ok, true);
+			assert.equal(out.inScope, 0);
+			assert.equal(out.platformStatuses[0].status, "no-hits");
+			const rendered = tools.get("asset_search").output.render({}, out).map((part) => part.text).join("\n");
+			assert.match(rendered, /无命中/, "模型可见文本要写明无命中，而不是'完成'");
+		} finally { globalThis.fetch = oldFetch; }
+	});
+
+	await ok("asset_search 保留 FOFA 分页游标，模型需要时可继续翻页", async () => {
+		const oldFetch = globalThis.fetch;
+		globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ error: false, size: 1, next: "CURSOR-NEXT-PAGE", results: [["203.0.113.7:443", "登录页", "203.0.113.7", "example.com", "443", "https", "nginx"]] }) });
+		try {
+			const out = await tools.get("asset_search").execute({ query: 'app:"Tomcat"', scope: "example.com", workspace: TEST_HOME });
+			assert.equal(out.ok, true);
+			assert.equal(out.platformStatuses[0].status, "ok");
+			assert.equal(out.platformStatuses[0].nextCursor, "CURSOR-NEXT-PAGE", "分页游标必须透出，否则无法继续取下一页");
+		} finally { globalThis.fetch = oldFetch; }
+	});
+
+	await ok("asset_search 用 nextCursor 继续翻页，并把新游标透出", async () => {
+		const oldFetch = globalThis.fetch;
+		let requested = "";
+		globalThis.fetch = async (url) => { requested = String(url); return { ok: true, status: 200, text: async () => JSON.stringify({ error: false, size: 1, next: "CURSOR-3", results: [["203.0.113.9:443", "第二页", "203.0.113.9", "example.com", "443", "https", "nginx"]] }) }; };
+		try {
+			const out = await tools.get("asset_search").execute({ query: 'app:"Tomcat"', scope: "example.com", workspace: TEST_HOME, platform: "fofa", nextCursor: "CURSOR-2" });
+			assert.equal(out.ok, true);
+			assert.equal(new URL(requested).searchParams.get("next"), "CURSOR-2", "上游请求要带上一轮返回的游标");
+			assert.equal(out.platformStatuses[0].nextCursor, "CURSOR-3", "继续翻页后要给出新游标");
+		} finally { globalThis.fetch = oldFetch; }
+	});
+
+	await ok("翻页游标只允许 FOFA 单平台单查询组，歧义时明确拒绝", async () => {
+		const st = openHunterStore(join(TEST_HOME, "hunter", "hunter.db"));
+		st.setKey.run("fofa", "test-key", new Date().toISOString());
+		try {
+			await assert.rejects(dispatch(null, st, "search", { query: 'app:"Tomcat"', scope: "example.com", platform: "hunter", next: "C" }), /只支持 FOFA/);
+			await assert.rejects(dispatch(null, st, "search", { query: 'app:"Tomcat"', platform: "all", next: "C" }), /只支持 FOFA/);
+			const many = Array.from({ length: 45 }, (_, i) => `h${i}.example.com`).join(",");
+			await assert.rejects(dispatch(null, st, "search", { query: 'app:"Tomcat"', scope: many, platform: "fofa", next: "C" }), /多个授权范围查询组/);
+		} finally { st.close(); }
+	});
+
+	await ok("search RPC 也返回 platformStatuses（含游标），UI 与模型都能继续翻页", async () => {
+		const st = openHunterStore(join(TEST_HOME, "hunter", "hunter.db"));
+		st.setKey.run("fofa", "test-key", new Date().toISOString());
+		const oldFetch = globalThis.fetch;
+		globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ error: false, size: 1, next: "RPC-CURSOR", results: [["203.0.113.11:443", "x", "203.0.113.11", "example.com", "443", "https", "nginx"]] }) });
+		try {
+			const out = await dispatch(null, st, "search", { query: 'app:"Tomcat"', platform: "fofa", scope: "example.com" });
+			assert.equal(out.ok, true);
+			assert.equal(out.platformStatuses[0].status, "ok");
+			assert.equal(out.platformStatuses[0].nextCursor, "RPC-CURSOR", "RPC 也要把游标给出来");
+			// v6 第 7.3 节：queryOriginal 与 queryEffective 分开返回并落库。
+			assert.equal(out.queryOriginal, 'app:"Tomcat"', "返回用户原始表达式");
+			const eff = out.queryEffective.find((q) => q.platform === "fofa");
+			assert.ok(eff && eff.query.includes("example.com"), "queryEffective 是附加范围后真正发送的表达式");
+			assert.ok(/\)\s*(?:&&|\|\|)\s*\(/.test(eff.query), "范围以括号组合附加，不改原 AND/OR 语义");
+			const runs = st.listSearchRuns.all(5);
+			assert.equal(runs.length, 1, "每次搜索落一条记录");
+			assert.equal(runs[0].query_original, 'app:"Tomcat"');
+			assert.ok(runs[0].query_effective.includes("example.com"), "记录里保存 queryEffective");
+		} finally { globalThis.fetch = oldFetch; st.close(); }
 	});
 
 	await ok("asset_search 按 scope 过滤并写入资产账本", async () => {

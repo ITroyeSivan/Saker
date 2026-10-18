@@ -27,8 +27,13 @@ const numberArg = (name, fallback) => {
 };
 
 const fixture = JSON.parse(readFileSync(casesFile, "utf8"));
-const { ensureKnowledgeIndex, searchAll } = await import("../plugins/dsh-knowledge-hub/lib/index.js");
+const { ensureKnowledgeIndex, searchAll, closeKnowledgeIndex } = await import("../plugins/dsh-knowledge-hub/lib/index.js");
 const { indexDbPath } = await import("../plugins/dsh-knowledge-hub/lib/index-build.js");
+
+// 索引是 ~63 MB 的 SQLite。必须显式关闭再退出：Windows 下句柄释放滞后，
+// 调用方（测试套件）在 process 'exit' 阶段删 DSH_HOME 会失败，而那个阶段
+// 设置 process.exitCode 已经无效 —— 于是"清理失败"被彻底静默吞掉（曾累积 464 个测试 home / 3.1 GB）。
+process.on("exit", () => { try { closeKnowledgeIndex(); } catch { /* 已关闭或从未打开 */ } });
 
 /** 大小写/分隔符归一，便于比对索引里的相对路径。 */
 const normPath = (value) => String(value || "").replace(/\\/g, "/").toLowerCase();
@@ -127,6 +132,11 @@ const report = {
     rows: negativeRows,
   },
 };
+
+// 显式关闭索引，不能只靠 'exit'：测试套件通过 --import 先注册了 DSH_HOME 清理处理器，
+// 它在 'exit' 阶段先跑，而那时句柄还没释放（要等进程真正结束）——删除必然失败，且
+// 'exit' 阶段设置 process.exitCode 无效，于是失败被静默吞掉（曾累积 464 个测试 home / 3.1 GB）。
+try { closeKnowledgeIndex(); } catch { /* 已关闭或从未打开 */ }
 
 console.log(`knowledge-eval cases=${n} top1=${(report.top1 * 100).toFixed(1)}% top5=${(report.top5 * 100).toFixed(1)}% mrr=${report.mrr.toFixed(3)} lowConfTop1=${(report.lowConfidenceTop1Rate * 100).toFixed(1)}% avg=${report.latencyMs.avg.toFixed(1)}ms index=${report.index.mb.toFixed(1)}MB`);
 for (const row of rows) console.log(`${row.hitRank ? "HIT " : "MISS"} ${row.id.padEnd(24)} rank=${row.hitRank ?? "-"} ${row.ms}ms  ${row.query}`);

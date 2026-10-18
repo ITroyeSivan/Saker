@@ -19,6 +19,7 @@ import { randomBytes } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { readSettingsSection } from "dsh-saker/settings-compat";
+import { sessionWorkingDirectory } from "dsh-saker/working-directory";
 import { hasBin, configuredToolPaths, configuredPathForTool, resolveToolBin, resolveToolInvocation } from "dsh-saker/tool-runtime";
 export { hasBin, configuredToolPaths, configuredPathForTool, resolveToolBin, resolveToolInvocation };
 import { matchesScope, upsertAssets } from "dsh-saker/asset-inventory";
@@ -43,7 +44,7 @@ function sessionIdOf(exec) {
 function resolveWorkspaceArg(workspace, exec) {
 	if (typeof workspace !== "string" || workspace === "") return path.resolve(".");
 	if (path.isAbsolute(workspace)) return path.resolve(workspace);
-	const sessionCwd = exec?.agent?.session?.header?.cwd;
+	const sessionCwd = sessionWorkingDirectory(exec?.agent?.ctx, exec?.agent?.session);
 	return sessionCwd ? path.resolve(sessionCwd, workspace) : path.resolve(workspace);
 }
 
@@ -238,6 +239,32 @@ export function persistScanRecords(workspace, { command, file, rows = [] }) {
 	});
 }
 
+/**
+ * 扫描任务台账（v6 第 7.2 节）：保存参数、输入范围、速率、并发、开始结束、退出状态与可得统计。
+ * 一行一个 JSON（JSONL），追加写；与证据/对账共用同一把跨进程锁，避免并发交错。
+ */
+export function persistScanJob(workspace, job) {
+	return withLedgerLock(workspace, () => {
+		const dir = path.join(workspace, "artifacts", "scans");
+		fs.mkdirSync(dir, { recursive: true });
+		const file = path.join(dir, "scan-jobs.jsonl");
+		fs.appendFileSync(file, JSON.stringify(job) + "\n");
+		return path.relative(workspace, file).replace(/\\/g, "/");
+	});
+}
+
+/** 读取最近的扫描任务台账；只读、坏行隔离、不访问目标。 */
+export function listScanJobs(workspace, limit = 50) {
+	let text = "";
+	try { text = fs.readFileSync(path.join(workspace, "artifacts", "scans", "scan-jobs.jsonl"), "utf8"); } catch { return []; }
+	const rows = [];
+	for (const line of text.split(/\r?\n/)) {
+		if (!line.trim()) continue;
+		try { rows.push(JSON.parse(line)); } catch { /* 坏行隔离：不拖垮台账 */ }
+	}
+	return rows.slice(-Math.max(1, Math.floor(Number(limit) || 50)));
+}
+
 function cappedCollector(limit) {
 	const chunks = [];
 	let size = 0;
@@ -394,8 +421,20 @@ export async function runScan({ bin, args, workspace, tool, rate, defaultRate, a
 	const spawnArgs = [...invocation.prefix, ...full];
 	const cmdStr = `${invocation.bin} ${spawnArgs.join(" ")}`;
 	const timeoutMs = path.basename(resolvedBin).toLowerCase().startsWith("nuclei") ? 900_000 : 300_000;
+	const startedAt = new Date().toISOString();
+	const startedMs = Date.now();
+	// 显式记录速率与并发：nuclei -c / sqlmap --threads；-t 在 nuclei 是模板目录，不能当并发。
+	const flagValue = (flag) => { const i = full.indexOf(flag); return i >= 0 && i + 1 < full.length ? full[i + 1] : null; };
+	const jobBase = { tool, target: String(target ?? ""), startedAt, rate: rate ?? defaultRate, defaultRate,
+		rateOverridden: Boolean(rate && rate !== defaultRate), concurrency: flagValue("-c") ?? flagValue("--threads") ?? null,
+		args: full, timeoutMs };
 	const proc = await runProcess(invocation.bin, spawnArgs, { timeoutMs, maxBuffer: 64 * 1024 * 1024 });
-	if (proc.error) { breakerRecord(tool, false); return { ok: false, error: `执行失败：${proc.error.message}${proc.error.code === "ETIMEDOUT" ? `（超时 ${timeoutMs / 1000}s${path.basename(resolvedBin).toLowerCase().startsWith("nuclei") ? "——模板库缺失时首次会尝试拉取导致超时" : ""}）` : ""}`, bin }; }
+	if (proc.error) {
+		breakerRecord(tool, false);
+		persistScanJob(workspace, { ...jobBase, finishedAt: new Date().toISOString(), durationMs: Date.now() - startedMs,
+			exitStatus: null, timedOut: proc.error.code === "ETIMEDOUT", error: String(proc.error.message || proc.error), hits: 0, outFile: "" });
+		return { ok: false, error: `执行失败：${proc.error.message}${proc.error.code === "ETIMEDOUT" ? `（超时 ${timeoutMs / 1000}s${path.basename(resolvedBin).toLowerCase().startsWith("nuclei") ? "——模板库缺失时首次会尝试拉取导致超时" : ""}）` : ""}`, bin };
+	}
 	breakerRecord(tool, proc.status === 0);
 
 	const raw = proc.stdout ? proc.stdout.toString() : "";
@@ -416,7 +455,11 @@ export async function runScan({ bin, args, workspace, tool, rate, defaultRate, a
 		rows,
 	});
 	const reconciled = rows.length;
-	return { ok: proc.status === 0, evidenceId, file: path.relative(workspace, outFile).replace(/\\/g, "/"), summary: parsed.__summary ?? {}, hits: (parsed.__hits || []).length, reconciled, stdout: parsed.__summaryText ?? "" };
+	const stdoutBytes = Buffer.byteLength(raw, "utf8");
+	const jobFile = persistScanJob(workspace, { ...jobBase, finishedAt: new Date().toISOString(), durationMs: Date.now() - startedMs,
+		exitStatus: proc.status ?? null, timedOut: false, error: "",
+		outFile: path.relative(workspace, outFile).replace(/\\/g, "/"), evidenceId, hits: rows.length, reconciled, stdoutBytes });
+	return { ok: proc.status === 0, evidenceId, file: path.relative(workspace, outFile).replace(/\\/g, "/"), jobFile, summary: parsed.__summary ?? {}, hits: (parsed.__hits || []).length, reconciled, stdout: parsed.__summaryText ?? "" };
 }
 
 //#region 注册表工具执行器：声明式 def → 构参 → 治理执行（预览封顶 + 全文落盘 + 熔断 + 阶梯提示）
@@ -612,7 +655,7 @@ function apply(ctx, config = {}) {
 			severity: { type: "string", description: "e.g. medium,high,critical (default high,critical)" },
 			rate: { type: "integer", description: "requests/sec override (default 15; override is audit-logged)" }
 		},
-		output: { schema: { type: "object", additionalProperties: true }, render: (_a, v) => [{ type: "text", text: v.ok ? `nuclei: ${v.__summaryText ?? ""}${v.stdout ? " — " + v.stdout : ""}（证据 ${v.evidenceId}）` : `nuclei 拒绝/失败：${v.error}` }] },
+		output: { schema: { type: "object", additionalProperties: true }, render: (_a, v) => [{ type: "text", text: v.ok ? `nuclei: ${v.__summaryText ?? ""}${v.stdout ? " — " + v.stdout : ""}（证据 ${v.evidenceId}；任务台账 ${v.jobFile ?? ""}）` : `nuclei 拒绝/失败：${v.error}` }] },
 		async execute(args, exec) {
 			const severity = args.severity ?? "high,critical";
 			const args2 = buildNucleiArgs(args.target, severity);
@@ -632,7 +675,7 @@ function apply(ctx, config = {}) {
 			favicon: { type: "boolean", description: "Optional second fingerprint request to /favicon.ico; use only when title/server/technology hints do not identify the product" },
 			rate: { type: "integer", description: "requests/sec override (default 25; audit-logged)" }
 		},
-		output: { schema: { type: "object", additionalProperties: true }, render: (_a, v) => [{ type: "text", text: v.ok ? `httpx: ${v.stdout ?? ""}（证据 ${v.evidenceId}）` : `httpx 失败：${v.error}` }] },
+		output: { schema: { type: "object", additionalProperties: true }, render: (_a, v) => [{ type: "text", text: v.ok ? `httpx: ${v.stdout ?? ""}（证据 ${v.evidenceId}；任务台账 ${v.jobFile ?? ""}）` : `httpx 失败：${v.error}` }] },
 		async execute(args, exec) {
 			const args2 = buildHttpxArgs(args.targets, { favicon: args.favicon });
 			const workspace = resolveWorkspaceArg(args.workspace, exec);
@@ -652,7 +695,7 @@ function apply(ctx, config = {}) {
 			wordlist: { type: "string", description: "Path to wordlist (default: common.txt via -w common if available)" },
 			rate: { type: "integer", description: "requests/sec override (default 50; audit-logged)" }
 		},
-		output: { schema: { type: "object", additionalProperties: true }, render: (_a, v) => [{ type: "text", text: v.ok ? `ffuf: ${v.stdout ?? ""}（证据 ${v.evidenceId}）` : `ffuf 拒绝/失败：${v.error}` }] },
+		output: { schema: { type: "object", additionalProperties: true }, render: (_a, v) => [{ type: "text", text: v.ok ? `ffuf: ${v.stdout ?? ""}（证据 ${v.evidenceId}；任务台账 ${v.jobFile ?? ""}）` : `ffuf 拒绝/失败：${v.error}` }] },
 		async execute(args, exec) {
 			const wl = args.wordlist ?? "common.txt";
 			const workspace = resolveWorkspaceArg(args.workspace, exec);

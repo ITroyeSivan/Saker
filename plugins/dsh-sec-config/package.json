@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-sec-config",
-  "version": "1.3.30",
+  "version": "1.3.36",
   "description": "设置本机工具路径、Burp、Yakit、DNSLog 和模型连接。",
   "type": "module",
   "main": "./lib/index.js",
@@ -26,7 +26,8 @@
     "security"
   ],
   "engines": {
-    "node": ">=22"
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": "0.2.0-rc.2 || 0.2.1-rc.2"
   },
   "dsh": {
     "bundle": {

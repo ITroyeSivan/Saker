@@ -6,6 +6,7 @@ import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
 import { saveChecks } from '../plugins/dsh-redteam-results/lib/checked.js';
 import { saveTaskContext, readTaskContext, readTaskRecord, readSavedVerification, taskContextView } from '../plugins/dsh-redteam-results/lib/task-context.js';
 import { mergeSavedVerification } from '../plugins/dsh-nday-hunter/lib/verification-queue.js';
+import { importPastedMaterial } from '../plugins/dsh-redteam-results/lib/materials-import.js';
 import { verificationBasis } from '../lib/verification-basis.mjs';
 let failed = 0;
 async function test(name, fn) { try { await fn(); console.log('ok   ' + name); } catch (error) { failed++; console.log('FAIL ' + name + ': ' + error.message); } }
@@ -61,6 +62,27 @@ try {
     assert.equal(detail.ok, true, detail.error);
     assert.match(tools.get('redteam_context').output.render({}, detail)[0].text, /GET \/input/);
     assert.match(tools.get('redteam_context').output.render({}, detail)[0].text, /HTTP\/1.1 200 OK/);
+    // 模型侧资料搜索（v6 第 5.4.1 节）：5 条短结果 + 3000 字节封顶，且不能和快照混调。
+    const found = await tools.get('redteam_context').execute({ search: 'input' }, exec);
+    assert.equal(found.ok, true, found.error);
+    assert.equal(found.pageSize, 5, '搜索每页 5 条');
+    assert(found.results.length >= 1, '能搜到已保存的请求');
+    assert(Buffer.byteLength(found.text) <= 3000, '搜索输出按 3000 字节封顶');
+    assert.match(found.text, /input/);
+    const mixed = await tools.get('redteam_context').execute({ search: 'input', context: '{}' }, exec);
+    assert.equal(mixed.ok, false); assert.match(mixed.error, /只传search/);
+    // 模型读原文（v6 第 5.4.1 节）：kind=material + id + read 走真实注册表返回分段，默认 ≤6000 字节。
+    const material = importPastedMaterial(store, 's1', { name: 'big.js', text: Array.from({ length: 200 }, (_, i) => 'const v' + i + ' = ' + i + ';').join('\n') }, { home });
+    const excerpt = await tools.get('redteam_context').execute({ kind: 'material', id: material.id, read: 0 }, exec);
+    assert.equal(excerpt.ok, true, excerpt.error);
+    assert.equal(excerpt.kind, 'code'); assert(excerpt.lines <= 80); assert(excerpt.nextOffset > 0);
+    // 模型真的读了原文才记「已读过」（v6 第 5.4 节）；本地浏览与引用到输入框都不算。
+    const readRow = store.db.prepare('SELECT material_id,bytes FROM material_reads WHERE session_id=?').get('s1');
+    assert(readRow, '模型读原文要记一条已读');
+    assert.equal(readRow.material_id, 'file:' + material.id);
+    assert(readRow.bytes > 0, '记下实际读了多少字节');
+    const badRead = await tools.get('redteam_context').execute({ read: 0 }, exec);
+    assert.equal(badRead.ok, false); assert.match(badRead.error, /kind=material/);
     const first = await tools.get('nday_priority_plan').execute({ entryIds: check.entryId }, exec);
     assert.equal(first.ok, true, first.error); assert.equal(first.plan.verificationQueue.items[0].action, 'reuse-record');
     assert.equal(first.plan.sharedHistory.storedChecks, 1);

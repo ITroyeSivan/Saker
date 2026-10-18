@@ -1,6 +1,8 @@
 // Desktop-only preferences and prompt drafts. Drafts never enter model context
 // until the user places one in the native composer and sends it.
 import { normalizeInteraction, reportingFor, MAX_SITE_WORKERS } from './interaction.js';
+import { normalizeTestContent } from './test-catalog.js';
+import { normalizeModelChoice } from './model-choice.js';
 
 export const CHAT_SETUP_SCHEMA = `
 CREATE TABLE IF NOT EXISTS chat_defaults (id INTEGER PRIMARY KEY CHECK(id=1), record TEXT NOT NULL);
@@ -13,7 +15,14 @@ export function chatDefaults(store) {
 }
 export function saveChatDefaults(store, input) {
   if (!Number.isInteger(input.workers) || input.workers < 0 || input.workers > MAX_SITE_WORKERS) throw Error('子代理上限应为0–'+MAX_SITE_WORKERS+'的整数');
-  const record = { interaction: normalizeInteraction(input.interaction), reporting: reportingFor(input), workers: input.workers };
+  const previous = chatDefaults(store) || {};
+  const record = { interaction: normalizeInteraction(input.interaction), reporting: reportingFor(input), workers: input.workers, explain: input.explain === true };
+  // v6 5.5：存为默认偏好也保存测试内容偏好；空数组表示“只分析已添加内容，不再访问网站”。
+  if (input.content !== undefined) record.content = normalizeTestContent(input.content);
+  for (const [key, label] of [['workerModel', '查找问题模型'], ['reviewModel', '复核结果模型'], ['reportModel', '整理报告模型']]) {
+    const value = input[key] === undefined ? previous[key] : input[key];
+    if (value !== undefined) record[key] = normalizeModelChoice(value, label);
+  }
   store.db.prepare('INSERT INTO chat_defaults(id,record) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET record=excluded.record').run(JSON.stringify(record));
   return record;
 }

@@ -85,7 +85,7 @@ Nday匹配（含机构分支）应先调用它，再把排序后的 `entryIds` �
 | 来源 | 当前状态 | 配置/入口 |
 |---|---|---|
 | FOFA / 奇安信 Hunter 资产测绘 / 360 Quake | 已接入 API | 设置 → 资产平台 API，key 只存本机 `hunter.db` |
-| 阿里云漏洞库 AVD | 外部浏览器脚本 | `_ref/tools/avd-fetch.mjs`，需 Chrome for Testing |
+| 阿里云漏洞库 AVD | 外部浏览器核对 | 无需 key；页面有反爬壳，需经浏览器渲染后人工核对 |
 | NVD / OSV / GitHub Advisories / CISA KEV / nuclei-templates | 已接入免费自动采集 | `nday_source_collect` 或设置页「漏洞情报更新」；勾选后直接更新，支持单源重试；定时更新默认停用 |
 | CNVD / CNNVD | 宿主搜索或人工页面 | 验证码 / 账号权限限制，未做匿名抓取 |
 | 奇安信 CERT / 国内情报站 | 仅来源指引 | 未找到并接入稳定免费 API；不要称其为已接入数据源 |

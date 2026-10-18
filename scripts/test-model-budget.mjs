@@ -6,8 +6,9 @@ import { spawnSync } from 'node:child_process';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
 import { startTaskPolicy, readTaskPolicy, taskPolicyStatus, updateTaskProgress } from '../plugins/dsh-redteam-results/lib/task-policy.js';
+import { recordKnowledgeUsage, markKnowledgeUsageSent } from '../plugins/dsh-redteam-results/lib/knowledge-usage.js';
 import { modelBudgetOverview, modelRequestDigest, reserveModelCall, dispatchModelCall, settleModelCall,
-  cancelModelReservation, recoverModelRuntime, normalizedModelUsage, registerModelAdmission } from '../plugins/dsh-redteam-results/lib/model-budget.js';
+  cancelModelReservation, recoverModelRuntime, normalizedModelUsage, registerModelAdmission, authorizeModelWire } from '../plugins/dsh-redteam-results/lib/model-budget.js';
 let failures=0;
 async function test(label,body){try{await body();console.log('ok '+label);}catch(error){failures++;console.error('FAIL '+label+': '+error.stack);}}
 const options={sessionId:'main',provider:'fixture',model:'exact-fixture',maxTokens:10,messages:[{role:'user',content:[{type:'text',text:'test'}]}]};
@@ -39,6 +40,8 @@ await test('shared root admission reserves before dispatch; children, retries an
     const rejected=reserveModelCall(store,'main',{...options,purpose:'session-title'});
     assert.equal(rejected.code,'model_calls_exhausted');const status=modelBudgetOverview(store,'child');
     assert.equal(status.chargedCalls,2);assert.equal(status.knownTokens,5);assert.equal(status.unknownCalls,1);assert.equal(status.totalTokens,null);
+    // 被拒的生成没有发出：单独记在 blocked，不能混进 unknownCalls（已发出但用量未知）。
+    assert(status.blocked && status.blocked.code==='model_calls_exhausted','a refused generation is recorded distinctly from unknown usage');
     assert(taskPolicyStatus(store,'main').stopped);assert(taskPolicyStatus(store,'child').stopped);
   }finally{store.close();}
 });
@@ -77,6 +80,27 @@ await test('recovery cancels only undispatched reservations; interrupted dispatc
     assert.throws(()=>dispatchModelCall(store,a.id),/not_reserved/);assert.throws(()=>dispatchModelCall(store,b.id),/not_reserved/);
   }finally{store.close();}
 });
+await test('native admission accepts frozen requests without rewriting durable messages',async()=>{
+  const store=openStore(':memory:');try{start(store,{tokens:100});
+    const snapshot=(id,text)=>({id,role:'user',source:{kind:'runtime-context',form:'snapshot',sections:[{name:'fixture-policy',text}]},
+      content:[{type:'text',text:'Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\n'+text}]});
+    const old=snapshot('old','budget remaining 8'),latest=snapshot('latest','budget remaining 3');
+    const evidence={id:'evidence',role:'tool',source:{kind:'tool'},content:[{type:'text',text:'raw response, budget remaining 8'}]};
+    const user={id:'user',role:'user',source:{kind:'user'},content:old.content};
+    const recalled={...old,id:'recalled',source:{kind:'recall',form:'recall'}};
+    const inconsistent={...old,id:'inconsistent',content:[{type:'text',text:'Extra material not covered by section metadata'}]};
+    const durable=Object.freeze([old,user,evidence,recalled,inconsistent,latest]);const before=JSON.stringify(durable);
+    const request=Object.freeze({...options,messages:durable});let hook,counted;
+    const registration=registerModelAdmission({on(_name,handler){hook=handler;return ()=>{};}},()=>store,{countInput:o=>{counted=o.messages;return certificate(o);}});
+    const next=async function*(){assert.deepEqual(request.messages.map(m=>m.id),['old','user','evidence','recalled','inconsistent','latest']);
+      assert.equal(request.messages.at(-1),latest);yield {type:'usage',usage:{inputTokens:2,outputTokens:1}};yield {type:'finish',reason:{kind:'stop'}};};
+    for await(const _chunk of hook(request,next)){}
+    assert.equal(counted,request.messages);assert.equal(JSON.stringify(durable),before);assert.equal(durable.length,6);
+    const unmanaged={...options,sessionId:'no-task',messages:durable};
+    for await(const _chunk of hook(unmanaged,async function*(){assert.equal(unmanaged.messages,durable);})){}
+    await registration.dispose();
+  }finally{store.close();}
+});
 await test('native stream middleware blocks before next(), settles complete usage, and keeps partial/error streams unknown',async()=>{
   const store=openStore(':memory:');try{start(store,{modelCalls:2});let hook,dispatches=0;
     const registration=registerModelAdmission({on(_name,handler){hook=handler;return ()=>{};}},()=>store);
@@ -86,6 +110,7 @@ await test('native stream middleware blocks before next(), settles complete usag
     const blocked=[];for await(const chunk of hook(options,success))blocked.push(chunk);
     assert.equal(dispatches,2);assert.equal(blocked[0].reason.failure.code,'TASK_MODEL_BUDGET');
     const status=modelBudgetOverview(store,'main');assert.equal(status.knownTokens,7);assert.equal(status.unknownCalls,1);assert.equal(status.totalTokens,null);
+    assert.equal(status.wireAttempts,0);assert.equal(status.unobservedCalls,2);
     await registration.dispose();
   }finally{store.close();}
 });
@@ -155,6 +180,15 @@ await test('missing certified counter stops strict native dispatch without invok
     assert.equal(chunks[0].reason.failure.code,'TASK_MODEL_BUDGET');assert.equal(readTaskPolicy(store,'main').modelBudgetBlock.code,'token_count_unavailable');
   }finally{store.close();}
 });
+await test('strict token mode fail-closes when a 256k output request has no complete dispatch counter',async()=>{
+  const store=openStore(':memory:');try{start(store,{tokens:150000});let hook,providerCalls=0;
+    registerModelAdmission({on(_name,handler){hook=handler;return ()=>{};}},()=>store);
+    const chunks=[];for await(const chunk of hook({...options,maxTokens:256000},()=>{providerCalls++;throw Error('provider must not be reached');}))chunks.push(chunk);
+    assert.equal(providerCalls,0);assert.equal(chunks[0].reason.failure.code,'TASK_MODEL_BUDGET');
+    assert.equal(readTaskPolicy(store,'main').modelBudgetBlock.code,'token_count_unavailable');
+    assert.equal(modelBudgetOverview(store,'main').chargedCalls,0);
+  }finally{store.close();}
+});
 await test('simultaneous SQLite connections share one admission ceiling without double allocation',async()=>{
   const directory=mkdtempSync(join(resolve(process.env.TEMP),'model-admission-race-'));
   const database=join(directory,'calls.db'), store=openStore(database), workers=[];
@@ -210,6 +244,37 @@ await test('the actual Desktop RPC rejects a new model ceiling when host admissi
     const ctx={tools:{guard(){}},sessions:{get(){return {header:{agentPreset:'pentest'}};}},agents:{get(){return {status:'idle',followup(){dispatched++;}};}}};
     await assert.rejects(dispatch(ctx,store,'task.start',{sessionId:'main',policy:{mode:'regular',budget:{toolCalls:1,modelCalls:1}}}),/准入钩子/);
     assert.equal(dispatched,0);assert.equal(readTaskPolicy(store,'main'),null);
+  }finally{store.close();}
+});
+await test('知识只在请求正文含 ref 时绑定，预留/派发/真实 wire 分层', async () => {
+  const store=openStore(':memory:');
+  try{
+    start(store,{modelCalls:5});
+    recordKnowledgeUsage(store,'main',{trigger:'manual',query:'fixture',reason:'fixture',contentBytes:10,deliveryId:'kh-test'});
+    const before=store.db.prepare('SELECT record FROM knowledge_usage WHERE session_id=?').all('main').map(row=>JSON.parse(row.record));
+    assert.equal(before[0].requestId,'','提供时还没有请求 ID');assert.equal(before[0].state,'prepared');
+    const unmarked=reserveModelCall(store,'main',options,{runtimeId:'fixture-runtime'});
+    assert.equal(unmarked.ok,true,'不含 ref 的请求仍可正常预留');
+    let after=store.db.prepare('SELECT record FROM knowledge_usage WHERE session_id=?').all('main').map(row=>JSON.parse(row.record));
+    assert.equal(after[0].requestId,'','请求正文不含 ref 时不能绑定知识记录');
+    cancelModelReservation(store,unmarked.id);
+    const marked={...options,messages:[...options.messages,{role:'user',content:[{type:'text',text:'ref=kh-test'}]}]};
+    const admitted=reserveModelCall(store,'main',marked,{runtimeId:'fixture-runtime'});
+    assert.equal(admitted.ok,true,'预留成功');
+    after=store.db.prepare('SELECT record FROM knowledge_usage WHERE session_id=?').all('main').map(row=>JSON.parse(row.record));
+    assert.equal(after[0].requestId,admitted.id,'回填到本次预留 ID');
+    assert.equal(after[0].state,'reserved','预留不等于已发送');
+    assert.ok(after[0].requestBoundAt,'带回填时间');
+    assert.equal(dispatchModelCall(store,admitted.id),true);
+    after=store.db.prepare('SELECT record FROM knowledge_usage WHERE session_id=?').all('main').map(row=>JSON.parse(row.record));
+    assert.equal(after[0].state,'dispatched');assert.ok(after[0].dispatchedAt);
+    const wire=authorizeModelWire(store,admitted.id,{model:'exact-fixture',bytes:Buffer.from('x'),protocol:'fixture',maximumOutput:10});
+    assert.equal(wire.ok,true,'真实 wire 授权成功');
+    after=store.db.prepare('SELECT record FROM knowledge_usage WHERE session_id=?').all('main').map(row=>JSON.parse(row.record));
+    assert.equal(after[0].state,'dispatched','授权发送本身不等于已经送达');
+    markKnowledgeUsageSent(store,admitted.id,Date.now());
+    after=store.db.prepare('SELECT record FROM knowledge_usage WHERE session_id=?').all('main').map(row=>JSON.parse(row.record));
+    assert.equal(after[0].state,'sent');assert.ok(after[0].sentAt);
   }finally{store.close();}
 });
 process.exitCode=failures?1:0;

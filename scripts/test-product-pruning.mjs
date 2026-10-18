@@ -34,6 +34,9 @@ try {
 for (const file of ['pack-all.mjs', 'install-all.mjs', 'install-desktop.mjs', 'pack-desktop-release.mjs']) {
   assert.match(readFileSync(join(root, 'scripts', file), 'utf8'), /productPluginDirectories\(root\)/)
 }
+const installerSource = readFileSync(join(root, 'scripts', 'install-desktop.mjs'), 'utf8')
+assert.match(installerSource, /--profile/, 'installer exposes explicit profile selection')
+assert.match(installerSource, /profileIndex < 0 \? 'desktop'/, 'plugin management still defaults to desktop')
 console.log('ok   every production build, installer and delivery uses one selection')
 for (const file of ['plugins/dsh-redteam-results/lib/index.js', 'plugins/dsh-stage-gate/lib/index.js', 'plugins/dsh-route-boost/lib/scope.mjs']) {
   assert.doesNotMatch(readFileSync(join(root, file), 'utf8'), /import\([^\n]*dsh-attack-atlas/)
@@ -43,16 +46,35 @@ assert.doesNotMatch(readFileSync(join(root, 'plugins/dsh-hunter/lib/client.js'),
 for (const file of ['preset/code-audit/opening.md','preset/ctf-solver/opening.md','preset/code-audit/skills/audit-playbook/SKILL.md','preset/ctf-solver/skills/ctf-playbook/SKILL.md','plugins/dsh-route-boost/lib/index.js']) {
   assert.doesNotMatch(readFileSync(join(root, file), 'utf8'), /campaign_idea_|campaign-memory|redteam_coverage_|redteam_atlas_target/)
 }
+// v6 第 13 节：公开文案里不得再宣传已退出的「方法编排」页与「测试模块」选择器
+// （产品里只剩模型可读的方法库；设置页与聊天工具栏都没有这两个入口）。
+for (const file of ['README.md', 'docs/getting-started.md', 'docs/features.md', 'plugins/dsh-method-stack/README.md']) {
+  const text = readFileSync(join(root, file), 'utf8')
+  assert.doesNotMatch(text, /方法编排/, file + ' 不应再宣传方法编排')
+  assert.doesNotMatch(text, /测试模块/, file + ' 不应再宣传测试模块选择器')
+}
 console.log('ok   runtime links, obsolete chat tab and published prompt requirements are removed')
+// 公开文案的版本号必须与 package.json 一致：README 曾写 0.4.103 而实际已经是 0.4.105。
+const rootVersion = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
+const readmeVersion = /当前版本\s*\*\*([0-9][^*]*)\*\*/.exec(readFileSync(join(root, 'README.md'), 'utf8'))?.[1]?.trim()
+assert.equal(readmeVersion, rootVersion, 'README 的“当前版本”必须与 package.json 一致')
+const guideVersion = /当前版本：Saker\s*\*\*([0-9][^*]*)\*\*/.exec(readFileSync(join(root, 'docs/getting-started.md'), 'utf8'))?.[1]?.trim()
+assert.equal(guideVersion, rootVersion, 'getting-started 的“当前版本”必须与 package.json 一致')
+for (const file of ['README.md', 'docs/getting-started.md']) {
+  const text = readFileSync(join(root, file), 'utf8')
+  assert.doesNotMatch(text, /写提示词/, file + ' 不应再使用旧按钮名“写提示词”')
+  assert.doesNotMatch(text, /redteam 成果/, file + ' 不应再使用旧入口名“redteam 成果”')
+}
+console.log('ok   published version and entry names match the shipped product')
 const docFixture = mkdtempSync(join(resolve(root, '../_ref/tmp'), 'product-doc-check-'))
 try {
   const copy = rel => { mkdirSync(join(docFixture, rel, '..'), { recursive: true }); copyFileSync(join(root, rel), join(docFixture, rel)) }
   for (const rel of ['package.json', 'README.md', 'docs/plugin-list.md', 'docs/getting-started.md', 'scripts/check-doc-plugins.mjs', 'scripts/lib/product-plugins.mjs']) copy(rel)
   for (const dir of readdirSync(join(root, 'plugins')).filter(name => name.startsWith('dsh-'))) copy('plugins/' + dir + '/package.json')
   const check = () => spawnSync(process.execPath, ['scripts/check-doc-plugins.mjs'], { cwd: docFixture, env: process.env, encoding: 'utf8' })
-  const good = check(); assert.equal(good.status, 0, good.stdout + good.stderr); assert.match(good.stdout, /实际插件数：21/)
+  const good = check(); assert.equal(good.status, 0, good.stdout + good.stderr); assert.match(good.stdout, /实际插件数：19/)
   const script = join(docFixture, 'scripts/check-doc-plugins.mjs'), current = readFileSync(script, 'utf8')
   writeFileSync(script, current.replaceAll('productPluginDirectories(ROOT)', "readdirSync(join(ROOT, 'plugins')).sort()"))
-  const old = check(); assert.notEqual(old.status, 0); assert.match(old.stdout, /表格缺少 dsh-attack-atlas, dsh-campaign-memory, dsh-webshell-mgr/)
+  const old = check(); assert.notEqual(old.status, 0); assert.match(old.stdout, /表格缺少 dsh-attack-atlas, dsh-campaign-memory, dsh-method-stack, dsh-route-boost, dsh-webshell-mgr/)
   console.log('ok   documentation checker accepts shipped selection and restoring retired counting fails behaviorally')
 } finally { assert(docFixture.startsWith(resolve(root, '../_ref/tmp') + sep)); rmSync(docFixture, { recursive: true, force: true }) }

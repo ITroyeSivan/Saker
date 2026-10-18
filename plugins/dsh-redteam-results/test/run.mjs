@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { openStore, registerFinding, updateFinding, removeFinding, getFinding, allFindings, listFindings, listFindingsAll, computeStats, computeStatsAll, modeCounts, modeCountsAll, groupByTarget, groupByTargetAll, setMeta, getMeta, ledgerOverviewAll, secondReviewError, secondReviewVerdict, SECOND_RATINGS, RATING_SCALE, REGISTER_STATUSES, MODE_STATUSES } from "../lib/store.js";
-import { verifyMessage, findingAdmissionError, isTrustedRequest, dispatch, checkCsrf, apply } from "../lib/index.js";
+import { verifyMessage, findingAdmissionError, isTrustedRequest, dispatch, checkCsrf, apply, contractEnvelope } from "../lib/index.js";
 
 // 二次复核成对参数：verified 是各模式通用的「验证类终态」，首次流转须在同一次调用里
 // 同时给出独立二次评级与足量依据——上游用例原先只流转状态，此处统一以 ...RV 补齐。
@@ -62,7 +62,7 @@ ok("register 自增序号且默认值齐备（pending/medium/unknown），行落
 	assert.deepEqual(getFinding(st, SID, "pentest-1").title, "SQL注入");
 });
 
-ok("状态语义：code-reviewed 可用、不记 verifiedAt；fixed 需先 verified", () => {
+ok("状态语义：code-reviewed 可用、不记 verifiedAt；fixed 需先 verified 且有带正常功能对照的「本次未复现」复测", () => {
 	const st = openStore(":memory:");
 	registerFinding(st, SID, "code-audit", { title: "fastjson 反序列化", auditMode: "static" });
 	const u = updateFinding(st, SID, "code-audit", "code-audit-1", { status: "code-reviewed" });
@@ -72,8 +72,15 @@ ok("状态语义：code-reviewed 可用、不记 verifiedAt；fixed 需先 verif
 	try { updateFinding(st, SID, "code-audit", "code-audit-1", { status: "fixed" }); } catch { threw = true; }
 	assert.ok(threw, "未 verified 直接 fixed 应抛错");
 	updateFinding(st, SID, "code-audit", "code-audit-1", { status: "verified", verifyNote: "本地复现 EXP 生效" , ...RV });
-	const f2 = updateFinding(st, SID, "code-audit", "code-audit-1", { status: "fixed", retestNote: "修复后复测不成功" });
-	assert.equal(f2.status, "fixed");
+	// 第 9.2 节：只有一条「本次未复现」的结构化复测记录才允许标已修复（自由文本 retestNote 不算）。
+	let noRetestThrew = false;
+	try { updateFinding(st, SID, "code-audit", "code-audit-1", { status: "fixed", retestNote: "修复后复测不成功" }); } catch { noRetestThrew = true; }
+	assert.ok(noRetestThrew, "verified 之后仍需要结构化复测记录才能标 fixed");
+	const now = Date.now();
+	st.db.prepare("INSERT INTO finding_retests(session_id,id,finding_id,at,record) VALUES(?,?,?,?,?)")
+		.run(SID, "retest-1", "code-audit-1", now, JSON.stringify({ id: "retest-1", findingId: "code-audit-1", verdict: "not-reproduced",
+			verdictLabel: "本次未复现", note: "修复后复测不成功", executionId: "retest-exec", executionOutcome: "response", executionStatus: 200, at: new Date(now).toISOString() }));
+	assert.throws(() => updateFinding(st, SID, "code-audit", "code-audit-1", { status: "fixed" }), /正常功能对照/, "缺少正常功能对照回执不能标 fixed");
 	st.close();
 });
 
@@ -273,6 +280,23 @@ ok("信任栅栏：回环 Host 放行、跨站 Origin 拒绝、伪造 Host 拒�
 	assert.equal(isTrustedRequest(mk({ host: "127.0.0.1:3080", origin: "http://127.0.0.1:9999" }), []), false, "本机他端口 Origin");
 });
 
+ok("统一返回契约：旧字段保留，另补 data/revision/requestId", () => {
+	const success = contractEnvelope({ ok: true, selection: { active: ["web"] }, revision: 7 }, "rtr-test-1");
+	assert.equal(success.ok, true);
+	assert.deepEqual(success.selection, { active: ["web"] }, "旧客户端读顶层字段");
+	assert.deepEqual(success.data.selection, { active: ["web"] }, "新客户端读 data");
+	assert.equal(success.revision, 7);
+	assert.equal(success.requestId, "rtr-test-1");
+	const noRevision = contractEnvelope({ ok: true, token: "x" }, "rtr-test-2");
+	assert.equal(noRevision.revision, null, "没有版本号的端点如实返回 null");
+	assert.equal(noRevision.data.token, "x");
+	const failure = contractEnvelope({ ok: false, code: "policy-conflict", error: "冲突", hint: "刷新" }, "rtr-test-3");
+	assert.equal(failure.ok, false);
+	assert.equal(failure.revision, null);
+	assert.equal(failure.requestId, "rtr-test-3");
+	assert.equal(failure.data, undefined);
+});
+
 ok("dispatch 端点分发：list/delete 正常、未知端点抛错、缺 sessionId 拒绝", async () => {
 	const st = openStore(":memory:");
 	registerFinding(st, SID, "pentest", { title: "x", severity: "high" });
@@ -316,7 +340,13 @@ ok("渗透富字段往返：三件套/影响/CVSS/请求包/复测", () => {
 		impact: "脱库 users 5 行", cvss: "CVSS:3.1/AV:N (8.6)", requestPkt: "GET /?id=1'", responsePkt: "HTTP/1.1 200"
 	});
 	updateFinding(st, SID, "pentest", f.id, { status: "verified", verifyNote: "差分翻转+marker 回显" , ...RV });
-	const u = updateFinding(st, SID, "pentest", f.id, { status: "fixed", retestNote: "复测已修复", retestAt: "2026-08-18T00:00:00Z" });
+	// 结构化复测记录还须带正常功能对照才允许 fixed（第 9.2 节）；自由文本 retestNote 仍原样往返。
+	const now = Date.now();
+	st.db.prepare("INSERT INTO finding_retests(session_id,id,finding_id,at,record) VALUES(?,?,?,?,?)")
+		.run(SID, "retest-rich", f.id, now, JSON.stringify({ id: "retest-rich", findingId: f.id, verdict: "not-reproduced",
+			verdictLabel: "本次未复现", note: "修复后复测不成功", executionId: "retest-exec", executionOutcome: "response", executionStatus: 200, at: new Date(now).toISOString() }));
+	assert.throws(() => updateFinding(st, SID, "pentest", f.id, { status: "fixed", retestNote: "复测已修复", retestAt: "2026-08-18T00:00:00Z" }), /正常功能对照/);
+	const u = updateFinding(st, SID, "pentest", f.id, { retestNote: "复测已修复", retestAt: "2026-08-18T00:00:00Z" });
 	assert.equal(u.baseline, "正常 12 行");
 	assert.equal(u.markerEcho, "r9t2k1");
 	assert.ok(u.cvss.startsWith("CVSS:3.1"));

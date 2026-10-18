@@ -24,11 +24,11 @@ const pentestOpening = readFileSync(join(ROOT, 'preset/pentest/opening.md'), 'ut
 assert.match(pentestPatch, /^\s*prefix: ''$/m, 'Pentest persona slot must be owned by the editable mode opening')
 assert.match(pentestCordis, /^\s*prefix: ''$/m, 'Pentest declarative persona slot must stay empty')
 assert.ok(!pentestOpening.includes('ask_user_question'), 'Pentest persona must not inject an interactive question step')
-assert.ok(pentestOpening.includes('Without scope or organization identity return scope_missing'), 'Pentest must stop cleanly when scope is missing')
-for (const mode of ['pentest-regular', 'pentest-nday', 'pentest-0day']) {
-  assert.ok(pentestOpening.includes(mode), `editable persona must point to ${mode}`)
-}
-assert.ok(pentestOpening.includes('Legacy /pentest-campaign maps to Nday'))
+// v6 第 4.1 节：长角色正文、方法编排开场与固定七流程退出模型请求。
+// opening.md 只保留迁移说明，固定能力说明由 dsh-redteam-results 的 task-prompt 一处维护。
+assert.ok(pentestOpening.includes('task-prompt'), '固定能力说明由 task-prompt 一处维护')
+assert.ok(!/pentest-regular|pentest-nday|pentest-0day|scope_missing|Legacy \/pentest-campaign/.test(pentestOpening),
+  '旧角色正文与方法开场不再进入模型请求')
 
 console.log('ok   新会话仅保留渗透专业入口，代码审计和CTF均隐藏')
 console.log('ok   旧会话继续解析，显式旧配置不重开已移除入口')

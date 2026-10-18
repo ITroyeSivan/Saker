@@ -1,0 +1,177 @@
+{
+  "log": {
+    "version": "1.2",
+    "creator": { "name": "Saker E09 fixture", "version": "1" },
+    "pages": [],
+    "entries": [
+      {
+        "startedDateTime": "2026-10-17T09:00:01.000Z",
+        "time": 12,
+        "request": {
+          "method": "GET",
+          "url": "https://portal.example.test/api/v1/profile",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            { "name": "Host", "value": "portal.example.test" },
+            { "name": "Cookie", "value": "sid=alice-session-001; theme=light" },
+            { "name": "Accept", "value": "application/json" }
+          ],
+          "queryString": [],
+          "cookies": [{ "name": "sid", "value": "alice-session-001" }],
+          "headersSize": -1,
+          "bodySize": 0
+        },
+        "response": {
+          "status": 200,
+          "statusText": "OK",
+          "httpVersion": "HTTP/1.1",
+          "headers": [{ "name": "Content-Type", "value": "application/json" }],
+          "cookies": [],
+          "content": { "size": 46, "mimeType": "application/json", "text": "{\"id\":1001,\"owner\":\"alice\",\"role\":\"member\"}" },
+          "redirectURL": "",
+          "headersSize": -1,
+          "bodySize": 46
+        },
+        "cache": {},
+        "timings": { "send": 0, "wait": 12, "receive": 0 }
+      },
+      {
+        "startedDateTime": "2026-10-17T09:00:02.000Z",
+        "time": 15,
+        "request": {
+          "method": "GET",
+          "url": "https://portal.example.test/api/v1/profile",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            { "name": "Host", "value": "portal.example.test" },
+            { "name": "Cookie", "value": "sid=bob-session-777; theme=dark" },
+            { "name": "Accept", "value": "application/json" }
+          ],
+          "queryString": [],
+          "cookies": [{ "name": "sid", "value": "bob-session-777" }],
+          "headersSize": -1,
+          "bodySize": 0
+        },
+        "response": {
+          "status": 200,
+          "statusText": "OK",
+          "httpVersion": "HTTP/1.1",
+          "headers": [{ "name": "Content-Type", "value": "application/json" }],
+          "cookies": [],
+          "content": { "size": 44, "mimeType": "application/json", "text": "{\"id\":2002,\"owner\":\"bob\",\"role\":\"member\"}" },
+          "redirectURL": "",
+          "headersSize": -1,
+          "bodySize": 44
+        },
+        "cache": {},
+        "timings": { "send": 0, "wait": 15, "receive": 0 }
+      },
+      {
+        "startedDateTime": "2026-10-17T09:00:03.000Z",
+        "time": 9,
+        "request": {
+          "method": "GET",
+          "url": "https://portal.example.test/api/v1/orders?owner=2002",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            { "name": "Host", "value": "portal.example.test" },
+            { "name": "Cookie", "value": "sid=alice-session-expired; theme=light" }
+          ],
+          "queryString": [{ "name": "owner", "value": "2002" }],
+          "cookies": [{ "name": "sid", "value": "alice-session-expired" }],
+          "headersSize": -1,
+          "bodySize": 0
+        },
+        "response": {
+          "status": 401,
+          "statusText": "Unauthorized",
+          "httpVersion": "HTTP/1.1",
+          "headers": [{ "name": "Content-Type", "value": "application/json" }],
+          "cookies": [],
+          "content": { "size": 32, "mimeType": "application/json", "text": "{\"error\":\"session expired\"}" },
+          "redirectURL": "",
+          "headersSize": -1,
+          "bodySize": 32
+        },
+        "cache": {},
+        "timings": { "send": 0, "wait": 9, "receive": 0 }
+      },
+      {
+        "startedDateTime": "2026-10-17T09:00:04.000Z",
+        "time": 0,
+        "request": {
+          "method": "GET",
+          "httpVersion": "HTTP/1.1",
+          "headers": [],
+          "queryString": [],
+          "cookies": [],
+          "headersSize": -1,
+          "bodySize": 0
+        },
+        "response": { "status": 0, "statusText": "", "httpVersion": "", "headers": [], "cookies": [], "content": { "size": 0, "mimeType": "" }, "redirectURL": "", "headersSize": -1, "bodySize": 0 },
+        "cache": {},
+        "timings": { "send": 0, "wait": 0, "receive": 0 }
+      },
+      {
+        "startedDateTime": "2026-10-17T09:00:05.000Z",
+        "time": 11,
+        "request": {
+          "method": "GET",
+          "url": "https://portal.example.test/api/v1/settings",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            { "name": "Host", "value": "portal.example.test" },
+            { "name": "Cookie", "value": "sid=bob-session-777; theme=dark" }
+          ],
+          "queryString": [],
+          "cookies": [{ "name": "sid", "value": "bob-session-777" }],
+          "headersSize": -1,
+          "bodySize": 0
+        },
+        "response": {
+          "status": 200,
+          "statusText": "OK",
+          "httpVersion": "HTTP/1.1",
+          "headers": [{ "name": "Content-Type", "value": "application/json" }],
+          "cookies": [],
+          "content": { "size": 33, "mimeType": "application/json", "text": "{\"owner\":\"bob\",\"theme\":\"dark\"}" },
+          "redirectURL": "",
+          "headersSize": -1,
+          "bodySize": 33
+        },
+        "cache": {},
+        "timings": { "send": 0, "wait": 11, "receive": 0 }
+      },
+      {
+        "startedDateTime": "2026-10-17T09:00:06.000Z",
+        "time": 13,
+        "request": {
+          "method": "GET",
+          "url": "https://portal.example.test/api/v1/settings",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            { "name": "Host", "value": "portal.example.test" },
+            { "name": "Cookie", "value": "sid=alice-session-001; theme=light" }
+          ],
+          "queryString": [],
+          "cookies": [{ "name": "sid", "value": "alice-session-001" }],
+          "headersSize": -1,
+          "bodySize": 0
+        },
+        "response": {
+          "status": 200,
+          "statusText": "OK",
+          "httpVersion": "HTTP/1.1",
+          "headers": [{ "name": "Content-Type", "value": "application/json" }],
+          "cookies": [],
+          "content": { "size": 35, "mimeType": "application/json", "text": "{\"owner\":\"alice\",\"theme\":\"light\"}" },
+          "redirectURL": "",
+          "headersSize": -1,
+          "bodySize": 35
+        },
+        "cache": {},
+        "timings": { "send": 0, "wait": 13, "receive": 0 }
+      }
+    ]
+  }
+}

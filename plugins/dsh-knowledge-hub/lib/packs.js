@@ -466,12 +466,14 @@ const DEBRIS_RE = /^\.?([A-Za-z0-9._-]+?)\.(recover|diverged)-\d+-\d+-[a-z0-9]+$
  *   - `.diverged-*`：**里面可能有用户对导入层做过的本地修改**，所以默认一份都不删。
  *     只有显式传 `includeBackups: true` 才会回收；那时也保留
  *     `state.packs[*].backup` 引用着的目录，以及每个 pack 最新的一份作为兜底。
+ *   - `dryRun: true`：只分类不删，返回的 `removed` 是"**会**被删掉的"，供报表使用。
  */
 export function prunePackDebris(importsPath, state = {}, options = {}) {
   const minAgeMs = Number.isFinite(options.minAgeMs) ? options.minAgeMs : 60_000
   const now = Number.isFinite(options.now) ? options.now : Date.now()
   const removeDir = options.removeDir || removeDirSafe
   const includeBackups = options.includeBackups === true
+  const dryRun = options.dryRun === true
 
   const referenced = new Set()
   for (const entry of Object.values(state.packs || {})) {
@@ -520,10 +522,50 @@ export function prunePackDebris(importsPath, state = {}, options = {}) {
 
   const removed = []
   for (const dir of doomed) {
+    if (dryRun) { removed.push(dir); continue }
     removeDir(dir)
     if (!fs.existsSync(dir)) removed.push(dir)
   }
   return { removed, kept }
+}
+
+/**
+ * 只统计、不删除：报告 pack 同步残骸里"能回收多少"和"保守档会留多少"。
+ *
+ * 为什么需要：真 home 实测堆了 **24 个目录 / 195.6 MB**（最早 2026-09-15），而自动同步走的是
+ * 保守档（`.diverged-*` 一份不删，因为里面可能有用户对导入层的本地修改），于是残骸只增不减，
+ * 界面上又完全看不到。先把数字暴露出来，让"要不要回收"变成用户能做的决定，
+ * 而不是悄悄删（可能丢用户的本地修改）或者悄悄涨（吃掉磁盘）。
+ *
+ * @param importsPath - 导入区根目录。
+ * @param state - 同步状态；`packs[*].backup` 引用着的目录永远算"保留"。省略时读当前 home 的状态。
+ * @returns `{ reclaimable, conservative }`，各自带 `count` 与 `bytes`。
+ */
+export function packDebrisReport(importsPath, state = readState()) {
+  const classify = (options) => prunePackDebris(importsPath, state, { ...options, dryRun: true })
+  const conservative = classify({ includeBackups: false })
+  const reclaimable = classify({ includeBackups: true })
+  const sizeOf = (dirs) => {
+    let bytes = 0
+    const walk = (dir) => {
+      let entries = []
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name)
+        if (entry.isDirectory()) { walk(full); continue }
+        try { bytes += fs.statSync(full).size } catch { /* 文件可能已消失 */ }
+      }
+    }
+    for (const dir of dirs) walk(dir)
+    return bytes
+  }
+  // 「能回收」= 显式档会删掉的那部分；「保守保留」= 即使显式档也留下的那部分。
+  return {
+    reclaimable: { count: reclaimable.removed.length, bytes: sizeOf(reclaimable.removed) },
+    conservative: { count: reclaimable.kept.length, bytes: sizeOf(reclaimable.kept) },
+    // 保守档（默认自动同步）实际不会动的那些，用于说明"为什么数字一直不降"。
+    untouchedByDefault: conservative.kept.length,
+  }
 }
 
 async function clonePack(pack, dir, git) {
@@ -693,6 +735,18 @@ export function packsStatus() {
   })
   return {
     release: catalog.release,
+    // 残骸**计数**（不递归统计字节：状态接口要便宜，界面会频繁调它）。
+    // 为什么要在这里报：自动同步走保守档，`.diverged-*` 一份都不删，
+    // 于是残骸只增不减（真 home 实测 24 个目录 / 195.6 MB）而界面上看不到。
+    // 要看体积用 packDebrisReport()。
+    debris: (() => {
+      try {
+        const dry = prunePackDebris(importsRoot(), state, { includeBackups: true, dryRun: true })
+        return { reclaimable: dry.removed.length, kept: dry.kept.length }
+      } catch {
+        return { reclaimable: 0, kept: 0 }
+      }
+    })(),
     revision: catalog.revision,
     catalogSource: catalog.remote.active ? 'remote' : 'bundled',
     catalogUpdatedAt: catalogState.lastUpdatedAt || '',

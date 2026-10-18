@@ -51,7 +51,7 @@ export const NDAY_SOURCE_REGISTRY = Object.freeze([
     integration: SOURCE_INTEGRATIONS.SCRIPT,
     auth: 'none',
     implemented: 'external-script',
-    configuredVia: '无需 key；_ref/tools/avd-fetch.mjs 经 Chrome for Testing 渲染',
+    configuredVia: '无需 key；页面有反爬壳，需经浏览器渲染后人工核对',
     detail: '可补 CNVD/AVD 编号、披露信息和厂商公告链接；不是插件内自动抓取器。',
   },
   {

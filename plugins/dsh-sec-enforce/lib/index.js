@@ -32,6 +32,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import z from "@deepseek-ai/schemastery";
+import { sessionWorkingDirectory } from "dsh-saker/working-directory";
 
 const name = "dsh-sec-enforce";
 const inject = ["tools", "agentPresets"];
@@ -199,7 +200,7 @@ export function buildAskListener({ config, appendLog, resolveMode }) {
 			let planText = "";
 			if (/^ms-[a-f0-9]{12}$/i.test(planId)) {
 				try {
-					const planFile = path.join(agent.session?.header?.cwd || "", "artifacts", "memshell", `cli-plan-${planId}.json`);
+					const planFile = path.join(sessionWorkingDirectory(agent?.ctx, agent?.session), "artifacts", "memshell", `cli-plan-${planId}.json`);
 					const plan = JSON.parse(fs.readFileSync(planFile, "utf8"));
 					planText = `计划 ${plan.commandLine || planId}；风险 ${plan.payloadReview?.summary || plan.risk || "unknown"}；批准短语 ${plan.approvalPhrase || "（只读命令）"}。`;
 				} catch { /* 计划缺失时仍走审批，不泄露或猜测内容 */ }
@@ -210,7 +211,7 @@ export function buildAskListener({ config, appendLog, resolveMode }) {
 			const token = String(exec.arguments?.__sakerMemshellApprovalToken || "");
 			if (/^mp-[a-f0-9]{12}$/i.test(planId) && token) {
 				try {
-					const planFile = path.join(agent.session?.header?.cwd || "", "artifacts", "memshell", `mcp-plan-${planId}.json`);
+					const planFile = path.join(sessionWorkingDirectory(agent?.ctx, agent?.session), "artifacts", "memshell", `mcp-plan-${planId}.json`);
 					const plan = JSON.parse(fs.readFileSync(planFile, "utf8"));
 					if (plan.approvalToken === token) preApprovedMcp = true;
 				} catch { /* token 无法核验时退回人工审批 */ }
@@ -223,7 +224,7 @@ export function buildAskListener({ config, appendLog, resolveMode }) {
 		if (ask === undefined) return next();
 		const downstream = await next();
 		if (downstream?.kind !== "allow") return downstream;
-		const workspace = agent.session?.header?.cwd;
+		const workspace = sessionWorkingDirectory(agent?.ctx, agent?.session);
 		if (workspace) {
 			try {
 				appendLog(workspace, `| ${new Date().toISOString()} | ${mode} | ask | ${exec.name} | ${ask.reason.split("：")[0]} |\n`);
@@ -259,7 +260,7 @@ export function buildGuard({ config, readGateLog, readOperationState, readAssetI
 		if (cfg.killSwitch && killTripped()) return { reason: KILL_REASON() };
 		const mode = resolveMode(agent);
 		if (mode === undefined || !SECURITY_MODES.has(mode)) return undefined;
-		const workspace = agent.session?.header?.cwd;
+		const workspace = sessionWorkingDirectory(agent?.ctx, agent?.session);
 		let reason = pipelineReason(cfg, mode, exec, workspace, readAssetInventory);
 		if (reason === undefined) reason = spreadReason(cfg, mode, exec, workspace, readAttackPlan, readAttackProgress);
 		if (reason === undefined && WRITE_TOOLS.has(exec.name)) {

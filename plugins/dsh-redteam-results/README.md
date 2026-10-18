@@ -16,9 +16,13 @@
 
 成本从官方会话事件取得，只保存计数字段。合计主代理与所有归属子代理，包括已释放的历史子任务；缓存、缺少用量的调用和不可用会话单独显示。模型运行用时合并父子并发区间，不包括后台标题请求，不估算金额。目标操作预算不等于全部模型工具调用。
 
-## 进度与发现
+原生 fetch 发送的 Messages、Chat Completions 和 Responses 生成请求会在发送前再次检查共享模型调用额度、取消和截止时间；同一次宿主调度中的传输重试单独申请额度。发送记录只保留正文哈希、字节数、协议和输出上限，后续成功不覆盖此前未知用量。界面把“已登记模型调用”和“已观测原生发送”分开显示，未观测发送单独计数；使用其他传输方式的路线不能被说成全部网络尝试。严格 token 额度仍要求匹配完整请求及全部尝试的可靠计数，未满足时拒绝发送。
 
-一个入口提供「概览、发现、文件」：概览显示本轮问题、当前状态、下一步、剩余操作和可交付发现；发现显示结论、证据、待补齐原因与报告导出；文件展示工作区共享的报告和复现材料。成本与子代理明细按需展开，资料和所有会话历史从“更多记录”打开。
+## 执行记录、发现的问题和测试资料
+
+「执行记录」查看实际工具调用、请求结果和用量；「发现的问题」查看具体结论、依据、尚缺的验证与报告导出；「测试资料」查看本次会话保存的资产、请求和已索引文件，可筛选、搜索并把引用加入输入框。通用知识文章与账号不混入测试资料。输入框上方提供提示词模板、添加测试资料、测试设置和知识库四个入口。
+
+助手通过 `redteam_context kind=finding` 分页读取发现索引；指定 `id` 读取详情，每段最多 6,000 UTF-8 字节，续读传返回的 `nextOffset` 到 `read`。受管理的复核和报告助手只读取所属父任务当前轮次的记录；报告助手不访问目标网站。生成导出包使用独立的报告导出入口。
 
 当前发现和导出限定本会话，只有明确打开历史才跨会话聚合。工作区文件会标明共享范围，文件存在不代表已确认。页面浏览只读取保存的记录；展开或收起不调用模型，也不改变提示词和工具定义。
 
@@ -39,9 +43,11 @@
 
 `action=status` 从实际成果与当前共享请求计算状态；`action=progress`记录planComplete/queueComplete，`action=cancel`结束目标操作。停止后仍可记录成果、共享上下文、检查、读写本地证据及导出交付。工具调用数不是命令内部HTTP请求数，单个批量工具仍需其请求数量限制。0Day独立定位预算耗尽且没有可达、范围内、有效正常后台/API请求与可控输入时返回backend_api_missing。`zday_pattern`再按requestId/requestRevision选唯一业务基线；原始请求含kind及inputs(name/location/evidenceIds)。桌面宿主不支持tools.guard时启动策略明确失败，不能声称已强制预算。
 
-`redteam_context` 保存/读取当前渗透会话共享上下文，Nday、常规和后台/API研究复用同一份数据。JSON对象包含 `assets`（id/url/inScope/reachable）、`checks`（assetId/entryId/endpoint/methodVersion/authContext/requestRevision、productConfirmed/productEvidenceIds、conditions、requestValid/baselineEvidenceIds、methodReviewed）、`requests`（id/endpoint/authContext/revision及原始请求响应）、`methods`（id/version及审阅资料）和 `maxSupplementAttempts`。这是完整快照替换，更新时携带要保留的资产/请求/方法；不会修改独立检查历史。入口须属于记录资产的同源，已知条件须附证据。该工具保存事实和引用，不执行请求。
+`redteam_context` 保存/读取当前渗透会话共享上下文，Nday、常规和后台/API研究复用同一份数据。优先直接传结构化 `assets`、`requests` 数组：资产按 `id`、请求按 `id+revision` 增量更新，保留其他记录；请求必填 `id`、`revision`、`endpoint`、`authContext`，用 `method/headers/body` 自动组成报文。保存请求不代表请求已执行，也不会自动标为有效。
 
-省略 `context` 读取20条分页索引，`offset` 指定下一页；`kind=asset/request/method` 配合 `id` 和可选 `version` 按需读取详情。请求使用revision，方法使用version；存在多个版本时必须指定。当前快照替换后仍可显式读取该会话的旧请求/方法版本，输出会标记历史；其他会话不能取得这些记录。
+兼容的 `context` 字段仍接收完整快照 JSON，包含 `assets`（id/url/inScope/reachable）、`checks`（assetId/entryId/endpoint/methodVersion/authContext/requestRevision、productConfirmed/productEvidenceIds、conditions、requestValid/baselineEvidenceIds、methodReviewed）、`requests`、`methods`（id/version及审阅资料）和 `maxSupplementAttempts`。旧快照会整体替换，须携带要保留的内容，不与新增量字段混用。入口须属于记录资产的同源，已知条件须附证据。该工具只保存事实和引用，不执行请求。
+
+省略 `context` 读取20条分页索引，`offset` 指定下一页；`search` 按关键词在测试资料里定位（每页 5 条短结果：来源/身份/时间，带下一页游标，输出 ≤3000 UTF-8 字节）；`kind=asset/request/method` 配合 `id` 和可选 `version` 按需读取详情。请求使用revision，方法使用version；存在多个版本时必须指定。当前快照替换后仍可显式读取该会话的旧请求/方法版本，输出会标记历史；其他会话不能取得这些记录。
 
 检查项标记 `requestValid=true` 时，baselineEvidenceIds须指向唯一有效请求：实际endpoint、authContext、revision均相同，且请求记录含 `valid=true`、原始 `request/response` 文本。`methodReviewed=true` 必须对应相同entryId（或显式methodId）/methodVersion且 `reviewed=true` 的方法。相同请求revision的入口、身份、请求/响应和相同方法version的内容不能改写；内容变化采用新版本，审阅与有效性可降级。每段请求/响应限64KB，更大的内容另存原始证据并建立引用。旧快照的未关联声明只读降级为未知，不改写原数据；重新确认后可保存新的有效快照。
 
@@ -53,7 +59,7 @@
 
 交付中的常见凭据字段脱敏；脚本需从环境/参数读取身份，发现常见硬编码凭据时拒绝打包并提示修订。原始证据仍保留本地。空成果包说明本轮未确认有效漏洞，阴性清单不能推导整个目标安全。
 
-当前 HTTP 复现与影响确认要求全部对照回执在 15 分钟内。自动验证、桌面人工复核、统计与导出均按实际读取时间核对；重新审阅不能延长旧回执的有效期。过期后保留历史观察与原始字节，当前成果显示待补证，不自动重发请求。需要重新确认时，在当前范围、身份和剩余额度内采集新的完整对照；此时间窗口不保证凭据或目标状态仍然有效。
+当前 HTTP 复现与影响确认按请求版本、身份/权限、目标实例、响应完整性和已知环境或业务状态变化核对，不使用统一的 15 分钟过期规则。无相关变化的正常对照可以复用；请求、身份、范围、目标实例或已知状态变化时，回执明确标为不适用，保留历史观察与原始字节，当前成果显示待补证，不自动重发请求。需要重新确认时，在当前范围、身份和剩余额度内采集新的完整对照。
 
 ## 固定版本的精选方法包
 
@@ -107,7 +113,23 @@
 
 通过后，`verification.effectReceiptId` 绑定宿主生成的 `effect-*` ID，control/probe引用第二轮；仅 `proofKind=access` 可由该结果晋级。`effect-detail`按本会话读取对照摘要，结果页默认折叠“独立影响对照”，交付包含effect.json：私有标记只以摘要保留，实际值不写进对照摘要。原始HTTP回执仍可按ID读取。
 
-创建新效果证明时，八张回执需在15分钟窗口内；既有历史证明按记录时间复核，不因时间经过就重复发请求。方法/请求/范围变化仍使它不能沿用。历史证明不保证现在登录态有效或当前部署未修复。
+除访问类外，另有已审阅的 `path-read-disclosure/v1` 文件读取契约（第 9.1 节「文件读取/路径」）。`effectSpec` 需给出 `marker`（24–256 位不透明文件标记）与 `normalTarget`（已复核的正常读文件请求目标，含查询）。`verify-effect` 的 `rounds` 恰好一轮 `[{normal,probe}]`：`normal` 用正常目标、`probe` 用不同的越界目标。验证要求两次都 2xx、正常对照不出现 marker、越界响应含 marker、marker 不出现在请求里（排除回显）、越界正文与正常正文不同且长度足够（排除通用错误页）。文件内容不涉及缓存/竞态，所以**一次有效观察即成立**；缺字段或不清正常读法不能套用该验证器。晋级后 `proofKind` 为 `other-impact`。
+
+第三条是 `state-change-impact/v1` 状态变更/业务契约（第 9.1 节「状态变更/业务」）。`effectSpec` 需给出 `marker`（24–256 位不透明受控值）与 `statePath`（复核过的状态字段 JSON 指针）。`verify-effect` 的 `rounds` 恰好一轮 `[{before,action,after}]`：`before`/`after` 是同入口的 GET 读回，`action` 是携带 marker 的写请求（POST/PUT/PATCH/DELETE，GET/HEAD 一律拒绝）。验证要求三次执行都 2xx 且方法/入口/请求基线一致、`before` 状态不含 marker、`after` 状态**含** marker 且与 `before` 不同、marker 不出现在两次读回请求里（排除回显）。动作自己的响应不算数——影响必须由**另一次独立 GET 读回**证明；"响应成功但状态没变"明确记为未确认。晋级后 `proofKind` 为 `write`，仍需桌面影响复核确认"该变更是否为允许行为"与恢复情况，配方本身不判断授权。
+
+第四条是 `nday-applicability/v1` Nday 适用性契约（第 9.1 节「Nday 适用性」/第 10.1 节）。`effectSpec` 需给出 `product`（产品名）与 `versionPattern`（版本正则，必须带捕获组），可选 `deploymentPattern`（部署条件原文）。`verify-effect` 的 `rounds` 恰好一轮 `[{fingerprint}]`。验证要求该回执是当前、新鲜、2xx 的同方法宿主回执，正文同时含产品名与版本原文，且版本原文**不出现在请求里**（排除回显）；声明了部署条件就必须在同一正文里找到对应原文。判定为**适用性**：`proofKind` 固定 `fingerprint`——交付门禁会以 `impact-proof-kind-missing` 拒绝把它当影响证据，实际影响必须另行核对；未知版本、只有扫描器标签一律不确认。
+
+第五条是 `config-disclosure/v1` 泄露/配置契约（第 9.1 节「泄露/配置」）。`effectSpec` 需给出 `marker`（24–256 位受控值，操作人把它放进非公开配置）。`verify-effect` 的 `rounds` 恰好一轮 `[{reference,anonymous}]`：`reference` 必须**带复核身份凭据**、`anonymous` 必须**完全不带凭据**，两者是同一入口的 GET。验证要求两次都 2xx、两次正文都含 marker、marker 不出现在请求里（排除回显）、**匿名正文与带凭据正文完全一致**（不同内容=公开页/错误页，不算泄露）、匿名正文长度足够（排除一行回显）。参考回执没带凭据时直接拒绝——那只是公开内容。晋级后 `proofKind` 为 `other-impact`。
+
+第六条是 `input-processing/v1` 输入处理契约（第 9.1 节「输入处理」）。`effectSpec` 需给出 `marker`（受控输入值）、`controlValue`（良性对照值，必须与 marker 不同）与 `processedValue`（期望的**被处理形态**，如大写/编码后的结果）。`verify-effect` 的 `rounds` 恰好一轮 `[{control,probe}]`：两次同入口、同身份，且把各自输入值换成占位符后请求必须**完全一致**（只差这一个输入值，差异才可归因）。验证要求两次都 2xx、探针正文含 `processedValue` 而对照正文不含、`processedValue` 不出现在任何请求里（排除原始回显）、两次正文不同（参数被忽略不算）。普通报错、偶发延迟、未知异常一律不确认。晋级后 `proofKind` 为 `other-impact`。
+
+第七条是 `server-side-access/v1` 服务端访问契约（第 9.1 节「服务端访问」）。证据只能来自**宿主回查 DNSLog 平台**的命中：`redteam_execution action=oob-issue` 按 `sec-config → DNSLog 平台`（平台地址 / token / 接收域名）在接收域名下发出可归因子域，注入载荷后 `action=oob-check` 由**宿主自己**回查平台（CEYE 兼容：`{url}/v1/records?token=&type=dns&filter=`，取 `data[]` 或 `records[]`，认不出的响应直接失败），命中按 label 落库为 `interaction_records`（`source=host-dnslog-query`），`action=detail id=interaction-…` 读全文。`effectSpec` 给出 `callbackHost`，`verify-effect` 的 `rounds` 恰好一轮 `[{trigger,interaction}]`：触发回执必须携带该回调域名，命中记录必须同域名、非空、且**回查时间晚于触发请求**（因果成立）。只有客户端访问、单一报错、没有平台记录、记录早于触发一律不确认。**晋级后 `proofKind='interaction'`——回连只证明载荷被处理并触发外连，交付门禁明确拒绝它充当影响证据**（要断言 RCE 还需命令回显、文件落地或会话建立）。
+
+第八条是 `browser-execution/v1` 浏览器执行契约（第 9.1 节「浏览器执行」）。`redteam_execution action=browser-run` 用**本机真实浏览器**（Chrome/Edge，无头 + CDP）打开复核过的 HTTP(S) URL，等页面加载完再在页面里求值 `window.__sakerProbe`——载荷必须是被执行过才会把它设成复核 marker；回执落库为 `browser_receipts`（`source=host-browser-execution`，含真实 origin、执行结果、CSP/对话框现象），`action=detail id=browser-…` 读全文。`effectSpec` 给出 `marker`，`verify-effect` 的 `rounds` 恰好一轮 `[{trigger,browser}]`：触发回执必须携带该 marker，浏览器回执必须同 marker、`executed=true`、origin 与复核入口**同源**且是 HTTP(S)。**仅回显文本、被转义、被 CSP 拦下、本地 file 环境一律不算**；`proofKind='other-impact'`（浏览器执行不等于权限或 RCE）。
+
+复测留档（第 9.2 节）：`redteam_finding_update` 可带 `retestVerdict`（`still-reproducible`/`not-reproduced`/`inconclusive`）、`retestExecutionId`、`retestControlExecutionId` 与 `retestNote`，桌面也可用 `finding.retest` RPC。结论只有「仍可复现 / 本次未复现 / 无法确认」三种：`still-reproducible` 须引用本轮、本次复测开始后的实际响应；`not-reproduced` 还要同时引用同一次复测的正常功能对照回执（同源、同身份、2xx），单独一张目标回执不能证明修复；`inconclusive` 必须写明原因。回执内容完整且匹配当前请求、身份和目标实例；时间本身不单独作废回执。超时、被阻断、登录失效、限流或服务端错误不能记为「本次未复现」；403/404 只有在正常功能对照仍可用时才支持「本次未复现」。标记已修复时再次检查最新复测的两条回执，旧的未复现记录不覆盖更新的无法确认或仍可复现。每次复测新建版本记录，**不覆盖原发现**；列表显示次数和最新结论。留档时间由服务器决定。
+
+创建新效果证明时，八张回执须匹配当前方法、请求版本、身份、目标实例并保持完整；无相关变化的历史证明不因时间经过就重复发请求，方法、请求、身份、范围或目标实例变化时才不能沿用。历史证明不保证现在登录态有效或当前部署未修复。
 
 开发源码现有 `redteam_execution action=run-effect`，一次工具调用执行已审阅的 `private-json-read/v1` 对照任务。`input` 为 JSON，包含 `methodId`、`methodVersion` 和 `roles`；四个角色 `owner`、`normal`、`probe`、`denied` 各带 `requestId`、`requestRevision`。前两者需要有效的已观察业务基线；`denied` 是同一受保护对象的无认证请求，不要求另有匿名 200 接口。只能执行保存且在授权范围内的 GET 请求。
 

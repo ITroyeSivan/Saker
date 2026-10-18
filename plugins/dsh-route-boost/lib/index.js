@@ -218,7 +218,7 @@ export function buildEnvelopeDetailed({ presetId, mode, phase, refsHits, evidenc
 		`boundary: ${mode.boundary}`,
 		...(surface === "wrap" ? ["工具面: 收尾阶段——subagent/workflow 派单已收起（先结束工作方向和报告，新方向须用户明示）"] : []),
 		presetId === "pentest"
-			? "conclude: 记录 RCE 是否复现、关键证据与阻断点；RCE 成功即收尾，不为覆盖率继续探测"
+			? "conclude: 记录问题是否确认、排除或仍缺条件、关键证据与阻断点；达到停止条件即收尾，不为覆盖率继续探测"
 			: "conclude: 收工前用 operation_conclude 申请结束——是否允许由系统判定（完成标准或工作方向还没结束时会被驳回并列出清单；确认做不到也是有效结果，如实记录，不要为了通过检查造假）",
 		`review: ${mode.review ?? "关键 finding 双签 = DSH 独立复核 + subagent_claude_code 复核一致；仅确认/挑战二选一"}`,
 		`evidence: ${evidence}（confirmed=按已验证引用；partial/unknown=下结论前先补证据）`
@@ -227,8 +227,8 @@ export function buildEnvelopeDetailed({ presetId, mode, phase, refsHits, evidenc
 		const mark = presetId === "redteam" ? "台账终态登记" : "记录本任务结论与证据引用";
 		const line = presetId === "pentest"
 			? (scope.directed
-				? `scope: RCE 定向——围绕用户线索${scope.hits && scope.hits.length > 0 ? `（${scope.hits.slice(0, 5).join("、")}）` : ""}只验证有证据通向 RCE 的路径；不扩展到无关漏洞；一条可复现 RCE 成功即停止`
-				: "scope: 固定终点为可复现 RCE——授权目标明确后快速收集产品/版本与暴露面，从 Nday、常规或 0day 中选一条最有证据的 RCE 路径；目标或授权不明先询问；不跑全漏洞矩阵，RCE 成功即停止")
+				? `scope: 定向——围绕用户线索${scope.hits && scope.hits.length > 0 ? `（${scope.hits.slice(0, 5).join("、")}）` : ""}只验证与当前问题直接相关的路径；不扩展到无关漏洞；完成或满足停止条件即收尾`
+				: "scope: 以当前任务问题和已选模块为准——先用已有资料，缺什么再补必要信息，从相关方向中选择有依据的检查；目标或授权不明先询问；不跑全漏洞矩阵，达到停止条件即收尾")
 			: (scope.directed
 				? `scope: 定向——用户指定优先${scope.hits && scope.hits.length > 0 ? `：${scope.hits.slice(0, 5).join("、")}` : ""}；只执行用户指定项，完成即逐项 ${mark}，未指定项不补测不欠账；转全流程须用户明示`
 				: `scope: 未指定具体项——${presetId === "redteam" ? "按路由手册受理（多任务走台账）" : "按本模式全流程矩阵推进"}`);

@@ -53,6 +53,22 @@ export const RULES = [
     note: '四个插件的模式清单均为 ["pentest","code-audit","ctf-solver"]；标准模式（宿主默认预设）下它们的注入与入库都不生效',
   },
   {
+    id: 'stage-gate',
+    label: '阶段门禁工具面',
+    prefixes: ['stage_gate', 'gates_list'],
+    modes: ['code-audit', 'ctf-solver'],
+    source: 'dsh-stage-gate/lib/index.js —— Web 迁移后 pentest 不再走阶段门；代码审计/CTF 保留',
+    note: 'pentest 下隐藏阶段门工具定义；代码审计/CTF 仍可见并继续使用',
+  },
+  {
+    id: 'method-orchestration',
+    label: '旧方法编排工具面',
+    prefixes: ['saker_method'],
+    modes: [],
+    source: 'dsh-method-stack 已退出产品安装；残留旧安装时也不应进入请求',
+    note: '三个安全模式和标准模式都隐藏；旧用户正文只作迁移源保留',
+  },
+  {
     id: 'pentest-rce-focus',
     label: '渗透测试常用工具',
     prefixes: [

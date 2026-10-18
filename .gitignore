@@ -31,3 +31,6 @@ smoke/
 
 # local archives
 archive/
+
+# local delivery receipts (kept outside source control)
+saker-delivery-*.zip

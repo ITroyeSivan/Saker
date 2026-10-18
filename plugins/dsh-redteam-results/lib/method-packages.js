@@ -198,6 +198,9 @@ export function listMethodPackages(store, offset = 0) {
       return { ...state, title: pkg.document.title, products: pkg.document.products, staticReview: review?.decision || 'not-reviewed', test: verification?.result || 'not-tested' }; }) };
 }
 export function activeMethodPackage(store, id) {
+  // J11 实测：action=active 不带 id 时直接落进 SQLite 绑定，模型看到的是
+  // "Provided value cannot be bound to SQLite parameter 1"——换成可读的中文契约说明。
+  if (typeof id !== 'string' || !id.trim()) throw new Error('active 需要方法包 id（先用 action=list 查看已登记的方法包；还没有登记过就先在成果页 stage 方法包并 review/activate）');
   const digest = store.db.prepare('SELECT digest FROM method_package_active WHERE id=?').get(id)?.digest;
   if (!digest) return null;
   const state = methodPackageState(store, digest);

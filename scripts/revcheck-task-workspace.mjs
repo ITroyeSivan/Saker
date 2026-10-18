@@ -11,7 +11,7 @@ const variants=[
  {name:'global-counts',old:"history ? 'counts.all' : 'counts.session'",next:"'counts.all'",failure:/FAIL current findings use session counts/},
  {name:'global-default-list',old:"var scope = props.scope === 'all' ? 'all' : 'session';",next:"var scope = 'all';",failure:/FAIL list, grouping and full export/},
  {name:'global-export',old:'{ scope: scope, sessionId: sessionId, mode: mode, page: n, pageSize: 100',next:'{ scope: "all", sessionId: sessionId, mode: mode, page: n, pageSize: 100',failure:/FAIL list, grouping and full export/},
- {name:'late-counts',old:'if (revision !== countRequest.current) return;',next:'',failure:/FAIL late global counts cannot overwrite/}
+ {name:'late-counts',old:'if (revision !== countRequest.current) return;',next:'',failure:/FAIL a stale counts response cannot overwrite/}
 ];
 for(const variant of variants){
  const dir=mkdtempSync(join(temp,'revcheck-task-workspace-'));

@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-ctf-observer",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "兼容历史 CTF 会话，提醒重复尝试、执行错误和已找到的 flag。",
   "files": [
     "lib",
@@ -33,5 +33,9 @@
     "bundle": {
       "patch": "./cordis.patch.yml"
     }
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": "0.2.0-rc.2 || 0.2.1-rc.2"
   }
 }

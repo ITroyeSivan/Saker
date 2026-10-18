@@ -8,6 +8,7 @@ const root=resolve(dirname(fileURLToPath(import.meta.url)),'..'),temp=resolve(ro
 const sha=file=>createHash('sha256').update(readFileSync(file)).digest('hex');
 const originals=['task-prompt.js','client.js'].map(name=>join(root,'plugins/dsh-redteam-results/lib',name)),before=originals.map(sha);
 const variants=[
+  {name:'retain-obsolete-context',file:'task-prompt.js',old:'const superseded = incoming.some(ownedSnapshot) ? snapshots : snapshots.slice(0, -1);',next:'const superseded = [];',runner:'test-task-prompt-cost.mjs',failure:/FAIL pre-step surface replacement keeps/},
   {name:'full-system-state',file:'task-prompt.js',old:"text: assembly => eligible(assembly) ? rule : ''",next:'text: snapshot',runner:'test-task-prompt-cost.mjs',failure:/FAIL task transitions keep/},
   {name:'missing-context',file:'task-prompt.js',old:"typeof ctx.systemPrompt.context !== 'function'",next:'true',runner:'test-task-prompt-cost.mjs',failure:/native task context was not registered/},
   {name:'read-mutation',file:'client.js',old:'// Reading or polling must not turn displayed defaults into a user choice.',next:"if(!result.configured&&!result.choice)return api('task.choose',{sessionId:props.sessionId,mode:'regular',workflow:'single',workers:1,interaction:'continuous'}).then(function(){return api('chat.settings',{sessionId:props.sessionId});});",runner:'test-desktop-task-ui.mjs',failure:/FAIL reading and polling Desktop chat settings never persist/}

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import url from "node:url";
 import { spawnSync } from "node:child_process";
-import { checkRegistered, configuredToolPaths, hasBin, registerableDefs, resolveToolBin, resolveToolInvocation, RATE_DEFAULTS, buildNucleiArgs, buildHttpxArgs, summarizeHttpxResults, runScan, governPreview, spillOutput, breakerCheck, breakerRecord, runGoverned, persistScanRecords, ffufParse, apply } from "../lib/index.js";
+import { checkRegistered, configuredToolPaths, hasBin, registerableDefs, resolveToolBin, resolveToolInvocation, RATE_DEFAULTS, buildNucleiArgs, buildHttpxArgs, summarizeHttpxResults, runScan, governPreview, spillOutput, breakerCheck, breakerRecord, runGoverned, persistScanRecords, listScanJobs, ffufParse, apply } from "../lib/index.js";
 import { TOOL_DEFS, buildArgs, tiersLine } from "../lib/registry.js";
 import { parseAssetPayload } from "../lib/ingest.js";
 
@@ -192,6 +192,33 @@ expect("保守默认值齐备", RATE_DEFAULTS.nuclei === 15 && RATE_DEFAULTS.htt
 // 缺字典拒绝（execute 层逻辑经由直接调用 runScan 不可达——此处验证 runScan 的未登记拦截独立于字典）
 r = await runScan({ bin: "definitely-missing-bin-xyz", args: [], workspace: F, tool: "nuclei", rate: undefined, defaultRate: 15, active: false, target: "x" });
 expect("缺二进制走三级兜底提示", !r.ok && r.error.includes("三级兜底"));
+
+// ── 扫描任务台账：参数/范围/速率/并发/开始结束/退出状态/统计（v6 第 7.2 节）──
+{
+	const ws = fs.mkdtempSync(path.join(os.tmpdir(), "scan-jobs-"));
+	try {
+		// 假扫描器：一个 .cjs（resolveToolInvocation 会用 node 前缀跑它），忽略额外参数、打印 JSON、退出 0。
+		const fake = path.join(ws, "fake-scanner.cjs");
+		fs.writeFileSync(fake, 'process.stdout.write(JSON.stringify([{ target: "http://a.test" }]));\n');
+		const parse = () => ({ __hits: [{ source: "fake", hit: "http://a.test" }], __summary: { rows: 1 }, __summaryText: "fake done" });
+		const job = await runScan({ bin: fake, args: ["-u", "http://a.test", "-c", "7"], workspace: ws, tool: "ffuf",
+			rate: 30, defaultRate: 50, active: false, target: "http://a.test", parse });
+		expect("扫描成功仍返回证据与统计", job.ok === true && job.hits === 1 && !!job.evidenceId);
+		const jobs = listScanJobs(ws);
+		expect("台账写入一行扫描任务", jobs.length === 1, JSON.stringify(jobs));
+		const j = jobs[0] || {};
+		expect("台账记录工具与输入范围", j.tool === "ffuf" && j.target === "http://a.test");
+		expect("台账记录速率与显式覆盖", j.rate === 30 && j.defaultRate === 50 && j.rateOverridden === true);
+		expect("台账记录并发与完整参数", j.concurrency === "7" && Array.isArray(j.args) && j.args.includes("-rate") && j.args.includes("30"));
+		expect("台账记录开始结束与耗时", /^\d{4}-\d\d-\d\dT/.test(String(j.startedAt)) && /^\d{4}-\d\d-\d\dT/.test(String(j.finishedAt)) && Number.isInteger(j.durationMs) && j.durationMs >= 0);
+		expect("台账记录退出状态与命中统计", j.exitStatus === 0 && j.timedOut === false && j.hits === 1 && j.evidenceId === job.evidenceId);
+		expect("台账落盘路径可读", fs.existsSync(path.join(ws, "artifacts", "scans", "scan-jobs.jsonl")));
+		expect("返回里带任务台账路径（模型可见引用）", job.jobFile === "artifacts/scans/scan-jobs.jsonl");
+		// 坏行隔离：损坏的 JSON 不拖垮台账。
+		fs.appendFileSync(path.join(ws, "artifacts", "scans", "scan-jobs.jsonl"), "{not json}\n");
+		expect("台账坏行隔离", listScanJobs(ws).length === 1);
+	} finally { fs.rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 }); }
+}
 
 // ── 注册表参数模型 ──
 let b = buildArgs(TOOL_DEFS.nmap, { target: "10.0.0.5" });

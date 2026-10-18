@@ -18,6 +18,7 @@
 // 台账机制原子（operation_progress/operation_intent/轮次护栏）全模式统一。
 
 import fs from "node:fs";
+import { sessionWorkingDirectory } from "dsh-saker/working-directory";
 import path from "node:path";
 import z from "@deepseek-ai/schemastery";
 
@@ -233,7 +234,7 @@ async function apply(ctx, config) {
 		let mode = "";
 		try { mode = String(ctx.agentPresets?.composedPreset?.(agent.ctx) ?? ""); } catch { /* 组合未就绪 */ }
 		if (!MODE_IDS.includes(mode)) return;
-		const cwd = agent.session?.header?.cwd;
+		const cwd = sessionWorkingDirectory(agent.ctx ?? ctx, agent.session);
 		if (typeof cwd !== "string" || !cwd) return;
 		const ledger = readOpenIntents(cwd);
 		const hint = intentHintOf(argsRaw, ledger);
@@ -267,7 +268,7 @@ async function apply(ctx, config) {
 			kickoffDone.add(sid);
 			if (shouldSkipKickoff(message)) return;   // 试水消息不打搅（仍按每会话一次纪律，不再补灌）
 			const agent = info?.agent;
-			const cwd = agent?.session?.header?.cwd;
+			const cwd = sessionWorkingDirectory(agent?.ctx ?? ctx, agent?.session);
 			if (typeof cwd === "string" && cwd && !fs.existsSync(path.join(cwd, "operation-state.json")) && typeof agent.followup === "function") {
 				let mode = "";
 				try { mode = String(ctx.agentPresets?.composedPreset?.(agent?.ctx) ?? ""); } catch { /* 组合未就绪 */ }

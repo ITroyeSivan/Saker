@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-session-pulse",
-  "version": "0.1.8",
+  "version": "0.1.16",
   "description": "兼容旧版会话状态和子代理列表。默认关闭。",
   "files": [
     "lib",
@@ -39,5 +39,9 @@
         "@deepseek-ai/dsh-client-runtime"
       ]
     }
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": "0.2.0-rc.2 || 0.2.1-rc.2"
   }
 }

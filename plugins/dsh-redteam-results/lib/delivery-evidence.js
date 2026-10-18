@@ -19,7 +19,7 @@ export function attachDeliveryEvidence(store, sessionId, finding) {
     const [control, probe] = [controlReceiptId, probeReceiptId].map(id => readExecutionReceipt(store, sessionId, id));
     requireFreshExecutions([control, probe]);
     if ([control, probe].some(receipt => receipt.source !== 'host-http-execution' || receipt.current !== true || receipt.outcome !== 'response'
-      || receipt.endpoint !== method.endpoint || receipt.authContext !== row.identity) || control.hypothesisId !== probe.hypothesisId) throw new Error('current complete execution pair does not match finding endpoint and identity');
+      || receipt.endpoint !== method.endpoint || receipt.authContext !== row.identity) || control.hypothesisId !== probe.hypothesisId) throw new Error('正常/差分执行对照与当前发现的端点或身份不匹配，请重新采集');
     if ([control, probe].some(receipt => receipt.methodId !== method.methodId || receipt.methodVersion !== method.methodVersion
       || receipt.methodBasis !== executionMethodBasis(currentMethod))) throw new Error('execution receipts do not match current reproduction method');
     if (control.status < 200 || control.status >= 300) throw new Error('normal execution control failed');

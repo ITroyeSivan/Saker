@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-mode-group",
-  "version": "1.0.7",
+  "version": "1.0.13",
   "description": "在新会话中选择常规测试、Nday 发现或 0Day 挖掘。",
   "files": [
     "lib",
@@ -36,5 +36,9 @@
         "@deepseek-ai/dsh-client-ui-slots"
       ]
     }
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": "0.2.0-rc.2 || 0.2.1-rc.2"
   }
 }

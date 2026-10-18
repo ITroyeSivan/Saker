@@ -6,6 +6,10 @@
 window.__ModuleLoader__.load({ id: '@dsh-external/dsh-knowledge-hub', factory: (require) => {
 var module = { exports: {} }; var exports = module.exports;
 'use strict';
+/* SAKER-UI-KIT:BEGIN */
+var SAKER_UI_KIT_CSS = "/* 5.7 共享组件层：Button / Input / Select / Badge / DataTable / Drawer / InlineNotice / EmptyState\n   单一来源：shared/ui-kit/ui-kit.css（令牌见 shared/ui-kit/ui-kit.json）。\n   由 scripts/sync-ui-kit.mjs 注入到各产品插件；插件里的同类尺寸规则应删除，避免双写。 */\n.saker-ui-btn{height:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px}\n.saker-ui-input{height:36px;border-radius:6px}\n.saker-ui-select{height:32px;border-radius:6px}\n.saker-ui-table td{height:38px}\n.saker-ui-badge{border-radius:6px;font-size:12px;line-height:1.5}\n.saker-ui-drawer{border-radius:12px}\n.saker-ui-notice{border-radius:6px;font-size:13px;line-height:1.5}\n.saker-ui-empty{border-radius:6px;font-size:13px;line-height:1.5}\n/* 现有插件类别名：与 canonical 类共用同一套尺寸 */\n.dsh-chat-panel-head button,.dsh-chat-actions button,.dsh-chat-task-status button,.dsh-task-nav button,.dsh-task-actions button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-prompt-io button,.dsh-prompt-more,.dsh-prompt-scopes button,.dsh-prompt-modes button,.dsh-prompt-foot button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-tools button,.dsh-materials-types button,.dsh-materials-foot button,.dsh-materials-table td button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-new button,.dsh-materials-import-actions button,.dsh-execution-tools>button,.dsh-test-content-actions button,.dsh-rtr-btn{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-task-nav select,.dsh-materials-tools select,.dsh-rtr-select{height:32px}\n.dsh-prompt-saveas input,.dsh-prompt-list input[type=search],.dsh-prompt-field input{height:36px}\n.dsh-materials-tools input[type=search],.dsh-materials-import input,.dsh-task-field input,.dsh-rtr-search{height:36px}\n.dsh-materials-table td{height:38px}\n.dsh-chat-setup svg,.dsh-task-workspace svg{width:16px;height:16px}\n.dsh-hnt-btn,.dsh-hnt-tab{height:32px}\n.dsh-hnt-input{height:36px}\n.dsh-hnt-select{height:32px}\n.dsh-mcs-btn,.dsh-mcs-iconbtn,.dsh-mcs-toolscount--btn{height:32px}\n.dsh-mcs-field input,.dsh-mcs-pairrow input,.dsh-mcs-search{height:36px}\n.dsh-mcs-field select,.dsh-mcs-seg button{height:32px}\n.dsh-sp-chip.is-btn{height:32px}\n.dsh-mg-chip{height:32px}\n/* 内联 style 插件（knowledge-hub / sec-config / skill-browse）：根容器打 data-saker-ui，\n   控件尺寸由共享层统一给，插件自己的 helper 不再写 height。 */\n[data-saker-ui] button{height:32px}\n[data-saker-ui] input:not([type=checkbox]):not([type=radio]):not([type=file]){height:36px}";
+/* SAKER-UI-KIT:END */
+(function(){try{if(document.getElementById('saker-ui-kit-style'))return;var st=document.createElement('style');st.id='saker-ui-kit-style';st.textContent=SAKER_UI_KIT_CSS;document.head.appendChild(st);}catch(e){}})();
 var React = require('react');
 var useState = React.useState, useEffect = React.useEffect;
 
@@ -31,7 +35,7 @@ function errText(r) {
 
 var CSS = {
   field: { display: 'block', width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l1, #d9d9de)', background: 'var(--dsw-alias-bg-base, #fff)', color: 'var(--dsw-alias-label-primary, #1a1a1a)', fontSize: 13, boxSizing: 'border-box' },
-  label: { display: 'block', margin: '10px 0 4px', fontSize: 12, color: 'var(--dsw-alias-label-tertiary, #6e6e73)' },
+  label: { display: 'block', margin: '12px 0 4px', fontSize: 12, color: 'var(--dsw-alias-label-tertiary, #6e6e73)' },
   groupTitle: { fontSize: 13, fontWeight: 600, margin: '0 0 4px', color: 'var(--dsw-alias-label-primary, #1a1a1a)' },
   hint: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary, #6e6e73)' },
 };
@@ -39,7 +43,7 @@ function btn(primary, extra) {
   return Object.assign({
     padding: '7px 14px', borderRadius: 6,
     border: '1px solid ' + (primary ? 'transparent' : 'var(--dsw-alias-border-l1,#d9d9de)'),
-    background: primary ? '#2f81f7' : 'transparent',
+    background: primary ? 'var(--dsw-alias-state-business-primary,#4c6ef5)' : 'transparent',
     color: primary ? '#fff' : 'var(--dsw-alias-label-primary,#1a1a1a)',
     fontSize: 13, fontWeight: 600, cursor: 'pointer',
   }, extra || {});
@@ -47,7 +51,7 @@ function btn(primary, extra) {
 function msgStyle(okv) { return { marginTop: 8, fontSize: 12, color: okv ? '#1a7f37' : '#d1242f' }; }
 function badge(bg, fg, text, title) {
   return React.createElement('span', {
-    style: { display: 'inline-flex', alignItems: 'center', padding: '1px 7px', borderRadius: 999, fontSize: 11, fontWeight: 600, background: bg, color: fg, lineHeight: '16px', whiteSpace: 'nowrap', marginLeft: 6 },
+    style: { display: 'inline-flex', alignItems: 'center', padding: '1px 7px', borderRadius: 999, fontSize: 12, fontWeight: 600, background: bg, color: fg, lineHeight: '16px', whiteSpace: 'nowrap', marginLeft: 8 },
     title: title || '',
   }, text);
 }
@@ -79,7 +83,7 @@ function Input(props) {
 function TextArea(props) {
   var rest = {};
   for (var k in props) if (k !== 'onChange') rest[k] = props[k];
-  return React.createElement('textarea', Object.assign({ style: Object.assign({ minHeight: 340, fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', fontSize: 12, lineHeight: 1.55, resize: 'vertical' }, CSS.field) }, rest, {
+  return React.createElement('textarea', Object.assign({ style: Object.assign({ minHeight: 340, fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', fontSize: 12, lineHeight:1.5, resize: 'vertical' }, CSS.field) }, rest, {
     onChange: typeof props.onChange === 'function'
       ? function (e) { props.onChange(e.target.value); }
       : undefined,
@@ -131,7 +135,7 @@ function markdownInline(text, prefix) {
     } else if (match[3]) {
       out.push(React.createElement('code', {
         key: prefix + '-c' + n,
-        style: { padding: '1px 4px', borderRadius: 4, background: 'var(--dsw-alias-bg-fill,#f0f2f5)', fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', fontSize: 12 },
+        style: { padding: '1px 4px', borderRadius: 4, background: 'var(--dsw-alias-bg-fill,rgba(128,128,128,.10))', fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', fontSize: 12 },
       }, match[3]));
     } else {
       out.push(React.createElement('strong', { key: prefix + '-b' + n }, match[4]));
@@ -157,7 +161,7 @@ function MarkdownPreview(props) {
     var tag = listType === 'ol' ? 'ol' : 'ul';
     nodes.push(React.createElement(tag, {
       key: 'list-' + nodes.length,
-      style: { margin: '5px 0 8px', paddingLeft: 22, lineHeight: 1.7 },
+      style: { margin: '4px 0 8px', paddingLeft: 22, lineHeight:1.5},
     }, list));
     list = [];
     listType = '';
@@ -167,7 +171,9 @@ function MarkdownPreview(props) {
     if (!code.length) return;
     nodes.push(React.createElement('pre', {
       key: 'code-' + nodes.length,
-      style: { margin: '8px 0', padding: '10px 12px', borderRadius: 6, overflowX: 'auto', background: '#f6f8fa', border: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', lineHeight: 1.55 },
+      // 深色主题：写死 #f6f8fa 会让继承来的近白代码文字变成"浅底浅字"。
+      // 用宿主定义的 markdown 代码块底色（深色下会自动变深），回退也取半透明灰。
+      style: { margin: '8px 0', padding: '10px 12px', borderRadius: 6, overflowX: 'auto', background: 'var(--dsw-alias-markdown-code-block,rgba(128,128,128,.10))', border: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', lineHeight:1.5},
     }, React.createElement('code', { style: { fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', fontSize: 12, whiteSpace: 'pre' } }, code.join('\n'))));
     code = [];
   }
@@ -187,13 +193,13 @@ function MarkdownPreview(props) {
       var sizes = { 1: 18, 2: 16, 3: 14, 4: 13 };
       nodes.push(React.createElement('div', {
         key: 'h-' + i,
-        style: { margin: level === 1 ? '6px 0 8px' : '12px 0 5px', fontSize: sizes[level], fontWeight: 700, lineHeight: 1.4, color: 'var(--dsw-alias-label-primary,#1a1a1a)' },
+        style: { margin: level === 1 ? '8px 0 8px' : '12px 0 4px', fontSize: sizes[level], fontWeight: 700, lineHeight:1.5, color: 'var(--dsw-alias-label-primary,#1a1a1a)' },
       }, markdownInline(heading[2], 'h' + i)));
       continue;
     }
     if (/^\s*(?:---|\*\*\*|___)\s*$/.test(line)) {
       flushList();
-      nodes.push(React.createElement('hr', { key: 'hr-' + i, style: { border: 0, borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', margin: '10px 0' } }));
+      nodes.push(React.createElement('hr', { key: 'hr-' + i, style: { border: 0, borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', margin: '12px 0' } }));
       continue;
     }
     var bullet = /^\s*[-*+]\s+(.+)$/.exec(line);
@@ -202,7 +208,7 @@ function MarkdownPreview(props) {
       var nextType = bullet ? 'ul' : 'ol';
       if (list.length && listType !== nextType) flushList();
       listType = nextType;
-      list.push(React.createElement('li', { key: 'li-' + i, margin: '2px 0' }, markdownInline((bullet || ordered)[1], 'li' + i)));
+      list.push(React.createElement('li', { key: 'li-' + i, margin: '4px 0' }, markdownInline((bullet || ordered)[1], 'li' + i)));
       continue;
     }
     flushList();
@@ -211,13 +217,13 @@ function MarkdownPreview(props) {
     if (quote) {
       nodes.push(React.createElement('blockquote', {
         key: 'q-' + i,
-        style: { margin: '7px 0', padding: '1px 0 1px 10px', borderLeft: '3px solid #c7d2fe', color: '#52525b', lineHeight: 1.7 },
+        style: { margin: '8px 0', padding: '1px 0 1px 10px', borderLeft: '3px solid #c7d2fe', color: '#52525b', lineHeight:1.5},
       }, markdownInline(quote[1], 'q' + i)));
       continue;
     }
     nodes.push(React.createElement('div', {
       key: 'p-' + i,
-      style: { margin: '5px 0', lineHeight: 1.72, color: 'var(--dsw-alias-label-secondary,#3f3f46)', wordBreak: 'break-word' },
+      style: { margin: '4px 0', lineHeight:1.5, color: 'var(--dsw-alias-label-secondary,#3f3f46)', wordBreak: 'break-word' },
     }, markdownInline(line, 'p' + i)));
   }
   if (inCode) flushCode();
@@ -227,7 +233,7 @@ function MarkdownPreview(props) {
     style: { minHeight: 340, maxHeight: 560, overflowY: 'auto', border: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', borderRadius: 8, padding: '12px 14px', background: 'var(--dsw-alias-bg-base,#fff)', fontSize: 13, boxSizing: 'border-box' },
   },
     parsed.meta.length ? React.createElement('div', {
-      style: { display: 'grid', gridTemplateColumns: 'auto minmax(0,1fr)', gap: '3px 10px', padding: '8px 10px', marginBottom: 8, borderRadius: 6, background: 'var(--dsw-alias-bg-fill,#f7f7f8)', fontSize: 11, lineHeight: 1.5 },
+      style: { display: 'grid', gridTemplateColumns: 'auto minmax(0,1fr)', gap: '4px 12px', padding: '8px 10px', marginBottom: 8, borderRadius: 6, background: 'var(--dsw-alias-bg-fill,rgba(128,128,128,.08))', fontSize: 12, lineHeight: 1.5 },
     }, parsed.meta.slice(0, 12).flatMap(function (row, i) {
       return [
         React.createElement('span', { key: 'mk' + i, style: { color: '#9a9aa0', fontFamily: 'ui-monospace, monospace' } }, row[0]),
@@ -246,19 +252,19 @@ function MarkdownPreview(props) {
 function TreeRow(props) {
   var item = props.item;
   var isCat = item.kind === 'dir' && props.depth === 0;
-  var indent = { paddingLeft: 8 + props.depth * 14, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, borderRadius: 4, paddingTop: 2, paddingBottom: 2, cursor: 'pointer' };
-  if (isCat) { indent.marginTop = 2; indent.background = 'var(--dsw-alias-bg-fill,#f4f4f5)'; indent.fontWeight = 600; }
-  var active = props.active ? { background: 'var(--dsw-alias-bg-fill, #f0f2f5)' } : null;
+  var indent = { paddingLeft: 8 + props.depth * 14, display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, borderRadius: 4, paddingTop: 2, paddingBottom: 2, cursor: 'pointer' };
+  if (isCat) { indent.marginTop = 2; indent.background = 'var(--dsw-alias-bg-fill,rgba(128,128,128,.10))'; indent.fontWeight = 600; }
+  var active = props.active ? { background: 'var(--dsw-alias-bg-fill, rgba(128,128,128,.12))' } : null;
   var arrow = item.kind === 'dir' ? (item.expanded ? '▾ ' : '▸ ') : '  ';
   var name = React.createElement('span', { style: { color: item.kind === 'dir' ? 'var(--dsw-alias-label-primary,#1a1a1a)' : 'var(--dsw-alias-label-secondary,#3f3f46)', fontWeight: item.kind === 'dir' ? (isCat ? 600 : 600) : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, item.name);
   var meta = null;
   if (item.kind === 'file' && item.size > 0) {
-    meta = React.createElement('span', { style: { fontSize: 11, color: '#9a9aa0', marginLeft: 'auto', flex: '0 0 auto' } }, (item.size / 1024).toFixed(1) + ' KB');
+    meta = React.createElement('span', { style: { fontSize: 12, color: '#9a9aa0', marginLeft: 'auto', flex: '0 0 auto' } }, (item.size / 1024).toFixed(1) + ' KB');
   } else if (item.kind === 'dir' && typeof item.fileCount === 'number') {
     meta = badge('#eef2ff', '#4338ca', String(item.fileCount) + ' 文件', '分类内文本文件数');
   }
   return React.createElement('div', { style: Object.assign(indent, active), onClick: props.onClick, title: isCat ? '分类：' + item.name : undefined },
-    React.createElement('span', { style: { color: '#9a9aa0', fontSize: 11 } }, arrow),
+    React.createElement('span', { style: { color: '#9a9aa0', fontSize: 12 } }, arrow),
     name, meta);
 }
 
@@ -362,7 +368,7 @@ function TreeSection(props) {
         key: 'remote-' + key + '-' + i,
         title: rel,
         onClick: function () { openRemote(hit); },
-        style: { display: 'flex', alignItems: 'flex-start', gap: 6, padding: '5px 7px', borderRadius: 4, cursor: 'pointer', fontSize: 12, lineHeight: 1.45, background: active ? 'var(--dsw-alias-bg-fill,#f0f2f5)' : 'transparent' },
+        style: { display: 'flex', alignItems: 'flex-start', gap: 8, padding: '5px 7px', borderRadius: 4, cursor: 'pointer', fontSize: 12, lineHeight:1.5, background: active ? 'var(--dsw-alias-bg-fill,rgba(128,128,128,.12))' : 'transparent' },
       },
         badge(SOURCE_META[source] ? SOURCE_META[source].bg : '#e4e4e7', SOURCE_META[source] ? SOURCE_META[source].fg : '#6e6e73', SOURCE_META[source] ? SOURCE_META[source].label : source),
         React.createElement('span', { style: { minWidth: 0, color: 'var(--dsw-alias-label-secondary,#3f3f46)', overflowWrap: 'anywhere' } }, rel, hit && hit.line ? ':' + hit.line : '')));
@@ -398,7 +404,7 @@ function TreeSection(props) {
       }
     });
     if (depth === 0 && children.files.length > 0) {
-      rows.push(React.createElement('div', { key: '_rootfiles', style: { fontSize: 11, color: '#9a9aa0', margin: '4px 0 2px 24px' } }, '根目录文件'));
+      rows.push(React.createElement('div', { key: '_rootfiles', style: { fontSize: 12, color: '#9a9aa0', margin: '4px 0 4px 24px' } }, '根目录文件'));
     }
     children.files.forEach(function (f) {
       var key = keyOf(f);
@@ -413,17 +419,17 @@ function TreeSection(props) {
   if (rootChildren) {
     var dirSum = (rootChildren.dirs || []).reduce(function (a, d) { return a + (d.fileCount || 0); }, 0);
     var fileSum = (rootChildren.files || []).length;
-    summary = React.createElement('span', { style: { fontSize: 11, color: '#9a9aa0', marginLeft: 'auto' } },
+    summary = React.createElement('span', { style: { fontSize: 12, color: '#9a9aa0', marginLeft: 'auto' } },
       rootChildren.dirs.length + ' 分类 · ' + (dirSum + fileSum) + ' 文件');
   }
 
-  return React.createElement('div', { style: { marginBottom: 6 } },
+  return React.createElement('div', { style: { marginBottom: 8 } },
     React.createElement('div', { style: { display: 'flex', alignItems: 'center', padding: '3px 4px' } },
       React.createElement('span', { style: { fontWeight: 600, fontSize: 13 } }, props.title),
       badge(meta.bg, meta.fg, meta.label),
       props.writable ? badge('#e6ffed', '#1a7f37', '可写') : null,
       summary),
-    React.createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'center', margin: '5px 0 7px' } },
+    React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center', margin: '4px 0 8px' } },
       React.createElement('input', {
         value: filter,
         placeholder: '筛选当前来源的分类或文件…',
@@ -435,7 +441,7 @@ function TreeSection(props) {
         onClick: function () { setFilter(''); },
         style: btn(false, { padding: '5px 9px', fontSize: 12, whiteSpace: 'nowrap' }),
       }, '清除') : null),
-    React.createElement('div', { style: { marginTop: 2 } }, filterTerm ? remoteRows() : renderChildren(nodes, 0, '')),
+    React.createElement('div', { style: { marginTop: 4 } }, filterTerm ? remoteRows() : renderChildren(nodes, 0, '')),
     msg ? React.createElement('div', { style: msgStyle(false) }, msg) : null);
 }
 
@@ -500,7 +506,7 @@ function Editor(props) {
   }
 
   var metaBadge = badge(meta.bg, meta.fg, meta.label + '层');
-  var pathLine = React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 6 } },
+  var pathLine = React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
     props.onBack ? React.createElement('button', { type: 'button', style: btn(false, { padding: '3px 8px', fontSize: 12 }), onClick: props.onBack }, '← 返回列表') : null,
     React.createElement('span', { style: { fontSize: 12, color: '#3f3f46', wordBreak: 'break-all' } }, props.file.mode ? props.file.mode + '/' : '', props.file.path),
     metaBadge,
@@ -509,7 +515,7 @@ function Editor(props) {
   return React.createElement('div', null,
     pathLine,
     React.createElement('div', { style: { marginTop: 8 } },
-      React.createElement('div', { style: { display: 'flex', gap: 6, marginBottom: 7 } },
+      React.createElement('div', { style: { display: 'flex', gap: 8, marginBottom: 8 } },
         React.createElement('button', { type: 'button', style: btn(viewMode === 'preview', { padding: '4px 10px', fontSize: 12 }), onClick: function () { setViewMode('preview'); } }, '预览'),
         React.createElement('button', { type: 'button', style: btn(viewMode === 'source', { padding: '4px 10px', fontSize: 12 }), onClick: function () { setViewMode('source'); } }, '源码')),
       viewMode === 'preview'
@@ -564,15 +570,15 @@ function ImportBox(props) {
 
   return React.createElement('div', { style: { borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', paddingTop: 12 } },
     React.createElement('div', { style: CSS.groupTitle }, '导入外部知识源（远程 Git）'),
-    React.createElement('div', { style: Object.assign({}, CSS.hint, { marginBottom: 6 }) },
+    React.createElement('div', { style: Object.assign({}, CSS.hint, { marginBottom: 8 }) },
       '克隆公开 Git 仓库（如 github.com/swisskyrepo/PayloadsAllTheThings，MIT 协议）到导入区，之后完全离线可用。需要本机能访问该地址；成功后显示来源 commit。'),
     React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
       React.createElement('div', { style: { flex: 3 } }, React.createElement(Input, { value: url, placeholder: 'Git 仓库 URL（https://…）', onChange: setUrl })),
       React.createElement('div', { style: { flex: 1 } }, React.createElement(Input, { value: name, placeholder: '名称（如 payloads-all-the-things）', onChange: setName })),
       React.createElement('button', { type: 'button', disabled: !!busy || !url.trim() || !name.trim(), style: btn(true), onClick: runGit }, busy === 'git' ? '导入中…' : '导入')),
-    React.createElement('div', { style: { marginTop: 14 } },
+    React.createElement('div', { style: { marginTop: 16 } },
       React.createElement('div', { style: CSS.groupTitle }, '导入本机文件夹'),
-      React.createElement('div', { style: Object.assign({}, CSS.hint, { marginBottom: 6 }) },
+      React.createElement('div', { style: Object.assign({}, CSS.hint, { marginBottom: 8 }) },
         '把运行 dsh 这台机器上的现有目录整体复制进导入区（自动跳过 .git）。例如本地已 clone 的 PayloadsAllTheThings，或团队共享的知识目录；离线最稳。'),
       React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
         React.createElement('div', { style: { flex: 3 } }, React.createElement(Input, { value: dirPath, placeholder: '本机文件夹绝对路径（如 D:\\kb\\PayloadsAllTheThings）', onChange: setDirPath })),
@@ -591,8 +597,8 @@ function SearchBar(props) {
         onKeyDown: function (e) { if (e.key === 'Enter') props.onRun(); },
         style: Object.assign({}, CSS.field, { border: '1px solid var(--dsw-alias-border-l2,#c9c9cf)', background: 'var(--dsw-alias-bg-base,#fff)' }),
       })),
-    React.createElement('button', { type: 'button', disabled: props.busy || !props.query.trim(), style: btn(true, { padding: '7px 12px' }), onClick: props.onRun }, props.busy ? '检索中…' : '检索'),
-    props.active ? React.createElement('button', { type: 'button', style: btn(false, { padding: '7px 12px' }), onClick: props.onClear }, '返回目录') : null);
+    React.createElement('button', { type: 'button', disabled: props.busy || !props.query.trim(), style: btn(true, { padding: '8px 12px' }), onClick: props.onRun }, props.busy ? '检索中…' : '检索'),
+    props.active ? React.createElement('button', { type: 'button', style: btn(false, { padding: '8px 12px' }), onClick: props.onClear }, '返回目录') : null);
 }
 
 function SearchResults(props) {
@@ -607,22 +613,22 @@ function SearchResults(props) {
     return React.createElement('div', { style: { color: '#9a9aa0', fontSize: 12, padding: 8 } }, '没有命中。换一个工具名、CVE 或更短的关键词。');
   }
   return React.createElement('div', null,
-    React.createElement('div', { style: { fontSize: 11, color: '#9a9aa0', margin: '2px 4px 6px' } }, '命中 ' + hits.length + ' 条'),
+    React.createElement('div', { style: { fontSize: 12, color: '#9a9aa0', margin: '4px 4px 8px' } }, '命中 ' + hits.length + ' 条'),
     hits.map(function (h, i) {
       var m = SOURCE_META[h.source] || SOURCE_META.bundle;
       var path = (h.mode ? h.mode + '/' : '') + h.path + (h.line ? ':' + h.line : '');
       return React.createElement('div', {
         key: i,
         title: path + (h.preview ? '\n' + h.preview : ''),
-        style: { display: 'grid', gridTemplateColumns: 'auto minmax(0,1fr)', gap: 6, padding: '6px 4px', borderRadius: 5, cursor: 'pointer', fontSize: 12, borderBottom: '1px solid var(--dsw-alias-border-l1,#f0f0f2)' },
-        onMouseEnter: function (e) { e.currentTarget.style.background = 'var(--dsw-alias-bg-fill,#f0f2f5)'; },
+        style: { display: 'grid', gridTemplateColumns: 'auto minmax(0,1fr)', gap: 8, padding: '6px 4px', borderRadius: 5, cursor: 'pointer', fontSize: 12, borderBottom: '1px solid var(--dsw-alias-border-l1,#f0f0f2)' },
+        onMouseEnter: function (e) { e.currentTarget.style.background = 'var(--dsw-alias-bg-fill,rgba(128,128,128,.12))'; },
         onMouseLeave: function (e) { e.currentTarget.style.background = 'transparent'; },
         onClick: function () { props.onOpen({ source: h.source, mode: h.mode || props.mode, path: h.path, name: h.path.split('/').pop() }); },
       },
         badge(m.bg, m.fg, m.label),
         React.createElement('div', { style: { minWidth: 0 } },
           React.createElement('div', { style: { color: '#3f3f46', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, path),
-          h.preview ? React.createElement('div', { style: { color: '#9a9aa0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 } }, h.preview) : null));
+          h.preview ? React.createElement('div', { style: { color: '#9a9aa0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 4 } }, h.preview) : null));
     }));
 }
 
@@ -711,7 +717,7 @@ function PackCard(props) {
     }, busy === 'mode:' + mode ? '切换中…' : label);
   };
   return React.createElement('div', { style: { border: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', borderRadius: 8, padding: '6px 10px', margin: '0 0 8px', fontSize: 12, background: 'var(--dsw-alias-bg-layer-2,#fafafb)' } },
-    React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' } },
+    React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' } },
       React.createElement('span', { style: { fontWeight: 700, color: ready === total && total ? '#1a7f37' : '#b45309' } }, '知识包 ' + ready + '/' + total),
       React.createElement('span', { style: CSS.hint }, '同步模式：' + modeLabel + (syncMode === 'auto' ? '（' + (st.autoSyncIntervalDays || 7) + ' 天一次）' : '') + '；按需加载，不常驻上下文'),
       React.createElement('span', { style: CSS.hint }, '来源清单：' + (st.release || '内置') + (st.catalogSource === 'remote' ? '（远程）' : '（内置）')),
@@ -724,23 +730,23 @@ function PackCard(props) {
       React.createElement('button', { type: 'button', disabled: !!busy || syncMode === 'frozen', onClick: syncAll, style: btn(false, { padding: '4px 12px', fontSize: 12 }) }, busy === 'sync' ? '更新中…' : '一键更新'),
       React.createElement('button', { type: 'button', disabled: !!busy, onClick: rebuild, style: btn(false, { padding: '4px 12px', fontSize: 12 }) }, busy === 'index' ? '重建中…' : '重建索引'),
       React.createElement('button', { type: 'button', onClick: function () { setExpanded(!expanded); }, style: btn(false, { padding: '4px 12px', fontSize: 12 }) }, expanded ? '收起列表' : '查看列表')),
-    showAdmin ? React.createElement('div', { style: { display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 5, paddingTop: 5, borderTop: '1px dashed var(--dsw-alias-border-l1,#e4e4e7)' } },
+    showAdmin ? React.createElement('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4, paddingTop: 5, borderTop: '1px dashed var(--dsw-alias-border-l1,#e4e4e7)' } },
       modeBtn('auto', '自动'), modeBtn('manual', '手动'), modeBtn('frozen', '冻结')) : null,
     failed.length ? React.createElement('button', {
       type: 'button',
       onClick: function () { setExpanded(true); },
-      style: { marginTop: 5, padding: 0, border: 0, background: 'transparent', color: '#d1242f', cursor: 'pointer', textAlign: 'left', fontSize: 12 },
+      style: { marginTop: 4, padding: 0, border: 0, background: 'transparent', color: '#d1242f', cursor: 'pointer', textAlign: 'left', fontSize: 12 },
     }, failed.length + ' 个知识包同步失败，点击查看原因') : null,
-    notice ? React.createElement('div', { style: msgStyle(notice.ok), marginTop: 5 }, notice.text) : null,
-    expanded ? React.createElement('div', { style: { marginTop: 6, maxHeight: 180, overflowY: 'auto', borderTop: '1px dashed var(--dsw-alias-border-l1,#e4e4e7)', paddingTop: 5 } },
+    notice ? React.createElement('div', { style: msgStyle(notice.ok), marginTop: 4 }, notice.text) : null,
+    expanded ? React.createElement('div', { style: { marginTop: 8, maxHeight: 180, overflowY: 'auto', borderTop: '1px dashed var(--dsw-alias-border-l1,#e4e4e7)', paddingTop: 5 } },
       (st.packs || []).map(function (p) {
-        return React.createElement('div', { key: p.id, style: { display: 'flex', gap: 6, padding: '2px 0' } },
+        return React.createElement('div', { key: p.id, style: { display: 'flex', gap: 8, padding: '2px 0' } },
           React.createElement('span', { style: { color: p.installed ? '#1a7f37' : '#b45309', flex: '0 0 46px' } }, p.installed ? '已安装' : '未安装'),
           React.createElement('span', { style: { fontWeight: 600, flex: '0 0 190px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, p.title || p.id),
           React.createElement('span', { title: p.backup || '', style: Object.assign({}, CSS.hint, { flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }) }, p.error || p.license || (p.backup ? '旧目录已备份' : '')),
           p.error ? React.createElement('button', {
             type: 'button', disabled: !!busy, onClick: function () { syncOne(p.id); },
-            style: btn(false, { padding: '2px 8px', fontSize: 11 }),
+            style: btn(false, { padding: '2px 8px', fontSize: 12 }),
           }, busy === 'sync:' + p.id ? '重试中…' : '重试') : null);
       })) : null);
 }
@@ -769,7 +775,9 @@ function EdbCard(props) {
       }
     }).catch(function (e) { setSyncing(false); setNotice({ ok: false, text: '下载异常：' + String(e && e.message || e) }); });
   }
-  var box = { border: '1px solid ' + (st.present ? '#bbf7d0' : 'var(--dsw-alias-border-l1,#e4e4e7)'), borderRadius: 8, padding: '6px 10px', margin: '0 0 8px', fontSize: 12, background: st.present ? '#f0fdf4' : 'var(--dsw-alias-bg-layer-2,#fafafb)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' };
+  // 深色主题：写死浅绿底会让继承来的近白文字变成"浅底浅字"。用半透明绿，
+  // 浅色下≈淡绿、深色下≈深绿，两种主题都读得清（宿主没有 --dsw-alias-bg-fill 之类的变量）。
+  var box = { border: '1px solid ' + (st.present ? 'rgba(34,197,94,.45)' : 'var(--dsw-alias-border-l1,#e4e4e7)'), borderRadius: 8, padding: '6px 10px', margin: '0 0 8px', fontSize: 12, background: st.present ? 'rgba(34,197,94,.12)' : 'var(--dsw-alias-bg-layer-2,#fafafb)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' };
   var tag = st.present
     ? React.createElement('span', { style: { color: '#1a7f37', fontWeight: 700 } }, 'Exploit-DB ' + st.rows + ' 条')
     : React.createElement('span', { style: { color: '#b45309', fontWeight: 700 } }, 'Exploit-DB 未接入');
@@ -787,7 +795,7 @@ function EdbCard(props) {
           syncing ? '下载中…（约 30MB）' : '下载官方索引'),
     React.createElement('button', { type: 'button', onClick: function () { setShowHint(!showHint); }, style: btn(false, { padding: '4px 12px', fontSize: 12 }) }, showHint ? '收起说明' : '说明'),
     notice ? React.createElement('div', { style: { flex: '1 0 100%', fontSize: 12, color: notice.ok ? '#1a7f37' : '#d1242f' } }, notice.text) : null,
-    showHint ? React.createElement('div', { style: { flex: '1 0 100%', fontSize: 12, color: '#3f3f46', lineHeight: 1.6, whiteSpace: 'pre-wrap', borderTop: '1px dashed var(--dsw-alias-border-l1,#e4e4e7)', paddingTop: 6 } }, st.hint || '（暂无说明）') : null);
+    showHint ? React.createElement('div', { style: { flex: '1 0 100%', fontSize: 12, color: '#3f3f46', lineHeight:1.5, whiteSpace: 'pre-wrap', borderTop: '1px dashed var(--dsw-alias-border-l1,#e4e4e7)', paddingTop: 6 } }, st.hint || '（暂无说明）') : null);
 }
 
 function Page(props) {
@@ -839,7 +847,7 @@ function Page(props) {
 
   var statsLine = null;
   if (statsV) {
-    statsLine = React.createElement('div', { style: { display: 'flex', gap: 10, margin: '2px 0 10px', fontSize: 12, color: '#6e6e73', flexWrap: 'wrap' } },
+    statsLine = React.createElement('div', { style: { display: 'flex', gap: 12, margin: '4px 0 12px', fontSize: 12, color: '#6e6e73', flexWrap: 'wrap' } },
       React.createElement('span', null, '内置手册 ' + statsV.bundleMd + ' 篇'),
       React.createElement('span', null, '规则 ' + statsV.bundleRules + ' 条'),
       React.createElement('span', { style: { color: '#c2410c', fontWeight: 600 } }, 'PATT 资料 ' + statsV.patt + ' 篇'),
@@ -849,11 +857,11 @@ function Page(props) {
       React.createElement('span', null, '合计 ' + statsV.total + ''));
   }
 
-  var modeTabs = React.createElement('div', { style: { display: 'flex', gap: 6, marginBottom: 4 } }, MODES.map(function (m) {
+  var modeTabs = React.createElement('div', { style: { display: 'flex', gap: 8, marginBottom: 4 } }, MODES.map(function (m) {
     var active = m.id === mode;
     return React.createElement('button', {
       key: m.id, type: 'button',
-      style: { padding: '5px 12px', borderRadius: 6, border: '1px solid ' + (active ? '#2f81f7' : 'var(--dsw-alias-border-l1,#d9d9de)'), background: active ? '#2f81f7' : 'transparent', color: active ? '#fff' : 'var(--dsw-alias-label-primary,#1a1a1a)', fontSize: 12, fontWeight: active ? 600 : 400, cursor: 'pointer' },
+      style: { padding: '5px 12px', borderRadius: 6, border: '1px solid ' + (active ? 'var(--dsw-alias-state-business-primary,#4c6ef5)' : 'var(--dsw-alias-border-l1,#d9d9de)'), background: active ? 'var(--dsw-alias-state-business-primary,#4c6ef5)' : 'transparent', color: active ? '#fff' : 'var(--dsw-alias-label-primary,#1a1a1a)', fontSize: 12, fontWeight: active ? 600 : 400, cursor: 'pointer' },
       onClick: function () { setMode(m.id); setActiveFile(null); clearSearch(); },
     }, m.label);
   }));
@@ -866,7 +874,7 @@ function Page(props) {
     if (id === 'import') return statsV.imports;
     return '';
   }
-  var sourceTabs = React.createElement('div', { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' } },
+  var sourceTabs = React.createElement('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' } },
     SOURCE_TABS.map(function (s) {
       var active = sourceTab === s.id;
       var count = sourceCount(s.id);
@@ -874,7 +882,7 @@ function Page(props) {
         key: s.id, type: 'button',
         style: {
           padding: '5px 10px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
-          border: '1px solid ' + (active ? '#2f81f7' : 'var(--dsw-alias-border-l1,#d9d9de)'),
+          border: '1px solid ' + (active ? 'var(--dsw-alias-state-business-primary,#4c6ef5)' : 'var(--dsw-alias-border-l1,#d9d9de)'),
           background: active ? '#e8f1fe' : 'transparent',
           color: active ? '#1d4ed8' : 'var(--dsw-alias-label-primary,#1a1a1a)',
           fontWeight: active ? 600 : 400,
@@ -917,12 +925,12 @@ function Page(props) {
     });
   }
 
-  return React.createElement('div', null,
+  return React.createElement('div', { 'data-saker-ui': 'knowledge' },
     React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 12 } },
       React.createElement('div', { style: { fontSize: 14, fontWeight: 700 } }, '知识库'),
       React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } }, modeTabs),
       React.createElement('button', { type: 'button', style: btn(false, { padding: '5px 10px', fontSize: 12 }), onClick: function () { setShowNew(!showNew); setPageMsg(''); } }, showNew ? '取消新建' : '+ 新建笔记')),
-    showNew ? React.createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'center', margin: '6px 0 10px', fontSize: 12, flexWrap: 'wrap' } },
+    showNew ? React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0 12px', fontSize: 12, flexWrap: 'wrap' } },
       '文件名：',
       React.createElement('input', { value: newName, onChange: function (e) { setNewName(e.target.value); }, placeholder: 'my-note.md', style: { padding: '4px 8px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', fontSize: 12 } }),
       '子目录（可空）：',
@@ -930,10 +938,10 @@ function Page(props) {
       React.createElement('button', { type: 'button', style: btn(true, { padding: '4px 12px', fontSize: 12 }), onClick: createDoc }, '创建'),
       pageMsg ? React.createElement('span', { style: { color: '#d1242f' } }, pageMsg) : null) : null,
     statsLine,
-    pageNotice ? React.createElement('div', { style: { margin: '6px 0 2px', fontSize: 12, color: '#1a7f37' } }, pageNotice) : null,
+    pageNotice ? React.createElement('div', { style: { margin: '8px 0 4px', fontSize: 12, color: '#1a7f37' } }, pageNotice) : null,
     React.createElement(PackCard, { connection: conn, reloadTick: reloadTick, onChanged: onChanged }),
     React.createElement(EdbCard, { connection: conn }),
-    React.createElement('div', { style: { margin: '10px 0 8px' } },
+    React.createElement('div', { style: { margin: '12px 0 8px' } },
       React.createElement(SearchBar, { query: query, busy: searchBusy, active: searchActive, onChange: setQuery, onRun: runSearch, onClear: clearSearch })),
     sourceTabs,
     // 没有打开文件时**不再**保留空的右半栏：旧布局是 `280px minmax(0,1fr)`，
@@ -944,7 +952,7 @@ function Page(props) {
       React.createElement('div', { style: { display: activeFile ? 'none' : 'block', height: 420, minWidth: 0, overflowY: 'auto', border: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', borderRadius: 8, padding: 8, background: 'var(--dsw-alias-bg-layer-2,#fafafb)' } }, leftContent),
       React.createElement('div', { style: { display: activeFile ? 'block' : 'none', minWidth: 0, height: 'min(620px, 68vh)', overflowY: 'auto' } },
         React.createElement(Editor, { connection: conn, file: activeFile, onChanged: onChanged, onDeleted: onDeleted, onBack: function () { setActiveFile(null); } }))),
-    activeFile ? null : React.createElement('div', { style: { marginTop: 6, fontSize: 11.5, color: '#9a9aa0', lineHeight: 1.6 } },
+    activeFile ? null : React.createElement('div', { style: { marginTop: 8, fontSize: 12, color: '#9a9aa0', lineHeight:1.5} },
       '点击文件查看内容。我的笔记和导入资料可编辑。'),
     showImport ? React.createElement('div', { style: { marginTop: 12 } },
       React.createElement(ImportBox, { connection: conn, onChanged: onChanged })) : null);

@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { readTaskContext } from './task-context.js';
 import { readTaskPolicy } from './task-policy.js';
+import { parseRowRecord } from './row-record.js';
 export const BUSINESS_MATERIAL_SCHEMA = `CREATE TABLE IF NOT EXISTS business_materials (
  session_id TEXT NOT NULL, id TEXT NOT NULL, source_url TEXT NOT NULL, digest TEXT NOT NULL,
  record TEXT NOT NULL, PRIMARY KEY(session_id,id));`;
@@ -100,11 +101,15 @@ export function indexBusinessMaterials(store, sessionId, cwd, input) {
       .run(sessionId, record.id, record.sourceUrl, record.digest, JSON.stringify(record));
     store.db.exec('COMMIT');
   } catch (error) { store.db.exec('ROLLBACK'); throw error; }
-  return businessMaterialView(store, sessionId, { changedIds: prepared.filter(row => !row.reused).map(row => row.record.id),
-    indexed: prepared.filter(row => !row.reused).length, reused: prepared.filter(row => row.reused || row.record.reusedContent).length });
+  // `updatedIds`：本次真正写进库的材料 id（同一 URL 换了内容 = 同一 id 的新版本）。
+  // 调用方按它唤醒依赖该资料的工作（v6 第 8.3 节）；只被复用/未变的材料不算事件。
+  const updatedIds = prepared.filter(row => !row.reused).map(row => row.record.id);
+  return { ...businessMaterialView(store, sessionId, { changedIds: updatedIds,
+    indexed: updatedIds.length, reused: prepared.filter(row => row.reused || row.record.reusedContent).length }), updatedIds };
 }
 export function businessMaterialView(store, sessionId, options = {}) {
-  const all = store.db.prepare('SELECT record FROM business_materials WHERE session_id=? ORDER BY rowid').all(sessionId).map(row => JSON.parse(row.record));
+  const all = store.db.prepare('SELECT record FROM business_materials WHERE session_id=? ORDER BY rowid').all(sessionId)
+    .map(row => parseRowRecord(row, { table: 'business_materials', id: sessionId }));
   if (options.id) {
     const item = all.find(row => row.id === options.id); if (!item) throw new Error('material not found in current session');
     let current = false; try { current = fs.statSync(item.file).size <= 512 * 1024 && hash(fs.readFileSync(item.file)) === item.digest; } catch { /* original source unavailable */ }
@@ -115,10 +120,26 @@ export function businessMaterialView(store, sessionId, options = {}) {
   const rows = options.changedIds ? all.filter(row => options.changedIds.includes(row.id)) : all;
   const hints = rows.flatMap(row => row.hints.map(hint => ({ ...hint, materialId: row.id, sourceUrl: row.sourceUrl,
     relevant: categories.some(([q, h]) => q.test(question) && h.test(hint.value)) }))).sort((a, b) => Number(b.relevant) - Number(a.relevant));
-  const summary = { operation: options.changedIds ? 'index-selected-files' : 'read-existing-index', indexed: options.indexed ?? 0, reused: options.reused ?? 0, files: all.length, shown: hints.slice(0, 12), omitted: Math.max(0, hints.length - 12),
+  // v6 第 5.4.1 节：新一批材料的变化通知按 **480 UTF-8 字节** 封顶（无 tokenizer 时的降级口径），
+  // 超过就少给线索、只留计数与游标，不把正文堆进通知；关键字段（总数/类型/相关引用）优先保留。
+  const summary = { operation: options.changedIds ? 'index-selected-files' : 'read-existing-index',
+    // v6 第 5.4.1 节：无 tokenizer 时的 480 字节上限必须**标近似**，不能让人当成精确 token。
+    // 这个字段最后才删（见下面的收缩顺序），否则一超限就先把口径说明丢掉。
+    unit: 'bytes-approx',
+    indexed: options.indexed ?? 0, reused: options.reused ?? 0, files: all.length, hints: hints.length,
+    relevant: hints.filter(hint => hint.relevant).slice(0, 3).map(hint => ({ materialId: hint.materialId, value: String(hint.value).slice(0, 60) })),
     unresolved: rows.filter(row => row.coverage.dynamicCallsUnresolved || row.coverage.capped).map(row => row.id),
-    detail: 'redteam_context kind=material id=material-ID', note: 'Text clues only; related names do not prove active interfaces or vulnerabilities. Inspect relevant chains, then validate actual requests.' };
-  return { ...summary, text: JSON.stringify(summary, null, 2) };
+    next: hints.length ? 'redteam_context search=<关键词> 取定位结果；kind=material id=<materialId> 读单个材料' : null,
+    detail: 'redteam_context kind=material id=material-ID',
+    note: '线索不等于接口或漏洞；须核对实际请求后再下结论。' };
+  let text = JSON.stringify(summary);
+  const bytes = () => Buffer.byteLength(text, 'utf8');
+  // 收缩顺序：先丢解释文案，再少给线索，再折叠未解析列表，最后丢续读提示；`unit` 不参与收缩。
+  if (bytes() > 480) { delete summary.note; text = JSON.stringify(summary); }
+  while (bytes() > 480 && summary.relevant.length) { summary.relevant.pop(); text = JSON.stringify(summary); }
+  if (bytes() > 480 && summary.unresolved.length) { summary.unresolvedCount = summary.unresolved.length; summary.unresolved = []; text = JSON.stringify(summary); }
+  if (bytes() > 480) { delete summary.detail; text = JSON.stringify(summary); }
+  return { ...summary, text };
 }
 export function copySiteMaterials(store, parentId, childId, site) {
   for (const row of store.db.prepare('SELECT record FROM business_materials WHERE session_id=?').all(parentId)) {

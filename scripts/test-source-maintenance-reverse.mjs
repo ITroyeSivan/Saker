@@ -46,5 +46,34 @@ await check('adding a tool to the host model request is caught by production ada
   };
   await assertion(real); await assert.rejects(assertion(mutated), assert.AssertionError);
 });
+await check('dropping the superseded marking is caught by the correction check', async () => {
+  const real = await import(paths[0].href);
+  const mutated = await variant(0,
+    "db.prepare(\"UPDATE reviews SET status='superseded' WHERE source=? AND id=? AND sha=?\").run(row.source, row.id, row.sha); continue;",
+    "db.prepare('DELETE FROM reviews WHERE source=? AND id=? AND sha=?').run(row.source, row.id, row.sha); continue;");
+  const text = 'Example CMS affected 1.0.0';
+  const doc = { kind: 'nday', title: 'Example CMS', summary: '来源描述版本问题，尚未复现。', product: 'Example CMS', vendor: '', versions: [], conditions: [], detection: [], remediation: [], evidence: [{ field: 'product', quote: 'Example CMS' }] };
+  const review = async () => ({ text: JSON.stringify(doc) });
+  const supersededCount = async (mod, tag) => {
+    const source = subscriptionId('example/supersede-' + tag);
+    const config = pipeline.normalizeCollectorConfig({ sources: [source], repositories: [{ repository: 'example/supersede-' + tag, mode: 'ai' }], reviewPerRun: 2, reviewPer24Hours: 10 });
+    const material = (body, commit) => {
+      const file = path.join(home, 'nday-hunter', 'source-content', 'git', 'blob-' + digest(body));
+      fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, body);
+      return { source, id: 'file:corrected', title: 'Example.md', summary: body, status: 'pending-source-review',
+        url: 'https://github.com/example/supersede-' + tag + '/blob/' + commit + '/Example.md',
+        repositoryFile: { repository: 'example/supersede-' + tag, path: 'Example.md', commit, sha256: digest(body), contentFile: file, contentAvailable: true, methodReady: false } };
+    };
+    await pipeline.runCollector(config, { home, fetchPage: async () => ({ rows: [material(text, 'a'.repeat(40))], complete: true, coverage: 'fixture' }) });
+    // 只入队不整理，留下一条旧正文的待整理记录。
+    await mod.runSourceReviews({ ...config, reviewPer24Hours: 0 }, { home, review });
+    await pipeline.runCollector(config, { home, fetchPage: async () => ({ rows: [material(text + ' Corrected version.', 'b'.repeat(40))], complete: true, coverage: 'fixture' }) });
+    const before = mod.sourceReviewStatus(home).counts.superseded ?? 0;
+    await mod.runSourceReviews(config, { home, review });
+    return (mod.sourceReviewStatus(home).counts.superseded ?? 0) - before;
+  };
+  assert.equal(await supersededCount(real, 'ok'), 1, '生产实现必须把旧 sha 标成 superseded');
+  assert.equal(await supersededCount(mutated, 'bad'), 0, '去掉标记后这条检查必须失败');
+});
 await check('source bytes are unchanged after isolated reverse tests', () => paths.forEach((file, index) => assert.equal(digest(fs.readFileSync(file)), digest(original[index]))));
 console.log(`${passed} passed, 0 failed`);

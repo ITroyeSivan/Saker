@@ -220,7 +220,8 @@ export function ServerCard(props: {
         {live?.exposure === 'proxy' && (
           <span className="dsh-mcs-chip" title={t('exposureProxyBadgeHint')}>proxy</span>
         )}
-        <span className="dsh-mcs-cmd"><code>{summary}</code></span>
+        {/* 命令行会被省略号截断；给 title 兜底，悬停能看到完整命令（与安全配置里的路径写法一致）。 */}
+        <span className="dsh-mcs-cmd" title={summary}><code>{summary}</code></span>
         <span className={`dsh-mcs-state ${stateTextClass[state]}`}>{t(stateLabel[state])}</span>
         {state === 'connected' && (
           <button

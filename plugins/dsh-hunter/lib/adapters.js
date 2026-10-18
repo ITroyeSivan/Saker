@@ -19,6 +19,54 @@ const LIMITS = {
 	quake: { pageSize: 100, creditPerRow: 1 }
 };
 
+/** 平台错误状态（v6 第 7.3 节）：无密钥/字段无权限/额度用尽/语法错/网络失败/无命中必须可分辨。 */
+export const SEARCH_STATUS = {
+	OK: "ok",
+	NO_HITS: "no-hits",
+	NO_KEY: "no-key",
+	FIELD_FORBIDDEN: "field-forbidden",
+	QUOTA_EXHAUSTED: "quota-exhausted",
+	SYNTAX: "syntax",
+	NETWORK: "network",
+	AUTH: "auth",
+	RATE_LIMITED: "rate-limited",
+	UNKNOWN: "unknown"
+};
+
+export class SearchError extends Error {
+	constructor(message, status = SEARCH_STATUS.UNKNOWN, { retriable = false } = {}) {
+		super(message);
+		this.name = "SearchError";
+		this.status = status;
+		this.retriable = retriable;
+	}
+}
+
+/** 把平台/网络错误归一成稳定状态：message 给人看，status 给分支，retriable 提示能否重试。 */
+export function classifySearchError(error) {
+	if (error instanceof SearchError) return { status: error.status, retriable: error.retriable, message: error.message };
+	const raw = String(error?.message ?? error ?? "");
+	const text = raw.toLowerCase();
+	const http = Number((raw.match(/^\s*(\d{3})\b/) || [])[1] || 0);
+	const has = (re) => re.test(text);
+	let status = SEARCH_STATUS.UNKNOWN;
+	let retriable = false;
+	if (http === 401 || has(/invalid key|无效.*(?:key|密钥)|账号无效|密钥无效|未授权|unauthorized|authentication failed/)) {
+		status = SEARCH_STATUS.AUTH;
+	} else if (http === 402 || has(/额度|配额|余额|欠费|充值|quota|insufficient|balance|积分不足|超出.*(?:次数|条数|上限)/)) {
+		status = SEARCH_STATUS.QUOTA_EXHAUSTED;
+	} else if (http === 403 || has(/无权限|未开通|不支持该字段|会员|professional|高级版|forbidden|not authorized|permission denied/)) {
+		status = SEARCH_STATUS.FIELD_FORBIDDEN;
+	} else if (http === 429 || has(/too many|rate ?limit|请求频繁|限流|频繁/)) {
+		status = SEARCH_STATUS.RATE_LIMITED; retriable = true;
+	} else if (has(/语法|syntax|parse error|解析错误|invalid query|非法查询|不存在|unknown field|查询语句/)) {
+		status = SEARCH_STATUS.SYNTAX;
+	} else if (has(/timeout|超时|network|网络|fetch failed|econn|enotfound|abort|socket|tls|dns/)) {
+		status = SEARCH_STATUS.NETWORK; retriable = true;
+	}
+	return { status, retriable, message: raw };
+}
+
 const DSL_FIELDS = [
 	"title", "body", "header", "app", "server", "port", "protocol", "domain", "ip", "host", "icp", "org", "asn", "city", "region", "cert", "icon_hash",
 	// FOFA 高级指纹字段。其他平台没有等价语法时由调用层拒绝该平台，不能退化成范围内全量查询。
@@ -115,7 +163,9 @@ async function fetchJson(url, opts = {}, timeoutMs = 15000) {
 		try { data = JSON.parse(text); } catch { data = { raw: text }; }
 		if (!res.ok) {
 			const msg = data?.errmsg || data?.message || data?.error || text.slice(0, 160);
-			throw new Error(`${res.status}: ${msg}`);
+			const full = `${res.status}: ${msg}`;
+			const { status, retriable } = classifySearchError(full);
+			throw new SearchError(full, status, { retriable });
 		}
 		return data;
 	} finally {
@@ -133,7 +183,11 @@ export async function searchFofaPage(key, query, size, nextCursor) {
 		+ "&qbase64=" + encodeURIComponent(b64(query))
 		+ (nextCursor ? "&next=" + encodeURIComponent(nextCursor) : "");
 	const data = await fetchJson(url);
-	if (data.error) throw new Error("FOFA: " + data.errmsg);
+	if (data.error) {
+		const msg = "FOFA: " + data.errmsg;
+		const { status, retriable } = classifySearchError(msg);
+		throw new SearchError(msg, status, { retriable });
+	}
 	const rows = Array.isArray(data.results) ? data.results : [];
 	return { rows, next: data.next ?? "", total: typeof data.size === "number" ? data.size : rows.length };
 }

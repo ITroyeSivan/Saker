@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-nday-hunter",
-  "version": "1.5.10",
+  "version": "1.5.11",
   "description": "按产品及版本查找已公开漏洞，核对适用条件并记录验证结果。",
   "files": [
     "lib",
@@ -45,5 +45,9 @@
       "patch": "./cordis.patch.yml"
     }
   },
-  "author": "Saker contributors"
+  "author": "Saker contributors",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": "0.2.0-rc.2 || 0.2.1-rc.2"
+  }
 }

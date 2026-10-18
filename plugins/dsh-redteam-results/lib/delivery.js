@@ -21,7 +21,14 @@ export function deliveryMaterialDigest(finding) {
 }
 
 export function parseReproduction(value) {
-  const method = typeof value === 'string' ? JSON.parse(value) : value
+  // 空值/坏 JSON 要说人话：以前直接把 JSON.parse 的英文异常抛出去，
+  // 发现详情里就显示 "Unexpected end of JSON input"，既看不懂也不是缺项清单该有的样子。
+  if (value === undefined || value === null || (typeof value === 'string' && !value.trim())) {
+    throw new Error('还没有完整复现方法：请先记录入口、成功标准、复核步骤与恢复方式')
+  }
+  let method
+  try { method = typeof value === 'string' ? JSON.parse(value) : value }
+  catch { throw new Error('复现方法不是有效 JSON：请重新保存入口、成功标准、复核步骤与恢复方式') }
   if (!method || typeof method !== 'object' || Array.isArray(method)) throw new Error('reproduction must be a method object')
   for (const key of ['mechanism', 'methodVersion', 'endpoint', 'successCriterion', 'reviewSteps', 'recovery']) {
     if (!text(method[key])) throw new Error(`reproduction.${key} is required as a nonempty string, not an array; prerequisites/dependencies/parameters/steps are string arrays`)

@@ -14,8 +14,11 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
+import { buildAliasDictionary, extractProductAliases, expandQueryAliases } from './product-aliases.js'
 
-export const INDEX_VERSION = 2
+// 3：knowledge_docs 增加 product_aliases（v6 第 6.1 节「产品别名」）。版本不一致时整表重建，
+// 否则老库里的空别名会一直跟着旧文件走下去。
+export const INDEX_VERSION = 3
 
 export const TEXT_EXTS = new Set([
   '.md', '.txt', '.yaml', '.yml', '.json', '.csv',
@@ -147,10 +150,18 @@ function readTextFile(file) {
     return { text: `# ${title}\n\nPDF document. Search matches its title and path; extract the PDF contents locally when the full text is needed.`, stat: st }
   }
   try {
-    return { text: normalizeText(fs.readFileSync(file, 'utf8')), stat: st }
+    const text = normalizeText(fs.readFileSync(file, 'utf8'))
+    return { text, stat: st, withdrawn: isWithdrawn(text) }
   } catch {
     return null
   }
+}
+
+/** 轻量撤回约定：YAML frontmatter 的 status，或正文首部的 [WITHDRAWN] 标记。 */
+function isWithdrawn(text) {
+  const head = text.slice(0, 4000)
+  return /^\s*---[\s\S]*?^status\s*:\s*(?:withdrawn|retracted|已撤回)\s*$/im.test(head)
+    || /^\s*\[(?:WITHDRAWN|RETRACTED|已撤回)\]\s*$/im.test(head)
 }
 
 function lineCount(text) {
@@ -232,8 +243,39 @@ function makeTitle(rel, body) {
   return path.basename(rel, path.extname(rel)).replace(/[-_]+/g, ' ').slice(0, 160)
 }
 
+/**
+ * 「资料时间」（v6 第 6.1 节）：优先正文里显式的日期（YYYY-MM-DD / YYYY年M月D日），
+ * 找不到就留空——文件修改时间是同步时间，不能冒充资料时间。
+ */
+function extractDocDate(body) {
+  const match = String(body || '').match(/(20\d{2})[-/年](\d{1,2})[-/月](\d{1,2})/);
+  if (!match) return '';
+  return match[1] + '-' + String(match[2]).padStart(2, '0') + '-' + String(match[3]).padStart(2, '0');
+}
+/**
+ * 「版本条件」（v6 第 6.1 节）：只抽正文里显式写的片段（影响版本行、比较符加版本号），
+ * 抽不到就留空——不猜产品，也不把普通版本号当适用条件。
+ */
+function extractVersionConditions(body) {
+  const text = String(body || '');
+  const out = [];
+  for (const line of text.match(/(?:影响|受影响|affected)[^\n]{0,10}?版本[^\n]{0,80}/gi) || []) out.push(line.trim().slice(0, 120));
+  for (const bound of text.match(/(?:<|<=|＜|≤)\s*v?\d+\.\d+(?:\.\d+)?/g) || []) out.push(bound.trim());
+  return [...new Set(out)].slice(0, 5).join(' | ');
+}
 function hashText(text) {
   return crypto.createHash('sha1').update(text).digest('hex')
+}
+
+/** 「产品别名」存的是 JSON 数组；坏行/空值一律当没有，不让它把整次检索带崩。 */
+function parseProductAliases(value) {
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
 }
 
 function sourceIdOf(source) {
@@ -308,10 +350,58 @@ export class KnowledgeIndex {
     this.dirtyAt = 0
     this.rootsFingerprint = null
     this.rootsFingerprintAt = 0
+    // 搜索/精读延迟采样（v6 第 10.5 节）：只留最近 200 次，进程内环形缓冲，不落库、不调模型。
+    this.latencySamples = { search: [], chunk: [] }
     // 计数缓存：status() 原来每次都 `COUNT(*)` 整表（8.4 万+ chunk，实测 ~140ms），
     // 而 ensureKnowledgeIndex() 每次检索都会问一次 status —— 于是每次知识检索都在全表计数。
     // 计数只在重建/失效时变，缓存后按需刷新（status({ counts: true })）。
     this.counts = null
+    /** 空闲页比例；只在显式 `status({ counts: true })` 时刷新。 */
+    this.deadSpace = null
+    // 产品别名词典（v6 第 6.1 节）：词典只来自源侧自述的 nday catalog，候选路径由调用方给出。
+    this.aliasCatalogPaths = Array.isArray(options.aliasCatalogPaths) ? options.aliasCatalogPaths : []
+    this.aliasDictionary = null
+    this.aliasDictionaryKey = ''
+  }
+
+  /**
+   * 产品别名词典：读候选路径里存在的 catalog，按 (路径, mtime, size) 缓存。
+   * 目录缺失或形状不对就返回 null —— 宁可不抽别名，也不拿普通英文词凑数。
+   */
+  productAliasDictionary() {
+    if (!this.aliasCatalogPaths.length) return null
+    const parts = []
+    for (const candidate of this.aliasCatalogPaths) {
+      try {
+        const stat = fs.statSync(candidate)
+        parts.push(`${candidate}:${stat.mtimeMs}:${stat.size}`)
+      } catch {
+        parts.push(`${candidate}:missing`)
+      }
+    }
+    const key = parts.join('|')
+    if (this.aliasDictionary && this.aliasDictionaryKey === key) return this.aliasDictionary
+    const entries = []
+    for (const candidate of this.aliasCatalogPaths) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(candidate, 'utf8'))
+        if (Array.isArray(parsed && parsed.entries)) entries.push(...parsed.entries)
+      } catch {
+        // 缺文件或坏 JSON：跳过这一份，不影响索引
+      }
+    }
+    this.aliasDictionaryKey = key
+    this.aliasDictionary = entries.length ? buildAliasDictionary(entries) : null
+    return this.aliasDictionary
+  }
+
+  /** 词典指纹（短哈希）：词典换了要重新抽别名，否则新别名永远追不上旧文件。 */
+  aliasFingerprint() {
+    if (!this.aliasCatalogPaths.length) return ''
+    // 先确保词典键已经算出来：否则首次调用时 key 还是空的，指纹在两次重建之间会跳变，
+    // 每次重建都被判成"词典换了"而整表重来（chunk rowid 也会跟着被冲掉）。
+    this.productAliasDictionary()
+    return crypto.createHash('sha1').update(this.aliasDictionaryKey || '').digest('hex').slice(0, 16)
   }
 
   open() {
@@ -336,6 +426,9 @@ export class KnowledgeIndex {
         sha1 TEXT NOT NULL,
         chunk_count INTEGER NOT NULL,
         indexed_at TEXT NOT NULL,
+        doc_date TEXT NOT NULL DEFAULT '',
+        version_conditions TEXT NOT NULL DEFAULT '',
+        product_aliases TEXT NOT NULL DEFAULT '',
         PRIMARY KEY (source_id, path)
       );
       CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_chunks USING fts5(
@@ -358,6 +451,10 @@ export class KnowledgeIndex {
         tokenize='unicode61 remove_diacritics 2'
       );
     `)
+    // 已有库补列（v6 第 6.1 节「资料时间」）：新库由上面的 CREATE TABLE 建好，老库在这里补。
+    try { db.exec("ALTER TABLE knowledge_docs ADD COLUMN doc_date TEXT NOT NULL DEFAULT ''"); } catch { /* 列已存在 */ }
+    try { db.exec("ALTER TABLE knowledge_docs ADD COLUMN version_conditions TEXT NOT NULL DEFAULT ''"); } catch { /* 列已存在 */ }
+    try { db.exec("ALTER TABLE knowledge_docs ADD COLUMN product_aliases TEXT NOT NULL DEFAULT ''"); } catch { /* 列已存在 */ }
     this.db = db
     return db
   }
@@ -422,6 +519,23 @@ export class KnowledgeIndex {
     return { hash: hash.digest('hex'), files }
   }
 
+  /** 记一次延迟样本：只留最近 200 次，够算 P50/P95，内存不随使用增长（v6 第 10.5 节）。 */
+  recordLatency(kind, ms) {
+    const bucket = this.latencySamples?.[kind]
+    if (!bucket || !Number.isFinite(ms)) return
+    bucket.push(Math.round(ms * 100) / 100)
+    if (bucket.length > 200) bucket.shift()
+  }
+  latencySummary() {
+    const summary = {}
+    for (const kind of Object.keys(this.latencySamples || {})) {
+      const values = [...this.latencySamples[kind]].sort((a, b) => a - b)
+      if (!values.length) { summary[kind] = { n: 0, p50: null, p95: null, max: null }; continue }
+      const at = ratio => values[Math.min(values.length - 1, Math.floor(ratio * (values.length - 1)))]
+      summary[kind] = { n: values.length, p50: at(0.5), p95: at(0.95), max: values[values.length - 1] }
+    }
+    return summary
+  }
   status(options = {}) {
     const db = this.open()
     const one = (key) => {
@@ -433,6 +547,7 @@ export class KnowledgeIndex {
     }
     let chunks = Number(this.counts?.chunks || 0)
     let docs = Number(this.counts?.docs || 0)
+    let deadSpace = this.deadSpace ?? null
     if (options.counts === true || this.counts === null) {
       try {
         chunks = Number(db.prepare('SELECT COUNT(*) AS n FROM knowledge_chunks').get().n || 0)
@@ -441,6 +556,18 @@ export class KnowledgeIndex {
       } catch {
         // empty or partially created index
       }
+      // 死空间比例：强制重建会留下约 35% 的空闲页（2026-10-11 实测，12k 文件语料：
+      // 89.9 MB → 124.4 MB 后**稳定不再涨**），只有 VACUUM 收得回来。
+      // 两条 PRAGMA 都是 O(1) 读库头，但 status() 在检索路径上也会被问到，
+      // 所以只在显式要计数时一起取，避免给每次检索加成本。
+      try {
+        const freePages = Number(db.prepare('PRAGMA freelist_count').get()?.freelist_count ?? 0)
+        const pages = Number(db.prepare('PRAGMA page_count').get()?.page_count ?? 0)
+        deadSpace = { freePages, pages, ratio: pages === 0 ? 0 : Number((freePages / pages).toFixed(3)) }
+      } catch {
+        deadSpace = null
+      }
+      this.deadSpace = deadSpace
     }
     const now = Date.now()
     if (
@@ -468,6 +595,18 @@ export class KnowledgeIndex {
       lastError: this.lastError,
       dirty: this.dirty,
       dirtyAt: this.dirtyAt,
+      deadSpace,
+      // 性能指标（v6 第 10.5 节）：本进程最近一次重建的耗时与文件数、是否截断 WAL，以及索引占用。
+      // 重启后 lastBuild 为 null，只反映本进程，不冒充历史统计；库大小随时可读。
+      lastBuild: this.lastBuild ? {
+        ms: this.lastBuild.ms, filesIndexed: this.lastBuild.filesIndexed, filesSkipped: this.lastBuild.filesSkipped,
+        filesRemoved: this.lastBuild.filesRemoved, chunks: this.lastBuild.chunks, errors: this.lastBuild.errors,
+        walTruncated: this.lastBuild.walTruncated === true, indexedAt: this.lastBuild.indexedAt,
+      } : null,
+      dbBytes: (() => { try { return fs.statSync(this.dbPath).size; } catch { return null; } })(),
+      walBytes: (() => { try { return fs.statSync(this.dbPath + '-wal').size; } catch { return 0; } })(),
+      // 搜索/精读延迟（v6 第 10.5 节）：本进程最近 200 次的 P50/P95，不落库、不调模型。
+      latency: this.latencySummary(),
     }
   }
 
@@ -484,19 +623,27 @@ export class KnowledgeIndex {
     const rollback = db.prepare('ROLLBACK')
     begin.run()
     try {
-      if (force) {
+      // 索引版本或产品别名词典换了都要整表重来：否则老库里的空字段会一直跟着没改过的文件。
+      const storedVersion = Number(db.prepare('SELECT value FROM knowledge_meta WHERE key = ?').get('version')?.value || 0)
+      const storedAlias = String(db.prepare('SELECT value FROM knowledge_meta WHERE key = ?').get('alias_fingerprint')?.value || '')
+      const aliasFingerprint = this.aliasFingerprint()
+      const full = force || storedVersion !== INDEX_VERSION || storedAlias !== aliasFingerprint
+      if (full) {
         db.exec('DELETE FROM knowledge_chunks; DELETE FROM knowledge_docs;')
       }
       const selectDoc = db.prepare('SELECT mtime_ms, size, sha1, chunk_count FROM knowledge_docs WHERE source_id = ? AND path = ?')
       const upsertDoc = db.prepare(`
-        INSERT INTO knowledge_docs(source_id, path, mtime_ms, size, sha1, chunk_count, indexed_at)
-        VALUES(?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO knowledge_docs(source_id, path, mtime_ms, size, sha1, chunk_count, indexed_at, doc_date, version_conditions, product_aliases)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(source_id, path) DO UPDATE SET
           mtime_ms=excluded.mtime_ms,
           size=excluded.size,
           sha1=excluded.sha1,
           chunk_count=excluded.chunk_count,
-          indexed_at=excluded.indexed_at
+          indexed_at=excluded.indexed_at,
+          doc_date=excluded.doc_date,
+          version_conditions=excluded.version_conditions,
+          product_aliases=excluded.product_aliases
       `)
       const deleteDoc = db.prepare('DELETE FROM knowledge_docs WHERE source_id = ? AND path = ?')
       const deleteChunks = db.prepare('DELETE FROM knowledge_chunks WHERE source_id = ? AND path = ?')
@@ -507,6 +654,8 @@ export class KnowledgeIndex {
           body, body_search, start_line, end_line
         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
+      // 词典只建一次，整轮重建复用；缺词典时整轮都不抽别名。
+      const aliasDictionary = this.productAliasDictionary()
 
       for (const source of this.roots) {
         if (!source || !source.root || !fs.existsSync(source.root)) continue
@@ -528,11 +677,18 @@ export class KnowledgeIndex {
             stats.errors++
             continue
           }
+          if (data.withdrawn) {
+            // 撤回条目不能继续被检索；旧索引残留也要删除。
+            deleteChunks.run(sourceId, docPath)
+            deleteDoc.run(sourceId, docPath)
+            stats.filesSkipped++
+            continue
+          }
           const size = data.stat.size
           const mtimeMs = data.stat.mtimeMs
           const sha1 = hashText(data.text)
           const previous = selectDoc.get(sourceId, docPath)
-          if (!force && previous && Number(previous.size) === size && Number(previous.mtime_ms) === mtimeMs && previous.sha1 === sha1) {
+          if (!full && previous && Number(previous.size) === size && Number(previous.mtime_ms) === mtimeMs && previous.sha1 === sha1) {
             seen.add(docPath)
             stats.filesSkipped++
             stats.chunks += Number(previous.chunk_count || 0)
@@ -540,9 +696,12 @@ export class KnowledgeIndex {
           }
           const chunks = chunkText(data.text)
           const title = makeTitle(rel, data.text)
-          if (!force) deleteChunks.run(sourceId, docPath)
+          if (!full) deleteChunks.run(sourceId, docPath)
           const indexedAt = nowIso()
-          upsertDoc.run(sourceId, docPath, mtimeMs, size, sha1, chunks.length, indexedAt)
+          // 产品别名（v6 第 6.1 节）：只认源侧词典里出现过的写法，命中行号一并留下。
+          const productAliases = aliasDictionary ? extractProductAliases(data.text, aliasDictionary) : []
+          upsertDoc.run(sourceId, docPath, mtimeMs, size, sha1, chunks.length, indexedAt, extractDocDate(data.text),
+            extractVersionConditions(data.text), productAliases.length ? JSON.stringify(productAliases) : '')
           seen.add(docPath)
           for (let i = 0; i < chunks.length; i++) {
             const chunk = chunks[i]
@@ -596,9 +755,24 @@ export class KnowledgeIndex {
       meta.run('stats', JSON.stringify(stats))
       meta.run('roots_fingerprint', fingerprint.hash)
       meta.run('roots_files', String(fingerprint.files))
+      meta.run('alias_fingerprint', aliasFingerprint)
       commit.run()
+      // 重建会把整份索引写进 WAL。实测（12,000 个文件 / 89.7 MB 索引）：
+      // 提交之后 WAL 仍有 90.3 MB，`close()` 才把它截成 0 —— 因为 `wal_autocheckpoint`
+      // 只做 passive checkpoint，**不会把 WAL 文件截短**。宿主进程一直开着，
+      // 用户的 home 里就多占一份与索引等大的磁盘（真 home 实测 604.6 MB 索引 + 979.6 MB WAL）。
+      // 写完主动截短一次即可；有读者时截短会返回 busy，不影响本次重建结果。
+      let walTruncated = false
+      if (stats.filesIndexed > 0 || stats.filesRemoved > 0) {
+        try {
+          const row = db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get()
+          walTruncated = Number(row?.busy ?? 1) === 0
+        } catch {
+          walTruncated = false
+        }
+      }
       this.lastError = ''
-      this.lastBuild = { ...stats, ms: Date.now() - started, indexedAt: nowIso() }
+      this.lastBuild = { ...stats, ms: Date.now() - started, indexedAt: nowIso(), walTruncated }
       this.rebuildCount++
       this.dirty = false
       this.dirtyAt = 0
@@ -617,7 +791,17 @@ export class KnowledgeIndex {
     }
   }
 
+  /** 搜索入口：只负责计时，实际逻辑在 searchInner（v6 第 10.5 节延迟采样）。 */
   search(query, options = {}) {
+    const started = performance.now()
+    try {
+      return this.searchInner(query, options)
+    } finally {
+      this.recordLatency('search', performance.now() - started)
+    }
+  }
+
+  searchInner(query, options = {}) {
     const text = normalizeText(query).trim()
     if (!text) return []
     const db = this.open()
@@ -638,6 +822,11 @@ export class KnowledgeIndex {
       { expr: mixed ? ftsQuery(latinTerms.join(' '), 'and') : '', penalty: -1.5 },
       { expr: ftsQuery(text, 'or'), penalty: 0 },
     ].filter((plan) => plan.expr)
+    // 产品别名规范化（v6 第 6.1 节）：查询里写的是别名（例如厂商名或产品中文名）时，补一条
+    // 用同一厂商其它写法检索的兜底计划。罚分与拉丁兜底同量级，精确命中仍然排在前。
+    const aliasPhrases = expandQueryAliases(text, this.productAliasDictionary())
+    // 用短语而不是拆词：中文被拆成 bigram 后 `应用服务器` 会退化成 `应用`/`服务` 这种泛词。
+    if (aliasPhrases.length) plans.push({ expr: aliasPhrases.map(quoteFtsTerm).join(' OR '), penalty: -1.5 })
     // 每个计划都跑（不再"凑够 limit 就提前退出"）：提前退出会让**后置的兜底计划**
     // 把**主计划的召回**挤掉——实测 persist-zh 因此丢了原本命中的中文文档。
     // 同一行在多计划里出现时取权重最高的一份（权重 = |bm25| + 计划罚分）。
@@ -671,6 +860,7 @@ export class KnowledgeIndex {
       }
     }
 
+    const docMetaStmt = db.prepare('SELECT mtime_ms, doc_date, version_conditions, product_aliases FROM knowledge_docs WHERE source_id=? AND path=?')
     const perPath = new Map()
     for (const entry of bestByRow.values()) {
       const row = entry.row
@@ -680,6 +870,8 @@ export class KnowledgeIndex {
       const previous = perPath.get(key)
       if (!previous || score > previous.score) {
         const local = snippetFor(row.body, text)
+        // 文档级元数据一次取齐：资料时间、版本条件、产品别名都来自同一行。
+        const doc = docMetaStmt.get(row.source_id, row.path)
         perPath.set(key, {
           source: row.kind || 'import',
           mode: row.scope || '',
@@ -695,6 +887,12 @@ export class KnowledgeIndex {
           license: row.license || '',
           score: Number(score.toFixed(6)),
           matched: local.matched,
+          updatedAt: doc?.mtime_ms ? new Date(Number(doc.mtime_ms)).toISOString() : null,
+          // 「资料时间」（v6 第 6.1 节）：正文里显式写的日期；找不到就留空，不拿同步时间冒充。
+          docDate: doc?.doc_date || '',
+          versionConditions: doc?.version_conditions || '',
+          // 「产品别名」（v6 第 6.1 节）：源侧词典命中的写法 + 首次出现的行号。
+          productAliases: parseProductAliases(doc?.product_aliases),
         })
       }
     }
@@ -712,17 +910,38 @@ export class KnowledgeIndex {
     return selected
   }
 
+  /** 精读入口：只负责计时，实际逻辑在 getChunkInner（v6 第 10.5 节延迟采样）。 */
   getChunk(chunkId) {
+    const started = performance.now()
+    try {
+      return this.getChunkInner(chunkId)
+    } finally {
+      this.recordLatency('chunk', performance.now() - started)
+    }
+  }
+
+  getChunkInner(chunkId) {
     const id = Number(chunkId)
     if (!Number.isInteger(id) || id <= 0) return null
     const db = this.open()
     try {
-      return db.prepare(`
+      const chunk = db.prepare(`
         SELECT rowid, source_id, kind, scope, pack_id, license, path, title, heading,
                body, start_line, end_line
         FROM knowledge_chunks
         WHERE rowid = ?
       `).get(id) || null
+      if (!chunk) return null
+      // 精读也要带文档级元数据（v6 第 6.1 节）。这里原来在 `return` 之后才写补充字段，
+      // 属于死代码：精读结果一直没有 updatedAt / docDate / versionConditions。
+      const doc = db.prepare('SELECT mtime_ms, doc_date, version_conditions, product_aliases FROM knowledge_docs WHERE source_id=? AND path=?').get(chunk.source_id, chunk.path)
+      return {
+        ...chunk,
+        updatedAt: doc?.mtime_ms ? new Date(Number(doc.mtime_ms)).toISOString() : null,
+        docDate: doc?.doc_date || '',
+        versionConditions: doc?.version_conditions || '',
+        productAliases: parseProductAliases(doc?.product_aliases),
+      }
     } catch {
       return null
     }

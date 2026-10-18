@@ -44,6 +44,7 @@ const MODE_ID = "ctf-solver";
 // BreachWeave 的 Manager 面：单会话里由模型自己当调度者（自派单 + 自纠偏 + 读快照）。
 // Observer 面：nudge 同时落 Observer Notes；steer 由本插件在轮次边界投递并消费。
 import { defineTool } from "@deepseek-ai/dsh-tools";
+import { sessionWorkingDirectory } from "dsh-saker/working-directory";
 import { readBoard, upsertChallenge, dispatch as boardDispatch, updateDispatch as boardUpdateDispatch, steer as boardSteer, addNote, peekSteers, markSteersConsumed, snapshotText, BOARD_FILE } from "./board.js";
 
 const inject = ["agentPresets", "tools"];
@@ -235,7 +236,7 @@ function apply(ctx) {
 
 	/** 协作看板落在**会话工作目录**（不是插件目录）：一题一目录时看板与该题产物同处。 */
 	const wsOf = (agent) => {
-		const cwd = agent?.session?.header?.cwd;
+		const cwd = sessionWorkingDirectory(agent?.ctx, agent?.session);
 		return typeof cwd === "string" && cwd ? cwd : "";
 	};
 

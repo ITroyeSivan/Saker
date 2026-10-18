@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const boundary=resolve(root,'../_ref/tmp'), directory=mkdtempSync(join(boundary,'model-budget-reverse-'));
 const source=readFileSync(join(root,'plugins/dsh-redteam-results/lib/model-budget.js'),'utf8');
+const transportSource=readFileSync(join(root,'plugins/dsh-redteam-results/lib/model-transport.js'),'utf8');
 const suite=readFileSync(join(root,'scripts/test-model-budget.mjs'),'utf8');
 const variants=[
   {id:'no-call-ceiling',from:'status.chargedCalls>=status.limits.modelCalls',to:'false',fail:'shared root admission'},
@@ -20,6 +21,9 @@ try{
   for(const variant of variants){
     assert.equal(source.split(variant.from).length-1,1,variant.id+': exact mutation anchor');
     const module=join(directory,variant.id+'.mjs');writeFileSync(module,source.replace(variant.from,variant.to));
+    writeFileSync(join(directory,'package.json'),JSON.stringify({type:'module'}));
+    writeFileSync(join(directory,'model-transport.js'),transportSource);
+    for (const name of ['task-policy-record.js','row-record.js','knowledge-usage.js']) writeFileSync(join(directory,name),readFileSync(join(root,'plugins/dsh-redteam-results/lib',name),'utf8'));
     // Keep the actual production store and task policy; redirect only the tested
     // ledger module. Run the targeted sequential cases; race/restart coverage
     // uses the real suite separately, avoiding false reds from temp imports.

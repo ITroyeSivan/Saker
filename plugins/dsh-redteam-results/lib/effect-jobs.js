@@ -61,7 +61,7 @@ function preflight(store, sessionId, input) {
     const row = selected[role].row;
     return [role, row.endpoint, row.authContext, row.request, row.valid, row.kind,
       row.response?.replace(/^Date:[^\r\n]*\r?\n/gim, ''),
-      row.inputs.map(field => [field.location, field.name]).sort()];
+      (row.inputs ?? []).map(field => [field.location, field.name]).sort()];
   })]);
   return { selected, methodKey, jobKey, input: { methodId: method.id, methodVersion: method.version,
     roles: Object.fromEntries(roles.map(role => [role, { requestId: selected[role].row.id, requestRevision: selected[role].row.revision }])), ...options } };
@@ -121,7 +121,10 @@ export async function runEffectJob(store, sid, input, signal) {
         write(store, sid, job); store.db.exec('COMMIT');
         stopDirections(store, sid, job, job.reason); return summary(store, sid, job, true);
       }
-      if (!current(store, sid, job) || captured.some(step => Date.now() - Date.parse(readExecutionReceipt(store, sid, step.receiptId).completedAt) > 15 * 60000)) {
+      if (!current(store, sid, job) || captured.some(step => {
+        const receipt = readExecutionReceipt(store, sid, step.receiptId);
+        return !receipt.current || receipt.integrityValid === false;
+      })) {
         job.state = 'stale'; job.reason = 'context or execution freshness changed; automatic resend refused';
         write(store, sid, job); store.db.exec('COMMIT'); stopDirections(store, sid, job, job.reason); return summary(store, sid, job, true);
       }
@@ -161,7 +164,7 @@ export async function runEffectJob(store, sid, input, signal) {
       if (captured.state !== 'captured') fail('uncaptured dispatch cannot be resent');
       return readExecutionReceipt(store, sid, captured.receiptId);
     }
-    const result = await executeRecordedRequest(store, sid, { hypothesisId, ...job.input.roles[role],
+    const result = await executeRecordedRequest(store, sid, { hypothesisId, ...job.input.roles[role], callId: input.callId,
       methodId: job.input.methodId, methodVersion: job.input.methodVersion,
       timeoutMs: job.input.timeoutMs, maxBytes: job.input.maxBytes }, { jobId: job.id, stepKey: key }, signal);
     return readExecutionReceipt(store, sid, result.id);

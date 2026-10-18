@@ -12,6 +12,7 @@ import { saveTaskContext } from '../plugins/dsh-redteam-results/lib/task-context
 import { startTaskPolicy, taskPolicyStatus } from '../plugins/dsh-redteam-results/lib/task-policy.js';
 import { createResearch, closeResearch, observeResearch } from '../plugins/dsh-redteam-results/lib/research.js';
 import { executeRecordedRequest, readExecutionReceipt } from '../plugins/dsh-redteam-results/lib/execution-receipts.js';
+import { stageMethodClassification } from '../plugins/dsh-redteam-results/lib/method-classification.js';
 import { verifyEffect, readEffectVerification, assessPrivateReadRound } from '../plugins/dsh-redteam-results/lib/effect-verifications.js';
 import { runEffectJob, readEffectJob } from '../plugins/dsh-redteam-results/lib/effect-jobs.js';
 import { recordImpactReview, readImpactReview } from '../plugins/dsh-redteam-results/lib/impact-reviews.js';
@@ -47,6 +48,9 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const endpoint = 'http://127.0.0.1:' + server.address().port + '/api/object', host = new URL(endpoint).host;
 const method = { id: 'private-read', version: 'v1', reviewed: true, endpoint,
   effectSpec: { kind: 'private-json-read/v1', resourceIdPath: '/id', ownerIdPath: '/ownerId', viewerIdPath: '/viewerId', visibilityPath: '/visibility', readersPath: '/readers', markerPath: '/secret' } };
+stageMethodClassification(store, { schema: 'saker.method-classification/1', id: method.id, version: method.version,
+  digest: 'b'.repeat(64), revision: 1, modules: ['exploit/access-control'], status: 'verified',
+  source: { kind: 'manual', version: method.version, position: 'test-effect-verifications fixture' } });
 const packet = (identity, object, mode) => 'GET /api/object?id=' + object + '&mode=' + mode + (mode === 'echo' ? '&marker=' + secrets.owner : '')
   + ' HTTP/1.1\r\nHost: ' + host + (identity ? '\r\nAuthorization: Fixture ' + identity : '') + '\r\n\r\n';
 const row = (id, identity, object, mode, valid = true) => ({ id, revision: 'v1', endpoint, authContext: identity || 'anonymous', kind: 'api', valid,
@@ -315,55 +319,71 @@ try {
     assert.equal(readEffectVerification(store, sid, effect.id).current, true);
     assert.equal(getFinding(store, sid, finding.id).delivery.ready, true);
   });
-  await test('expired evidence revokes current confirmation manual review ready counts and export while retaining history without HTTP', () => {
+  await test('unchanged evidence stays current after 16 minutes; request mismatch revokes confirmation without HTTP', () => {
     const clock = Date.now, before = requests;
     const original = getFinding(store, 'positive', finding.id);
     const review = { receiptIds: effect.receiptIds, permissionsConfirmed: true, impactConfirmed: true,
       note: 'Operator compared the two roles, private object ACL, original response marker and anonymous denial in both independent rounds.' };
     recordImpactReview(store, 'positive', original, review, 'desktop-action');
     assert.equal(readImpactReview(store, 'positive', original).current, true);
-    const saved = store.db.prepare('SELECT record FROM effect_verifications WHERE session_id=? AND id=?').get('positive', effect.id).record;
+    const receiptId = effect.controlReceiptId;
+    const savedReceipt = store.db.prepare('SELECT record FROM execution_receipts WHERE session_id=? AND id=?').get('positive', receiptId).record;
     try {
       Date.now = () => clock() + 16 * 60 * 1000;
+      assert.equal(verifyEffect(store, 'positive', validInput).verified, true, 'time alone does not invalidate unchanged evidence');
+      assert.equal(readEffectVerification(store, 'positive', effect.id).current, true);
+      assert.equal(readImpactReview(store, 'positive', original).current, true);
+      assert.doesNotThrow(() => recordImpactReview(store, 'positive', original, review, 'desktop-action'));
+      assert.equal(getFinding(store, 'positive', finding.id).delivery.ready, true);
+      Date.now = clock;
+      const changed = JSON.parse(savedReceipt); changed.requestBasis = '0'.repeat(64);
+      store.db.prepare('UPDATE execution_receipts SET record=? WHERE session_id=? AND id=?').run(JSON.stringify(changed), 'positive', receiptId);
       assert.equal(verifyEffect(store, 'positive', validInput).verified, false);
       const historical = readEffectVerification(store, 'positive', effect.id);
       assert.equal(historical.verified, true, 'historical observation is preserved');
-      assert.equal(historical.current, false, 'historical proof cannot certify current impact indefinitely');
-      assert.match(historical.currentReason, /expired|过期/);
-      assert.equal(readImpactReview(store, 'positive', original).current, false, 'human review cannot revive old controls');
-      assert.throws(() => recordImpactReview(store, 'positive', original, review, 'desktop-action'), /expired|过期/);
+      assert.equal(historical.current, false, 'request mismatch revokes current confirmation');
+      assert.match(historical.currentReason, /不匹配|失效/);
+      assert.equal(readImpactReview(store, 'positive', original).current, false);
+      assert.throws(() => recordImpactReview(store, 'positive', original, review, 'desktop-action'), /不匹配|失效/);
       assert.equal(getFinding(store, 'positive', finding.id).delivery.ready, false);
-      assert.equal(getFinding(store, 'positive', finding.id).executionEvidence.verified, false, 'expired pair cannot certify current reproduction');
+      assert.equal(getFinding(store, 'positive', finding.id).executionEvidence.verified, false);
       assert.equal(computeStats(store, 'positive', 'pentest').delivery.ready, 0);
       assert.equal(listFindings(store, 'positive', 'pentest', { delivery: 'ready' }).total, 0);
       assert.equal(summarizeMetrics(home, { sessionId: 'positive' }).confirmedFindings, 0);
       assert.equal(buildDeliveryFiles([getFinding(store, 'positive', finding.id)], []).confirmedFindings, 0);
-      assert.equal(store.db.prepare('SELECT record FROM effect_verifications WHERE session_id=? AND id=?').get('positive', effect.id).record, saved);
       assert.equal(requests, before);
-    } finally { Date.now = clock; }
+    } finally {
+      Date.now = clock;
+      store.db.prepare('UPDATE execution_receipts SET record=? WHERE session_id=? AND id=?').run(savedReceipt, 'positive', receiptId);
+    }
     assert.equal(readEffectVerification(store, 'positive', effect.id).current, true);
     assert.equal(getFinding(store, 'positive', finding.id).delivery.ready, true);
   });
-  await test('cached completed jobs lose current impact at expiry and cold reopening does not send again or reset budget', async () => {
+  await test('cached completed jobs stay current after 16 minutes and only request mismatch revokes impact', async () => {
     const sid = 'expiry-job'; prepareJob(sid, 'vulnerable', 8);
     const job = await runEffectJob(store, sid, jobInput);
     assert.equal(job.impactVerified, true);
     const before = requests, clock = Date.now;
-    const captured = job.steps.map(step => readExecutionReceipt(store, sid, step.receiptId));
-    const earliest = Math.min(...captured.map(row => Date.parse(row.completedAt)));
+    const receiptId = job.steps[0].receiptId;
+    const savedReceipt = store.db.prepare('SELECT record FROM execution_receipts WHERE session_id=? AND id=?').get(sid, receiptId).record;
     try {
-      Date.now = () => earliest + 15 * 60 * 1000;
-      assert.equal(readEffectJob(store, sid, job.id).impactVerified, true, 'inclusive freshness boundary');
-      Date.now = () => earliest + 15 * 60 * 1000 + 1;
+      Date.now = () => Date.parse(readExecutionReceipt(store, sid, receiptId).completedAt) + 16 * 60 * 1000;
+      assert.equal(readEffectJob(store, sid, job.id).impactVerified, true, 'time alone does not invalidate unchanged job');
+      Date.now = clock;
+      const changed = JSON.parse(savedReceipt); changed.requestBasis = '0'.repeat(64);
+      store.db.prepare('UPDATE execution_receipts SET record=? WHERE session_id=? AND id=?').run(JSON.stringify(changed), sid, receiptId);
       assert.equal(readEffectJob(store, sid, job.id).impactVerified, false);
       store.close(); store = openStore(file);
       const cached = await runEffectJob(store, sid, jobInput);
       assert.equal(cached.id, job.id); assert.equal(cached.cached, true);
       assert.equal(cached.impactVerified, false); assert.equal(cached.coverage, 'partial-or-unknown');
-      assert.match(cached.reason, /expired|过期/);
+      assert.match(cached.reason, /不匹配|失效/);
       assert.equal(taskPolicyStatus(store, sid).policy.used.toolCalls, 8);
-      assert.equal(requests, before, 'expiry alone never dispatches new work');
-    } finally { Date.now = clock; }
+      assert.equal(requests, before, 'request mismatch alone never dispatches new work');
+    } finally {
+      Date.now = clock;
+      store.db.prepare('UPDATE execution_receipts SET record=? WHERE session_id=? AND id=?').run(savedReceipt, sid, receiptId);
+    }
   });
   await test('duplicate or borrowed receipts cannot replace independent execution and method changes revoke persisted effects and ready views', () => {
     const duplicate = { ...validInput, rounds: [validInput.rounds[0], validInput.rounds[0]] };

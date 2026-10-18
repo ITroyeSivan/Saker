@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-redteam-results",
-  "version": "1.0.53",
+  "version": "1.0.174",
   "description": "查看测试进展、漏洞记录和验证详情，导出报告与复现文件。",
   "files": [
     "lib",
@@ -26,7 +26,21 @@
     "./delivery": "./lib/delivery.js",
     "./checked": "./lib/checked.js",
     "./bundle": "./lib/bundle.js",
-    "./task-context": "./lib/task-context.js"
+    "./task-context": "./lib/task-context.js",
+    "./content-catalog": "./lib/content-catalog.js",
+    "./task-modules": "./lib/task-modules.js",
+    "./test-catalog": "./lib/test-catalog.js",
+    "./prompt-templates": "./lib/prompt-templates.js",
+    "./prompt-store": "./lib/prompt-store.js",
+    "./materials-view": "./lib/materials-view.js",
+    "./materials-import": "./lib/materials-import.js",
+    "./execution-view": "./lib/execution-view.js",
+    "./knowledge-switch": "./lib/knowledge-switch.js",
+    "./knowledge-usage": "./lib/knowledge-usage.js",
+    "./work-lease": "./lib/work-lease.js",
+    "./task-archive": "./lib/task-archive.js",
+    "./method-classification": "./lib/method-classification.js",
+    "./execution-modules": "./lib/execution-modules.js"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-tools": "*"
@@ -45,5 +59,9 @@
         "@deepseek-ai/dsh-client-ui-settings"
       ]
     }
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": "0.2.0-rc.2 || 0.2.1-rc.2"
   }
 }

@@ -6,6 +6,10 @@
 window.__ModuleLoader__.load({ id: '@dsh-external/dsh-sec-config', factory: (require) => {
 var module = { exports: {} }; var exports = module.exports;
 'use strict';
+/* SAKER-UI-KIT:BEGIN */
+var SAKER_UI_KIT_CSS = "/* 5.7 共享组件层：Button / Input / Select / Badge / DataTable / Drawer / InlineNotice / EmptyState\n   单一来源：shared/ui-kit/ui-kit.css（令牌见 shared/ui-kit/ui-kit.json）。\n   由 scripts/sync-ui-kit.mjs 注入到各产品插件；插件里的同类尺寸规则应删除，避免双写。 */\n.saker-ui-btn{height:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px}\n.saker-ui-input{height:36px;border-radius:6px}\n.saker-ui-select{height:32px;border-radius:6px}\n.saker-ui-table td{height:38px}\n.saker-ui-badge{border-radius:6px;font-size:12px;line-height:1.5}\n.saker-ui-drawer{border-radius:12px}\n.saker-ui-notice{border-radius:6px;font-size:13px;line-height:1.5}\n.saker-ui-empty{border-radius:6px;font-size:13px;line-height:1.5}\n/* 现有插件类别名：与 canonical 类共用同一套尺寸 */\n.dsh-chat-panel-head button,.dsh-chat-actions button,.dsh-chat-task-status button,.dsh-task-nav button,.dsh-task-actions button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-prompt-io button,.dsh-prompt-more,.dsh-prompt-scopes button,.dsh-prompt-modes button,.dsh-prompt-foot button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-tools button,.dsh-materials-types button,.dsh-materials-foot button,.dsh-materials-table td button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-new button,.dsh-materials-import-actions button,.dsh-execution-tools>button,.dsh-test-content-actions button,.dsh-rtr-btn{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-task-nav select,.dsh-materials-tools select,.dsh-rtr-select{height:32px}\n.dsh-prompt-saveas input,.dsh-prompt-list input[type=search],.dsh-prompt-field input{height:36px}\n.dsh-materials-tools input[type=search],.dsh-materials-import input,.dsh-task-field input,.dsh-rtr-search{height:36px}\n.dsh-materials-table td{height:38px}\n.dsh-chat-setup svg,.dsh-task-workspace svg{width:16px;height:16px}\n.dsh-hnt-btn,.dsh-hnt-tab{height:32px}\n.dsh-hnt-input{height:36px}\n.dsh-hnt-select{height:32px}\n.dsh-mcs-btn,.dsh-mcs-iconbtn,.dsh-mcs-toolscount--btn{height:32px}\n.dsh-mcs-field input,.dsh-mcs-pairrow input,.dsh-mcs-search{height:36px}\n.dsh-mcs-field select,.dsh-mcs-seg button{height:32px}\n.dsh-sp-chip.is-btn{height:32px}\n.dsh-mg-chip{height:32px}\n/* 内联 style 插件（knowledge-hub / sec-config / skill-browse）：根容器打 data-saker-ui，\n   控件尺寸由共享层统一给，插件自己的 helper 不再写 height。 */\n[data-saker-ui] button{height:32px}\n[data-saker-ui] input:not([type=checkbox]):not([type=radio]):not([type=file]){height:36px}";
+/* SAKER-UI-KIT:END */
+(function(){try{if(document.getElementById('saker-ui-kit-style'))return;var st=document.createElement('style');st.id='saker-ui-kit-style';st.textContent=SAKER_UI_KIT_CSS;document.head.appendChild(st);}catch(e){}})();
 var React = require('react');
 var useState = React.useState, useEffect = React.useEffect;
 
@@ -63,10 +67,10 @@ function errText(res, fallback) {
 function fieldStyle() {
   return { display: 'block', width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l1, #d9d9de)', background: 'var(--dsw-alias-bg-base, #fff)', color: 'var(--dsw-alias-label-primary, #1a1a1a)', fontSize: 13, boxSizing: 'border-box' };
 }
-function labelStyle() { return { display: 'block', margin: '10px 0 4px', fontSize: 12, color: 'var(--dsw-alias-label-tertiary, #6e6e73)' }; }
-function groupStyle() { return { marginBottom: 18 }; }
+function labelStyle() { return { display: 'block', margin: '12px 0 4px', fontSize: 12, color: 'var(--dsw-alias-label-tertiary, #6e6e73)' }; }
+function groupStyle() { return { marginBottom: 16 }; }
 function groupTitleStyle() { return { fontSize: 13, fontWeight: 600, margin: '0 0 4px', color: 'var(--dsw-alias-label-primary, #1a1a1a)' }; }
-function btnStyle(primary) { return { padding: '8px 16px', borderRadius: 6, border: '1px solid ' + (primary ? 'transparent' : 'var(--dsw-alias-border-l1,#d9d9de)'), background: primary ? '#2f81f7' : 'transparent', color: primary ? '#fff' : 'var(--dsw-alias-label-primary,#1a1a1a)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }; }
+function btnStyle(primary) { return { padding: '8px 16px', borderRadius: 6, border: '1px solid ' + (primary ? 'transparent' : 'var(--dsw-alias-border-l1,#d9d9de)'), background: primary ? 'var(--dsw-alias-state-business-primary,#4c6ef5)' : 'transparent', color: primary ? '#fff' : 'var(--dsw-alias-label-primary,#1a1a1a)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }; }
 function msgStyle(ok) { return { marginTop: 8, fontSize: 12, color: ok ? '#1a7f37' : '#d1242f' }; }
 
 function Input(props) {
@@ -125,7 +129,7 @@ function presetLabelOf(key) {
   return hit ? hit.label : null;
 }
 function rowBtnStyle(extra) {
-  return Object.assign({ padding: '3px 9px', borderRadius: 6, fontSize: 11, cursor: 'pointer', border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: 'transparent', color: 'var(--dsw-alias-label-primary,#1a1a1a)' }, extra || {});
+  return Object.assign({ padding: '3px 9px', borderRadius: 6, fontSize: 12, cursor: 'pointer', border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: 'transparent', color: 'var(--dsw-alias-label-primary,#1a1a1a)' }, extra || {});
 }
 var miniHint = { fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#6e6e73)' };
 
@@ -260,13 +264,13 @@ function ToolLibrary(props) {
   var el = React.createElement;
   var children = [];
   // 1) 目录格式提示（默认折叠，避免长说明压住真实操作区）
-  children.push(el('details', { key: 'hint', style: { marginBottom: 10, borderRadius: 8, background: 'var(--dsw-alias-bg-layer-2,#f6f6f7)', border: '1px dashed var(--dsw-alias-border-l1,#d9d9de)' } },
+  children.push(el('details', { key: 'hint', style: { marginBottom: 12, borderRadius: 8, background: 'var(--dsw-alias-bg-layer-2,#f6f6f7)', border: '1px dashed var(--dsw-alias-border-l1,#d9d9de)' } },
     el('summary', { style: { cursor: 'pointer', padding: '8px 12px', fontSize: 12, fontWeight: 600, color: 'var(--dsw-alias-label-primary,#1a1a1a)' } }, '工具目录格式与探测说明'),
-    el('div', { style: { padding: '0 12px 10px', fontSize: 12, lineHeight: 1.7, color: 'var(--dsw-alias-label-tertiary,#6e6e73)' } },
+    el('div', { style: { padding: '0 12px 10px', fontSize: 12, lineHeight:1.5, color: 'var(--dsw-alias-label-tertiary,#6e6e73)' } },
       el('div', null, '默认工具库为空；添加「工具根目录」（可多个）后一键探测，按目录自动分类导入。推荐结构（一个目录 = 一个工具）：'),
       el('code', { style: { background: 'rgba(127,127,127,.12)', padding: '1px 5px', borderRadius: 4 } }, '工具根/05-内网与域渗透/Kerbrute/kerbrute_windows_amd64.exe'),
       el('div', null, '分类取根目录下一级的分类目录名（如 01-WebShell管理、05-内网与域渗透），没有编号目录时按名称线索归类。探测按「工具」而非「文件」收录：exe/jar 各自成项，脚本需与所在目录同名（如 sqlmap/sqlmap.py），仓库内部模块与测试文件自动排除。分散在别处的工具用「按分类手动导入」。'),
-      el('div', { style: { marginTop: 6, paddingTop: 6, borderTop: '1px dashed var(--dsw-alias-border-l1,#d9d9de)' } },
+      el('div', { style: { marginTop: 8, paddingTop: 6, borderTop: '1px dashed var(--dsw-alias-border-l1,#d9d9de)' } },
         el('span', { style: { fontWeight: 600, color: 'var(--dsw-alias-label-primary,#1a1a1a)' } }, '探测不到某个工具？先看这里：'),
         el('div', null, '① 只有安装包的情况很常见（典型如 Nmap：官网只发 nmap-7.99-setup.exe）。安装包不被当作工具收录——探测器会跳过 '),
         el('code', { style: { background: 'rgba(127,127,127,.12)', padding: '1px 5px', borderRadius: 4 } }, '*-setup.exe / *.msi / *.zip / *.7z / *.tar*'),
@@ -276,11 +280,11 @@ function ToolLibrary(props) {
   var rootRow = [];
   rootRow.push(el(Input, { key: 'ri', value: S.rootInput, placeholder: '工具根目录，如 D:\\Tools（可添加多个）', onChange: setRootInput }));
   rootRow.push(el('button', { key: 'add', type: 'button', style: rowBtnStyle(), onClick: addRoot }, '添加目录'));
-  rootRow.push(el('button', { key: 'scan', type: 'button', disabled: S.scanning, style: rowBtnStyle({ borderColor: '#2f81f7', color: '#2f81f7' }), onClick: doScan }, S.scanning ? '探测中…' : '探测并自动导入'));
-  children.push(el('div', { key: 'roots', style: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: 6 } }, rootRow));
+  rootRow.push(el('button', { key: 'scan', type: 'button', disabled: S.scanning, style: rowBtnStyle({ borderColor: 'var(--dsw-alias-state-business-primary,#4c6ef5)', color: 'var(--dsw-alias-state-business-primary,#4c6ef5)' }), onClick: doScan }, S.scanning ? '探测中…' : '探测并自动导入'));
+  children.push(el('div', { key: 'roots', style: { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 8 } }, rootRow));
   if (roots.length > 0) {
-    children.push(el('div', { key: 'rootlist', style: { display: 'flex', flexWrap: 'wrap', gap: 6, margin: '2px 0 8px' } }, roots.map(function (r) {
-      return el('span', { key: r, style: { display: 'inline-flex', alignItems: 'center', gap: 5, maxWidth: '100%', padding: '3px 8px', borderRadius: 999, fontSize: 12, border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: 'var(--dsw-alias-bg-layer-2,#f6f6f7)' } },
+    children.push(el('div', { key: 'rootlist', style: { display: 'flex', flexWrap: 'wrap', gap: 8, margin: '4px 0 8px' } }, roots.map(function (r) {
+      return el('span', { key: r, style: { display: 'inline-flex', alignItems: 'center', gap: 4, maxWidth: '100%', padding: '3px 8px', borderRadius: 999, fontSize: 12, border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: 'var(--dsw-alias-bg-layer-2,#f6f6f7)' } },
         el('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, r),
         el('button', { type: 'button', title: '移出该目录', style: { border: 'none', background: 'transparent', color: '#d1242f', cursor: 'pointer', fontSize: 12, padding: 0, flex: '0 0 auto' }, onClick: function () { removeRoot(r); } }, '×'));
     })));
@@ -294,15 +298,15 @@ function ToolLibrary(props) {
     prevKids.push(el('button', { key: 'all', type: 'button', style: rowBtnStyle(), onClick: function () { var picks = {}; pv.files.forEach(function (f) { if (f.presetKey) picks[f.path] = true; }); up({ preview: Object.assign({}, pv, { picks: picks }) }); } }, '全选识别项'));
     prevKids.push(el('button', { key: 'none', type: 'button', style: rowBtnStyle(), onClick: function () { up({ preview: Object.assign({}, pv, { picks: {} }) }); } }, '清空'));
     pv.files.forEach(function (f) {
-      prevKids.push(el('div', { key: f.path, style: { display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0', fontSize: 12 } },
+      prevKids.push(el('div', { key: f.path, style: { display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', fontSize: 12 } },
         el('input', { type: 'checkbox', checked: !!pv.picks[f.path], onChange: function () { togglePick(f.path); } }),
-        el('select', { value: pv.catOverride[f.path] || f.category || CAT_FALLBACK, style: { fontSize: 11, maxWidth: 130 }, onChange: function (e) { setFileCat(f.path, e.target.value); } }, cats.map(function (c) { return el('option', { key: c, value: c }, c); })),
+        el('select', { value: pv.catOverride[f.path] || f.category || CAT_FALLBACK, style: { fontSize: 12, maxWidth: 130 }, onChange: function (e) { setFileCat(f.path, e.target.value); } }, cats.map(function (c) { return el('option', { key: c, value: c }, c); })),
         el('span', { style: { flex: '0 0 130px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, (f.presetKey ? '★ ' + (presetLabelOf(f.presetKey) || f.presetKey) : (f.tool || f.name))),
         el('span', { title: f.path, style: { flex: 1, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, f.path),
         el('button', { type: 'button', style: rowBtnStyle(), onClick: function () { importOne(f); } }, '单导')));
     });
-    prevKids.push(el('div', { key: 'go', style: { marginTop: 6 } },
-      el('button', { type: 'button', style: rowBtnStyle({ background: '#2f81f7', color: '#fff', borderColor: '#2f81f7' }), onClick: importSelection }, '导入勾选项')));
+    prevKids.push(el('div', { key: 'go', style: { marginTop: 8 } },
+      el('button', { type: 'button', style: rowBtnStyle({ background: 'var(--dsw-alias-state-business-primary,#4c6ef5)', color: '#fff', borderColor: 'var(--dsw-alias-state-business-primary,#4c6ef5)' }), onClick: importSelection }, '导入勾选项')));
     children.push(el('div', { key: 'preview', style: { border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', borderRadius: 8, margin: '4px 0 8px', padding: 8, maxHeight: 300, overflow: 'auto' } }, prevKids));
   }
   // 4) 分类树（只渲染「有工具」的分类；空分类在下方「分类管理」里可见可删）
@@ -314,28 +318,28 @@ function ToolLibrary(props) {
     var rows = grouped[c] || [];
     var kids = rows.map(function (e) {
           var checked = startup[e.key]?.configuredPath === e.path ? startup[e.key] : null;
-          return el('div', { key: e.key, style: { display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0', fontSize: 13 } },
+          return el('div', { key: e.key, style: { display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', fontSize: 13 } },
             el('span', { style: { flex: '0 0 150px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, e.name || e.key),
             el('span', { title: e.path, style: { flex: 1, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 } }, e.path),
-            el('select', { value: e.category, style: { fontSize: 11 }, onChange: function (ev) { setEntryCat(e.key, ev.target.value); } }, cats.map(function (cc) { return el('option', { key: cc, value: cc }, cc); })),
+            el('select', { value: e.category, style: { fontSize: 12 }, onChange: function (ev) { setEntryCat(e.key, ev.target.value); } }, cats.map(function (cc) { return el('option', { key: cc, value: cc }, cc); })),
             el('button', { type: 'button', style: rowBtnStyle(), disabled: !!checked?.busy, onClick: function () { checkStartup(e); } }, checked?.busy ? '检查中…' : '检查启动'),
             checked && !checked.busy ? el('details', { style: { maxWidth: 240 }, 'aria-label': '工具启动检查 ' + e.key },
               el('summary', null, ({ available: '可启动', missing: '入口不存在', unconfigured: '未配置', unsupported: '尚未支持检查', stale: '请先保存', failed: '启动失败', timeout: '检查超时', mismatch: '工具不匹配', inconclusive: '无法确认' })[checked.state] || '无法确认'),
               el('p', null, checked.reason), checked.actualFile ? el('small', null, '实际入口：' + checked.actualFile) : null,
-              checked.preview ? el('pre', { style: { whiteSpace: 'pre-wrap', maxHeight: 160, overflow: 'auto', fontSize: 11 } }, checked.preview) : null) : null,
+              checked.preview ? el('pre', { style: { whiteSpace: 'pre-wrap', maxHeight: 160, overflow: 'auto', fontSize: 12 } }, checked.preview) : null) : null,
             el('button', { type: 'button', style: rowBtnStyle({ color: '#d1242f' }), onClick: function () { removeEntry(e.key); } }, '移除'));
         });
     children.push(el(Group, { key: 'g:' + c, title: c + '（' + rows.length + '）' }, kids));
   });
   // 5) 手动导入
   var m = S.manual;
-  children.push(el('div', { key: 'manual', style: { borderTop: '1px solid var(--dsw-alias-border-l1,#d9d9de)', marginTop: 10, paddingTop: 8 } },
-    el('div', { style: { fontWeight: 600, fontSize: 13, margin: '6px 0' } }, '按分类手动导入（工具分散在不同目录/已单独安装时用这个）'),
-    el('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' } },
+  children.push(el('div', { key: 'manual', style: { borderTop: '1px solid var(--dsw-alias-border-l1,#d9d9de)', marginTop: 12, paddingTop: 8 } },
+    el('div', { style: { fontWeight: 600, fontSize: 13, margin: '8px 0' } }, '按分类手动导入（工具分散在不同目录/已单独安装时用这个）'),
+    el('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' } },
       el('select', { value: m.cat, style: { fontSize: 12, maxWidth: 150 }, onChange: function (ev) { up({ manual: Object.assign({}, m, { cat: ev.target.value }) }); } }, cats.map(function (c) { return el('option', { key: c, value: c }, c); })),
       el('div', { style: { width: 170 } }, el(Input, { value: m.name, placeholder: '工具名（字母数字下划线）', onChange: function (v) { up({ manual: Object.assign({}, m, { name: v }) }); } })),
       el('div', { style: { flex: 1, minWidth: 220 } }, el(Input, { value: m.path, placeholder: '工具绝对路径（exe/py/ps1/jar…）', onChange: function (v) { up({ manual: Object.assign({}, m, { path: v }) }); } })),
-      el('button', { type: 'button', style: rowBtnStyle({ borderColor: '#2f81f7', color: '#2f81f7' }), onClick: manualAdd }, '手动导入'))));
+      el('button', { type: 'button', style: rowBtnStyle({ borderColor: 'var(--dsw-alias-state-business-primary,#4c6ef5)', color: 'var(--dsw-alias-state-business-primary,#4c6ef5)' }), onClick: manualAdd }, '手动导入'))));
   // 6) 分类管理
   var catKids = cats.map(function (c) {
     var builtin = BASE_CATEGORIES.indexOf(c) >= 0;
@@ -345,13 +349,13 @@ function ToolLibrary(props) {
   });
   catKids.push(el(Input, { key: 'inp', value: S.newCat, placeholder: '自定义分类名', onChange: function (v) { up({ newCat: v }); } }));
   catKids.push(el('button', { key: 'addc', type: 'button', style: rowBtnStyle(), onClick: addCategory }, '添加分类'));
-  children.push(el('div', { key: 'cats', style: { borderTop: '1px solid var(--dsw-alias-border-l1,#d9d9de)', marginTop: 10, paddingTop: 8 } },
-    el('div', { style: { fontWeight: 600, fontSize: 13, margin: '6px 0' } }, '分类管理'),
-    el('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' } }, catKids)));
+  children.push(el('div', { key: 'cats', style: { borderTop: '1px solid var(--dsw-alias-border-l1,#d9d9de)', marginTop: 12, paddingTop: 8 } },
+    el('div', { style: { fontWeight: 600, fontSize: 13, margin: '8px 0' } }, '分类管理'),
+    el('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' } }, catKids)));
   if (S.msg) children.push(el('div', { key: 'msg', style: msgStyle(S.msgOk === true) }, S.msg));
   return el('div', null, children);
 }
-function hintStyle() { return { fontSize: 12, color: 'var(--dsw-alias-label-tertiary, #6e6e73)', marginBottom: 6, lineHeight: 1.6 }; }
+function hintStyle() { return { fontSize: 12, color: 'var(--dsw-alias-label-tertiary, #6e6e73)', marginBottom: 8, lineHeight:1.5}; }
 
 function ConfigForm(props) {
   var v = props.value || {};
@@ -466,7 +470,7 @@ function ConfigForm(props) {
       React.createElement(Input, { value: memshell.cliPath || '', placeholder: 'memshell-party-cli', onChange: function (val) { setPath(['memshell', 'cliPath'], val); } }),
       React.createElement('label', { style: labelStyle() }, 'MCP Server 名（可选，用于 MCP 调用链）'),
       React.createElement(Input, { value: memshell.mcpServer || '', placeholder: 'memshell-party', onChange: function (val) { setPath(['memshell', 'mcpServer'], val); } })),
-    React.createElement('div', { style: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', margin: '0 0 14px', padding: '8px 10px', borderRadius: 6, background: 'var(--dsw-alias-bg-layer-2,#f6f6f7)' } },
+    React.createElement('div', { style: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', margin: '0 0 16px', padding: '8px 10px', borderRadius: 6, background: 'var(--dsw-alias-bg-layer-2,#f6f6f7)' } },
       'DeepSeek API 密钥请到「平台设置 → 模型/服务」中维护，本页不再重复设置。'),
     React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
       React.createElement('button', { type: 'button', disabled: busy, style: btnStyle(true), onClick: save }, busy ? '保存中…' : '保存配置'),
@@ -519,7 +523,7 @@ function PasswordForm(props) {
 function ServiceRow(props) {
   var status = props.status || null;
   var badgeStyle = function (bg, fg) {
-    return { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 600, background: bg, color: fg, lineHeight: '16px', whiteSpace: 'nowrap' };
+    return { display: 'inline-flex', alignItems: 'center', gap: 8, padding: '2px 8px', borderRadius: 999, fontSize: 12, fontWeight: 600, background: bg, color: fg, lineHeight: '16px', whiteSpace: 'nowrap' };
   };
   var badge = null;
   if (!props.value || props.value.trim() === '') {
@@ -537,7 +541,7 @@ function ServiceRow(props) {
   } else {
     badge = React.createElement('span', { style: badgeStyle('#ffebe9', '#d1242f') }, '● 不可达');
   }
-  return React.createElement('div', { style: { marginBottom: 10 } },
+  return React.createElement('div', { style: { marginBottom: 12 } },
     React.createElement('label', { style: labelStyle() },
       React.createElement('span', null, props.label),
       React.createElement('span', { style: { marginLeft: 8 } }, badge)),
@@ -647,7 +651,7 @@ function ModelLink(props) {
       key: m.id, type: 'button', disabled: busy !== '',
       onClick: function () { writeField('mode', m.id); },
       style: { padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer',
-        border: '1px solid ' + (active ? '#2f81f7' : 'var(--dsw-alias-border-l1,#d9d9de)'),
+        border: '1px solid ' + (active ? 'var(--dsw-alias-state-business-primary,#4c6ef5)' : 'var(--dsw-alias-border-l1,#d9d9de)'),
         background: active ? '#e8f1fe' : 'transparent',
         color: active ? '#1d4ed8' : 'var(--dsw-alias-label-primary,#1a1a1a)' },
     }, m.label);
@@ -658,7 +662,7 @@ function ModelLink(props) {
       key: r.id, type: 'button', disabled: busy !== '',
       onClick: function () { writeField('redaction', r.id); },
       style: { padding: '5px 10px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
-        border: '1px solid ' + (active ? '#2f81f7' : 'var(--dsw-alias-border-l1,#d9d9de)'),
+        border: '1px solid ' + (active ? 'var(--dsw-alias-state-business-primary,#4c6ef5)' : 'var(--dsw-alias-border-l1,#d9d9de)'),
         background: active ? '#e8f1fe' : 'transparent', color: active ? '#1d4ed8' : 'var(--dsw-alias-label-primary,#1a1a1a)' },
     }, r.label);
   }
@@ -670,7 +674,7 @@ function ModelLink(props) {
     v.mode === 'proxy' ? React.createElement('div', { style: { marginBottom: 8 } },
       React.createElement('label', { style: labelStyle() }, '出站脱敏（只作用于本机模型代理）'),
       React.createElement('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } }, REDACTION_MODES.map(redactionBtn)),
-      React.createElement('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary, #6e6e73)', marginTop: 4 } },
+      React.createElement('div', { style: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary, #6e6e73)', marginTop: 4 } },
         '默认按字段名与内容识别 Authorization/Cookie、密码、私钥、云密钥和常见 token；保留目标 IP、域名、URL 与普通验证载荷。「密钥 + PII」再脱敏邮箱、手机号、身份证和 Luhn 校验通过的银行卡号，按需开启。')) : null,
     v.mode === 'proxy' ? React.createElement('div', null,
       React.createElement('label', { style: labelStyle() }, '代理监听端口（本机回环，内置代理用这个端口）'),
@@ -686,7 +690,7 @@ function ModelLink(props) {
         onChange: function (t) { setDraft(Object.assign({}, draft, { customBaseUrl: t })); },
         onBlur: function () { writeField('customBaseUrl', draftOf('customBaseUrl', v.customBaseUrl)); },
       })) : null,
-    React.createElement('div', { style: { marginTop: 10, fontSize: 12, lineHeight: 1.9, color: 'var(--dsw-alias-label-tertiary, #6e6e73)' } },
+    React.createElement('div', { style: { marginTop: 12, fontSize: 12, lineHeight:1.5, color: 'var(--dsw-alias-label-tertiary, #6e6e73)' } },
       React.createElement('div', null, '目标地址：', React.createElement('code', null, v.targetBaseUrl || '（空）')),
       React.createElement('div', null, '当前生效：',
         React.createElement('code', null, v.installedBaseUrl === null ? '（未读到）' : (v.installedBaseUrl || '（空）')), ' ', badge),
@@ -727,7 +731,7 @@ function ModelLink(props) {
       React.createElement('button', { type: 'button', style: btnStyle(true), disabled: busy !== '' || v.inSync, onClick: doApply }, busy === 'apply' ? '写入中…' : (v.inSync ? '已是最新' : '写入配置'))),
     msg ? React.createElement('div', { style: msgStyle(msg.ok) }, msg.text) : null,
     (probe && probe.body)
-      ? React.createElement('div', { style: { marginTop: 6, fontSize: 11, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', wordBreak: 'break-all' } }, probe.body.slice(0, 160))
+      ? React.createElement('div', { style: { marginTop: 8, fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', wordBreak: 'break-all' } }, probe.body.slice(0, 160))
       : null);
 }
 
@@ -831,9 +835,9 @@ function EndpointProfiles(props) {
         React.createElement('div', { style: { fontSize: 13, fontWeight: 600, color: 'var(--dsw-alias-label-primary,#1a1a1a)' } },
           p.name,
           ' ',
-          React.createElement('span', { style: { fontSize: 11, fontWeight: 400, color: 'var(--dsw-alias-label-tertiary,#6e6e73)' } }, '· ' + kindLabel(p.kind)),
-          active ? React.createElement('span', { style: { fontSize: 11, marginLeft: 6, color: '#1a7f37' } }, '● 当前') : null),
-        React.createElement('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', wordBreak: 'break-all' } },
+          React.createElement('span', { style: { fontSize: 12, fontWeight: 400, color: 'var(--dsw-alias-label-tertiary,#6e6e73)' } }, '· ' + kindLabel(p.kind)),
+          active ? React.createElement('span', { style: { fontSize: 12, marginLeft: 8, color: '#1a7f37' } }, '● 当前') : null),
+        React.createElement('div', { style: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', wordBreak: 'break-all' } },
           p.baseURL || '（无 baseURL 覆盖）', p.note ? ' · ' + p.note : '')),
       React.createElement('button', {
         type: 'button', style: btnStyle(!active), disabled: busy !== '' || active,
@@ -858,41 +862,41 @@ function EndpointProfiles(props) {
     React.createElement('div', { style: hintStyle() },
       '「回得去」靠的是「恢复初始地址」档：自定义 provider 的模型不在 dsh 内建目录里，baseURL 是必填项，清掉会被宿主判为非法配置。',
       '想切回原来的地址就用它（', v.baseline && v.baseline.baseURL ? '当前记录：' + v.baseline.baseURL : '尚未记录，点下方按钮记一次', '）。'),
-    React.createElement('div', { style: { fontSize: 12, lineHeight: 1.9, marginBottom: 8, color: 'var(--dsw-alias-label-tertiary, #6e6e73)' } },
+    React.createElement('div', { style: { fontSize: 12, lineHeight:1.5, marginBottom: 8, color: 'var(--dsw-alias-label-tertiary, #6e6e73)' } },
       React.createElement('div', null, '当前生效：',
         React.createElement('code', null, v.installedBaseUrl === null ? '（未读到）' : (v.installedBaseUrl || '（无覆盖）'))),
       React.createElement('div', null, '命中档位：',
         React.createElement('code', null, v.activeProfileName || '（不匹配任何档案）'),
-        v.isDefault ? React.createElement('span', { style: { marginLeft: 6, color: '#1a7f37' } }, '● 无覆盖') : null)),
+        v.isDefault ? React.createElement('span', { style: { marginLeft: 8, color: '#1a7f37' } }, '● 无覆盖') : null)),
     rows.length
       ? React.createElement('div', null, rows.map(row))
       : React.createElement('div', { style: hintStyle() }, '（还没有档案）'),
-    React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' } },
+    React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' } },
       React.createElement('button', {
         type: 'button', style: btnStyle(false), disabled: busy !== '' || !v.installedBaseUrl,
         onClick: captureBaseline,
       }, busy === 'baseline' ? '记录中…' : '把当前生效地址记为初始地址')),
-    React.createElement('div', { style: { marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)' } },
-      React.createElement('div', { style: { fontSize: 13, fontWeight: 600, marginBottom: 2 } }, '新增/更新档案'),
+    React.createElement('div', { style: { marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)' } },
+      React.createElement('div', { style: { fontSize: 13, fontWeight: 600, marginBottom: 4 } }, '新增/更新档案'),
       React.createElement('label', { style: labelStyle() }, '档案名（同 id 即更新；新档案填个新的名字即可）'),
       React.createElement(Input, {
         value: form.name, placeholder: '例如：OpenCode Go（代理）',
         onChange: function (t) { setForm(Object.assign({}, form, { name: t })); },
       }),
       React.createElement('label', { style: labelStyle() }, '类型'),
-      React.createElement('div', { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } },
+      React.createElement('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
         EP_KINDS.map(function (k) {
           var on = form.kind === k.id;
           return React.createElement('button', {
             key: k.id, type: 'button', disabled: busy !== '',
             onClick: function () { setForm(Object.assign({}, form, { kind: k.id })); },
             style: { padding: '5px 10px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
-              border: '1px solid ' + (on ? '#2f81f7' : 'var(--dsw-alias-border-l1,#d9d9de)'),
+              border: '1px solid ' + (on ? 'var(--dsw-alias-state-business-primary,#4c6ef5)' : 'var(--dsw-alias-border-l1,#d9d9de)'),
               background: on ? '#e8f1fe' : 'transparent', color: on ? '#1d4ed8' : 'var(--dsw-alias-label-primary,#1a1a1a)' },
           }, k.label);
         })),
       form.kind === 'default'
-        ? React.createElement('div', { style: { marginTop: 6, fontSize: 11, color: '#9a6700' } }, '这一档不需要地址：切换时清除 baseURL 覆盖。⚠️ 仅当该 provider 的模型在 dsh 内建目录里才成立；自定义 provider 会被宿主判为缺 baseURL 而拒绝（届时会给出提示，配置不会被改坏）。')
+        ? React.createElement('div', { style: { marginTop: 8, fontSize: 12, color: '#9a6700' } }, '这一档不需要地址：切换时清除 baseURL 覆盖。⚠️ 仅当该 provider 的模型在 dsh 内建目录里才成立；自定义 provider 会被宿主判为缺 baseURL 而拒绝（届时会给出提示，配置不会被改坏）。')
         : React.createElement('div', null,
             React.createElement('label', { style: labelStyle() }, '端点地址（写到 /v1 为止）'),
             React.createElement(Input, {
@@ -964,14 +968,14 @@ function EgressPolicy(props) {
       '当前档位：', React.createElement('code', null, policy.mode || 'allow'),
       ' · 策略文件来源：', React.createElement('code', null, state.source || 'file'),
       policy.updatedAt ? ' · 更新于 ' + String(policy.updatedAt).replace('T', ' ').slice(0, 19) : ''),
-    React.createElement('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 6 } },
+    React.createElement('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 } },
       EGRESS_MODES.map(function (m) {
         var on = (policy.mode || 'allow') === m.id;
         return React.createElement('button', {
           key: m.id, type: 'button', title: m.hint, disabled: busy !== '',
           onClick: function () { save(m.id); },
           style: { padding: '6px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
-            border: '1px solid ' + (on ? '#2f81f7' : 'var(--dsw-alias-border-l1,#d9d9de)'),
+            border: '1px solid ' + (on ? 'var(--dsw-alias-state-business-primary,#4c6ef5)' : 'var(--dsw-alias-border-l1,#d9d9de)'),
             background: on ? '#e8f1fe' : 'transparent', color: on ? '#1d4ed8' : 'var(--dsw-alias-label-primary,#1a1a1a)' },
         }, busy === m.id ? '切换中…' : (on ? '● ' + m.label : m.label));
       })),
@@ -988,7 +992,7 @@ function EgressPolicy(props) {
       }, busy === (policy.mode || 'allow') ? '保存中…' : '保存白名单'),
       React.createElement('button', { type: 'button', style: btnStyle(false), disabled: busy !== '', onClick: load }, '刷新')),
     recent.length
-      ? React.createElement('div', { style: { marginTop: 10, fontSize: 11, lineHeight: 1.8, color: 'var(--dsw-alias-label-tertiary,#6e6e73)' } },
+      ? React.createElement('div', { style: { marginTop: 12, fontSize: 12, lineHeight:1.5, color: 'var(--dsw-alias-label-tertiary,#6e6e73)' } },
           React.createElement('div', { style: { fontWeight: 600 } }, '最近出站判定'),
           recent.map(function (row, i) {
             return React.createElement('div', { key: i },
@@ -1018,15 +1022,15 @@ function Page(props) {
   if (state.status === 'loading') return React.createElement('div', { style: { fontSize: 13 } }, '加载中…');
   if (state.status === 'error') return React.createElement('div', { style: { fontSize: 13, color: '#d1242f' } }, '无法读取配置，请检查服务是否运行。');
 
-  return React.createElement('div', { style: { maxWidth: 620 } },
+  return React.createElement('div', { style: { maxWidth: 620 }, 'data-saker-ui': 'sec-config' },
     React.createElement(ConfigForm, { connection: props.connection, value: state.value, onChange: function (v) { setState({ status: 'ready', value: v }); }, onSaved: load }),
-    React.createElement('hr', { style: { border: 'none', borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', margin: '20px 0' } }),
+    React.createElement('hr', { style: { border: 'none', borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', margin: '24px 0' } }),
     React.createElement(ModelLink, { key: 'model-' + rev, connection: props.connection }),
-    React.createElement('hr', { style: { border: 'none', borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', margin: '20px 0' } }),
+    React.createElement('hr', { style: { border: 'none', borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', margin: '24px 0' } }),
     React.createElement(EndpointProfiles, { connection: props.connection, onChanged: function () { setRev(function (n) { return n + 1; }); } }),
-    React.createElement('hr', { style: { border: 'none', borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', margin: '20px 0' } }),
+    React.createElement('hr', { style: { border: 'none', borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', margin: '24px 0' } }),
     React.createElement(EgressPolicy, { connection: props.connection }),
-    React.createElement('hr', { style: { border: 'none', borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', margin: '20px 0' } }),
+    React.createElement('hr', { style: { border: 'none', borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)', margin: '24px 0' } }),
     React.createElement(PasswordForm, { connection: props.connection }));
 }
 

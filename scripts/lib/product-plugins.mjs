@@ -7,6 +7,10 @@ export const RETIRED_PLUGINS = Object.freeze([
   '@dsh-external/dsh-attack-atlas',
   '@dsh-external/dsh-campaign-memory',
   '@dsh-external/dsh-webshell-mgr',
+  // 旧 Web 编排本体：方法目录/开场/saker_method 与 route 信封已由 task-prompt、
+  // 测试内容目录和任务设置替代；保留仓库源码只作迁移参考，不再进入产品安装。
+  '@dsh-external/dsh-method-stack',
+  '@dsh-external/dsh-route-boost',
 ])
 export function productPluginDirectories(root) {
   return readdirSync(join(root, 'plugins')).sort().filter(name => {
@@ -19,10 +23,10 @@ export function installedRetiredPlugins(manifest) {
   const bundles = manifest.dsh?.profile?.bundles ?? []
   return RETIRED_PLUGINS.filter(name => Object.hasOwn(manifest.dependencies ?? {}, name) || bundles.includes(name))
 }
-export function retireInstalledPlugins(manifestPath, invoke) {
+export function retireInstalledPlugins(manifestPath, invoke, profile = 'desktop') {
   const retired = installedRetiredPlugins(JSON.parse(readFileSync(manifestPath, 'utf8')))
   if (!retired.length) return []
-  invoke(['plugin', '--profile', 'desktop', 'remove', ...retired])
+  invoke(['plugin', '--profile', profile, 'remove', ...retired])
   const remaining = installedRetiredPlugins(JSON.parse(readFileSync(manifestPath, 'utf8')))
   if (remaining.length) throw Error('Retired plugins remain in the Desktop profile: ' + remaining.join(', '))
   return retired

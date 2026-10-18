@@ -25,6 +25,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { TaskBlockedError, normalizeTaskDependencies, assertTaskDependencies, taskReadiness } from "./task-dependencies.mjs";
 import { defineTool } from "@deepseek-ai/dsh-tools";
+import { sessionWorkingDirectory } from "dsh-saker/working-directory";
 import { registerProjectRpc } from "./project-channel.mjs";
 
 //#region gate schema
@@ -528,7 +529,7 @@ export function checkRequirement(check) {
 function resolveWorkspaceArg(workspace, exec) {
 	if (typeof workspace !== "string" || workspace === "") return path.resolve(".");
 	if (path.isAbsolute(workspace)) return path.resolve(workspace);
-	const sessionCwd = exec?.agent?.session?.header?.cwd;
+	const sessionCwd = sessionWorkingDirectory(exec?.agent?.ctx, exec?.agent?.session);
 	return sessionCwd ? path.resolve(sessionCwd, workspace) : path.resolve(workspace);
 }
 
@@ -1254,7 +1255,7 @@ export function startTaskForTool(workspace, { sessionId = "", toolName = "" } = 
 /** Native pre-execution gate also covers subagent/MCP tools without a tracked wrapper. */
 export function buildTaskReadinessGuard() {
 	return (exec) => {
-		const workspace = exec?.agent?.session?.header?.cwd;
+		const workspace = sessionWorkingDirectory(exec?.agent?.ctx, exec?.agent?.session);
 		if (!workspace || !exec?.name || exec.name.startsWith("operation_")) return undefined;
 		const sessionId = String(exec.agent.session.id || "");
 		const state = readOperationState(fs, workspace);
@@ -1732,7 +1733,7 @@ function apply(ctx) {
 		if (subagentBindings.has(id)) return;
 		const intoLedger = (kind, info) => {
 			try {
-				const workspace = agent?.session?.header?.cwd;
+				const workspace = sessionWorkingDirectory(agent?.ctx, agent?.session);
 				if (typeof workspace !== "string" || workspace === "") return;
 				const sessionId = String(agent?.session?.id ?? "");
 				const provider = String(info?.provider ?? "");

@@ -12,7 +12,7 @@ function validate(store, sid, finding, review) {
   const receipts = review.receiptIds.map(id => readExecutionReceipt(store, sid, id));
   requireFreshExecutions(receipts);
   if (receipts.some(receipt => !receipt.current || receipt.source !== 'host-http-execution' || receipt.outcome !== 'response'
-    || new URL(receipt.endpoint).origin !== new URL(parseReproduction(finding.reproduction).endpoint).origin)) throw new Error('effect review needs current complete same-site host receipts');
+    || new URL(receipt.endpoint).origin !== new URL(parseReproduction(finding.reproduction).endpoint).origin)) throw new Error('人工复核需要当前仍匹配的同源完整执行回执，已失效的回执不能作为依据');
   if (!finding.executionEvidence?.verified || !finding.executionEvidence.receiptIds.every(id => review.receiptIds.includes(id))) throw new Error('include the finding\'s actual normal/probe executions');
   if (!review.permissionsConfirmed || !review.impactConfirmed || (review.proofKind === 'write' && !review.restorationConfirmed)) throw new Error('confirm actual permission, effect, and write restoration');
   if (typeof review.note !== 'string' || review.note.trim().length < 40 || review.note.length > 3000) throw new Error('record 40..3000 characters describing roles, objects, actual effect, and limits');

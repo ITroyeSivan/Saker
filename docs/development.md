@@ -11,7 +11,7 @@ node scripts/pack-all.mjs
 node scripts/install-desktop.mjs --desktop-dir "C:/path/to/DeepSeek Harness"
 ```
 
-当前适配官方 Windows Desktop 0.2.0-rc.2。安装前完成 desktop profile 初始化并退出应用。安装器调用官方 CLI，核对包内容并刷新桌面快捷方式。DSH_DESKTOP_DIR 可代替安装目录参数；DSH_HOME 可指定独立配置目录。
+当前适配官方 Windows Desktop 0.2.1-rc.2（同时兼容 0.2.0-rc.2）。安装前完成 desktop profile 初始化并退出应用。安装器调用官方 CLI，核对包内容并刷新桌面快捷方式。DSH_DESKTOP_DIR 可代替安装目录参数；DSH_HOME 可指定独立配置目录。
 
 ## 检查
 

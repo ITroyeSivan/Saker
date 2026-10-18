@@ -46,7 +46,7 @@ const readPlugin = (name, file = 'lib/index.js') => {
   // Pentest：保留侦察/漏洞路径/证据工具；收起 CTF、后渗透与通用流程工具。
   const pt = computeDeny('pentest', known, RULES)
   ok('pentest 隐藏 ctf_*（4 个）', pt.includes('ctf_steer') && C === 4)
-  ok(`pentest 基础规则收起数为 ${pt.length}（期望 ${C + 19}，任务工具另按包收起）`, pt.length === C + 19)
+  ok(`pentest 基础规则收起数为 ${pt.length}（期望 ${C + 20}，任务工具另按包收起）`, pt.length === C + 20)
   ok('pentest 隐藏 webshell、保留按需工具包入口', pt.includes('webshell_exec') && !pt.includes('tool_pack'))
   ok('pentest 隐藏矩阵、后渗透和内网工具，并收起绕过管理的子代理工具',
     ['attack_gate', 'redteam_atlas_target', 'redteam_coverage_mark', 'netexec_scan', 'crackmapexec_scan', 'impacket_suite', 'access_confirm', 'memshell_cli', 'nday_triage', 'campaign_memory_write', 'trace_recent'].every((n) => pt.includes(n))
@@ -178,13 +178,17 @@ const readPlugin = (name, file = 'lib/index.js') => {
 
   // 4.5 Pentest 的工具边界必须跟随主线提示，且只影响该模式的能力声明。
   const focus = RULES.find((r) => r.id === 'pentest-rce-focus')
-  // The mode persona is now a separate, user-editable full opening.
+  // R10：旧角色开场已退出；固定能力说明只由 task-prompt 维护。
   const pentestPrompt = readFileSync(new URL('../preset/pentest/opening.md', PLUGINS), 'utf8')
+  const taskPrompt = readFileSync(new URL('../plugins/dsh-redteam-results/lib/task-prompt.js', PLUGINS), 'utf8')
   ok('Pentest RCE 工具规则存在并排除该模式', !!focus && !focus.modes.includes('pentest'))
-  ok('Pentest 按证据委派独立任务，默认不按每个目标/CVE派模型',
-    /never fan out by URL\/CVE/i.test(pentestPrompt)
-    && /Delegate only a clear necessary site task/i.test(pentestPrompt)
-    && /Default finish the agreed task/i.test(pentestPrompt))
+  ok('旧 Pentest 角色开场不再进入请求',
+    !/never fan out by URL\/CVE/i.test(pentestPrompt)
+    && !/Delegate only a clear necessary site task/i.test(pentestPrompt)
+    && /task-prompt/.test(pentestPrompt))
+  ok('固定 Saker 能力说明只在 task-prompt 维护',
+    /查询当前任务设置/.test(taskPrompt) && /读取相关资料/.test(taskPrompt)
+    && /使用可用工具/.test(taskPrompt) && /引用实际结果/.test(taskPrompt))
   ok('Pentest 规则收起记忆轨迹、内网、后渗透和非主线 Nday 工具', ['webshell_', 'netexec_', 'crackmapexec_', 'impacket_', 'campaign_', 'trace_', 'access_confirm', 'memshell_cli', 'nday_handoff'].every((p) => focus.prefixes.includes(p)))
   ok('Pentest 主线规则不屏蔽按需工具包入口', !focus.prefixes.includes('tool_pack') && !computeDeny('pentest', ['tool_pack'], RULES).includes('tool_pack'))
   const toolPackRule = RULES.find((r) => r.id === 'toolPack')

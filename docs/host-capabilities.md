@@ -1,6 +1,6 @@
 # dsh Desktop host capability map
 
-Supported Windows host: official Desktop 0.2.0-rc.2. The plugin client runs in the application's shared renderer; `client.platform = web` remains the official renderer API identifier.
+Supported Windows host: official Desktop 0.2.1-rc.2, with 0.2.0-rc.2 compatibility retained. The plugin client runs in the application's shared renderer; `client.platform = web` remains the official renderer API identifier.
 
 Saker should not rebuild capabilities that the host already owns. This map records which side is authoritative.
 

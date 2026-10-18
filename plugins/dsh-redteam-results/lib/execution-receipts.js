@@ -4,41 +4,71 @@ import https from 'node:https';
 import { createHash, randomUUID } from 'node:crypto';
 import { readTaskContext } from './task-context.js';
 import { researchDetail, researchNext } from './research.js';
-import { taskExecutionGuard, readTaskPolicy, pauseTaskPolicy, acceptBaselineRecheck } from './task-policy.js';
+import { taskExecutionGuard, readTaskPolicy, pauseTaskPolicy, acceptBaselineRecheck, targetTrafficDenial, excludedPathDenial, effectivePolicy } from './task-policy.js';
+import { writeTaskPolicy, taskEvent } from './task-policy-record.js';
+import { moduleGateFor, rootModuleSelection } from './execution-modules.js';
+import { sameEndpointPath } from './endpoint-binding.js';
+import { acquireTargetSlot } from './request-pacing.js';
+import { resolveTaskIdentity, identityDenial, identityRequestHeaders } from './identity-binding.js';
 
 export const EXECUTION_RECEIPT_SCHEMA = `CREATE TABLE IF NOT EXISTS execution_receipts (
  session_id TEXT NOT NULL, id TEXT NOT NULL, record TEXT NOT NULL,
  PRIMARY KEY(session_id,id)
 );`;
+const FIRST_CONTACT_LIMIT = 5;
 const digest = value => createHash('sha256').update(value).digest('hex');
-// Current confirmation uses the execution time, never the date on which an
-// operator reread or reviewed the saved bytes. Historical receipts stay intact.
+// A receipt is current when it still belongs to the same request revision,
+// identity and integrity-checked response. Age alone never invalidates it:
+// temporary tokens or changed business state must be rejected by the specific
+// request/identity/environment checks, not by a blanket timeout.
 export function requireFreshExecutions(receipts, referenceTime = Date.now()) {
   if (!Number.isFinite(referenceTime)) throw new Error('invalid verification timestamp');
   for (const receipt of receipts) {
     const completed = Date.parse(receipt.completedAt);
     if (!Number.isFinite(completed) || completed > referenceTime + 60000)
       throw new Error('执行证据时间无效，请核对原始回执。');
-    if (referenceTime - completed > 15 * 60 * 1000)
-      throw new Error('执行证据已过期，请在当前身份下重新采集完整对照。');
+    if (receipt.current === false || receipt.integrityValid === false)
+      throw new Error('执行证据与当前请求、身份或目标实例不匹配，请在当前条件下重新采集完整对照。');
+    if (receipt.complete === false)
+      throw new Error('执行证据不完整，请重新采集完整响应。');
   }
 }
-const basis = row => digest(JSON.stringify([row.id, row.revision, row.endpoint, row.authContext, row.request]));
+// 回执绑定用**规范化报文**（wire）计算：宿主回填会把行里的原文规范成同一形式
+// （J11c 实测：回填后旧回执曾整体变 stale，受控对照无法评估）。仍保留原文口径
+// 作为兼容比对，见 readExecutionReceipt。
+const basis = (row, wire = row.request) => digest(JSON.stringify([row.id, row.revision, row.endpoint, row.authContext, wire]));
 export const executionMethodBasis = method => {
   const { reviewed, reviewedAt, reviewer, reviewNotes, ...content } = method;
   return digest(JSON.stringify(Object.fromEntries(Object.entries(content).sort(([a], [b]) => a.localeCompare(b)))));
 };
+/**
+ * 已准入、未派发：释放本次预留。只减 toolCalls，不动其它计数、不删历史回执、不清预算。
+ * 用于"准入通过后、网络 I/O 前"模块被关闭的竞态窗口。
+ */
+function releaseExecutionReservation(store, sessionId) {
+  const child = readTaskPolicy(store, sessionId);
+  for (const id of [sessionId, child?.parentSession].filter(Boolean)) {
+    const policy = readTaskPolicy(store, id);
+    if (!policy) continue;
+    writeTaskPolicy(store, id, { ...policy, used: { ...policy.used, toolCalls: Math.max(0, (policy.used?.toolCalls ?? 0) - 1) } });
+  }
+}
 function requestRow(store, sessionId, id, revision) {
   const context = readTaskContext(store, sessionId);
   const rows = context?.requests.filter(row => row.id === id && row.revision === revision) || [];
   if (rows.length !== 1) throw new Error('one current recorded request revision required');
   const row = rows[0], endpoint = new URL(row.endpoint);
-  if (!context.assets.some(asset => asset.inScope === true && asset.reachable === true && new URL(asset.url).origin === endpoint.origin)) throw new Error('recorded request has no reachable authorized asset');
+  if (!context.assets.some(asset => asset.inScope === true && asset.reachable === true && new URL(asset.url).origin === endpoint.origin))
+    throw new Error('recorded request has no reachable authorized asset：需要一个与请求 **同 origin** 的资产，并在快照里显式写 inScope:true、reachable:true。'
+      + '顺序是：先保存带 reachable:true 的资产（此时请求**不要**标 valid）→ redteam_execution run 拿到真实响应 → 再把该请求标 valid:true。'
+      + '（范围与目标一致时 inScope 会自动带上。）');
   return row;
 }
 function parseRequest(row) {
   const packet = row.request;
-  if (typeof packet !== 'string' || Buffer.byteLength(packet) > 65536) throw new Error('bounded recorded HTTP request required');
+  if (typeof packet !== 'string' || Buffer.byteLength(packet) > 65536)
+    throw new Error('bounded recorded HTTP request required：request 必须是完整 HTTP/1.1 报文文本（≤64KB）；'
+      + '也可以只给 method+endpoint+headers/body，保存上下文时会自动拼成报文。');
   const split = packet.indexOf('\r\n\r\n');
   if (split < 0) throw new Error('recorded request needs CRLF header boundary');
   const lines = packet.slice(0, split).split('\r\n');
@@ -66,13 +96,21 @@ function parseRequest(row) {
     + Object.entries(headers).map(([name, value]) => name + ': ' + value).join('\r\n') + '\r\n\r\n' + body.toString();
   return { endpoint, target, method: first[1], headers, body, wireRequest };
 }
-export function preflightRecordedRequest(store, sessionId, input, { requireMethod = true } = {}) {
+export function preflightRecordedRequest(store, sessionId, input, { requireMethod = false } = {}) {
   const row = requestRow(store, sessionId, input.requestId, input.requestRevision), parsed = parseRequest(row);
   const policy = readTaskPolicy(store, sessionId);
   if (policy?.target && new URL(policy.target).origin !== parsed.endpoint.origin) throw new Error('request is outside the current task site');
+  const pathDenial = excludedPathDenial(policy, { url: parsed.target });
+  if (pathDenial) throw new Error(pathDenial);
   const method = readTaskContext(store, sessionId)?.methods.find(item => item.id === input.methodId && item.version === input.methodVersion && item.reviewed === true);
-  if (!method && (requireMethod || input.methodId !== undefined || input.methodVersion !== undefined)) throw new Error('current reviewed method identity and version required');
-  return { row, parsed, method };
+  if (!method && (requireMethod || input.methodId !== undefined || input.methodVersion !== undefined))
+    throw new Error('current reviewed method identity and version required：methodId/methodVersion 必须同时指向当前任务上下文 methods[] 里 reviewed:true 的行；'
+      + '普通正常/异常对照（run-pair）不要带这两个字段——只有 run-effect / verify-effect 必须绑定已审阅配方。');
+  // 内容闸：调用方给出测试内容键时只核对当前任务是否启用；不再绑定方法分类。
+  const requirement = { status: 'content', modules: Array.isArray(input.contentKeys) ? input.contentKeys : [] };
+  const denial = moduleGateFor(store, sessionId, requirement.modules)();
+  if (denial) throw new Error(denial);
+  return { row, parsed, method, requirement };
 }
 function recordedJobDenial(store, sessionId, input, jobStep, direction, row, parsed) {
   if (!jobStep || !/^denied\.[01]$/.test(jobStep.stepKey) || parsed.headers.authorization || parsed.headers.cookie) return false;
@@ -124,34 +162,101 @@ export async function executeRecordedRequest(store, sessionId, input, jobStep, s
   const row = requestRow(store, sessionId, input.requestId, input.requestRevision);
   const parsed = parseRequest(row);
   const task = readTaskPolicy(store, sessionId);
+  // 缩范围沿任务树传播（v6 第 8.3 节）：子代理发请求前读的是「子任务 ∩ 父任务」的最紧限制，
+  // 主任务中途关掉网站访问或加排除路径，已经在跑的子代理同样立即生效。
+  const limits = task ? effectivePolicy(store, task) : task;
+  // 动作限制的适配器侧强制（第 4.3 节）：是否访问网站、是否禁止改动业务数据。
+  // 放在发请求之前，与工具闸互为双保险；拒绝时不占用预算、不发出任何请求。
+  const limitDenial = targetTrafficDenial(limits, { method: parsed.method });
+  if (limitDenial) throw new Error(limitDenial);
+  // 排除路径同样在发请求前强制：命中就不派发、不占预算。
+  const pathDenial = excludedPathDenial(limits, { url: parsed.target });
+  if (pathDenial) throw new Error(pathDenial);
+  // 身份需求（第 5.5/8.1 节）：已失效/待确认的账号不会被当成有效；
+  // 有效账号另存的秘密只在请求自己没带 Cookie/Authorization 时套上去，秘密不进回执。
+  const identity = resolveTaskIdentity(store, sessionId, row.authContext);
+  const identityReason = identityDenial(identity);
+  if (identityReason) throw new Error(identityReason);
+  const identityHeaders = identityRequestHeaders(parsed, identity);
+  const identitySecretApplied = identityHeaders ? identityHeaders.kind : null;
+  // 派发用带上秘密的头；回执仍记请求原文，秘密不进回执。
+  const outgoing = identityHeaders ? { ...parsed, headers: identityHeaders.headers } : parsed;
   const recheck = input.purpose === 'baseline' && task?.needsBaselineRecheck === true;
-  if (input.purpose !== undefined && !recheck) throw new Error('baseline recheck is only available after user resolution');
+  const firstContact = input.purpose === 'first-contact';
+  if (input.purpose !== undefined && !recheck && !firstContact) throw new Error('baseline recheck is only available after user resolution');
   if (recheck && (!['GET', 'HEAD'].includes(parsed.method) || row.valid !== true || !/^HTTP\/\S+\s+2\d\d\b/i.test(row.response || ''))) throw new Error('recorded normal GET/HEAD baseline required');
-  const direction = recheck ? { id: 'baseline-recheck', binding: { endpoint: row.endpoint, authContext: row.authContext } } : researchDetail(store, sessionId, input.hypothesisId);
-  if (!recheck && (!direction.current || !['active', 'supported'].includes(direction.state) || researchNext(store, sessionId).id !== direction.id)) throw new Error('execution requires the current active direction');
+  if (firstContact) {
+    // 首次接触（用例 J7 实测的死锁）：run 要 hypothesis、research create 要 valid 基线，而基线又只能靠 run 拿到。
+    // 任务里还**一个 valid 基线都没有**时，允许对"已存 + inScope+reachable"的 GET/HEAD 发一次真实请求，拿回执后再标 valid。
+    if (jobStep) throw new Error('first contact cannot run inside an effect job');
+    const context = readTaskContext(store, sessionId);
+    const current = (context?.requests || []).find(item => item.id === row.id && item.revision === row.revision);
+    if (current?.valid === true) throw new Error('first contact is only for an unconfirmed baseline; use the current direction instead');
+    if (!['GET', 'HEAD'].includes(parsed.method)) throw new Error('first contact only allows GET or HEAD');
+    const receipts = store.db.prepare('SELECT record FROM execution_receipts WHERE session_id=?').all(sessionId)
+      .map(item => { try { return JSON.parse(item.record); } catch { return null; } }).filter(Boolean);
+    const alreadyExecuted = receipts.some(item => item.requestId === row.id && item.requestRevision === row.revision);
+    if (alreadyExecuted) throw new Error('this request already has a first-contact receipt; use another unexecuted GET/HEAD or mark the successful baseline valid');
+    if (receipts.filter(item => item.hypothesisId === 'first-contact').length >= FIRST_CONTACT_LIMIT)
+      throw new Error('first contact/material path check limit reached; use a current direction or stop and report the environment gap');
+  }
+  if (!recheck && !firstContact && (typeof input.hypothesisId !== 'string' || !input.hypothesisId.trim()))
+    throw new Error('execution requires a current research direction（hypothesisId）；任务里还没有任何有效基线时，'
+      + '先保存带 reachable:true 的资产 + 还没执行过的 GET/HEAD 请求，再用 purpose=first-contact 跑一次拿回执，然后按顺序标 valid:true。');
+  const direction = recheck ? { id: 'baseline-recheck', binding: { endpoint: row.endpoint, authContext: row.authContext } }
+    : firstContact ? { id: 'first-contact', binding: { endpoint: row.endpoint, authContext: row.authContext } }
+      : researchDetail(store, sessionId, input.hypothesisId);
+  if (!recheck && !firstContact && (!direction.current || !['active', 'supported'].includes(direction.state) || researchNext(store, sessionId).id !== direction.id))
+    throw new Error('execution requires the current active direction'
+      + (direction.blockedReason ? '：' + direction.blockedReason + '（方向被阻断时不要改写基线掩盖它；按提示处理或新建研究方向）' : ''));
   if (task?.target && new URL(task.target).origin !== parsed.endpoint.origin) throw new Error('request is outside the current task site');
-  if (row.endpoint !== direction.binding.endpoint || (row.authContext !== direction.binding.authContext
-    && !recordedJobDenial(store, sessionId, input, jobStep, direction, row, parsed))) throw new Error('recorded request must match direction endpoint and identity');
+  if (!sameEndpointPath(row.endpoint, direction.binding.endpoint) || (row.authContext !== direction.binding.authContext
+    && !recordedJobDenial(store, sessionId, input, jobStep, direction, row, parsed)))
+    throw new Error('recorded request must stay on the same endpoint path and identity（查询参数可变；路径、来源与身份不能变）：'
+      + '方向基线 ' + direction.binding.endpoint + '，本次请求 ' + row.endpoint + '，身份 ' + row.authContext + ' vs ' + direction.binding.authContext);
   let selectedMethod;
   if (input.methodId !== undefined || input.methodVersion !== undefined) {
     selectedMethod = readTaskContext(store, sessionId)?.methods.find(method => method.id === input.methodId && method.version === input.methodVersion && method.reviewed === true);
     if (!selectedMethod) throw new Error('current reviewed method identity and version required');
   }
+  // 内容闸：全不选时任何新的目标操作都被拒绝，包括用户处理阻碍后的 baseline 复查；
+  // 已存资料、历史回执的读取不受影响。调用方给出 contentKeys 时只核对是否启用该项。
+  const requiredContent = Array.isArray(input.contentKeys) ? input.contentKeys : [];
+  const requirement = { status: 'content', modules: requiredContent };
+  const moduleCheck = moduleGateFor(store, sessionId, requiredContent);
   const denied = taskExecutionGuard(store, sessionId, 'recorded-http-execution', Date.now(), { baselineRecheck: recheck, ...(jobStep ? { onReserve: () => {
     store.db.prepare('INSERT INTO effect_job_steps (session_id,job_id,step_key,state) VALUES (?,?,?,?)').run(sessionId, jobStep.jobId, jobStep.stepKey, 'inflight');
-  } } : {}) });
+  } } : {}), moduleCheck });
   if (denied) throw new Error(denied);
+  // 网络 I/O 前的最终核对（此刻不持有任何事务）。已准入、未派发：拒绝时释放本次预留，绝不发出请求。
+  const late = moduleCheck();
+  if (late) { releaseExecutionReservation(store, sessionId); throw new Error(late + '（已准入、未派发；没有发出请求）'); }
+  const modulePolicy = recheck ? null : (() => { const { selection } = rootModuleSelection(store, sessionId);
+    return { modulesRev: selection.rev, policyRev: selection.policyRev, active: selection.active }; })();
   const startedAt = new Date().toISOString(), started = performance.now();
-  const result = await exchange(parsed, timeoutMs, maxBytes, signal);
+  // 请求节流（PLAN 5.5）：先在每会话闸门里排队，拿到名额才真的发请求；释放放在 finally。
+  const releaseSlot = await acquireTargetSlot(sessionId, task, signal);
+  let result;
+  try { result = await exchange(outgoing, timeoutMs, maxBytes, signal); }
+  finally { releaseSlot(); }
   const record = { id: 'execution-' + randomUUID(), source: 'host-http-execution', hypothesisId: direction.id,
     requestId: row.id, requestRevision: row.revision, endpoint: row.endpoint, authContext: row.authContext,
+    ...(typeof input.callId === 'string' && input.callId ? { callId: input.callId } : {}),
+    ...(identity?.matched ? { identity: { name: identity.name, status: identity.status } } : {}),
+    ...(identitySecretApplied ? { identitySecretApplied } : {}),
     ...(selectedMethod ? { methodId: selectedMethod.id, methodVersion: selectedMethod.version, methodBasis: executionMethodBasis(selectedMethod) } : {}),
-    requestBasis: basis(row), startedAt, completedAt: new Date().toISOString(), elapsedMs: Math.ceil(performance.now() - started),
+    ...(requirement.modules.length ? { contentRequirement: requirement.modules } : {}),
+    ...(modulePolicy ? { modulePolicy } : {}),
+    requestBasis: basis(row, parsed.wireRequest), startedAt, completedAt: new Date().toISOString(), elapsedMs: Math.ceil(performance.now() - started),
     requestAttempts: 1, redirectFollowed: false, request: parsed.wireRequest, requestSha256: digest(parsed.wireRequest), ...result,
     impactVerified: false, evidenceLimit: 'Host captured execution only; recorded identity labels and impact still require independent verification.' };
   store.db.exec('BEGIN IMMEDIATE');
   try {
     store.db.prepare('INSERT INTO execution_receipts (session_id,id,record) VALUES (?,?,?)').run(sessionId, record.id, JSON.stringify(record));
+    // 同事务写一条带 executionId 的任务事件（v6 第 9.3 节）：事件流能直接指回这次执行回执，
+    // 而不是只看到"任务状态变了"却找不到对应执行。
+    taskEvent(store, sessionId, readTaskPolicy(store, sessionId)?.policyRev ?? 0, 'execution-recorded',
+      { executionId: record.id, workId: sessionId, endpoint: record.endpoint, status: record.status, outcome: record.outcome });
     if (jobStep) store.db.prepare('UPDATE effect_job_steps SET state=?,receipt_id=? WHERE session_id=? AND job_id=? AND step_key=?').run('captured', record.id, sessionId, jobStep.jobId, jobStep.stepKey);
     store.db.exec('COMMIT');
   } catch (error) { store.db.exec('ROLLBACK'); throw error; }
@@ -166,7 +271,9 @@ export async function executeRecordedRequest(store, sessionId, input, jobStep, s
     const blocker = { code, reason: explicitIpBlock ? '目标明确返回IP访问阻断；停止请求，不自动绕行' : '访问限流或正常对照失效；停止并核对访问状态',
       evidence: sessionId + ':' + record.id + '; HTTP=' + record.status + '; outcome=' + record.outcome };
     pauseTaskPolicy(store, sessionId, blocker, 'host-captured-http');
-    if (task?.parentSession && ['ip-blocked', 'normal-access-failed'].includes(code)) pauseTaskPolicy(store, task.parentSession, blocker, 'host-captured-child-http');
+    // 父停止、缩范围、身份失效和额度变化沿任务树传播（v6 第 8.3 节）。
+    // login-expired 也要上抛：账号失效会让依赖该身份的子任务全部停摆，父任务必须知道。
+    if (task?.parentSession && ['ip-blocked', 'normal-access-failed', 'login-expired'].includes(code)) pauseTaskPolicy(store, task.parentSession, blocker, 'host-captured-child-http');
   }
   if (recheck && !code && record.outcome === 'response' && record.status >= 200 && record.status < 300) {
     const previousType = /^content-type:\s*([^;\r\n]+)/im.exec(row.response)?.[1]?.toLowerCase();
@@ -199,12 +306,20 @@ export function readExecutionReceipt(store, sessionId, id) {
       || result.capturedBytes !== body.length || !Number.isSafeInteger(result.responseBytes)
       || result.responseBytes < body.length) throw new Error('receipt metadata differs from captured bytes');
     integrityValid = true;
-    current = basis(requestRow(store, sessionId, result.requestId, result.requestRevision)) === result.requestBasis;
+    const currentRow = requestRow(store, sessionId, result.requestId, result.requestRevision);
+    let canonical = '';
+    try { canonical = parseRequest(currentRow).wireRequest; } catch { canonical = ''; }
+    // 新口径：按规范化报文比对（格式差异不算改动，内容/路径/身份变了仍会失效）；
+    // 旧口径：行原文直接比对，兼容本改动之前写入的回执。
+    current = (canonical !== '' && basis(currentRow, canonical) === result.requestBasis) || basis(currentRow) === result.requestBasis;
     if (!current) currentReason = 'receipt request revision changed';
   } catch (error) { currentReason = error.message; /* Historical bytes remain readable, never silently repaired. */ }
   return { ...result, current, integrityValid, currentReason };
 }
 export function executionReceiptSummary(record) {
   const { request, responseHead, responseBodyBase64, requestBasis, ...summary } = record;
-  return { ...summary, detail: 'redteam_execution action=detail id=' + record.id };
+  return { ...summary,
+    ...(record.identitySecretApplied ? { note: '本次派发按身份“' + (record.identity?.name || '') + '”另存的秘密补了 '
+      + record.identitySecretApplied + ' 认证头；回执里的请求原文不含秘密。' } : {}),
+    detail: 'redteam_execution action=detail id=' + record.id };
 }

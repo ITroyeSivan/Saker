@@ -2,6 +2,7 @@
 // Response differences are investigation material, never automatic impact proof.
 import { createHash, randomUUID } from 'node:crypto';
 import { preflightRecordedRequest, executeRecordedRequest, readExecutionReceipt } from './execution-receipts.js';
+import { sameEndpointPath } from './endpoint-binding.js';
 import { researchDetail, researchNext, observeResearch } from './research.js';
 import { taskPolicyStatus } from './task-policy.js';
 import { readTaskContext } from './task-context.js';
@@ -13,14 +14,27 @@ const steps = (store, sid, id) => store.db.prepare('SELECT step_key AS step,stat
 function prepare(store, sid, input) {
   if (!input || typeof input !== 'object' || Array.isArray(input) || JSON.stringify(input).length > 8192) fail('bounded comparison document required');
   const direction = researchDetail(store, sid, input.hypothesisId);
-  if (!direction.current) fail('current research baseline required');
+  if (!direction.current) fail('current research baseline required'
+    + (direction.blockedReason ? '：' + direction.blockedReason : '') + '（基线证据被改写后不要掩盖它；按提示处理或新建研究方向）');
+  // 方法绑定是可选的：run-pair 只重放两条已存 GET/HEAD，不做模块派发；带方法时必须同时给
+  // 两个字段，且必须是当前任务上下文里 reviewed:true 的行（preflight 校验）。J11 实测：
+  // 把已审阅方法设成硬门槛会让全新 profile 的正常/异常对照永远跑不起来（没有方法包可选）。
+  if ((input.methodId === undefined) !== (input.methodVersion === undefined))
+    fail('methodId 与 methodVersion 必须同时提供；不带这两个字段时按普通对照执行（不需要方法包，run-effect/verify-effect 才要求已审阅配方）');
   const selected = Object.fromEntries(['normal', 'probe'].map(role => [role, preflightRecordedRequest(store, sid,
-    { ...input[role], ...(input.methodId === undefined ? {} : { methodId: input.methodId, methodVersion: input.methodVersion }) }, { requireMethod: false })]));
-  if (input.methodVersion !== undefined && input.methodId === undefined) fail('method identity and version must be supplied together');
-  for (const { row, parsed, method } of Object.values(selected)) {
-    if (row.endpoint !== direction.binding.endpoint || row.authContext !== direction.binding.authContext
-      || !['GET', 'HEAD'].includes(parsed.method) || (method && method.endpoint !== row.endpoint)) fail('comparison must stay in the current endpoint and identity; automatic comparisons accept GET/HEAD only');
+    { ...input[role], ...(input.methodId === undefined ? {} : { methodId: input.methodId, methodVersion: input.methodVersion }) })]));
+  for (const [role, { row, parsed, method }] of Object.entries(selected)) {
+    // J11b 实测：受控对照要改查询参数（q=apple vs q=apple'），"同端点"必须是
+    // 同 origin + 同 pathname（查询参数可变），不是 endpoint 整串相等。
+    if (!sameEndpointPath(row.endpoint, direction.binding.endpoint) || row.authContext !== direction.binding.authContext
+      || !['GET', 'HEAD'].includes(parsed.method) || (method && !sameEndpointPath(method.endpoint, row.endpoint)))
+      fail('comparison must stay on the same endpoint path and identity（查询参数可变；路径、来源与身份不能变；自动对照只接受 GET/HEAD）：'
+        + '方向基线 ' + direction.binding.endpoint + '，' + role + ' ' + row.endpoint + '（' + parsed.method + '，身份 ' + row.authContext + '）');
   }
+  // J11f 实测：模型把参数值只写进 inputs（位置标注），endpoint 与报文里都没有值，
+  // 两条请求逐字相同 → 对照必然 no-information，还引出后续一串无效改行。这里直接拒绝并给做法。
+  if (selected.normal.parsed.wireRequest === selected.probe.parsed.wireRequest)
+    fail('normal 与 probe 的报文完全相同：这不会产生任何差异。受控输入的值必须写进 probe 的 endpoint 完整 URL（例如 .../search?q=apple%27）或报文原文；inputs 只标注参数位置，不携带值。');
   const normal = selected.normal;
   if (normal.row.id !== direction.binding.requestId || normal.row.revision !== direction.binding.requestRevision
     || !normal.row.valid || !/^HTTP\/\S+\s+2\d\d\b/.test(normal.row.response || '')) fail('normal role must use this direction\'s recorded valid baseline');
@@ -28,7 +42,7 @@ function prepare(store, sid, input) {
   if (credentials('normal') !== credentials('probe')) fail('comparison cannot silently switch credentials');
   const jobKey = hash(['recorded-comparison/v1', direction.boundary, direction.controlledInputs, direction.supportCriterion, direction.falsifier,
     ...['normal', 'probe'].map(role => { const row = selected[role].row; return [row.endpoint, row.authContext, row.request, row.valid,
-      row.response?.replace(/^Date:[^\r\n]*\r?\n/gim, ''), row.inputs.map(field => [field.location, field.name]).sort()]; }),
+      row.response?.replace(/^Date:[^\r\n]*\r?\n/gim, ''), (row.inputs ?? []).map(field => [field.location, field.name]).sort()]; }),
     selected.normal.method ? hash(selected.normal.method) : 'no-method']);
   const timeoutMs = input.timeoutMs ?? 5000, maxBytes = input.maxBytes ?? 65536;
   if (!Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 15000 || !Number.isInteger(maxBytes) || maxBytes < 64 || maxBytes > 65536) fail('invalid comparison limits');
@@ -65,14 +79,17 @@ export function comparisonFindingInput(store, sid, input) {
   const saved = store.db.prepare('SELECT record FROM effect_jobs WHERE session_id=? AND id=?').get(sid, comparisonId);
   if (!saved) fail('comparisonId must be the plain pair-UUID returned by run-pair, not a JSON object or hypothesis ID; keep the recorded lead and correct this argument once, without new requests or filesystem search');
   const job = JSON.parse(saved.record), view = readComparisonJob(store, sid, comparisonId);
-  if (!view || view.state !== 'completed' || !view.current || view.steps.length !== 2) fail('current completed two-request comparison required');
+  if (!view || view.state !== 'completed' || !view.current || view.steps.length !== 2)
+    fail('current completed two-request comparison required：对照必须已完成、两条回执仍与当前上下文一致。'
+      + '跑完对照后不要再改写 normal/probe 行（标 valid:true、换 responseReceiptId 都会让旧对照失效）；'
+      + '用最新的、未被改写的对照重试，必要时在同一方向重跑一次 run-pair。');
   const direction = researchDetail(store, sid, job.input.hypothesisId);
   const observation = direction.observations.find(row => row.id === job.observationId);
   if (observation?.assessment?.outcome !== 'support') fail('interpret the comparison as support before registering a pending lead; an HTTP difference is not sufficient');
   const method = readTaskContext(store, sid)?.methods.find(row => row.id === job.input.methodId && row.version === job.input.methodVersion && row.reviewed);
   if (!method) fail('comparison registration needs its current reviewed method; retain the research lead until that condition is available');
   const receipts = Object.fromEntries(view.steps.map(step => [step.step.replace(/\.0$/, ''), readExecutionReceipt(store, sid, step.receiptId)]));
-  if (!receipts.normal?.current || !receipts.probe?.current || receipts.normal.outcome !== 'response' || receipts.probe.outcome !== 'response') fail('current complete normal and probe receipts required');
+  if (!receipts.normal?.current || !receipts.probe?.current || receipts.normal.outcome !== 'response' || receipts.probe.outcome !== 'response') fail('对照必须引用当前仍匹配、内容完整的正常与差分回执');
   const ids = [receipts.normal.id, receipts.probe.id];
   const reproduction = { kind: 'method', mechanism: direction.boundary, methodId: method.id, methodVersion: method.version, endpoint: direction.binding.endpoint,
     prerequisites: ['Independently confirm the recorded identity, object ownership and expected permission.'], dependencies: [],
@@ -98,7 +115,7 @@ export async function runComparisonJob(store, sid, input, signal) {
         job.state = 'interrupted'; job.reason = 'uncaptured dispatch; automatic resend refused'; write(store, sid, job);
         store.db.exec('COMMIT'); return summary(store, sid, job, true);
       }
-      if (steps(store, sid, job.id).some(step => { const receipt = readExecutionReceipt(store, sid, step.receiptId); return !receipt.current || Date.now() - Date.parse(receipt.completedAt) > 15 * 60000; })) {
+      if (steps(store, sid, job.id).some(step => { const receipt = readExecutionReceipt(store, sid, step.receiptId); return !receipt.current || receipt.integrityValid === false; })) {
         job.state = 'interrupted'; job.reason = 'captured comparison stale; automatic resend refused'; write(store, sid, job);
         store.db.exec('COMMIT'); return summary(store, sid, job, true);
       }
@@ -121,7 +138,7 @@ export async function runComparisonJob(store, sid, input, signal) {
       signal?.throwIfAborted();
       const step = steps(store, sid, job.id).find(step => step.step === role + '.0');
       receipts[role] = step ? readExecutionReceipt(store, sid, step.receiptId) : readExecutionReceipt(store, sid,
-        (await executeRecordedRequest(store, sid, { hypothesisId: job.input.hypothesisId, ...job.input[role],
+        (await executeRecordedRequest(store, sid, { hypothesisId: job.input.hypothesisId, ...job.input[role], callId: input.callId,
           ...(job.input.methodId === undefined ? {} : { methodId: job.input.methodId, methodVersion: job.input.methodVersion }),
           timeoutMs: job.input.timeoutMs, maxBytes: job.input.maxBytes }, { jobId: job.id, stepKey: role + '.0' }, signal)).id);
       if (receipts[role].outcome !== 'response' || !receipts[role].current) fail('normal access or capture incomplete: ' + receipts[role].outcome);

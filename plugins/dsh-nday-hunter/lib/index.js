@@ -26,6 +26,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import { readSettingsSection } from 'dsh-saker/settings-compat'
 import { readInventory, scopeSafeAsset } from 'dsh-saker/asset-inventory'
 import { parseQueryExpression, queryTerms, compileQueryExpression } from 'dsh-saker/query-expression'
+import { sessionWorkingDirectory } from 'dsh-saker/working-directory'
 import {
   VERDICT,
   candidateEntries,
@@ -53,6 +54,7 @@ import { ATTACK_PROGRESS_FILE, bucketGates, emptyProgress, recordGate, renderGat
 import { buildMemshellCliPlan, buildMemshellMcpPlan, executeMemshellCliPlan, redactObject } from './memshell-cli.js'
 import { loadZdayCatalog, matchZdayPatterns, renderZdayHypotheses, observedResearchInputs } from './zday.js'
 import { buildAccessPlan, classifyMemoryBackend, renderAccessPlan } from './post.js'
+import { writeFileAtomicSync } from './atomic-write.js'
 import { renderWorklist, triageDocs } from './triage.js'
 import { deriveProductKeywords, renderCoverageGap } from './coverage-gap.js'
 import { resolveDshHome } from './home.js'
@@ -76,7 +78,7 @@ import { readMetrics, recordFeedbackMetric, recordMatchMetric, recordSearchMetri
  */
 function resolveWorkspaceArg(workspace, exec) {
   const raw = String(workspace ?? '').trim()
-  const base = exec?.agent?.session?.header?.cwd
+  const base = sessionWorkingDirectory(exec?.agent?.ctx, exec?.agent?.session)
   if (raw === '') return path.resolve(base ?? '.')
   return path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(base ?? '.', raw)
 }
@@ -506,7 +508,7 @@ function writePriorityPolicy(policy) {
   const file = priorityPolicyFile()
   fs.mkdirSync(path.dirname(file), { recursive: true })
   const next = normalizePriorityPolicy(policy)
-  fs.writeFileSync(file, JSON.stringify(next, null, 2) + '\n', 'utf8')
+  writeFileAtomicSync(file, JSON.stringify(next, null, 2) + '\n', { encoding: 'utf8' })
   return next
 }
 
@@ -522,6 +524,16 @@ function writePriorityPolicy(policy) {
 // **认不出的响应一律当失败**——把平台错误页当成「有回连」会直接制造假阳性。
 
 const OOB_LABEL_RE = /^[a-z0-9][a-z0-9-]{2,39}$/
+
+/**
+ * 工具返回值必须能无损序列化。
+ *
+ * 宿主的输出校验是 `validateJsonSchemaValue(output.schema, value)`：对象里出现 `undefined`
+ * 字段（或 Date/Map/类实例等）会被判 "not a lossless JSON object"，**模型收到的是"调用失败"**。
+ * 2026-10-11 用官方 Desktop 的真校验器实测抓到 `nday_source_radar` 与 `nday_source_collect`
+ * 在空参数下就踩这条（桩加载器下看不见）。这里统一过一遍 JSON 往返，把 `undefined` 字段去掉。
+ */
+const lossless = value => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)))
 
 /**
  * 把「批量带外的归因表」落盘。`oob_probe action=batch` 与 `nday_match` 的命中预分配
@@ -1010,7 +1022,7 @@ function apply(ctx, config = {}) {
           ...(page ? [`本地检索：${page.total} 条匹配；nextCursor=${page.nextCursor ?? 'null'}；来源原文用 record=来源ID:记录ID 读取。`] : []),
           ...(candidates.length ? ['', '候选（已按编号/URL/标题去重，保留来源时间与可信等级）：', ...candidates.slice(0, 20).map((row) => `- [${row.trust}/${row.freshness}] ${row.source}:${row.id || '-'} | ${row.title} | ${row.publishedAt || row.published || '日期未标注'} | ${row.url} | revision=${row.revision}${row.requiresSourceReview ? ' | 需要回源复核' : ''}`)] : []),
         ].join('\n')
-        return { ok: true, status, metrics, candidates, matchedCandidates: page?.total ?? null, nextCursor: page?.nextCursor ?? null, text }
+        return lossless({ ok: true, status, metrics, candidates, matchedCandidates: page?.total ?? null, nextCursor: page?.nextCursor ?? null, text })
       } catch (error) {
         return { ok: false, error: String(error?.message || error) }
       }
@@ -1052,7 +1064,7 @@ function apply(ctx, config = {}) {
           ...(failed.length ? ['失败源：', ...failed.map((row) => `- ${row.source}: ${row.error}`)] : []),
           ...(result.summary.skippedSources ? [`跳过 ${result.summary.skippedSources} 个源（未配置公众号检索词等）。`] : []),
         ].join('\n')
-        return { ok: true, ...collectorResponse(result), text }
+        return lossless({ ok: true, ...collectorResponse(result), text })
       } catch (error) {
         return { ok: false, error: String(error?.message || error) }
       }
@@ -1327,7 +1339,7 @@ function apply(ctx, config = {}) {
         const value = raw && typeof raw === 'object' && 'value' in raw ? raw.value : raw
         if (!value || value.ok !== true) {
           const error = String(value?.error || raw?.error || `${platform} 未返回成功结果`)
-          platformAttempts.push({ platform, ok: false, error, fieldWarnings: attemptFieldWarnings })
+          platformAttempts.push({ platform, ok: false, status: String(value?.status || raw?.status || ''), error, fieldWarnings: attemptFieldWarnings })
           if (requestedPlatform === 'auto' && platform !== platformOrder[platformOrder.length - 1]) continue
           return { ok: false, error, text: `nday_scope_hunt 失败：${error}${attemptFieldWarnings.length ? `\n字段差异：\n${attemptFieldWarnings.map((line) => `- ${line}`).join('\n')}` : ''}\n${pagination}`, platformAttempts, fieldWarnings: attemptFieldWarnings, detail: value }
         }
@@ -1601,7 +1613,7 @@ function apply(ctx, config = {}) {
       if (args.action === 'record') {
         const result = recordGate(plan, progress, args)
         if (!result.ok) return { ok: false, error: result.error }
-        fs.writeFileSync(progressFile, JSON.stringify(result.progress, null, 2) + '\n', 'utf8')
+        writeFileAtomicSync(progressFile, JSON.stringify(result.progress, null, 2) + '\n', { encoding: 'utf8' })
         appendEvidence(workspace, `attack-gate-${stamp()}`, `attack_gate ${args.bucketId} ${args.outcome}`, ATTACK_PROGRESS_FILE)
         progress = result.progress
       }

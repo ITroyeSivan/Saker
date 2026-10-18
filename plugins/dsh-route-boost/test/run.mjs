@@ -363,7 +363,7 @@ console.log(fail === 0 ? `\nall ${pass} tests passed` : `\n${fail} FAILED, ${pas
 	else process.env.DSH_HOME = savedHome;
 }
 
-// 18. Pentest 只负责一条有证据的 RCE 路径；其他安全模式保留原定向/矩阵口径
+// 18. Pentest 围绕当前问题推进；其他安全模式保留原定向/矩阵口径
 {
 	const targeted = detectScope("pentest", "帮我测试这个目标的SQL注入漏洞、XSS漏洞");
 	ok("定向判定：图谱类目命中 SQL 注入与 xss", targeted.directed === true && targeted.hits.some((h) => h.includes("SQL")) && targeted.hits.some((h) => h.toLowerCase().includes("xss")));
@@ -374,11 +374,11 @@ console.log(fail === 0 ? `\nall ${pass} tests passed` : `\n${fail} FAILED, ${pas
 	ok("判定确定性", JSON.stringify(detectScope("pentest", "测 SQL 注入")) === JSON.stringify(detectScope("pentest", "测 SQL 注入")));
 	const m = MODES.pentest, phase = inferPhase(m, "帮我测试这个目标的SQL注入漏洞、XSS漏洞");
 	const dEnv = buildEnvelopeDetailed({ presetId: "pentest", mode: m, phase, refsHits: [], gates: GATES, scope: detectScope("pentest", "帮我测试这个目标的SQL注入漏洞、XSS漏洞") });
-	ok("定向信封：只沿可能到 RCE 的指定线索验证", dEnv.text.includes("scope: RCE 定向") && dEnv.text.includes("SQL 注入") && dEnv.text.includes("有证据通向 RCE") && dEnv.text.includes("一条可复现 RCE 成功即停止"));
+	ok("定向信封：只沿当前问题相关线索验证", dEnv.text.includes("scope: 定向") && dEnv.text.includes("SQL 注入") && dEnv.text.includes("当前问题直接相关") && dEnv.text.includes("完成或满足停止条件即收尾"));
 	const fEnv = buildEnvelopeDetailed({ presetId: "pentest", mode: m, phase: m.phases[0], refsHits: [], gates: GATES, scope: { directed: false, hits: [] } });
-	ok("无特定漏洞线索时只走单条 RCE 主线", fEnv.text.includes("固定终点为可复现 RCE") && fEnv.text.includes("选一条最有证据的 RCE 路径") && fEnv.text.includes("不跑全漏洞矩阵") && !fEnv.text.includes("全流程矩阵推进"));
+	ok("无特定漏洞线索时按问题与已选模块推进", fEnv.text.includes("当前任务问题和已选模块") && fEnv.text.includes("从相关方向中选择有依据的检查") && fEnv.text.includes("不跑全漏洞矩阵") && !fEnv.text.includes("全流程矩阵推进"));
 	ok("Pentest 目标锚只接受明确授权资产", fEnv.text.includes("target: 仅测试用户明确给出的授权 URL/IP") && !fEnv.text.includes("redteam_atlas_target"));
-	ok("Pentest 边界与复核口径明确止于 RCE", m.boundary.includes("RCE 后立即停止") && m.boundary.includes("不做 webshell") && m.review.includes("不要求子代理双签"));
+	ok("Pentest 边界与复核口径按停止条件收尾且不做持久化", m.boundary.includes("达到用户设置的停止条件") && m.boundary.includes("不做 webshell") && m.review.includes("不要求子代理双签"));
 	ok("目的行：粘滞携带用户原文", buildEnvelopeDetailed({ presetId: "pentest", mode: m, phase, refsHits: [], gates: GATES, scope: { directed: true, hits: ["SQL 注入"] }, purpose: "验证服务端命令执行并留存只读响应" }).text.includes("目的: 验证服务端命令执行并留存只读响应"));
 	ok("目的行：无 purpose 不出行", !buildEnvelopeDetailed({ presetId: "pentest", mode: m, phase, refsHits: [], gates: GATES }).text.includes("目的:"));
 	ok("目的行：多行原文单行化+超长裁剪", purposeLine("第一行\n第二行   空格") === "第一行 第二行 空格" && purposeLine("x".repeat(200)).length === 121 && purposeLine("x".repeat(200)).endsWith("…") && purposeLine("  ") === "");
@@ -448,7 +448,7 @@ console.log(fail === 0 ? `\nall ${pass} tests passed` : `\n${fail} FAILED, ${pas
 {
 	const m = MODES.pentest;
 	const env = buildEnvelope({ presetId: "pentest", mode: m, phase: m.phases[0], refsHits: [], evidence: "unknown", gates: FALLBACK_GATES });
-	ok("Pentest 以 RCE 证据或阻断点直接收尾", env.includes("记录 RCE 是否复现") && env.includes("RCE 成功即收尾") && !env.includes("operation_conclude"));
+	ok("Pentest 以确认、排除或缺条件结果直接收尾", env.includes("问题是否确认、排除或仍缺条件") && env.includes("达到停止条件即收尾") && !env.includes("operation_conclude"));
 	const otherModes = Object.entries(MODES).filter(([pid]) => pid !== "pentest");
 	const missing = otherModes.filter(([pid, mm]) =>
 		!buildEnvelope({ presetId: pid, mode: mm, phase: mm.phases[0], refsHits: [], evidence: "unknown", gates: FALLBACK_GATES }).includes("operation_conclude")).map(([pid]) => pid);

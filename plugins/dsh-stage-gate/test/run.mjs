@@ -910,8 +910,8 @@ import os from "node:os";
 			&& snap.flow.buckets[0].status === "interrupted" && snap.flow.current === "S5"
 			&& snap.tasks.find((task) => task.id === "i1").bucketId === "bucket-demo",
 			JSON.stringify(snap.flow));
-		expect("S6 明确止于 RCE 证据与报告",
-			snap.flow.stages.find((stage) => stage.id === "S6")?.label === "RCE 证据与报告（停止）",
+		expect("S6 明确止于结果证据与报告",
+			snap.flow.stages.find((stage) => stage.id === "S6")?.label === "结果证据与报告（停止）",
 			JSON.stringify(snap.flow.stages));
 		expect("工作台快照：作业地图把资产组和关联任务连起来",
 			snap.graph.groupCount === 1 && snap.graph.groups[0].id === "bucket-demo"
@@ -925,7 +925,9 @@ import os from "node:os";
 			const banned = ["归一化", "指纹分桶", "攻击流程图", "复用分", "未收口", "收口", "意图", "准则"];
 			const found = banned.filter((term) => clientSource.includes(term));
 			expect("工作台界面不回退到 AI 化术语", found.length === 0, found.join(","));
-			expect("工作台界面包含作业地图卡片", clientSource.includes("作业地图") && clientSource.includes("graphCard"));
+			expect("进度页保留会话标题状态提示且不恢复已删除的作业地图",
+				clientSource.includes("progressTitleLabel") && clientSource.includes("ProgressDocumentTitle")
+				&& !clientSource.includes("作业地图") && !clientSource.includes("graphCard"));
 		}
 		expect("工作台快照：已登记目标时不报「目标契约」缺失",
 			snap.goalRegistered === true && !snap.attention.some((a) => a.kind === "目标未登记"));

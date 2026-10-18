@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-knowledge-hub",
-  "version": "0.3.21",
+  "version": "0.3.39",
   "description": "搜索安全资料，管理内置手册、个人笔记和导入的资料。",
   "type": "module",
   "main": "./lib/index.js",
@@ -30,7 +30,8 @@
     "payloads"
   ],
   "engines": {
-    "node": ">=22"
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": "0.2.0-rc.2 || 0.2.1-rc.2"
   },
   "dsh": {
     "bundle": {

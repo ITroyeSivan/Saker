@@ -18,6 +18,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { DatabaseSync } from "node:sqlite";
 
 // ⚠ DSH_HOME 必须在**任何** dshHome() 调用之前设好（模块内 bundleRefs/pattRef 是懒缓存）。
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), "kh-home-"));
@@ -28,6 +29,7 @@ process.env.SAKER_DISABLE_BUNDLE = "1";
 
 const { dispatch, stats, searchAll, ensureKnowledgeIndex, closeKnowledgeIndex, apply, autoSyncKnowledgePacks, getSyncMode, setSyncMode, translateQuery, queryConcepts, coverageBonusOf } = await import("../lib/index.js");
 const { syncPack, refreshPackCatalog, catalogCachePathForDebug, loadCatalog, packsStatus } = await import("../lib/packs.js");
+const { extractFacts, packAutoItems, renderAutoBlock, autoBudgetAllows, AUTO_BATCH_MAX_ITEMS, AUTO_BATCH_BYTES } = await import("../lib/auto-provide.js");
 
 let pass = 0, fail = 0;
 const ok = (label, cond, extra) => {
@@ -322,6 +324,26 @@ write(path.join(IMPORTS, "team-notes", "win", "ad.md"), "# 域渗透\nKerberoast
 	ok("PDF 可按标题/路径检索", pdfHits.some((h) => h.path === "irm/IRM-Ransomware.pdf"), JSON.stringify(pdfHits.map((h) => h.path)));
 	const pdfRead = await dispatch("read", { source: "import", mode: "pentest", path: "irm/IRM-Ransomware.pdf" });
 	ok("PDF 读取返回元数据提示而非二进制乱码", pdfRead.ok && /PDF document/.test(pdfRead.value.content) && !pdfRead.value.content.includes("\u0000"), JSON.stringify(pdfRead).slice(0, 200));
+
+	// E12：更正文件要带更新时间，撤回文件不能继续被检索。
+	const notes = path.join(REFS, "pentest", "notes");
+	fs.mkdirSync(notes, { recursive: true });
+	const oldNote = path.join(notes, "condition-old.md");
+	const newNote = path.join(notes, "condition-new.md");
+	const withdrawnNote = path.join(notes, "condition-withdrawn.md");
+	fs.writeFileSync(oldNote, "# old condition\n\nconditionchangemarker old condition\n");
+	fs.writeFileSync(newNote, "# corrected condition\n\nconditionchangemarker corrected condition\n");
+	fs.writeFileSync(withdrawnNote, "---\nstatus: withdrawn\n---\n\nwithdrawnmarker must not be searchable\n");
+	fs.utimesSync(oldNote, new Date("2026-01-01T00:00:00Z"), new Date("2026-01-01T00:00:00Z"));
+	fs.utimesSync(newNote, new Date("2026-02-01T00:00:00Z"), new Date("2026-02-01T00:00:00Z"));
+	ensureKnowledgeIndex().invalidate();
+	const correctionHits = searchAll("conditionchangemarker", "pentest");
+	const oldHit = correctionHits.find((h) => h.path === "notes/condition-old.md");
+	const newHit = correctionHits.find((h) => h.path === "notes/condition-new.md");
+	ok("更正文件检索带 updatedAt 且新文件时间更晚", !!oldHit && !!newHit && oldHit.updatedAt && newHit.updatedAt
+		&& Date.parse(newHit.updatedAt) > Date.parse(oldHit.updatedAt), JSON.stringify(correctionHits.map((h) => ({ path: h.path, updatedAt: h.updatedAt }))));
+	const withdrawnHits = searchAll("withdrawnmarker", "pentest");
+	ok("撤回标记文件不再进入检索", !withdrawnHits.some((h) => h.path === "notes/condition-withdrawn.md"), JSON.stringify(withdrawnHits.map((h) => h.path)));
 }
 
 // ── 12. 模型工具输出契约：render 必须真的带检索片段/原文 ───────────────────
@@ -344,6 +366,43 @@ write(path.join(IMPORTS, "team-notes", "win", "ad.md"), "# 域渗透\nKerberoast
 	const searchText = searchTool.output.render({ query: "布尔盲注" }, searchValue)[0].text;
 	ok("knowledge_search render 带命中路径与片段", /sqli\.md/.test(searchText) && /盲注/.test(searchText), searchText.slice(0, 240));
 	ok("knowledge_search 被预算截断到 limit", searchValue.value.hits.length <= 2, JSON.stringify(searchValue.value.hits.map((h) => h.path)));
+	// 主动搜索不传 limit 时默认最多 5 条（v6 第 6.2 节）：8 份命中文件只能拿回 5 条。
+	for (let i = 0; i < 8; i += 1) write(path.join(USER_PENTEST, "bulk", `hit-${i}.md`), `# 命中 ${i}\nSakerDefaultLimitProbe 关键词正文。\n`);
+	closeKnowledgeIndex();
+	const defaultHits = await searchTool.execute({ query: "SakerDefaultLimitProbe", mode: "pentest" });
+	ok("knowledge_search 不传 limit 时默认最多 5 条", defaultHits.ok && defaultHits.value.hits.length > 0 && defaultHits.value.hits.length <= 5, JSON.stringify(defaultHits.value.hits.length));
+	// v6 第 6.2 节「空结果」：主动检索要返回没有命中的**具体查询**，且不生成资料。
+	const emptyHits = await searchTool.execute({ query: "SakerNoSuchTermXyzzy", mode: "pentest" });
+	const emptyText = searchTool.output.render({ query: "SakerNoSuchTermXyzzy" }, emptyHits)[0].text;
+	ok("knowledge_search 空结果返回具体查询且不编资料",
+		emptyHits.ok && emptyHits.value.hits.length === 0 && emptyHits.value.query === "SakerNoSuchTermXyzzy"
+		&& /没有命中：SakerNoSuchTermXyzzy/.test(emptyText), emptyText.slice(0, 200));
+
+	// v6 第 5.6 节：任务级知识库开关关闭时，知识工具必须拒绝读取（唯一布尔来源）。
+	const redteamDir = path.join(HOME, "redteam-results");
+	fs.mkdirSync(redteamDir, { recursive: true });
+	const switchDb = new DatabaseSync(path.join(redteamDir, "results.db"));
+	switchDb.exec("CREATE TABLE IF NOT EXISTS task_knowledge (session_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL, source TEXT NOT NULL, updated_at TEXT NOT NULL)");
+	const execFor = (id) => ({ agent: { session: { id } } });
+	switchDb.prepare("INSERT OR REPLACE INTO task_knowledge(session_id,enabled,source,updated_at) VALUES(?,?,?,?)").run("kh-off", 0, "desktop-user", "2026-10-12T00:00:00.000Z");
+	const blocked = await searchTool.execute({ query: "布尔盲注", mode: "pentest", limit: 2 }, execFor("kh-off"));
+	ok("关闭知识库后 knowledge_search 拒绝读取", blocked.ok === false && blocked.error && blocked.error.code === "knowledge_disabled", JSON.stringify(blocked).slice(0, 200));
+	// 拒绝要给人话：以前 render 用模板插值结构化错误，模型只看到 "[object Object]"。
+	const blockedText = searchTool.output.render({ query: "布尔盲注" }, blocked)[0].text;
+	ok("被开关拦下时 render 输出可读原因（含错误码，不是 [object Object]）",
+		blockedText.includes("knowledge_disabled") && blockedText.includes("已关闭知识库读取") && !blockedText.includes("[object Object]"), blockedText);
+	const blockedRead = await readTool.execute({ hitId: "1", limit: 20 }, execFor("kh-off"));
+	ok("关闭知识库后 knowledge_read 拒绝读取", blockedRead.ok === false && blockedRead.error && blockedRead.error.code === "knowledge_disabled", JSON.stringify(blockedRead).slice(0, 200));
+	const blockedReadText = readTool.output.render({ hitId: "1" }, blockedRead)[0].text;
+	ok("knowledge_read 被拦下时 render 同样输出可读原因",
+		blockedReadText.includes("knowledge_disabled") && !blockedReadText.includes("[object Object]"), blockedReadText);
+	switchDb.prepare("INSERT OR REPLACE INTO task_knowledge(session_id,enabled,source,updated_at) VALUES(?,?,?,?)").run("kh-on", 1, "desktop-user", "2026-10-12T00:00:00.000Z");
+	const allowed = await searchTool.execute({ query: "布尔盲注", mode: "pentest", limit: 2 }, execFor("kh-on"));
+	ok("开启知识库的会话仍可检索", allowed.ok === true, JSON.stringify(allowed).slice(0, 200));
+	const usageRows = switchDb.prepare("SELECT record FROM knowledge_usage WHERE session_id=?").all("kh-on");
+	const usageRecord = usageRows.length ? JSON.parse(usageRows[0].record) : null;
+	ok("内容交给模型时写入真实使用记录", usageRows.length >= 1 && usageRecord && usageRecord.trigger === "knowledge_search" && usageRecord.contentBytes > 0, JSON.stringify(usageRows).slice(0, 200));
+	switchDb.close();
 
 	const hitId = searchValue.value.hits[0] && searchValue.value.hits[0].chunkId;
 	const readValue = await readTool.execute({ hitId, limit: 20 });
@@ -353,6 +412,21 @@ write(path.join(IMPORTS, "team-notes", "win", "ad.md"), "# 域渗透\nKerberoast
 		readValue.ok && typeof readValue.value.absPath === "string" && fs.existsSync(readValue.value.absPath)
 		&& readText.includes(readValue.value.absPath),
 		JSON.stringify({ root: readValue.value.root, absPath: readValue.value.absPath }));
+
+	// v6 第 6.2 节：主动精读默认 80 行且每段最多 6000 UTF-8 字节，先到分页并给续读位置。
+	write(path.join(USER_PENTEST, "long", "excerpt.md"),
+		Array.from({ length: 400 }, (_, i) => `第 ${i + 1} 行：这是一段用于验证分段上限的知识正文内容。`).join("\n"));
+	const firstSeg = await readTool.execute({ source: "user", mode: "pentest", path: "long/excerpt.md" });
+	ok("knowledge_read 每段 ≤6000 UTF-8 字节", firstSeg.ok && firstSeg.value.bytes <= 6000, JSON.stringify(firstSeg).slice(0, 200));
+	ok("knowledge_read 有后续时给 nextOffset", firstSeg.value.nextOffset > 1 && firstSeg.value.truncated === true, JSON.stringify({ to: firstSeg.value.to, nextOffset: firstSeg.value.nextOffset }));
+	const secondSeg = await readTool.execute({ source: "user", mode: "pentest", path: "long/excerpt.md", offset: firstSeg.value.nextOffset });
+	ok("knowledge_read 用 nextOffset 能续读到不同段落", secondSeg.ok && secondSeg.value.text !== firstSeg.value.text && secondSeg.value.from === firstSeg.value.nextOffset, JSON.stringify({ from: secondSeg.value.from }));
+	// 单行本身就超过预算：先分页到那一行，读到它时再截断并如实标注，不假装读完整行。
+	write(path.join(USER_PENTEST, "long", "oneline.md"), "标题\n" + "x".repeat(9000) + "\n尾行");
+	const headSeg = await readTool.execute({ source: "user", mode: "pentest", path: "long/oneline.md" });
+	ok("knowledge_read 在超长行前分页（nextOffset 指向该行）", headSeg.ok && headSeg.value.nextOffset === 2 && headSeg.value.lineTruncated === false, JSON.stringify({ to: headSeg.value.to, nextOffset: headSeg.value.nextOffset }));
+	const oneLine = await readTool.execute({ source: "user", mode: "pentest", path: "long/oneline.md", offset: headSeg.value.nextOffset });
+	ok("knowledge_read 单行超预算时截断并标注 lineTruncated", oneLine.ok && oneLine.value.lineTruncated === true && oneLine.value.bytes <= 6000, JSON.stringify({ bytes: oneLine.value.bytes, lineTruncated: oneLine.value.lineTruncated }));
 }
 
 // ── 12b. 统一出站策略：冻结档必须在 git 之前拦下；本地路径不算出站 ──────────
@@ -576,6 +650,54 @@ write(path.join(IMPORTS, "team-notes", "win", "ad.md"), "# 域渗透\nKerberoast
 	fs.rmSync(junk, { recursive: true, force: true });
 }
 
+// ── 残骸报表：先把数字暴露出来，别偷偷涨（也不偷偷删）────────────────────
+// 背景：真 home 实测堆了 24 个目录 / 195.6 MB，而自动同步走保守档一份 `.diverged-*` 都不删。
+{
+	const { prunePackDebris, packDebrisReport } = await import("../lib/packs.js");
+	const junk = fs.mkdtempSync(path.join(os.tmpdir(), "packs-report-"));
+	const mk = (name, ageMs) => {
+		const dir = path.join(junk, name);
+		fs.mkdirSync(dir, { recursive: true });
+		fs.writeFileSync(path.join(dir, "x.md"), "x".repeat(64));
+		const stamp = new Date(Date.now() - ageMs);
+		fs.utimesSync(dir, stamp, stamp);
+		return dir;
+	};
+	const orphan = mk(".alpha.recover-111-2-aaaaaa", 10 * 60_000);
+	const excess = mk(".alpha.diverged-111-2-cccccc", 20 * 60_000);
+	const newest = mk(".alpha.diverged-222-2-dddddd", 10 * 60_000);
+	const referenced = mk(".beta.diverged-333-2-eeeeee", 30 * 60_000);
+	const fresh = mk(".gamma.recover-444-2-ffffff", 1_000);
+	const state = { packs: { beta: { backup: referenced } } };
+
+	const report = packDebrisReport(junk, state);
+	ok("残骸报表：只统计不删除（目录一个都没少）",
+		[orphan, excess, newest, referenced, fresh].every((d) => fs.existsSync(d)), JSON.stringify(report));
+	ok("残骸报表：能回收的数量=显式档会删的那些（孤儿临时 clone + 多余分叉备份）",
+		report.reclaimable.count === 2, JSON.stringify(report));
+	ok("残骸报表：保守保留的数量=显式档也留下的那些（每 pack 最新一份 + state 引用 + 太新的）",
+		report.conservative.count === 3, JSON.stringify(report));
+	ok("残骸报表：能回收的字节数不是 0", report.reclaimable.bytes > 0, JSON.stringify(report));
+	// 默认档保留 4 个（3 份分叉备份一份不删 + 太新的临时 clone），显式档只保留 3 个，
+	// 能回收 2 个。这组数字正是"为什么残骸一直不降"的解释。
+	ok("残骸报表：说明默认档保留多少（否则用户看不懂为什么数字不降）",
+		report.untouchedByDefault === 4 && report.untouchedByDefault > report.reclaimable.count, JSON.stringify(report));
+
+	const explicit = prunePackDebris(junk, state, { minAgeMs: 60_000, includeBackups: true });
+	ok("残骸报表与实际回收一致（报表说 2 个，实删也是 2 个）",
+		explicit.removed.length === report.reclaimable.count && !fs.existsSync(orphan) && !fs.existsSync(excess),
+		JSON.stringify(explicit));
+	ok("残骸报表：保留项与实删后的留存一致",
+		explicit.kept.length === report.conservative.count && fs.existsSync(newest) && fs.existsSync(referenced) && fs.existsSync(fresh),
+		JSON.stringify(explicit));
+	fs.rmSync(junk, { recursive: true, force: true });
+
+	const status = packsStatus();
+	ok("packsStatus 暴露残骸计数（界面才看得到这件事）",
+		status.debris && Number.isInteger(status.debris.reclaimable) && Number.isInteger(status.debris.kept),
+		JSON.stringify(status.debris));
+}
+
 // ── 接线：syncPacks 必须真的调用回收（否则上面全绿、宿主里永远不回收）────────
 {
 	const { syncPacks, loadCatalog } = await import("../lib/packs.js");
@@ -688,6 +810,164 @@ write(path.join(IMPORTS, "team-notes", "win", "ad.md"), "# 域渗透\nKerberoast
 	}
 }
 
+// ── 资料时间（v6 第 6.1 节）─────────────────────────────────────────────────
+{
+	const idx = ensureKnowledgeIndex();
+	if (!idx) {
+		ok("资料时间（测试环境无索引，跳过）", true);
+	} else {
+		const file = path.join(USER_PENTEST, "doc-date.md");
+		write(file, "# 公告\n\n发布于 2024-03-05，影响版本 1.2。\n");
+		idx.rebuild({});
+		const row = idx.db.prepare('SELECT doc_date FROM knowledge_docs WHERE path LIKE ?').get('%doc-date.md');
+		ok("正文里的日期写进 knowledge_docs.doc_date", row && row.doc_date === "2024-03-05", JSON.stringify(row));
+		write(file, "# 公告\n\n没有日期的正文。\n");
+		idx.rebuild({});
+		const row2 = idx.db.prepare('SELECT doc_date FROM knowledge_docs WHERE path LIKE ?').get('%doc-date.md');
+		ok("没有日期时 doc_date 留空，不拿同步时间冒充", row2 && row2.doc_date === "", JSON.stringify(row2));
+		fs.rmSync(file, { force: true });
+		idx.rebuild({});
+	}
+}
+
+// ── 版本条件（v6 第 6.1 节）─────────────────────────────────────────────────
+{
+	const idx = ensureKnowledgeIndex();
+	if (!idx) {
+		ok("版本条件（测试环境无索引，跳过）", true);
+	} else {
+		const file = path.join(USER_PENTEST, "version-conditions.md");
+		write(file, "# 公告\n\n影响版本：1.0.0 - 1.2.3\n\n修复版本：1.2.4\n\n旧版本 < 2.0.1 也受影响。\n");
+		idx.rebuild({});
+		const row = idx.db.prepare('SELECT version_conditions FROM knowledge_docs WHERE path LIKE ?').get('%version-conditions.md');
+		ok("显式版本条件写进 knowledge_docs", row && row.version_conditions.includes("1.0.0 - 1.2.3"), JSON.stringify(row));
+		ok("比较符版本条件也被抽取", row && row.version_conditions.includes("< 2.0.1"), JSON.stringify(row));
+		write(file, "# 公告\n\n只写正文，没有任何版本条件。\n");
+		idx.rebuild({});
+		const row2 = idx.db.prepare('SELECT version_conditions FROM knowledge_docs WHERE path LIKE ?').get('%version-conditions.md');
+		ok("没有显式条件时留空", row2 && row2.version_conditions === "", JSON.stringify(row2));
+		fs.rmSync(file, { force: true });
+		idx.rebuild({});
+	}
+}
+
+// ── 产品别名（v6 第 6.1 节）────────────────────────────────────────────────
+// 词典只认源侧自述的 nday catalog。测试 home 里没有，就在用户层放一份形状相同的小 catalog：
+// 这同时验证了「词典来自哪里」和「没有词典时不硬猜」两件事。
+{
+	const { buildAliasDictionary, extractProductAliases, expandQueryAliases, normalizeAliasTerm } = await import("../lib/product-aliases.js");
+
+	// 纯函数面：清洗规则逐条断言，不依赖索引。
+	const cleanEntries = [
+		{ product: "东方通 TongWeb 应用服务器", vendor: "北京东方通科技股份有限公司", aliases: ["TongWeb", "东方通应用服务器"] },
+		{ product: "东方通 TongWeb 应用服务器（Spring 组件）", vendor: "北京东方通科技股份有限公司", aliases: ["TongWeb", "heimdall"] },
+		{ product: "东方通 TongWeb 应用服务器（EJB 组件）", vendor: "北京东方通科技股份有限公司", aliases: ["TongWeb", "东方通应用服务器"] },
+	];
+	const cleanDictionary = buildAliasDictionary(cleanEntries);
+	ok("源侧 product/aliases 进词典", cleanDictionary.terms.has("tongweb") && cleanDictionary.terms.has("东方通应用服务器"), JSON.stringify([...cleanDictionary.terms.keys()]));
+	ok("带括号的写法整条丢弃（组件注释不是产品名）", !cleanDictionary.terms.has(normalizeAliasTerm("东方通 TongWeb 应用服务器（Spring 组件）")), JSON.stringify([...cleanDictionary.terms.keys()]));
+	const expanded = expandQueryAliases("东方通 TongWeb 反序列化", cleanDictionary);
+	ok("查询里的别名扩展成同一产品的其它写法", expanded.includes("东方通应用服务器"), JSON.stringify(expanded));
+	ok("查询里已经写过的写法不再重复扩展", !expanded.includes("TongWeb"), JSON.stringify(expanded));
+
+	// 指向不明就丢弃：同一个词被 13 个产品声明（超过上限 12）。
+	const ambiguousEntries = [];
+	for (let i = 0; i < 13; i += 1) ambiguousEntries.push({ product: `产品${i} 系统`, vendor: `厂商${i}`, aliases: ["sharedtag"] });
+	ambiguousEntries.push({ product: "唯一产品", vendor: "唯一厂商", aliases: ["uniquebrand"] });
+	const ambiguousDictionary = buildAliasDictionary(ambiguousEntries);
+	ok("被过多产品声明的词丢弃（不认错）", !ambiguousDictionary.terms.has("sharedtag") && ambiguousDictionary.ambiguousTerms >= 1, JSON.stringify(ambiguousDictionary.ambiguousTerms));
+	ok("只指向一个产品的词保留", ambiguousDictionary.terms.has("uniquebrand"));
+
+	// 跨厂商的标签词（`auth-bypass` 这类被一堆不同厂商的条目挂在 aliases 上）必须丢掉；
+	// 同一个厂商的两种写法（带/不带法人后缀括号）要归成一个，别把真品牌名误杀。
+	const tagDictionary = buildAliasDictionary([
+		{ product: "产品A 系统", vendor: "厂商甲股份有限公司", aliases: ["auth-bypass"] },
+		{ product: "产品B 平台", vendor: "厂商乙", aliases: ["auth-bypass"] },
+		{ product: "产品A 系统", vendor: "厂商甲股份有限公司（Jia Co., Ltd.）", aliases: ["专属别名"] },
+	]);
+	ok("跨厂商的标签词丢弃（不认错）", !tagDictionary.terms.has(normalizeAliasTerm("auth-bypass")), JSON.stringify([...tagDictionary.terms.keys()]));
+	ok("同一厂商的两种写法归成一个，真别名不被误杀", tagDictionary.terms.has("专属别名"), JSON.stringify([...tagDictionary.terms.keys()]));
+
+	// 后台重建路径（真机点「重建索引」走的就是它）必须同样拿到词典路径：
+	// 只在 ensureKnowledgeIndex 里传路径的话，后台重建出来的索引一条别名都没有（2026-10-17 真机踩到）。
+	const { aliasCatalogPaths } = await import("../lib/index-build.js");
+	const catalogPaths = aliasCatalogPaths(HOME);
+	ok("后台重建也能解析出词典路径（包层 + 用户层）",
+		catalogPaths.length === 2 && catalogPaths.every((p) => p.endsWith(path.join("nday", "catalog.json")))
+		&& catalogPaths[1].startsWith(HOME), JSON.stringify(catalogPaths));
+	ok("后台重建把词典路径传给了 KnowledgeIndex",
+		/aliasCatalogPaths:\s*aliasCatalogPaths\(home\)/.test(fs.readFileSync(new URL("../lib/index-build.js", import.meta.url), "utf8")));
+
+	// 端到端：写一份用户层 catalog，重建索引，看文档级字段。
+	const idx = ensureKnowledgeIndex();
+	if (!idx) {
+		ok("产品别名端到端（测试环境无索引，跳过）", true);
+	} else {
+		write(path.join(REFS, "pentest", "nday", "catalog.json"), JSON.stringify({
+			entries: [
+				{ product: "东方通 TongWeb 应用服务器", vendor: "北京东方通科技股份有限公司", aliases: ["TongWeb", "东方通应用服务器"] },
+				{ product: "东方通 TongWeb 应用服务器（Spring 组件）", vendor: "北京东方通科技股份有限公司", aliases: ["TongWeb", "heimdall"] },
+				{ product: "泛微 e-cology", vendor: "上海泛微网络科技股份有限公司", aliases: ["泛微", "泛微OA", "e-cology"] },
+			],
+		}));
+		const file = path.join(USER_PENTEST, "product-alias.md");
+		write(file, "# 通告\n\n发布于 2025-04-01。\n\n东方通 TongWeb 应用服务器存在反序列化漏洞，影响版本 < 7.0.5。\n");
+		idx.rebuild({});
+		const row = idx.db.prepare('SELECT product_aliases FROM knowledge_docs WHERE path LIKE ?').get('%product-alias.md');
+		const aliases = JSON.parse((row && row.product_aliases) || "[]");
+		ok("源侧词典命中的产品写进 knowledge_docs.product_aliases", aliases.some((a) => a.product.includes("TongWeb")), JSON.stringify(row));
+		const group = aliases.find((a) => a.product.includes("TongWeb")) || {};
+		ok("别名写法与首次出现行号一并保留（提取字段关联原文段落）",
+			Array.isArray(group.aliases) && group.aliases.includes("东方通 TongWeb 应用服务器") && group.line === 5, JSON.stringify(aliases));
+		ok("组里带源侧厂商名（不是模型补的）", /东方通/.test(group.vendor || ""), JSON.stringify(group));
+
+		// 精读路径也要带文档级元数据。这里原来在 return 之后写补充字段，属于死代码。
+		const chunkRow = idx.db.prepare('SELECT rowid FROM knowledge_chunks WHERE path LIKE ? LIMIT 1').get('%product-alias.md');
+		const chunk = chunkRow ? idx.getChunk(chunkRow.rowid) : null;
+		ok("精读返回资料时间/版本条件/产品别名", !!chunk && chunk.docDate === "2025-04-01"
+			&& chunk.versionConditions.includes("< 7.0.5") && Array.isArray(chunk.productAliases) && chunk.productAliases.length > 0,
+			JSON.stringify(chunk && { docDate: chunk.docDate, versionConditions: chunk.versionConditions, productAliases: chunk.productAliases }));
+
+		write(file, "# 通告\n\n这段正文没有出现任何产品名。\n");
+		idx.rebuild({});
+		const row2 = idx.db.prepare('SELECT product_aliases FROM knowledge_docs WHERE path LIKE ?').get('%product-alias.md');
+		ok("正文没有产品名时留空，不硬猜", row2 && row2.product_aliases === "", JSON.stringify(row2));
+		fs.rmSync(file, { force: true });
+		idx.rebuild({});
+	}
+}
+
+// ── 索引性能指标（v6 第 10.5 节）─────────────────────────────────────────────
+{
+	const idx = ensureKnowledgeIndex();
+	if (!idx) {
+		ok("索引性能指标（测试环境无索引，跳过）", true);
+	} else {
+		idx.rebuild({});
+		const status = idx.status();
+		ok("status 带本进程重建耗时", status.lastBuild && Number.isFinite(status.lastBuild.ms), JSON.stringify(status.lastBuild));
+		ok("status 带索引占用字节", Number.isFinite(status.dbBytes) && status.dbBytes > 0, JSON.stringify(status.dbBytes));
+	}
+}
+
+// ── 搜索/精读延迟（v6 第 10.5 节）───────────────────────────────────────────
+{
+	const idx = ensureKnowledgeIndex();
+	if (!idx) {
+		ok("搜索/精读延迟（测试环境无索引，跳过）", true);
+	} else {
+		idx.rebuild({});
+		const before = idx.status().latency;
+		idx.search('公告', { limit: 3 });
+		const chunk = idx.db.prepare('SELECT rowid FROM knowledge_chunks LIMIT 1').get();
+		if (chunk) idx.getChunk(chunk.rowid);
+		const after = idx.status().latency;
+		ok("搜索延迟被采样", after.search.n > before.search.n, JSON.stringify(after.search));
+		ok("精读延迟被采样", chunk ? after.chunk.n > before.chunk.n : true, JSON.stringify(after.chunk));
+		ok("延迟摘要给出 P50/P95", Number.isFinite(after.search.p50) && Number.isFinite(after.search.p95), JSON.stringify(after.search));
+	}
+}
+
 // ── 提示词清单缓存（2026-09-18 性能修复）────────────────────────────────────
 // 这条 manifest 每个回合都会被装配一次；旧实现每次全量遍历知识目录（真实库实测 ~33ms/回合）。
 // 用"patch readdirSync 计数"做行为断言，不用计时断言（避免机器负载导致的 flaky）。
@@ -745,6 +1025,70 @@ write(path.join(IMPORTS, "team-notes", "win", "ad.md"), "# 域渗透\nKerberoast
 		&& client.includes("setSearchBusy(false); setHits([]); setSearchErr('检索失败："));
 }
 
+closeKnowledgeIndex();
+
+// ── 13. 知识自动补充（v6 第 6.1/6.2 节）：事实抽取、批次上限、累计额度、装配接线 ──
+{
+	// 纯函数：抽事实只认写出版本的标识，不猜没版本的产品。
+	const facts = extractFacts("排查 CVE-2026-12345 与 EDB-51234；目标跑 Apache 2.4.58，另一个只是 Kubernetes 字样。");
+	ok("extractFacts 命中 CVE 精确标识", facts.some((f) => f.kind === "cve" && f.value === "CVE-2026-12345"), JSON.stringify(facts));
+	ok("extractFacts 命中 EDB 精确标识", facts.some((f) => f.kind === "edb"), JSON.stringify(facts));
+	ok("extractFacts 命中“产品 + 版本”", facts.some((f) => f.kind === "product" && f.value === "Apache 2.4.58"), JSON.stringify(facts));
+	ok("extractFacts 不把没有版本的产品当事实", !facts.some((f) => f.value === "Kubernetes"), JSON.stringify(facts));
+	ok("extractFacts 同一段内去重", extractFacts("CVE-2026-12345 与 cve-2026-12345").length === 1);
+
+	// 纯函数：每批最多 3 条、≤3000 字节，先到算谁。
+	const many = Array.from({ length: 6 }, (_, i) => ({ text: `片段 ${i} ` + "x".repeat(40) }));
+	const packedCount = packAutoItems(many);
+	ok("packAutoItems 每批最多 3 条", packedCount.items.length === AUTO_BATCH_MAX_ITEMS && packedCount.dropped === 3, JSON.stringify({ kept: packedCount.items.length, dropped: packedCount.dropped }));
+	const packedBytes = packAutoItems([{ text: "a".repeat(2900) }, { text: "b".repeat(300) }, { text: "c" }]);
+	ok("packAutoItems 每批 ≤3000 字节（超了就少给一条）", packedBytes.bytes <= AUTO_BATCH_BYTES && packedBytes.items.length === 1, JSON.stringify({ bytes: packedBytes.bytes, kept: packedBytes.items.length }));
+	ok("renderAutoBlock 带来源/位置/chunkId", /\[user\]/.test(renderAutoBlock([{ source: "user", path: "a/b.md", line: 3, chunkId: "c1", title: "标题", preview: "片段" }])));
+	ok("renderAutoBlock 空输入返回空串", renderAutoBlock([]) === "");
+
+	// 纯函数：同一问题与整任务分别封顶，先到先停止。
+	ok("autoBudgetAllows 未超限时放行", autoBudgetAllows({ questionBytes: 0, taskBytes: 0 }, 3000).allowed === true);
+	ok("autoBudgetAllows 问题额度用尽即停", autoBudgetAllows({ questionBytes: 9000, taskBytes: 0 }, 10).allowed === false);
+	ok("autoBudgetAllows 任务额度用尽即停", autoBudgetAllows({ questionBytes: 0, taskBytes: 30000 }, 10).allowed === false);
+
+	// 装配接线：新事实触发一次自动补充，内容确实进入请求才写使用记录，同一事实不重复补。
+	write(path.join(USER_PENTEST, "cve", "notice.md"), "# 公告\nCVE-2026-12345 影响示例组件 1.2.3，官方已发布修复版本 1.2.4。\n");
+	closeKnowledgeIndex();
+	const contexts = [];
+	const autoCtx = {
+		effect() {},
+		inject(_names, cb) { cb(); },
+		connection: { register() {} },
+		tools: { register() {} },
+		systemPrompt: { context(def) { contexts.push(def); } },
+	};
+	apply(autoCtx, {});
+	const autoEntry = contexts.find((c) => c.name === "knowledge-hub-auto");
+	ok("apply 注册 knowledge-hub-auto 动态上下文", !!autoEntry && typeof autoEntry.text === "function");
+	const sessionId = "kh-auto-1";
+	const message = { type: "user/message", data: { role: "user", source: { kind: "user" }, content: [{ type: "text", text: "目标是 Apache 2.4.58，公告编号 CVE-2026-12345，帮我确认影响。" }] } };
+	const session = { id: sessionId, header: { agentPreset: "pentest" }, surface: { nodes: [1] }, eventAt: () => message };
+	const firstAuto = autoEntry.text({ agent: { session } });
+	ok("自动补充在有新事实时返回非空知识块", typeof firstAuto === "string" && firstAuto.length > 0, firstAuto.slice(0, 160));
+	ok("自动补充块 ≤3000 UTF-8 字节", Buffer.byteLength(firstAuto, "utf8") <= AUTO_BATCH_BYTES, Buffer.byteLength(firstAuto, "utf8"));
+	ok("自动补充块带 chunkId 便于按需精读", /chunk=/.test(firstAuto), firstAuto.slice(0, 160));
+	const secondAuto = autoEntry.text({ agent: { session } });
+	ok("同一事实不重复自动补充", secondAuto === "", secondAuto.slice(0, 80));
+	// 工具结果（role=tool 的 tool/result）同样是触发源：导入结果与工具返回的新识别事实落在这里。
+	const toolEvent = { type: "tool/result", data: { message: { role: "tool", content: [{ type: "text", text: "导入结果：识别到 CVE-2026-12345，组件 1.2.3。" }] } } };
+	const toolSession = { id: "kh-auto-tool", header: { agentPreset: "pentest" }, surface: { nodes: [2] }, eventAt: () => toolEvent };
+	const toolAuto = autoEntry.text({ agent: { session: toolSession } });
+	ok("工具结果里的新事实也能触发自动补充", typeof toolAuto === "string" && toolAuto.length > 0, toolAuto.slice(0, 160));
+	const offSession = { ...session, id: "kh-auto-off" };
+	const offDb = new DatabaseSync(path.join(HOME, "redteam-results", "results.db"));
+	offDb.prepare("CREATE TABLE IF NOT EXISTS task_knowledge (session_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL, source TEXT NOT NULL, updated_at TEXT NOT NULL)").run();
+	offDb.prepare("INSERT OR REPLACE INTO task_knowledge(session_id,enabled,source,updated_at) VALUES(?,?,?,?)").run("kh-auto-off", 0, "desktop-user", "2026-10-12T00:00:00.000Z");
+	offDb.close();
+	ok("关闭知识库后自动补充一律停止", autoEntry.text({ agent: { session: offSession } }) === "");
+}
+
+// 自动补充的记账是 fire-and-forget（不能卡装配热路径）：清理前给它们一点时间收句柄。
+await new Promise((resolve) => setTimeout(resolve, 300));
 closeKnowledgeIndex();
 fs.rmSync(HOME, { recursive: true, force: true });
 console.log(fail === 0 ? `\nall ${pass} tests passed` : `\n${fail} FAILED, ${pass} passed`);

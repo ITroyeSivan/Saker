@@ -45,7 +45,9 @@ const STUBS = {
     "  f.__kind = kind;\n" +
     "  f.__def = undefined;\n" +
     "  f.default = function (v) { const n = node(kind, shape); n.__def = v; return n; };\n" +
-    "  for (const m of ['optional', 'required', 'description', 'transform', 'pipe', 'volatile']) f[m] = function () { return f; };\n" +
+    // 链式方法清单按插件实际用到的补全（2026-10-11：dsh-mcp-studio 用 .pattern/.step/.min/.max，
+    // 缺了它就会以 "z.string(...).required(...).pattern is not a function" 加载失败）。
+    "  for (const m of ['optional', 'required', 'description', 'transform', 'pipe', 'volatile', 'pattern', 'step', 'min', 'max']) f[m] = function () { return f; };\n" +
     "  return f;\n" +
     "}\n" +
     "const z = {};\n" +

@@ -22,6 +22,16 @@ CREATE TABLE IF NOT EXISTS history (
   verdict TEXT NOT NULL DEFAULT '',
   details TEXT NOT NULL DEFAULT ''
 );
+-- 资产搜索记录（v6 第 7.3 节「保存 queryOriginal 和 queryEffective」）：
+-- 用户原始输入与真正发到各平台的表达式分开存，回看时能看清范围是怎么拼上去的。
+CREATE TABLE IF NOT EXISTS search_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at TEXT NOT NULL,
+  query_original TEXT NOT NULL DEFAULT '',
+  query_effective TEXT NOT NULL DEFAULT '',
+  platforms TEXT NOT NULL DEFAULT '',
+  statuses TEXT NOT NULL DEFAULT ''
+);
 CREATE TABLE IF NOT EXISTS authorized (
   key TEXT NOT NULL PRIMARY KEY,
   note TEXT NOT NULL DEFAULT '',
@@ -134,6 +144,8 @@ export function openHunterStore(dbPath) {
 		getKeys: db.prepare("SELECT platform, key_value, updated_at FROM configs"),
 		insertHistory: db.prepare("INSERT INTO history (created_at, finding_id, mode, query, platforms, verdict, details) VALUES (?,?,?,?,?,?,?)"),
 		listHistory: db.prepare("SELECT * FROM history ORDER BY id DESC LIMIT ?"),
+		insertSearchRun: db.prepare("INSERT INTO search_runs (created_at, query_original, query_effective, platforms, statuses) VALUES (?,?,?,?,?)"),
+		listSearchRuns: db.prepare("SELECT * FROM search_runs ORDER BY id DESC LIMIT ?"),
 		authorize: db.prepare("INSERT INTO authorized (key, note, created_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET note=excluded.note, created_at=excluded.created_at"),
 		unauthorize: db.prepare("DELETE FROM authorized WHERE key = ?"),
 		listAuthorized: db.prepare("SELECT key, note, created_at FROM authorized ORDER BY created_at DESC"),

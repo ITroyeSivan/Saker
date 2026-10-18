@@ -1,33 +1,70 @@
 window.__ModuleLoader__.load({ id: "@dsh-external/dsh-redteam-results", factory: (require) => {
 var module = { exports: {} }; var exports = module.exports;
-// dsh-redteam-results client — 进度与发现：当前任务、发现、文件与显式历史查询。
+// dsh-redteam-results client — 执行记录、发现与测试资料的直接入口。
 // 默认按 sessionId 隔离；只有历史页请求 scope=all。模式隔离由服务端双键强制。
 "use strict";
+/* SAKER-UI-KIT:BEGIN */
+var SAKER_UI_KIT_CSS = "/* 5.7 共享组件层：Button / Input / Select / Badge / DataTable / Drawer / InlineNotice / EmptyState\n   单一来源：shared/ui-kit/ui-kit.css（令牌见 shared/ui-kit/ui-kit.json）。\n   由 scripts/sync-ui-kit.mjs 注入到各产品插件；插件里的同类尺寸规则应删除，避免双写。 */\n.saker-ui-btn{height:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px}\n.saker-ui-input{height:36px;border-radius:6px}\n.saker-ui-select{height:32px;border-radius:6px}\n.saker-ui-table td{height:38px}\n.saker-ui-badge{border-radius:6px;font-size:12px;line-height:1.5}\n.saker-ui-drawer{border-radius:12px}\n.saker-ui-notice{border-radius:6px;font-size:13px;line-height:1.5}\n.saker-ui-empty{border-radius:6px;font-size:13px;line-height:1.5}\n/* 现有插件类别名：与 canonical 类共用同一套尺寸 */\n.dsh-chat-panel-head button,.dsh-chat-actions button,.dsh-chat-task-status button,.dsh-task-nav button,.dsh-task-actions button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-prompt-io button,.dsh-prompt-more,.dsh-prompt-scopes button,.dsh-prompt-modes button,.dsh-prompt-foot button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-tools button,.dsh-materials-types button,.dsh-materials-foot button,.dsh-materials-table td button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-new button,.dsh-materials-import-actions button,.dsh-execution-tools>button,.dsh-test-content-actions button,.dsh-rtr-btn{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-task-nav select,.dsh-materials-tools select,.dsh-rtr-select{height:32px}\n.dsh-prompt-saveas input,.dsh-prompt-list input[type=search],.dsh-prompt-field input{height:36px}\n.dsh-materials-tools input[type=search],.dsh-materials-import input,.dsh-task-field input,.dsh-rtr-search{height:36px}\n.dsh-materials-table td{height:38px}\n.dsh-chat-setup svg,.dsh-task-workspace svg{width:16px;height:16px}\n.dsh-hnt-btn,.dsh-hnt-tab{height:32px}\n.dsh-hnt-input{height:36px}\n.dsh-hnt-select{height:32px}\n.dsh-mcs-btn,.dsh-mcs-iconbtn,.dsh-mcs-toolscount--btn{height:32px}\n.dsh-mcs-field input,.dsh-mcs-pairrow input,.dsh-mcs-search{height:36px}\n.dsh-mcs-field select,.dsh-mcs-seg button{height:32px}\n.dsh-sp-chip.is-btn{height:32px}\n.dsh-mg-chip{height:32px}\n/* 内联 style 插件（knowledge-hub / sec-config / skill-browse）：根容器打 data-saker-ui，\n   控件尺寸由共享层统一给，插件自己的 helper 不再写 height。 */\n[data-saker-ui] button{height:32px}\n[data-saker-ui] input:not([type=checkbox]):not([type=radio]):not([type=file]){height:36px}";
+/* SAKER-UI-KIT:END */
 var React = require("react");
 var useState = React.useState, useEffect = React.useEffect, useCallback = React.useCallback, useRef = React.useRef;
 
 var dshCsrf = {};
+// 0.2.1 把插件自注册路由挂在 /api 前缀下；0.2.0 仍是根路径。
+// 先探测两个候选，命中后固定本次会话的 base；不把端口或前缀写死在每个调用点。
+var SAKER_API_BASES = ["/dsh-redteam-results", "/api/dsh-redteam-results"];
+var sakerApiBase = null;
+function readJsonResponse(response, label) {
+	return response.text().catch(function () { throw Error(label + "失败：HTTP " + response.status + " · 响应体不可读"); }).then(function (text) {
+		var body = String(text || ""), type = response.headers && response.headers.get ? (response.headers.get("content-type") || "") : "";
+		if (!response.ok) {
+			var detail = body.trim().slice(0, 240);
+			throw Error(label + "失败：HTTP " + response.status + (detail ? " · " + detail : " · 响应为空"));
+		}
+		if (!body.trim()) throw Error(label + "失败：HTTP " + response.status + " · 响应为空");
+		try { return JSON.parse(body); }
+		catch (_) { throw Error(label + "失败：响应不是 JSON（HTTP " + response.status + "，" + (type || "未知类型") + "，" + body.length + " 字节）"); }
+	});
+}
 /** CSRF token 懒加载（同源 GET /csrf，跨源页面读不到）；POST 回带 x-dsh-csrf 头。
  *  token 缓存遇 403 即失效重取一次——宿主重启轮换 token 后已开标签页自愈，不再永久 403。 */
 function csrfOf(base) {
-	if (!dshCsrf[base]) dshCsrf[base] = fetch(base + "/csrf").then(function (r) { return r.json(); }).then(function (r) { return r && r.token ? r.token : ""; }).catch(function () { return ""; });
+	if (!dshCsrf[base]) dshCsrf[base] = fetch(base + "/csrf", { credentials: "same-origin" }).then(function (r) { return readJsonResponse(r, "读取 CSRF"); }).then(function (r) { return r && r.token ? r.token : ""; }).catch(function () { return ""; });
 	return dshCsrf[base];
 }
+function detectApiBase() {
+	if (sakerApiBase) return Promise.resolve(sakerApiBase);
+	return Promise.all(SAKER_API_BASES.map(function (base) {
+		return fetch(base + "/csrf", { credentials: "same-origin" }).then(function (r) {
+			if (!r.ok) return null;
+			return readJsonResponse(r, "探测 Saker 接口").then(function (json) { return json && json.token ? { base: base, token: json.token } : null; });
+		}).catch(function () { return null; });
+	})).then(function (results) {
+		var hit = results.filter(Boolean)[0];
+		if (!hit) throw Error("Saker 接口不可用：CSRF 获取失败");
+		sakerApiBase = hit.base;
+		dshCsrf[hit.base] = Promise.resolve(hit.token);
+		return hit.base;
+	});
+}
 function postJson(tok, endpoint, payload) {
-	return fetch("/dsh-redteam-results/" + endpoint, {
+	return fetch((sakerApiBase || SAKER_API_BASES[0]) + "/" + endpoint, {
 		method: "POST",
 		headers: tok ? { "content-type": "application/json", "x-dsh-csrf": tok } : { "content-type": "application/json" },
+		credentials: "same-origin",
 		body: JSON.stringify(payload || {})
 	});
 }
 function api(endpoint, payload) {
-	return csrfOf("/dsh-redteam-results").then(function (tok) {
-		return postJson(tok, endpoint, payload).then(function (r) {
-			if (r.status === 403) {
-				delete dshCsrf["/dsh-redteam-results"];
-				return csrfOf("/dsh-redteam-results").then(function (tok2) { return postJson(tok2, endpoint, payload); }).then(function (r2) { return r2.json(); });
-			}
-			return r.json();
+	return detectApiBase().then(function (base) {
+		return csrfOf(base).then(function (tok) {
+			return postJson(tok, endpoint, payload).then(function (r) {
+				if (r.status === 403) {
+					delete dshCsrf[base];
+					return csrfOf(base).then(function (tok2) { return postJson(tok2, endpoint, payload); }).then(function (r2) { return readJsonResponse(r2, "Saker " + endpoint); });
+				}
+				return readJsonResponse(r, "Saker " + endpoint);
+			});
 		});
 	});
 }
@@ -54,7 +91,9 @@ function verdictSuffix(f) {
 	if (v === "match") return "（与首次 " + f.severity + " 一致）";
 	return "";
 }
-var STATUS_LABEL = { pending: "待验证", "code-reviewed": "代码侧已复核", suspect: "疑似·未定论", verified: "已验证", "false-positive": "误报", fixed: "已修复" };
+// 状态词表按 v6 第 5.3 节的叫法：待核实 / 已确认；其余稳定值（代码侧已复核、疑似、误报、已修复）保留。
+// 只改显示，store 里的稳定值不变，也不动数据库迁移。
+var STATUS_LABEL = { pending: "待核实", "code-reviewed": "代码侧已复核", suspect: "疑似·未定论", verified: "已确认", "false-positive": "误报", fixed: "已修复" };
 var EVIDENCE_LABEL = { impact: "影响已证", confirmed: "已证实", partial: "部分证据", unknown: "未知" };
 var SOURCE_LABEL = { manual: "人工深审", "scan-confirmed": "扫描确认", "scan-false-positive": "扫描误报" };
 var AUDIT_MODE_LABEL = { static: "静态审计", dynamic: "动态·验证成功" };
@@ -190,7 +229,7 @@ function findingSummary(f) {
 	if (f.status === 'fixed') return '已标记为修复，复测记录见详情。';
 	if (f.delivery?.ready) return '已验证，已保存请求、响应和复现步骤。';
 	var reason = [f.executionEvidence?.reason, f.executionEvidence?.impactReason].filter(Boolean).join(' ');
-	if (reason.includes('已过期')) return '上次验证已超过 15 分钟，需要重新验证。';
+	if (reason.includes('不匹配') || reason.includes('已失效')) return '上次验证与当前请求、身份或目标实例不匹配，需要重新验证。';
 	var gaps = f.delivery?.gaps || [];
 	if (gaps.includes('request-response-evidence-missing')) return '还缺测试时的请求或响应。';
 	if (gaps.includes('request-response-evidence-invalid')) return '保存的请求或响应与测试地址不符，需要核对。';
@@ -216,6 +255,16 @@ function downloadArchive(name, base64) {
 }
 
 //#region 导出生成器（MD 报告 / MD 总览 / MD 表格 / HTML 报告包）
+
+// 报告导出前自动遮蔽秘密（v6 第 9.2 节）：账号凭据不随交付物外流。
+// 页面里本地查看原文不受影响；这里只处理要导出/交付的文本。
+function maskSecrets(text) {
+	return String(text == null ? "" : text)
+		.replace(/^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|api-key|x-auth-token)\s*:[^\r\n]*/gim,
+			function (line) { return line.split(":")[0] + ": [已遮蔽]"; })
+		.replace(/("(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?token|refresh[_-]?token)"\s*:\s*")[^"]*(")/gi,
+			"$1[已遮蔽]$2");
+}
 
 function mdReport(f, mode) {
 	var M = MODE_META[mode];
@@ -379,8 +428,8 @@ function mdReport(f, mode) {
 			f.poc || "（未填写）",
 			mode === "attack-defense" && f.impact ? "- 影响证明：" + f.impact : "",
 			mode === "attack-defense" && (f.baseline || f.diffEvidence || f.markerEcho) ? "\n## 对照三件套\n\n- 基线：" + (f.baseline || "（未填）") + "\n- 差分（翻转）：" + (f.diffEvidence || "（未填）") + "\n- marker 回显：" + (f.markerEcho || "（未填）") + "\n" : "",
-			mode === "attack-defense" && f.requestPkt ? "\n## 完整请求包\n\n```\n" + f.requestPkt + "\n```\n" : "",
-			mode === "attack-defense" && f.responsePkt ? "\n## 关键响应\n\n```\n" + f.responsePkt + "\n```\n" : "",
+			mode === "attack-defense" && f.requestPkt ? "\n## 完整请求包\n\n```\n" + maskSecrets(f.requestPkt) + "\n```\n" : "",
+			mode === "attack-defense" && f.responsePkt ? "\n## 关键响应\n\n```\n" + maskSecrets(f.responsePkt) + "\n```\n" : "",
 			f.iocs ? "\n## IOC / 环境结果清单\n\n" + f.iocs + "\n" : "",
 			f.detectionRule ? "\n## 检测规则（YARA/Sigma）\n\n```yara\n" + f.detectionRule + "\n```\n" : "",
 			"",
@@ -468,8 +517,8 @@ function mdReport(f, mode) {
 		"",
 		f.poc || f.description || "（未填写）",
 		"",
-		f.requestPkt ? "### 完整请求包\n\n```\n" + f.requestPkt + "\n```\n" : "",
-		f.responsePkt ? "### 关键响应\n\n```\n" + f.responsePkt + "\n```\n" : "",
+		f.requestPkt ? "### 完整请求包\n\n```\n" + maskSecrets(f.requestPkt) + "\n```\n" : "",
+		f.responsePkt ? "### 关键响应\n\n```\n" + maskSecrets(f.responsePkt) + "\n```\n" : "",
 		"## 修复建议",
 		"",
 		f.fix || "（未填写）",
@@ -486,7 +535,13 @@ function jsonReport(meta, stats, rows, mode) {
 		mode: mode,
 		meta: meta || null,
 		stats: stats || null,
-		findings: rows || []
+		// 交付用 JSON 同样遮蔽秘密（v6 第 9.2 节）；页面本地查看不受影响。
+		findings: (rows || []).map(function (row) {
+			return Object.assign({}, row, {
+				requestPkt: row && row.requestPkt ? maskSecrets(row.requestPkt) : row && row.requestPkt,
+				responsePkt: row && row.responsePkt ? maskSecrets(row.responsePkt) : row && row.responsePkt
+			});
+		})
 	}, null, 2) + "\n";
 }
 
@@ -801,25 +856,25 @@ var CSS_SCREEN = [
 	"@keyframes dshGlobeFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}",
 	"@container scrinner (max-width:980px){.dsh-scr-hero{gap:16px}.dsh-scr-globewrap{transform:scale(.85);order:-1;flex-basis:100%}}",
 	"@container scrinner (max-width:760px){.dsh-scr-hero{gap:10px}.dsh-scr-globewrap{transform:scale(.62)}}",
-	".dsh-rtr-distsec{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1 1 220px}",
+	".dsh-rtr-distsec{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1 1 220px}",
 	".dsh-rtr-disthead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}",
-	".dsh-rtr-distlegend{display:flex;gap:6px 10px;flex-wrap:wrap;min-width:0}",
-	".dsh-rtr-distleg{font-size:10px;color:var(--dsw-alias-label-secondary,#666);display:inline-flex;align-items:center;gap:3px;max-width:160px;overflow:hidden;white-space:nowrap}",
+	".dsh-rtr-distlegend{display:flex;gap:8px 12px;flex-wrap:wrap;min-width:0}",
+	".dsh-rtr-distleg{font-size:12px;color:var(--dsw-alias-label-secondary,#666);display:inline-flex;align-items:center;gap:4px;max-width:160px;overflow:hidden;white-space:nowrap}",
 	".dsh-rtr-distleg i{width:7px;height:7px;border-radius:2px;flex:none}",
-	".dsh-rtr-segbar{display:flex;height:14px;border-radius:7px;overflow:hidden;gap:1px;background:color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 4%,var(--dsw-alias-bg-base,#fff))}",
+	".dsh-rtr-segbar{display:flex;height:14px;border-radius:6px;overflow:hidden;gap:0px;background:color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 4%,var(--dsw-alias-bg-base,#fff))}",
 	".dsh-rtr-segbar span{display:block;min-width:3px;transition:width .5s ease}",
-	".dsh-rtr-distdetails summary{font-size:10px;color:var(--dsw-alias-label-tertiary,#8a8a8f);cursor:pointer;user-select:none;width:max-content}",
-	".dsh-rtr-distdetails[open] summary{margin-bottom:2px;color:var(--dsw-alias-state-business-primary,#4c6ef5)}",
-	".dsh-rtr-disttitle{font-size:11px;letter-spacing:.05em;color:var(--dsw-alias-label-tertiary,#8a8a8f)}",
-	".dsh-rtr-dist{display:flex;flex-direction:column;gap:3px;max-height:138px;overflow-y:auto;min-width:0}",
-	".dsh-rtr-distrow{display:grid;grid-template-columns:minmax(60px,110px) 1fr 26px;align-items:center;gap:6px;min-width:0}",
-	".dsh-rtr-distlbl{font-size:11px;color:var(--dsw-alias-label-secondary,#666);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+	".dsh-rtr-distdetails summary{font-size:12px;color:var(--dsw-alias-label-tertiary,#8a8a8f);cursor:pointer;user-select:none;width:max-content}",
+	".dsh-rtr-distdetails[open] summary{margin-bottom:4px;color:var(--dsw-alias-state-business-primary,#4c6ef5)}",
+	".dsh-rtr-disttitle{font-size:12px;letter-spacing:.05em;color:var(--dsw-alias-label-tertiary,#8a8a8f)}",
+	".dsh-rtr-dist{display:flex;flex-direction:column;gap:4px;max-height:138px;overflow-y:auto;min-width:0}",
+	".dsh-rtr-distrow{display:grid;grid-template-columns:minmax(60px,110px) 1fr 26px;align-items:center;gap:8px;min-width:0}",
+	".dsh-rtr-distlbl{font-size:12px;color:var(--dsw-alias-label-secondary,#666);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
 	".dsh-rtr-disttrack{height:8px;border-radius:4px;background:rgba(120,150,190,.16);overflow:hidden}",
-	".dsh-rtr-disttrack span{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,#3f8ef7,#38d4ff);transition:width .4s ease}",
+	".dsh-rtr-disttrack span{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,var(--dsw-alias-state-business-primary,#4c6ef5),color-mix(in srgb,var(--dsw-alias-state-business-primary,#4c6ef5) 55%,#9db8ff));transition:width .4s ease}",
 	".dsh-rtr-distrow.is-click{cursor:pointer}",
 	".dsh-rtr-distrow.is-click .dsh-rtr-disttrack span{background:linear-gradient(90deg,#7a5cf5,#b48cff)}",
 	".dsh-rtr-distrow.is-click:hover .dsh-rtr-distlbl{color:var(--dsw-alias-state-business-primary,#4c6ef5)}",
-	".dsh-rtr-distval{font-size:11px;font-family:monospace;color:var(--dsw-alias-label-primary,#333);text-align:right}",
+	".dsh-rtr-distval{font-size:12px;font-family:monospace;color:var(--dsw-alias-label-primary,#333);text-align:right}",
 	".dsh-scr-panel h4{margin:0 0 14px;font-size:15px;font-weight:600;letter-spacing:.04em;color:#fff;padding-bottom:10px;border-bottom:1px solid rgba(58,157,255,.2)}",
 	".dsh-scr-panel h4::before{content:\"\"}",
 	".dsh-scr-center{display:flex;flex-direction:column;gap:14px}",
@@ -870,37 +925,37 @@ var CSS_SCREEN = [
 
 var CSS = [
 	".dsh-rtr-root{height:100%;display:flex;min-height:0;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#1a1a1a);font-size:13px}",
-	".dsh-rtr-side{width:168px;flex:none;border-right:1px solid var(--dsw-alias-border-l1,#e9e9ec);padding:14px 10px;display:flex;flex-direction:column;gap:2px;background:linear-gradient(180deg,color-mix(in srgb,var(--rt-accent,#4c6ef5) 3%,var(--dsw-alias-bg-base,#fff)),color-mix(in srgb,var(--rt-accent,#4c6ef5) 6%,var(--dsw-alias-bg-base,#fff)));backdrop-filter:blur(12px) saturate(1.1)}",
-	".dsh-rtr-side-title{font-size:12px;letter-spacing:.12em;color:var(--dsw-alias-label-tertiary,#8a8a8f);padding:0 8px 10px;font-weight:600}",
-	".dsh-rtr-side-item{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:7px 10px;border:none;background:none;border-radius:8px;cursor:pointer;color:var(--dsw-alias-label-secondary,#5b5b60);font-size:13px;text-align:left;transition:background .18s,color .18s,box-shadow .18s}",
+	".dsh-rtr-side{width:168px;flex:none;border-right:1px solid var(--dsw-alias-border-l1,#e9e9ec);padding:16px 12px;display:flex;flex-direction:column;gap:4px;background:linear-gradient(180deg,color-mix(in srgb,var(--rt-accent,#4c6ef5) 3%,var(--dsw-alias-bg-base,#fff)),color-mix(in srgb,var(--rt-accent,#4c6ef5) 6%,var(--dsw-alias-bg-base,#fff)));backdrop-filter:blur(12px) saturate(1.1)}",
+	".dsh-rtr-side-title{font-size:12px;letter-spacing:.12em;color:var(--dsw-alias-label-tertiary,#8a8a8f);padding:0 8px 12px;font-weight:600}",
+	".dsh-rtr-side-item{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 10px;border:none;background:none;border-radius:6px;cursor:pointer;color:var(--dsw-alias-label-secondary,#5b5b60);font-size:13px;text-align:left;transition:background .18s,color .18s,box-shadow .18s}",
 	".dsh-rtr-side-item:hover{background:var(--dsw-alias-interactive-bg-hover,color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 6%,transparent));color:var(--dsw-alias-label-primary,#1a1a1a)}",
 	".dsh-rtr-side-item.is-active{background:color-mix(in srgb,var(--rt-accent,#4c6ef5) 10%,transparent);color:var(--rt-accent,#4c6ef5);font-weight:600;box-shadow:inset 3px 0 0 0 var(--rt-accent,#4c6ef5),inset 0 0 0 1px color-mix(in srgb,var(--rt-accent,#4c6ef5) 10%,transparent)}",
-	".dsh-rtr-count{font-size:11px;min-width:22px;text-align:center;border-radius:999px;padding:1px 8px;background:color-mix(in srgb,var(--rt-accent,#4c6ef5) 10%,transparent);border:1px solid color-mix(in srgb,var(--rt-accent,#4c6ef5) 28%,transparent);color:var(--rt-accent,#4c6ef5);font-variant-numeric:tabular-nums}",
-	".dsh-rtr-main{flex:1;min-width:0;display:flex;flex-direction:column;overflow:auto;padding:14px 18px 18px;gap:12px}",
-	".dsh-rtr-meta{display:flex;align-items:center;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--dsw-alias-label-secondary,#5b5b60);border:1px solid var(--dsw-alias-border-l1,#e9e9ec);border-radius:9px;padding:7px 12px;background:color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 4%,var(--dsw-alias-bg-base,#fff))}",
+	".dsh-rtr-count{font-size:12px;min-width:22px;text-align:center;border-radius:999px;padding:0px 8px;background:color-mix(in srgb,var(--rt-accent,#4c6ef5) 10%,transparent);border:1px solid color-mix(in srgb,var(--rt-accent,#4c6ef5) 28%,transparent);color:var(--rt-accent,#4c6ef5);font-variant-numeric:tabular-nums}",
+	".dsh-rtr-main{flex:1;min-width:0;display:flex;flex-direction:column;overflow:auto;padding:16px 16px 16px;gap:12px}",
+	".dsh-rtr-meta{display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--dsw-alias-label-secondary,#5b5b60);border:1px solid var(--dsw-alias-border-l1,#e9e9ec);border-radius:9px;padding:8px 12px;background:color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 4%,var(--dsw-alias-bg-base,#fff))}",
 	".dsh-rtr-meta b{color:var(--dsw-alias-label-primary,#1a1a1a);font-weight:600;margin-left:4px}",
 	".dsh-rtr-meta.is-ghost{border-style:dashed;background:transparent;color:var(--dsw-alias-label-tertiary,#8a8a8f);padding:4px 12px}",
 	".dsh-rtr-metalink{font:inherit;font-size:12px;color:var(--dsw-alias-state-business-primary,#4c6ef5);background:none;border:none;cursor:pointer;padding:0}",
 	".dsh-rtr-metalink:hover{text-decoration:underline}",
 	".dsh-rtr-meta input{font:inherit;font-size:12px;padding:3px 8px;border:1px solid var(--dsw-alias-border-l2,#d4d4d8);border-radius:6px;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#1a1a1a)}",
-	".dsh-rtr-stats{display:flex;flex-direction:column;gap:10px}",
+	".dsh-rtr-stats{display:flex;flex-direction:column;gap:12px}",
 	".dsh-rtr-cardsrow{display:flex;gap:12px;flex-wrap:wrap}",
-	".dsh-rtr-statcard{flex:1;min-width:110px;border:1px solid var(--dsw-alias-border-l1,#e9e9ec);border-radius:10px;padding:9px 13px;background:var(--dsw-alias-bg-base,#fff);cursor:pointer}",
+	".dsh-rtr-statcard{flex:1;min-width:110px;border:1px solid var(--dsw-alias-border-l1,#e9e9ec);border-radius:10px;padding:8px 12px;background:var(--dsw-alias-bg-base,#fff);cursor:pointer}",
 	".dsh-rtr-statcard:hover{border-color:var(--dsw-alias-border-l2,#d4d4d8)}",
 	".dsh-rtr-statcard.is-dim{opacity:.55}",
-	".dsh-rtr-statnum{font-size:21px;font-weight:700;line-height:1.2;margin-top:2px}",
-	".dsh-rtr-statlabel{font-size:11px;color:var(--dsw-alias-label-tertiary,#8a8a8f);letter-spacing:.05em}",
+	".dsh-rtr-statnum{font-size:21px;font-weight:700;line-height:1.2;margin-top:4px}",
+	".dsh-rtr-statlabel{font-size:12px;color:var(--dsw-alias-label-tertiary,#8a8a8f);letter-spacing:.05em}",
 	".dsh-rtr-statextra{display:flex;flex-direction:row;flex-wrap:wrap;gap:8px 16px;width:100%;align-items:flex-start}",
 	".dsh-rtr-bar{display:flex;height:10px;border-radius:5px;overflow:hidden;background:color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 4%,var(--dsw-alias-bg-base,#fff));flex:1 1 100%}",
-	".dsh-rtr-chiprow{display:flex;gap:6px;flex-wrap:wrap;flex:1 1 100%}",
-	".dsh-rtr-types{display:flex;gap:6px;flex-wrap:wrap}",
-	".dsh-rtr-typechip{font-size:11px;padding:2px 8px;border-radius:9px;background:color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 4%,var(--dsw-alias-bg-base,#fff));color:var(--dsw-alias-label-secondary,#5b5b60);border:1px solid var(--dsw-alias-border-l1,#e9e9ec);cursor:pointer}",
+	".dsh-rtr-chiprow{display:flex;gap:8px;flex-wrap:wrap;flex:1 1 100%}",
+	".dsh-rtr-types{display:flex;gap:8px;flex-wrap:wrap}",
+	".dsh-rtr-typechip{font-size:12px;padding:2px 8px;border-radius:6px;background:color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 4%,var(--dsw-alias-bg-base,#fff));color:var(--dsw-alias-label-secondary,#5b5b60);border:1px solid var(--dsw-alias-border-l1,#e9e9ec);cursor:pointer}",
 	".dsh-rtr-typechip.is-static{cursor:default;opacity:.78}",
 	".dsh-rtr-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}",
 	".dsh-rtr-toolbar .dsh-rtr-spacer{flex:1}",
-	".dsh-rtr-select,.dsh-rtr-search{font:inherit;font-size:12px;padding:5px 8px;border:1px solid var(--dsw-alias-border-l2,#d4d4d8);border-radius:7px;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#1a1a1a)}",
+	".dsh-rtr-select,.dsh-rtr-search{font:inherit;font-size:12px;padding:4px 8px;border:1px solid var(--dsw-alias-border-l2,#d4d4d8);border-radius:6px;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#1a1a1a)}",
 	".dsh-rtr-search{width:170px}",
-	".dsh-rtr-btn{font:inherit;font-size:12px;padding:5px 11px;border-radius:7px;border:1px solid var(--dsw-alias-border-l2,#d4d4d8);background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#1a1a1a);cursor:pointer;white-space:nowrap}",
+	".dsh-rtr-btn{font:inherit;font-size:12px;padding:5px 11px;border-radius:6px;border:1px solid var(--dsw-alias-border-l2,#d4d4d8);background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#1a1a1a);cursor:pointer;white-space:nowrap}",
 	".dsh-rtr-btn:hover{background:var(--dsw-alias-interactive-bg-hover,color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 7%,transparent))}",
 	".dsh-rtr-btn.is-primary{border-color:transparent;background:var(--dsw-alias-state-business-primary,#4c6ef5);color:#fff}",
 	".dsh-rtr-btn.is-primary:hover{filter:brightness(1.05)}",
@@ -908,71 +963,89 @@ var CSS = [
 	".dsh-rtr-btn:active{background:color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 13%,transparent)}",
 	".dsh-rtr-btn:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4c6ef5);outline-offset:1px}",
 	".dsh-rtr-btn:disabled{opacity:.5;cursor:default}",
-	".dsh-rtr-grouphead{display:flex;align-items:center;gap:10px;padding:10px 12px 4px;font-weight:600;font-size:12.5px;color:var(--dsw-alias-label-secondary,#5b5b60)}",
+	".dsh-rtr-grouphead{display:flex;align-items:center;gap:12px;padding:12px 12px 4px;font-weight:600;font-size:13px;color:var(--dsw-alias-label-secondary,#5b5b60)}",
 	".dsh-rtr-grouphead .dsh-rtr-count{font-weight:400}",
 	".dsh-rtr-row{border:1px solid var(--dsw-alias-border-l1,#e9e9ec);border-radius:10px;overflow:hidden;background:var(--dsw-alias-bg-base,#fff)}",
 	".dsh-rtr-row + .dsh-rtr-row{margin-top:8px}",
-	".dsh-rtr-rowhead{display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer}",
+	".dsh-rtr-rowhead{display:flex;align-items:center;gap:12px;padding:8px 12px;cursor:pointer}",
 	".dsh-rtr-rowhead:hover{background:var(--dsw-alias-interactive-bg-hover,color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 5%,transparent))}",
-	".dsh-rtr-seq{font-size:11px;color:var(--dsw-alias-label-tertiary,#8a8a8f);width:28px;flex:none;text-align:right}",
+	".dsh-rtr-seq{font-size:12px;color:var(--dsw-alias-label-tertiary,#8a8a8f);width:28px;flex:none;text-align:right}",
 	".dsh-rtr-title{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
 	".dsh-rtr-summ{flex:1;min-width:0;color:var(--dsw-alias-label-tertiary,#8a8a8f);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
-	".dsh-rtr-time{font-size:11px;color:var(--dsw-alias-label-tertiary,#8a8a8f);flex:none}",
-	".dsh-rtr-sev{flex:none;font-size:11px;font-weight:600;padding:2px 8px;border-radius:9px;border:1px solid}",
+	".dsh-rtr-time{font-size:12px;color:var(--dsw-alias-label-tertiary,#8a8a8f);flex:none}",
+	".dsh-rtr-sev{flex:none;font-size:12px;font-weight:600;padding:4px 8px;border-radius:9px;border:1px solid}",
 	".dsh-rtr-sev-critical{color:#c2182f;border-color:rgba(194,24,47,.35);background:rgba(194,24,47,.08)}",
 	".dsh-rtr-sev-high{color:#ff4d4d;border-color:rgba(255,77,77,.35);background:rgba(255,77,77,.08)}",
 	".dsh-rtr-sev-medium{color:#b58a00;border-color:rgba(181,138,0,.35);background:rgba(181,138,0,.08)}",
 	".dsh-rtr-sev-low{color:#3b7dd8;border-color:rgba(59,125,216,.35);background:rgba(59,125,216,.08)}",
-	".dsh-rtr-st{flex:none;font-size:11px;padding:2px 8px;border-radius:9px;border:1px solid var(--dsw-alias-border-l2,#d4d4d8);color:var(--dsw-alias-label-secondary,#5b5b60)}",
+	".dsh-rtr-st{flex:none;font-size:12px;padding:4px 8px;border-radius:9px;border:1px solid var(--dsw-alias-border-l2,#d4d4d8);color:var(--dsw-alias-label-secondary,#5b5b60)}",
+	".dsh-rtr-st-retesting{border-color:var(--dsw-alias-state-business-primary,#4c6ef5);color:var(--dsw-alias-state-business-primary,#4c6ef5);background:var(--dsw-alias-state-business-primary-alpha,rgba(76,110,245,.08))}",
 	".dsh-rtr-st-verified{color:#2f9e63;border-color:rgba(47,158,99,.35);background:rgba(47,158,99,.08)}",
 		".dsh-rtr-st-code-reviewed{color:#0b7285;border-color:rgba(11,114,133,.35);background:rgba(11,114,133,.08)}",
 	".dsh-rtr-st-false-positive{color:#8a8a8f;text-decoration:line-through}",
-	".dsh-rtr-am{flex:none;font-size:11px;padding:2px 8px;border-radius:9px;border:1px solid}",
+	".dsh-rtr-am{flex:none;font-size:12px;padding:4px 8px;border-radius:9px;border:1px solid}",
 	".dsh-rtr-am-static{color:var(--dsw-alias-label-secondary,#5b5b60);border-color:rgba(91,91,96,.35);background:rgba(91,91,96,.07)}",
 	".dsh-rtr-am-dynamic{color:#2f9e63;border-color:rgba(47,158,99,.35);background:rgba(47,158,99,.1);font-weight:600}",
-	".dsh-rtr-detail{border-top:1px solid var(--dsw-alias-border-l1,#e9e9ec);padding:12px 16px;display:flex;flex-direction:column;gap:10px;background:color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 4%,var(--dsw-alias-bg-base,#fff))}",
+	// 详情是覆盖面板（v6 第 5.3 节）：宽 min(640px, 内容区宽度)，覆盖而不挤压列表；窄屏改成贴边整宽。
+	".dsh-rtr-detail{position:fixed;right:24px;bottom:24px;z-index:60;box-sizing:border-box;width:min(640px,calc(100vw - 48px));max-height:min(70vh,640px);overflow:auto;border:1px solid var(--dsw-alias-border-l1,#e9e9ec);border-radius:12px;padding:12px 16px;display:flex;flex-direction:column;gap:12px;background:var(--dsw-alias-bg-base,#fff);box-shadow:0 12px 36px rgba(0,0,0,.2)}",
+	"@media(max-width:720px){.dsh-rtr-detail{left:12px;right:12px;bottom:12px;width:auto}}",
+	".dsh-rtr-detail-head{position:sticky;top:0;z-index:1;display:flex;justify-content:flex-end;margin:-8px 0 4px;background:var(--dsw-alias-bg-base,#fff)}",
 	".dsh-rtr-fields{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--dsw-alias-label-secondary,#5b5b60)}",
 	".dsh-rtr-fields b{color:var(--dsw-alias-label-primary,#1a1a1a);font-weight:600;margin-left:4px}",
 	".dsh-rtr-block h4{margin:0 0 4px;font-size:12px;color:var(--dsw-alias-label-tertiary,#8a8a8f);letter-spacing:.04em}",
-	".dsh-rtr-block pre{margin:0;padding:10px 12px;border-radius:8px;background:var(--dsw-alias-bg-base,#fff);border:1px solid var(--dsw-alias-border-l1,#e9e9ec);white-space:pre-wrap;word-break:break-word;font-size:12px;max-height:280px;overflow:auto}",
-	".dsh-rtr-duo{display:flex;gap:10px;flex-wrap:wrap}",
+	".dsh-rtr-block pre{margin:0;padding:12px 12px;border-radius:8px;background:var(--dsw-alias-bg-base,#fff);border:1px solid var(--dsw-alias-border-l1,#e9e9ec);white-space:pre-wrap;word-break:break-word;font-size:12px;max-height:280px;overflow:auto}",
+	".dsh-rtr-duo{display:flex;gap:12px;flex-wrap:wrap}",
 	".dsh-rtr-duo>div{flex:1;min-width:280px}",
-	".dsh-rtr-duo pre{margin:0;padding:10px 12px;border-radius:8px;background:var(--dsw-alias-bg-base,#fff);border:1px solid var(--dsw-alias-border-l1,#e9e9ec);white-space:pre-wrap;word-break:break-word;font-size:12px;max-height:280px;overflow:auto}",
-	".dsh-rtr-verdict{font-size:12px;padding:6px 12px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2,#d4d4d8);background:var(--dsw-alias-bg-base,#fff)}",
-	".dsh-rtr-rowactions{display:flex;gap:6px;flex:none}",
+	".dsh-rtr-duo pre{margin:0;padding:12px 12px;border-radius:8px;background:var(--dsw-alias-bg-base,#fff);border:1px solid var(--dsw-alias-border-l1,#e9e9ec);white-space:pre-wrap;word-break:break-word;font-size:12px;max-height:280px;overflow:auto}",
+	// 原文双栏在窄屏改成上下栏（v6 第 5.3 节）；默认遮蔽秘密，展开按钮只在本地改显示。
+	"@media(max-width:720px){.dsh-rtr-packets{display:block}.dsh-rtr-packets>div+div{margin-top:12px}}",
+	".dsh-rtr-packet-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:8px}",
+	".dsh-rtr-packet-actions small{color:var(--dsw-alias-label-secondary,#5b5b60)}",
+	".dsh-rtr-verdict{font-size:12px;padding:8px 12px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2,#d4d4d8);background:var(--dsw-alias-bg-base,#fff)}",
+	".dsh-rtr-rowactions{display:flex;gap:8px;flex:none}",
 	".dsh-rtr-check{accent-color:var(--dsw-alias-state-business-primary,#4c6ef5)}",
 	".dsh-rtr-pager{display:flex;align-items:center;justify-content:center;gap:12px;padding:4px 0;font-size:12px;color:var(--dsw-alias-label-secondary,#5b5b60)}",
-	".dsh-rtr-empty{border:1px dashed var(--dsw-alias-border-l2,#d4d4d8);border-radius:10px;padding:36px 20px;text-align:center;color:var(--dsw-alias-label-tertiary,#8a8a8f);font-size:12px;line-height:1.9}",
-	".dsh-rtr-notice{position:sticky;top:0;z-index:2;font-size:12px;padding:6px 12px;border-radius:8px;background:rgba(76,110,245,.08);border:1px solid rgba(76,110,245,.25);color:var(--dsw-alias-label-primary,#1a1a1a)}",
-	".dsh-rtr-skel{color:var(--dsw-alias-label-tertiary,#8a8a8f);padding:28px;text-align:center;font-size:12px}",
+	".dsh-rtr-empty{border:1px dashed var(--dsw-alias-border-l2,#d4d4d8);border-radius:10px;padding:24px 24px;text-align:center;color:var(--dsw-alias-label-tertiary,#8a8a8f);font-size:12px;line-height:1.5}",
+	".dsh-rtr-empty-actions{margin-top:16px}",
+	".dsh-rtr-empty-actions button{font:inherit;cursor:pointer;border:1px solid var(--dsw-alias-border-l1,#d9d9de);border-radius:6px;padding:6px 14px;background:var(--dsw-alias-bg-base,transparent);color:var(--dsw-alias-label-primary,inherit)}",
+	".dsh-rtr-notice{position:sticky;top:0;z-index:2;font-size:12px;padding:8px 12px;border-radius:8px;background:rgba(76,110,245,.08);border:1px solid rgba(76,110,245,.25);color:var(--dsw-alias-label-primary,#1a1a1a)}",
+	// 报告预览：定高、正文独立滚动，长报告不把页面撑爆，底部按钮始终可见。
+	".dsh-rtr-report-preview{margin:12px 0;border:1px solid var(--dsw-alias-border-l1,#d9d9de);border-radius:10px;background:var(--dsw-alias-bg-base,#fff);overflow:hidden}",
+	".dsh-rtr-preview-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--dsw-alias-border-l1,#e5e5ea)}",
+	".dsh-rtr-preview-name{font-size:12px;color:var(--dsw-alias-label-secondary,#6e6e73);overflow-wrap:anywhere}",
+	// 正文底色必须**跟随主题**：宿主没定义 --dsw-alias-bg-l1，写死浅色回退会让深色下变成白底白字。
+	// 用半透明灰（和工具行 chip 同一手法）在浅色/深色都成立。
+	".dsh-rtr-preview-body{max-height:min(420px,60vh);overflow:auto;margin:0;padding:12px;font-size:12px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--dsw-alias-bg-l1,rgba(128,128,128,.08))}",
+	".dsh-rtr-preview-head{border-bottom-color:var(--dsw-alias-border-l1,rgba(128,128,128,.25))}",
+	".dsh-rtr-skel{color:var(--dsw-alias-label-tertiary,#8a8a8f);padding:24px;text-align:center;font-size:12px}",
 	".dsh-rtr-tl{display:flex;flex-direction:column}",
 	".dsh-rtr-tl-item{display:flex;gap:12px;align-items:stretch;min-width:0}",
 	".dsh-rtr-tl-rail{display:flex;flex-direction:column;align-items:center;width:18px;flex:none}",
-	".dsh-rtr-tl-dot{width:10px;height:10px;border-radius:50%;background:var(--dsw-alias-state-business-primary,#4c6ef5);border:2px solid var(--dsw-alias-bg-base,#fff);flex:none;margin-top:22px;z-index:1}",
+	".dsh-rtr-tl-dot{width:10px;height:10px;border-radius:50%;background:var(--dsw-alias-state-business-primary,#4c6ef5);border:2px solid var(--dsw-alias-bg-base,#fff);flex:none;margin-top:24px;z-index:1}",
 	".dsh-rtr-tl-line{flex:1;width:2px;background:var(--dsw-alias-border-l2,#d4d4d8);margin-top:4px}",
 	".dsh-rtr-tl-item:last-child .dsh-rtr-tl-line{display:none}",
-	".dsh-rtr-tl-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px;padding-bottom:12px}",
-	".dsh-rtr-tl-time{font-family:monospace;font-size:11px;color:var(--dsw-alias-label-secondary,#5b5b60);letter-spacing:.04em}",
+	".dsh-rtr-tl-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;padding-bottom:12px}",
+	".dsh-rtr-tl-time{font-family:monospace;font-size:12px;color:var(--dsw-alias-label-secondary,#5b5b60);letter-spacing:.04em}",
 	".dsh-rtr-tl-card{border:1px solid var(--dsw-alias-border-l1,#e9e9ec);border-radius:10px;background:var(--dsw-alias-bg-base,#fff);overflow:hidden}",
-	".dsh-rtr-tl-meta{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--dsw-alias-label-secondary,#5b5b60);padding:0 12px 9px;cursor:pointer}",
+	".dsh-rtr-tl-meta{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--dsw-alias-label-secondary,#5b5b60);padding:0 12px 8px;cursor:pointer}",
 	".dsh-rtr-tl-meta b{color:var(--dsw-alias-label-primary,#1a1a1a);font-weight:600;margin-left:4px}",
 	".dsh-rtr-tl-concl{flex:1;min-width:0;color:var(--dsw-alias-label-tertiary,#8a8a8f);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
 	"@media (max-width:720px){.dsh-rtr-tl-item{gap:8px}.dsh-rtr-tl-meta{gap:8px}}",
-	".dsh-rtr-cp{display:flex;flex-direction:column;gap:10px}",
+	".dsh-rtr-cp{display:flex;flex-direction:column;gap:12px}",
 	".dsh-rtr-cp-item{display:flex;flex-direction:column;gap:0;min-width:0}",
 	".dsh-rtr-cp-card{border:1px solid var(--dsw-alias-border-l1,#e9e9ec);border-radius:10px;background:var(--dsw-alias-bg-base,#fff);overflow:hidden}",
-	".dsh-rtr-cp-chain{display:flex;gap:0;flex-wrap:wrap;align-items:stretch;padding:9px 12px;cursor:pointer;row-gap:6px}",
-	".dsh-rtr-cp-hop{display:flex;align-items:baseline;gap:6px;font-size:12px;max-width:100%}",
-	".dsh-rtr-cp-hop:not(:last-child):after{content:'→';color:var(--dsw-alias-label-tertiary,#8a8a8f);margin:0 6px}",
+	".dsh-rtr-cp-chain{display:flex;gap:0;flex-wrap:wrap;align-items:stretch;padding:8px 12px;cursor:pointer;row-gap:8px}",
+	".dsh-rtr-cp-hop{display:flex;align-items:baseline;gap:8px;font-size:12px;max-width:100%}",
+	".dsh-rtr-cp-hop:not(:last-child):after{content:'→';color:var(--dsw-alias-label-tertiary,#8a8a8f);margin:0 8px}",
 	".dsh-rtr-cp-hop i{font-style:normal;color:var(--dsw-alias-label-tertiary,#8a8a8f);white-space:nowrap}",
 	".dsh-rtr-cp-hop b{font-weight:600;color:var(--dsw-alias-label-primary,#1a1a1a);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px}",
-	".dsh-rtr-cp-hoplabel{font-size:11px;color:var(--dsw-alias-label-tertiary,#8a8a8f);white-space:nowrap}",
+	".dsh-rtr-cp-hoplabel{font-size:12px;color:var(--dsw-alias-label-tertiary,#8a8a8f);white-space:nowrap}",
 	".dsh-rtr-cp-hopval{color:var(--dsw-alias-label-primary,#1a1a1a);font-size:12px}",
-	".dsh-rtr-cp-impact{flex:1 1 100%;border-top:1px dashed var(--dsw-alias-border-l1,#e9e9ec);padding-top:6px}",
+	".dsh-rtr-cp-impact{flex:1 1 100%;border-top:1px dashed var(--dsw-alias-border-l1,#e9e9ec);padding-top:8px}",
 	"@media (max-width:720px){.dsh-rtr-cp-hop{flex-basis:100%}.dsh-rtr-cp-hop:not(:last-child):after{display:none}}",
 	"@media (max-width:720px){.dsh-rtr-root{flex-direction:column}.dsh-rtr-side{width:auto;flex-direction:row;overflow-x:auto;padding:8px}.dsh-rtr-side-title{display:none}.dsh-rtr-side-item{white-space:nowrap}}",
-	".dsh-rtr-exportpop{position:fixed;z-index:300;visibility:hidden;background:var(--rt-surface-card,#fff);border:1px solid var(--rt-border,#e9e9ec);border-radius:10px;box-shadow:0 10px 34px rgba(9,20,40,.18);padding:6px;min-width:180px;display:flex;flex-direction:column}",
-	".dsh-rtr-exportitem{border:none;background:none;text-align:left;padding:8px 12px;font-size:12.5px;border-radius:7px;cursor:pointer;color:var(--dsw-alias-label-primary,#1a1a1a)}",
+	".dsh-rtr-exportpop{position:fixed;z-index:300;visibility:hidden;background:var(--rt-surface-card,#fff);border:1px solid var(--rt-border,#e9e9ec);border-radius:12px;box-shadow:0 10px 34px rgba(9,20,40,.18);padding:8px;min-width:180px;display:flex;flex-direction:column}",
+	".dsh-rtr-exportitem{border:none;background:none;text-align:left;padding:8px 12px;font-size:13px;border-radius:6px;cursor:pointer;color:var(--dsw-alias-label-primary,#1a1a1a)}",
 	".dsh-rtr-exportitem:hover{background:var(--rt-surface-tint,#f7f7f8)}"
 ].join("\n");
 
@@ -982,7 +1055,7 @@ function installStyles() {
 	if (!document.getElementById("dsh-rt-tokens")) {
 		var tok = document.createElement("style");
 		tok.id = "dsh-rt-tokens";
-		tok.textContent = "body{--rt-sev-critical:#c2182f;--rt-sev-high:#ff4d4d;--rt-sev-medium:#d9b00c;--rt-sev-low:#3b7dd8;--rt-sev-critical-bright:#ff8fa0;--rt-sev-high-bright:#ff6b8a;--rt-sev-medium-bright:#ffd43b;--rt-sev-low-bright:#4dabf7;--rt-ok:#2f9e44;--rt-dead:#c92a2a;--rt-ok-bright:#36f1b0;--rt-dead-bright:#ff8787;--rt-accent:var(--dsw-alias-state-business-primary,#4c6ef5);--rt-surface-card:var(--dsw-alias-bg-base,#fff);--rt-surface-tint:color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 4%,var(--dsw-alias-bg-base,#fff));--rt-border:var(--dsw-alias-border-l1,#e9e9ec);--rt-mono:ui-monospace,\"SF Mono\",SFMono-Regular,Menlo,Consolas,monospace;--rt-navy-bg:rgba(8,24,46,.96);--rt-navy-bg-soft:rgba(12,32,62,.6);--rt-navy-line:rgba(58,157,255,.45);--rt-navy-line-soft:rgba(58,157,255,.28);--rt-navy-text:#e8f3ff;--rt-navy-text-2:#cfe6ff;--rt-navy-body:#b9d2ee;--rt-navy-dim:#7d97b8;--rt-navy-dim-2:#8fb4d9;--rt-navy-accent:#38d4ff;--rt-navy-accent-2:#3a9dff}";
+		tok.textContent = ".dsh-task-workspace,.dsh-rtr-screen{--rt-sev-critical:#c2182f;--rt-sev-high:#ff4d4d;--rt-sev-medium:#d9b00c;--rt-sev-low:#3b7dd8;--rt-sev-critical-bright:#ff8fa0;--rt-sev-high-bright:#ff6b8a;--rt-sev-medium-bright:#ffd43b;--rt-sev-low-bright:#4dabf7;--rt-ok:#2f9e44;--rt-dead:#c92a2a;--rt-ok-bright:#36f1b0;--rt-dead-bright:#ff8787;--rt-accent:var(--dsw-alias-state-business-primary,#4c6ef5);--rt-surface-card:var(--dsw-alias-bg-base,#fff);--rt-surface-tint:color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 4%,var(--dsw-alias-bg-base,#fff));--rt-border:var(--dsw-alias-border-l1,#e9e9ec);--rt-mono:ui-monospace,\"SF Mono\",SFMono-Regular,Menlo,Consolas,monospace;--rt-navy-bg:rgba(8,24,46,.96);--rt-navy-bg-soft:rgba(12,32,62,.6);--rt-navy-line:rgba(58,157,255,.45);--rt-navy-line-soft:rgba(58,157,255,.28);--rt-navy-text:#e8f3ff;--rt-navy-text-2:#cfe6ff;--rt-navy-body:#b9d2ee;--rt-navy-dim:#7d97b8;--rt-navy-dim-2:#8fb4d9;--rt-navy-accent:#38d4ff;--rt-navy-accent-2:#3a9dff}";
 		document.head.appendChild(tok);
 	}
 	var el = document.createElement("style");
@@ -1009,7 +1082,7 @@ function statusTextForExport(f, mode) {
 }
 function Btn(props) {
 	return React.createElement("button", {
-		className: "dsh-rtr-btn" + (props.primary ? " is-primary" : "") + (props.danger ? " is-danger" : ""),
+		className: "dsh-rtr-btn saker-ui-btn" + (props.primary ? " is-primary" : "") + (props.danger ? " is-danger" : ""),
 		onClick: props.onClick, disabled: props.disabled, type: "button", 'aria-pressed': props['aria-pressed'], 'aria-expanded': props['aria-expanded'], style: props.style
 	}, props.children);
 }
@@ -1250,6 +1323,8 @@ function MetaBar(props) {
 
 function Detail(props) {
 	var deliveryError = useState('');
+	// 原始报文默认遮蔽账号密钥；用户明确展开时才在本地显示（v6 第 5.3 节）。
+	var revealPackets = useState(false);
 	var f = props.f, mode = props.mode;
 	var meta = props.meta || MODE_META.pentest;
 	var audit = mode === "code-audit";
@@ -1365,6 +1440,19 @@ function Detail(props) {
 				React.createElement(Btn, { onClick: function () { props.onExportOne(f); } }, "导出路径卡（MD）")));
 	}
 	return React.createElement("div", { className: "dsh-rtr-detail" },
+		// 关闭放在面板顶部的固定头部（v6 第 5.3 节）：长详情滚动到底也随时能关。
+		props.onClose ? React.createElement("div", { className: "dsh-rtr-detail-head" },
+			React.createElement(Btn, { onClick: function () { props.onClose(); } }, "关闭")) : null,
+		// 详情顺序固定（v6 第 5.3 节）：一句话结论与影响 → 目标和身份条件 → 本次原始依据/关键差异
+		// → 尚缺条件 → 历次复测。结论与影响排在最前，别被后面的字段挤下去。
+		mode === "pentest" && (f.summary || f.description || f.impact)
+			? Block({ title: "结论与影响" }, [f.summary, f.description, f.impact].filter(Boolean).join("\n\n"))
+			: null,
+		// 「复测中」给出对应运行链接（v6 第 5.3 节）：不另起重复会话，直接指到本任务的执行记录。
+		f.verifying ? React.createElement("div", { className: "dsh-rtr-block" },
+			React.createElement("h4", null, "复测中"),
+			React.createElement("p", null, "复核/复测请求已发送到原会话，等结论；本次运行记录见「执行记录」。"),
+			props.onOpenExecution ? React.createElement(Btn, { onClick: function () { props.onOpenExecution(); } }, "查看运行记录") : null) : null,
 		React.createElement("div", { className: "dsh-rtr-fields" },
 			React.createElement("span", null, audit ? "主线类型" : binary ? "结论类型" : "类型", React.createElement("b", null, f.type || "未分类")),
 			binary && f.family ? React.createElement("span", null, "家族", React.createElement("b", null, f.family)) : null,
@@ -1378,8 +1466,8 @@ function Detail(props) {
 			f.verifiedAt ? React.createElement("span", null, "验证时间", React.createElement("b", null, fmtTime(f.verifiedAt))) : null,
 			(audit || mode === "pentest") ? React.createElement("span", null, "来源", React.createElement("b", null, SOURCE_LABEL[f.sourceOrigin] || f.sourceOrigin)) : null,
 			audit && f.auditMode ? React.createElement("span", null, "审计形态", React.createElement("b", { style: f.auditMode === "dynamic" ? { color: "#2f9e63" } : null }, AUDIT_MODE_LABEL[f.auditMode] || f.auditMode)) : null),
-		f.description ? Block({ title: binary ? "定性依据（结论摘要）" : "描述" }, f.description) : null,
-		!audit && f.impact ? Block({ title: binary ? "能力与危害" : "影响证明" }, f.impact) : null,
+		mode !== "pentest" && f.description ? Block({ title: binary ? "定性依据（结论摘要）" : "描述" }, f.description) : null,
+		mode !== "pentest" && !audit && f.impact ? Block({ title: binary ? "能力与危害" : "影响证明" }, f.impact) : null,
 		mode === "pentest" && (f.baseline || f.diffEvidence || f.markerEcho) ? React.createElement("div", { className: "dsh-rtr-duo" },
 			React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize: 12, color: "#8a8a8f" } }, "对照三件套 · 基线"), React.createElement("pre", null, f.baseline || "（未填）")),
 			React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize: 12, color: "#8a8a8f" } }, "差分（翻转）"), React.createElement("pre", null, f.diffEvidence || "（未填）"))) : null,
@@ -1387,39 +1475,55 @@ function Detail(props) {
 		audit && (f.chain || f.chainTracer) ? React.createElement("div", { className: "dsh-rtr-block" },
 			React.createElement("h4", null, "双链对照（entry → sink）"),
 			React.createElement("div", { className: "dsh-rtr-duo" },
-				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize: 11, color: "#8a8a8f" } }, "审计工人链"), React.createElement("pre", null, f.chain || "（未填）")),
-				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize: 11, color: "#8a8a8f" } }, "追踪员链（独立重追）"), React.createElement("pre", null, f.chainTracer || "（未填）"))),
+				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize: 12, color: "#8a8a8f" } }, "审计工人链"), React.createElement("pre", null, f.chain || "（未填）")),
+				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize: 12, color: "#8a8a8f" } }, "追踪员链（独立重追）"), React.createElement("pre", null, f.chainTracer || "（未填）"))),
 			f.chainVerdict ? React.createElement("div", { className: "dsh-rtr-verdict", style: { marginTop: 8 } }, "一致性结论：" + f.chainVerdict) : null) : null,
 		!audit && f.chain ? Block({ title: binary ? "执行链 / 还原链路" : "调用链（entry → sink）" }, f.chain) : null,
 		audit && (f.snippetEntry || f.snippetSink) ? React.createElement("div", { className: "dsh-rtr-block" },
 			React.createElement("h4", null, "关键代码"),
 			React.createElement("div", { className: "dsh-rtr-duo" },
-				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize: 11, color: "#8a8a8f" } }, "入口 entry"), React.createElement("pre", null, f.snippetEntry || "（未填）")),
-				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize: 11, color: "#8a8a8f" } }, "危险点 sink"), React.createElement("pre", null, f.snippetSink || "（未填）")))) : null,
+				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize: 12, color: "#8a8a8f" } }, "入口 entry"), React.createElement("pre", null, f.snippetEntry || "（未填）")),
+				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize: 12, color: "#8a8a8f" } }, "危险点 sink"), React.createElement("pre", null, f.snippetSink || "（未填）")))) : null,
 		f.poc ? Block({ title: meta.pocTitle }, f.poc) : null,
 		binary && f.iocs ? Block({ title: "IOC 清单" }, f.iocs) : null,
+		deliveryError[0] ? Block({ title: '导出失败' }, deliveryError[0]) : null,
+    mode === 'pentest' ? React.createElement(EffectEvidenceView, { finding: f, onReviewed: props.onEffectReview }) : null,
+		binary && f.detectionRule ? Block({ title: "检测规则（YARA/Sigma）" }, f.detectionRule) : null,
+		// 原文 HTTP 双栏查看（v6 第 5.3 节）：默认遮蔽账号密钥，展开只在本地显示，不增加模型输入。
+		mode === "pentest" && (f.requestPkt || f.responsePkt) ? React.createElement("div", { className: "dsh-rtr-block" },
+			React.createElement("h4", null, "原始依据（请求 / 响应）"),
+			React.createElement("div", { className: "dsh-rtr-duo dsh-rtr-packets" },
+				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize: 12, color: "#8a8a8f" } }, "请求原文"),
+					React.createElement("pre", null, revealPackets[0] ? (f.requestPkt || "（未保存）") : maskSecrets(f.requestPkt || "（未保存）"))),
+				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize: 12, color: "#8a8a8f" } }, "响应原文"),
+					React.createElement("pre", null, revealPackets[0] ? (f.responsePkt || "（未保存）") : maskSecrets(f.responsePkt || "（未保存）")))),
+			React.createElement("div", { className: "dsh-rtr-packet-actions" },
+				React.createElement("small", null, revealPackets[0]
+					? "当前显示本地原文，包含账号密钥；只在本机查看，不会因此增加模型输入。"
+					: "账号密钥默认已遮蔽；需要本地核对时再展开。"),
+				React.createElement(Btn, { onClick: function () { revealPackets[1](!revealPackets[0]); } },
+					revealPackets[0] ? "重新遮蔽" : "展开原始内容"))) : null,
+		f.evidence ? Block({ title: "证据引用" }, f.evidence) : null,
+		// 「尚缺条件」排在原始依据之后（v6 第 5.3 节顺序）：先说依据，再说还缺什么。
 		mode === 'pentest' && f.delivery ? Block({ title: '利用交付' },
 			f.delivery.ready ? '材料完整；复现' + (f.delivery.reproductionVerified ? '已实测' : '尚未运行')
 				: '材料待补齐：' + f.delivery.missing.join('、')) : null,
 		mode === 'pentest' && f.delivery && !f.delivery.ready && f.executionEvidence && (f.executionEvidence.reason || f.executionEvidence.impactReason)
 			? Block({ title: '需要重新核对' }, f.executionEvidence.reason || f.executionEvidence.impactReason) : null,
-		deliveryError[0] ? Block({ title: '导出失败' }, deliveryError[0]) : null,
-    mode === 'pentest' ? React.createElement(EffectEvidenceView, { finding: f, onReviewed: props.onEffectReview }) : null,
-		binary && f.detectionRule ? Block({ title: "检测规则（YARA/Sigma）" }, f.detectionRule) : null,
-		mode === "pentest" && f.requestPkt ? Block({ title: "完整请求包" }, f.requestPkt) : null,
-		mode === "pentest" && f.responsePkt ? Block({ title: "关键响应" }, f.responsePkt) : null,
-		f.evidence ? Block({ title: "证据引用" }, f.evidence) : null,
 		f.fix ? Block({ title: binary ? "处置建议" : "修复建议" }, f.fix) : null,
 		audit && f.patch ? Block({ title: "修复 diff 建议" }, f.patch) : null,
 		f.verifyNote ? Block({ title: "复核注记" }, f.verifyNote) : null,
 		f.retestNote ? Block({ title: "复测记录" }, f.retestNote + (f.retestAt ? "（" + fmtTime(f.retestAt) + "）" : "")) : null,
+		// 结构化复测（v6 第 9.2 节）：三结论的最新一次 + 次数；详细历史按需读取。
+		f.retest ? Block({ title: "复测（" + f.retest.count + " 次）" }, f.retest.latest.verdictLabel + " · " + fmtTime(f.retest.latest.at)) : null,
 		React.createElement("div", { className: "dsh-rtr-rowactions" },
 			mode === "code-audit" ? React.createElement(Btn, { primary: true, onClick: function () { props.onLiveVerify ? props.onLiveVerify(f) : null; } }, "实测") : null,
-			props.onVerify ? React.createElement(Btn, { onClick: function () { props.onVerify(f); } }, "发送到会话验证") : null,
-			props.onExportOne ? React.createElement(Btn, { onClick: function () { props.onExportOne(f); } }, "导出报告（MD）") : null,
+			// 底部操作按 v6 第 5.3 节的叫法：复核/复测、导出这条发现（功能不变）。
+			props.onVerify ? React.createElement(Btn, { onClick: function () { props.onVerify(f); } }, "复核/复测") : null,
+			props.onExportOne ? React.createElement(Btn, { onClick: function () { props.onExportOne(f); } }, "导出这条发现") : null,
 			mode === 'pentest' && f.delivery && f.delivery.ready ? React.createElement(Btn, { onClick: function () {
 				api('finding.delivery', { sessionId: f.sessionId || props.sessionId, id: f.id }).then(function (result) {
-					if (result.ok) download(result.filename, result.text);
+					if (result.ok) { if (props.onPreview) props.onPreview(result.filename, result.text); else download(result.filename, result.text); }
 					else deliveryError[1](result.error || '交付材料不完整');
 				}).catch(function (error) { deliveryError[1](error.message || String(error)); });
 			} }, '导出完整利用方法') : null));
@@ -1434,7 +1538,7 @@ function EffectEvidenceView(props) {
     React.createElement('pre',{style:{whiteSpace:'pre-wrap',maxHeight:360,overflow:'auto'}},JSON.stringify(evidence,null,2)));
   if(!host||!host.verified||['access','write','other-impact'].indexOf(f.proofKind)<0)return null;
   function submit(){busy[1](true);notice[1]('');return api('finding.impact-review',{sessionId:f.sessionId,id:f.id,note:note[0],receiptIds:ids[0].split(/[\s,，]+/).filter(Boolean),permissionsConfirmed:permission[0],impactConfirmed:impact[0],restorationConfirmed:restoration[0],secondRating:rating[0]}).then(function(value){if(!value.ok)throw Error(typeof value.error==='string'?value.error:(value.error&&value.error.message)||'复核保存失败');saved[1](value.review);if(props.onReviewed)return props.onReviewed();}).catch(function(error){notice[1](error.message);}).finally(function(){busy[1](false);});}
-  function check(state,label){return React.createElement('label',{style:{display:'block',margin:'6px 0'}},React.createElement('input',{type:'checkbox',checked:state[0],onChange:function(event){state[1](event.target.checked);}}),label);}
+  function check(state,label){return React.createElement('label',{style:{display:'block',margin:'8px 0'}},React.createElement('input',{type:'checkbox',checked:state[0],onChange:function(event){state[1](event.target.checked);}}),label);}
   return React.createElement('details',{'aria-label':'人工复核实际效果',style:{margin:'12px 0'}},React.createElement('summary',null,'人工复核实际效果'),
     React.createElement('p',null,'程序已保存正常与异常请求。请独立核对角色、对象和真实业务效果；状态码、success或菜单变化不足以确认。写入测试还需效果和还原的两次实际读取回执。'),
     React.createElement('label',null,'实际证据回执ID（逗号分隔）',React.createElement('textarea',{'aria-label':'效果证据回执',value:ids[0],onChange:function(event){ids[1](event.target.value);},style:{width:'100%'}})),
@@ -1463,163 +1567,1032 @@ function exampleTemplates(mode) {
   };
   return (examples[mode] || []).concat([['补充我的思路','我的问题或怀疑：[用自己的话描述]。\n请结合已有资料帮我核查，告诉我哪些事实支持或不支持这个判断。','适合补充你观察到的现象、业务背景或怀疑。']]).map(function (row) { return { title: row[0], text: row[1], hint: row[2] }; });
 }
-function chatReporting(value) { return value.reporting || (value.interaction==='milestone'?'milestone':'summary'); }
-function cooperationValue(value) { return value==='milestone'?'continuous':value||'continuous'; }
-var CHAT_COOPERATION = {guided:'共同研判',confirm:'关键节点确认',continuous:'自主推进'};
-var CHAT_COOPERATION_HINT = {guided:'做完一个方向后，停下来和你讨论。',confirm:'切换测试方向或阶段前，先等你确认。',continuous:'自动继续测试，缺少必要信息时再询问。'};
+// v6 第 5.5 节稳定值：询问时机 auto/confirm-data-change/confirm-step；汇报 end/notable/step。
+// 旧值 continuous/milestone、confirm、guided 与 summary/milestone 只做只读迁移。
+var CHAT_LEGACY_INTERACTION={continuous:'auto',milestone:'auto',confirm:'confirm-step',guided:'confirm-step'};
+var CHAT_LEGACY_REPORTING={summary:'end',milestone:'step'};
+function chatReporting(value) { var r=(value&&value.reporting)||(value&&value.interaction==='milestone'?'step':'end'); return CHAT_LEGACY_REPORTING[r]||r; }
+function cooperationValue(value) { return CHAT_LEGACY_INTERACTION[value]||value||'auto'; }
+var CHAT_COOPERATION = {auto:'自行推进','confirm-data-change':'改动网站数据前问我','confirm-step':'每个检查步骤前问我'};
+var CHAT_COOPERATION_HINT = {auto:'在已确认的范围和操作权限内继续；缺账号或关键信息时集中询问。','confirm-data-change':'读取和分析继续；提交、修改或删除业务数据前先确认当前操作及预计影响。','confirm-step':'先说明本步骤要检查什么，确认后执行该步骤内必要调用；不为每条请求重复弹窗。'};
+var CHAT_REPORTING = {end:'任务结束时',notable:'发现问题或需要帮助时',step:'每完成一个检查步骤时'};
+var START_MODE = {'materials-first':'资料优先','auto-recon':'自动信息收集','direct-test':'直接测试'};
+var START_MODE_HINT = {'materials-first':'先用现有请求、源码、流量和扫描结果，缺什么再补。','auto-recon':'先在授权范围内补必要入口、存活和服务信息。','direct-test':'直接围绕已给出的请求、接口或源码开始检查。'};
 function ChatIcon(props) {
   var paths={direction:'M4 6h12M4 12h8M4 18h4',users:'M14 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M8 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 20v-2a4 4 0 0 0-3-3.87M16 2.13a4 4 0 0 1 0 7.75',chat:'M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9H13a8.48 8.48 0 0 1 8 8v.5',prompt:'M4 4h16v16H4zM8 8h8M8 12h8M8 16h4',settings:'M4 6h16M4 12h16M4 18h16M8 4v4M16 10v4M10 16v4'};
   return React.createElement('svg',{width:14,height:14,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.7,strokeLinecap:'round',strokeLinejoin:'round','aria-hidden':true},React.createElement('path',{d:paths[props.name]||paths.settings}));
 }
 function InteractionControl(props) {
-  return React.createElement('div',{style:{marginTop:10}},
-    React.createElement('label',{className:'dsh-task-field'},React.createElement('span',null,'协作方式'),React.createElement('select',{'aria-label':'协作方式',value:cooperationValue(props.interaction),disabled:props.disabled,onChange:function(e){return props.onChange(e.target.value);}},
-      ['guided','confirm','continuous'].map(function(value){return React.createElement('option',{key:value,value:value},CHAT_COOPERATION[value]);}))),
+  return React.createElement('div',{style:{marginTop:12}},
+    React.createElement('label',{className:'dsh-task-field'},React.createElement('span',null,'什么时候问我'),React.createElement('select',{'aria-label':'什么时候问我',value:cooperationValue(props.interaction),disabled:props.disabled,onChange:function(e){return props.onChange(e.target.value);}},
+      ['auto','confirm-data-change','confirm-step'].map(function(value){return React.createElement('option',{key:value,value:value},CHAT_COOPERATION[value]);}))),
     React.createElement('p',{style:{fontSize:12}},CHAT_COOPERATION_HINT[cooperationValue(props.interaction)]));
 }
 function FlowControls(props) {
   return React.createElement('div',null,
     props.mode==='regular'?React.createElement('label',{className:'dsh-task-field'},React.createElement('span',null,'测试安排'),React.createElement('select',{'aria-label':'测试安排',value:props.workflow||'single',disabled:props.disabled,onChange:function(e){props.onChange({workflow:e.target.value});}},
       React.createElement('option',{value:'single'},'只做当前模式'),React.createElement('option',{value:'regular-to-nday'},'收集后自动接 Nday'),React.createElement('option',{value:'regular-with-nday'},'常规与 Nday 同时进行'))):null,
-    React.createElement('label',{className:'dsh-task-field'},React.createElement('span',null,'子代理上限'),React.createElement('input',{type:'number',min:0,max:16,step:1,'aria-label':'子代理上限',value:props.workers??1,disabled:props.disabled,onChange:function(e){var n=Number(e.target.value);if(e.target.value!==''&&Number.isInteger(n)&&n>=0&&n<=16)props.onChange({workers:n});}})),
+    React.createElement('label',{className:'dsh-task-field'},React.createElement('span',null,'子代理上限'),React.createElement('input',{type:'number',min:0,max:16,step:1,'aria-label':'子代理上限',value:props.workers??2,disabled:props.disabled,onChange:function(e){var n=Number(e.target.value);if(e.target.value!==''&&Number.isInteger(n)&&n>=0&&n<=16)props.onChange({workers:n});}})),
+    React.createElement('label',{className:'dsh-task-field'},React.createElement('span',null,'起步方式'),React.createElement('select',{'aria-label':'起步方式',value:props.startMode||'materials-first',disabled:props.disabled,onChange:function(e){props.onChange({startMode:e.target.value});}},Object.keys(START_MODE).map(function(value){return React.createElement('option',{key:value,value:value},START_MODE[value]);}))),
+    React.createElement('p',{style:{fontSize:12}},START_MODE_HINT[props.startMode||'materials-first']),
     React.createElement(InteractionControl,{interaction:props.interaction,disabled:props.disabled,onChange:function(value){return props.onChange({interaction:value});}}),
     props.mode==='regular'&&props.workflow&&props.workflow!=='single'?React.createElement('p',null,'常规测试和 Nday 共用操作次数和停止时间。'):null);
 }
-function chatError(value) { return typeof value==='string'?value:(value&&value.message)||'操作失败，请重试'; }
-function promptFields(text) {
-  return Array.from(new Set((text.match(/\[[^\]\n]{1,60}\]/g)||[]).map(function(value){return value.slice(1,-1);}))).slice(0,12);
+// 统一错误文案（v6 第 9.3 节）：接口错误含 code / 具体 message / 可恢复操作，
+// 这里把 message 与 hint 一起给用户看，别只丢一句「操作失败」。
+function chatError(value) {
+  if (typeof value === 'string') return value;
+  if (!value) return '操作失败，请重试';
+  var message = value.error || value.message || '操作失败，请重试';
+  return value.hint ? message + '（' + value.hint + '）' : message;
 }
-function fillPrompt(template, fields) {
-  return template.replace(/\[([^\]\n]{1,60})\]/g,function(token,key){return fields[key]&&fields[key].trim()?fields[key].trim():token;});
+// 提示词模板编辑器（v6 第 3 节）：右侧覆盖抽屉；内置 36 篇只读；会话独立草稿；必填 0–2 项；
+// 全文始终可见；插入不发送、不创建任务、不调用模型。
+var PROMPT_FAVORITES_KEY='saker.prompt.favorites';
+function promptSubstitute(tpl, values, fields) {
+  return String(tpl.text).replace(/\{\{([a-zA-Z0-9_]+)\}\}/g, function (_m, key) {
+    var raw = values[key];
+    if (raw !== undefined && raw !== null && String(raw).trim() !== '') return String(raw);
+    return (fields[key] && fields[key].default) || '';
+  });
 }
-var chatDraftClock=0;
+function promptMissing(tpl, values, fields) {
+  return (tpl.required || []).filter(function (k) { return !(values[k] && String(values[k]).trim()); })
+    .map(function (k) { return (fields[k] && fields[k].label) || k; });
+}
+function loadPromptFavorites() { try { return JSON.parse(window.localStorage.getItem(PROMPT_FAVORITES_KEY)) || []; } catch (error) { return []; } }
+function savePromptFavorites(list) { try { window.localStorage.setItem(PROMPT_FAVORITES_KEY, JSON.stringify(list)); } catch (error) { /* localStorage 不可用则仅本次会话有效 */ } }
 function ChatPromptEditor(props) {
-  var draft=useState(''), selected=useState(''), templates=useState([]), base=useState(''), fields=useState({}), manual=useState(false);
-  var loaded=useState(false), saved=useState(''), notice=useState(''), title=useState(''), busy=useState(false);
-  var dirty=useState(false);
-  var latest=useRef(null), pending=useRef(Promise.resolve()), alive=useRef(true);
-  function persist(value) {
-    pending.current=pending.current.catch(function(){}).then(function(){return api('chat.draft',{sessionId:props.sessionId,mode:props.mode,draft:value});}).then(function(result){
-      if(!result.ok)throw Error(chatError(result.error));
-      if(alive.current&&latest.current===value)saved[1](result.draft.text===value.text?'草稿已保存':'其他窗口已有较新草稿，请刷新后检查');
-    }).catch(function(error){if(alive.current)saved[1]('草稿保存失败：'+error.message);});
-    return pending.current;
+  var lib=useState(null), query=useState(''), scope=useState('common'), selectedId=useState('');
+  var values=useState({}), text=useState(''), editMode=useState('fields');
+  var saveState=useState(''), notice=useState(''), busy=useState(false), optional=useState(false);
+  var importNotice=useState(''), importRef=useRef(null);
+  var drafts=useState({}), favorites=useState(loadPromptFavorites()), conflict=useState(null), saveAsName=useState('');
+  var draftRev=useRef(0), alive=useRef(true), pending=useRef(Promise.resolve()), openBtn=useRef(null), focusDone=useRef(false);
+  // 当前选中的模板：persist 的回调是异步的，闭包里的 selectedId[0] 是**发起那次渲染**的值，
+  // 用它判断"存的还是不是当前模板"会误判（真机复现：切模板后新模板的保存被旧 revision 顶掉）。
+  var selectedRef=useRef('');
+  var dirty=useRef(false), debounce=useRef(0);
+  var fields=lib[0]?lib[0].fields:{};
+  var all=lib[0]?lib[0].builtin.concat(lib[0].user.templates):[];
+  var selected=all.find(function(row){return row.id===selectedId[0];})||null;
+  function persist(id, body) {
+    if(!id)return pending.current;
+    return pending.current.catch(function(){}).then(function(){return api('prompt.draft',{sessionId:props.sessionId,action:'save',templateId:id,expectedRevision:body.expectedRevision,mode:props.mode,editMode:body.editMode,fields:body.fields,text:body.text});}).then(function(result){
+      if(!result.ok)throw Error(chatError(result));
+      if(result.draft&&result.draft.conflict){if(alive.current)conflict[1](result.draft);return;}
+      // 只有「这次存的还是当前选中的模板」才更新 draftRev：switchTo 会异步把上一个模板再存一次，
+      // 无条件回写会把当前模板的 revision 覆盖成上一个模板的，之后对新模板的保存直接冲突、
+      // 用户刚编辑的内容静默丢失（2026-10-17 真机复现）。
+      // 内存里的草稿表也要跟着更新：它只在打开抽屉时加载一次，不回写的话
+      // 「编辑 → 切模板 → 切回来」会恢复成保存前的旧值（2026-10-18 真机复现：
+      // S01 的 检查重点 明明已落库，切回来却是空的）。
+      drafts[1](function(previous){var next=Object.assign({},previous);next[id]=result.draft;return next;});
+      if(alive.current){if(id===selectedRef.current)draftRev.current=result.draft.revision;saveState[1]('已保存');}
+    }).catch(function(error){if(alive.current)saveState[1]('草稿保存失败：'+error.message);});
+  }
+  // 500ms 防抖保存 + 关闭时提交最后一版（v6 第 3.3 节第 7 条）：编辑停下就落一次，
+  // 关抽屉/切模板/插入都不丢稿。dirty 只由真实编辑置位，避免"打开就写一次"。
+  function markDirty(){dirty.current=true;}
+  function flushDraft(){
+    if(!dirty.current||!selectedId[0])return pending.current;
+    dirty.current=false;
+    return persist(selectedId[0],{expectedRevision:draftRev.current,editMode:editMode[0],fields:values[0],text:text[0]});
   }
   useEffect(function(){
-    alive.current=true;var active=true;
-    Promise.all([api('chat.draft',{sessionId:props.sessionId,mode:props.mode}),api('chat.templates',{sessionId:props.sessionId})]).then(function(values){
-      if(!values[0].ok||!values[1].ok)throw Error(chatError((!values[0].ok?values[0]:values[1]).error));
+    if(!props.open||!dirty.current)return;
+    if(debounce.current)clearTimeout(debounce.current);
+    debounce.current=setTimeout(function(){debounce.current=0;flushDraft();},500);
+    return function(){if(debounce.current){clearTimeout(debounce.current);debounce.current=0;}};
+  });
+  useEffect(function(){
+    if(props.open)return;
+    if(debounce.current){clearTimeout(debounce.current);debounce.current=0;}
+    flushDraft();
+  },[props.open]);
+  function load(){alive.current=true;var active=true;
+    return Promise.all([api('prompt.library',{sessionId:props.sessionId,action:'list'}),api('prompt.draft',{sessionId:props.sessionId,action:'list'})]).then(function(res){
+      if(!res[0].ok||!res[1].ok)throw Error(chatError(!res[0].ok?res[0]:res[1]));
       if(!active)return;
-      templates[1](values[1].templates);
-      var value=values[0].draft, first=exampleTemplates(props.mode)[0];
-      if(value){draft[1](value.text);selected[1](value.template);manual[1](true);saved[1]('已恢复本会话草稿');}
-      else if(first){draft[1](first.text);base[1](first.text);selected[1]('built-in:0');}
-      loaded[1](true);
+      lib[1](res[0]);
+      var map={};res[1].drafts.forEach(function(d){map[d.templateId]=d;});drafts[1](map);
+      // 无草稿时保持空白编辑，没有默认选中项；已有草稿恢复**最近编辑**的那一条。
+      // 按 revision 排是错的：那是每个模板各自的计数器，改过次数多的模板会压过刚编辑过的那条。
+      var recent=res[1].drafts.slice().sort(function(a,b){
+        var at=String(a.updatedAt||''),bt=String(b.updatedAt||'');
+        if(at&&bt&&at!==bt)return bt<at?-1:1;
+        return b.revision-a.revision;
+      })[0];
+      if(recent){selectedId[1](recent.templateId);selectedRef.current=recent.templateId;values[1](recent.fields||{});editMode[1](recent.editMode||'fields');text[1](recent.text||'');draftRev.current=recent.revision;saveState[1]('已恢复本会话草稿');}
     }).catch(function(error){if(active)notice[1](error.message);});
-    return function(){active=false;alive.current=false;if(latest.current)persist(latest.current);};
-  },[props.sessionId]);
-  useEffect(function(){
-    if(!loaded[0]||!dirty[0])return;
-    chatDraftClock=Math.max(Date.now(),chatDraftClock+1);
-    var value={text:draft[0],template:selected[0],mode:props.mode,editedAt:chatDraftClock};latest.current=value;saved[1]('正在保存草稿…');
-    var timer=setTimeout(function(){persist(value);},500);
-    return function(){clearTimeout(timer);};
-  },[loaded[0],dirty[0],draft[0],selected[0],props.mode]);
-  var builtins=exampleTemplates(props.mode), mine=templates[0].filter(function(row){return row.mode===props.mode;});
-  function select(value) {
-    var example=value.indexOf('built-in:')===0?builtins[Number(value.slice(9))]:mine.find(function(row){return row.id===value;});
-    selected[1](value);fields[1]({});manual[1](false);base[1](example?example.text:'');draft[1](example?example.text:'');dirty[1](true);notice[1]('');
   }
-  function copy(){return Promise.resolve().then(function(){return navigator.clipboard.writeText(draft[0]);}).then(function(){notice[1]('已复制编辑后的提示词');}).catch(function(){notice[1]('复制失败，请在下方编辑框选中文本后手工复制。');});}
+  useEffect(function(){var p=load();return function(){alive.current=false;};},[props.sessionId]);
+  // 打开抽屉就把焦点放进搜索框：这样键盘 Esc 能直接关闭并回到入口按钮（v6 UI01/UI09/UI12）。
+  useEffect(function(){
+    if(!props.open){focusDone.current=false;return;}
+    if(focusDone.current)return;focusDone.current=true;
+    if(typeof document==='undefined')return;
+    var search=document.querySelector('[aria-label="模板搜索"]');
+    if(search&&search.focus)search.focus();
+  },[props.open]);
+  // 兜底：入口按钮那一步已经捕获过落点；这里只处理「挂载时就是打开状态」的情况
+  // （测试夹具与宿主恢复面板时），避免 insert() 拿不到预捕获的 span。
+  useEffect(function(){
+    if(!props.open)return;
+    if(props.insertion&&props.insertion.current)return;
+    if(props.inputActions&&typeof props.inputActions.captureInsertion==='function'&&props.insertion)props.insertion.current=props.inputActions.captureInsertion();
+  },[props.open]);
+  function generated(tpl, vals){return promptSubstitute(tpl, vals, fields);}
+  function switchTo(id) {
+    if(id===selectedId[0])return;
+    if(selected&&text[0].trim())persist(selected.id,{expectedRevision:draftRev.current,editMode:editMode[0],fields:values[0],text:text[0]});
+    // 不在这里清冲突：冲突按模板保留，切走再切回来还能看到两份稿（v6 第 3.3 节第 7 条）。
+    // 渲染时只显示属于当前模板的那一条，避免把别的模板的冲突挂在这一页上。
+    var tpl=all.find(function(row){return row.id===id;});selectedId[1](id);selectedRef.current=id;notice[1]('');
+    var saved=drafts[0][id];
+    if(saved){values[1](saved.fields||{});editMode[1](saved.editMode||'fields');text[1](saved.text||'');draftRev.current=saved.revision;saveState[1]('已恢复该模板的稿');}
+    else if(tpl){values[1]({});editMode[1]('fields');text[1](generated(tpl,{}));draftRev.current=0;saveState[1]('');}
+    else{values[1]({});text[1]('');draftRev.current=0;}
+  }
+  function setField(key,value){var next=Object.assign({},values[0]);next[key]=value;values[1](next);if(editMode[0]==='fields'&&selected)text[1](generated(selected,next));markDirty();}
+  function beginManual(){editMode[1]('manual');notice[1]('已切换为直接编辑；之后切换模板不会自动改写这份稿。');markDirty();}
+  function useGenerated(){editMode[1]('fields');if(selected)text[1](generated(selected,values[0]));markDirty();}
+  function toggleFavorite(){if(!selected)return;var list=favorites[0].indexOf(selected.id)>=0?favorites[0].filter(function(x){return x!==selected.id;}):favorites[0].concat([selected.id]);favorites[1](list);savePromptFavorites(list);}
+  // 导入/导出（v6 第 3.3 节第 11 条）：导入逐条报告结果，重 ID 由服务端导入为新副本；
+  // 导出只含用户模板、标签与字段声明，不含账号凭据。
+  function importFile(file){
+    if(!file)return Promise.resolve();
+    return file.text().then(function(raw){
+      var doc;
+      try{doc=JSON.parse(raw);}catch(error){throw Error('导入文件不是合法 JSON：'+error.message);}
+      return api('prompt.library',{sessionId:props.sessionId,action:'import',document:doc});
+    }).then(function(result){
+      if(!result.ok)throw Error(chatError(result));
+      var accepted=(result.accepted||[]).length, rejected=result.rejected||[];
+      importNotice[1]('导入完成：接受 '+accepted+' 条'+(rejected.length?('，拒绝 '+rejected.length+' 条（'+rejected.map(function(row){return '第'+(row.index+1)+'条 '+row.reason;}).join('；')+'）'):''));
+      return load();
+    }).catch(function(error){importNotice[1]('导入失败：'+error.message);});
+  }
+  function exportTemplates(){
+    return api('prompt.library',{sessionId:props.sessionId,action:'export'}).then(function(result){
+      if(!result.ok)throw Error(chatError(result));
+      var count=(result.document&&result.document.templates||[]).length;
+      if(typeof download==='function')download('saker-prompt-templates.json',JSON.stringify(result.document,null,2),'application/json');
+      notice[1]('已导出我的模板 '+count+' 条（不含账号凭据）');
+    }).catch(function(error){notice[1]('导出失败：'+error.message);});
+  }
+  // 我的模板分页：每页 30 条只是加载数量，没有总数上限（v6 第 3.3 节第 10 条）。
+  function loadMoreUser(){
+    if(!lib[0]||!lib[0].user)return Promise.resolve();
+    var loaded=lib[0].user.templates.length;
+    return api('prompt.library',{sessionId:props.sessionId,action:'list',offset:loaded,limit:30}).then(function(result){
+      if(!result.ok)throw Error(chatError(result));
+      var user=result.user||{templates:[],total:loaded,more:0};
+      lib[1](Object.assign({},lib[0],{user:Object.assign({},user,{templates:lib[0].user.templates.concat(user.templates||[])})}));
+    }).catch(function(error){notice[1]('加载更多模板失败：'+error.message);});
+  }
+  function copy(){var missing=selected?promptMissing(selected,values[0],fields):[];var out=text[0];if(missing.length)out=promptSubstitute(selected,values[0],fields);return Promise.resolve().then(function(){return navigator.clipboard.writeText(out);}).then(function(){notice[1](missing.length?('已复制，还剩 '+missing.length+' 项未填：'+missing.join('、')):'已复制全文');}).catch(function(){notice[1]('复制失败，请在下方编辑框全选后手工复制。');});}
   function insert(){try{
     if(!props.inputActions||typeof props.inputActions.insertText!=='function')throw Error('输入框暂不可用，请复制后粘贴');
-    var span=props.inputActions.captureInsertion();
-    if(!props.inputActions.insertText(draft[0],span))throw Error('输入框正在变化，请稍后重试；编辑内容仍保留');
+    // v6 第 3.3 节第 8 条：落点在**打开抽屉前**就捕获好（宿主 caretSpan 在编辑器失焦后返回文档末尾，
+    // 抽屉一开原来的光标/选区就没了）。没有预捕获时退回现取，保证仍可用。
+    var span=(props.insertion&&props.insertion.current)||props.inputActions.captureInsertion();
+    if(!props.inputActions.insertText(text[0],span)){
+      // 抽屉打开期间输入框被别处改过：宿主按版本拒绝。重取一次落点（此时=文档末尾）换行追加，
+      // 并按方案原话说明，而不是把用户已经打好的内容丢回去让他重来。
+      var fresh=typeof props.inputActions.captureInsertion==='function'?props.inputActions.captureInsertion():null;
+      if(fresh&&(!span||fresh.draftRev!==span.draftRev)&&props.inputActions.insertText('\n'+text[0],fresh)){
+        if(selected)persist(selected.id,{expectedRevision:draftRev.current,editMode:editMode[0],fields:values[0],text:text[0]});
+        props.onClose();
+        notice[1]('输入框已有新内容，已追加到末尾');
+        return;
+      }
+      throw Error('输入框正在变化，请稍后重试；编辑内容仍保留');
+    }
+    if(selected)persist(selected.id,{expectedRevision:draftRev.current,editMode:editMode[0],fields:values[0],text:text[0]});
+    props.onClose();
     notice[1]('已插入聊天输入框，请检查后自行发送');
   }catch(error){notice[1](error.message);}}
-  function saveTemplate(){busy[1](true);notice[1]('');var existing=mine.find(function(row){return row.title===title[0].trim();});
-    return api('chat.templates',{sessionId:props.sessionId,template:{id:existing&&existing.id,title:title[0].trim(),text:draft[0],mode:props.mode}}).then(function(result){
-      if(!result.ok)throw Error(chatError(result.error));templates[1](result.templates);notice[1]('个人模板已保存，可在其他会话选用');
-    }).catch(function(error){notice[1](error.message);}).finally(function(){busy[1](false);});
-  }
-  return React.createElement('section',{'aria-label':'提示词编辑器',className:'dsh-chat-prompt',hidden:!props.open},
-    React.createElement('div',{className:'dsh-chat-panel-head'},React.createElement('strong',null,'准备这次任务'),React.createElement('button',{type:'button',onClick:props.onClose,'aria-label':'关闭提示词编辑器'},'关闭')),
-    React.createElement('p',null,'选一个符合你情况的示例，填好后插入聊天。也可以直接改写。'),
-    React.createElement('label',null,'你现在有什么？ ',React.createElement('select',{'aria-label':'起点模板',disabled:!loaded[0]||busy[0],value:selected[0],onChange:function(event){select(event.target.value);}},
-      React.createElement('option',{value:''},'从空白开始'),builtins.map(function(row,i){return React.createElement('option',{key:i,value:'built-in:'+i},row.title);}),mine.map(function(row){return React.createElement('option',{key:row.id,value:row.id},'我的模板：'+row.title);}))),
-    selected[0].indexOf('built-in:')===0&&builtins[Number(selected[0].slice(9))]?React.createElement('p',{className:'dsh-chat-template-hint'},builtins[Number(selected[0].slice(9))].hint):null,
-    !manual[0]?React.createElement('div',{className:'dsh-chat-fields'},promptFields(base[0]).map(function(key){return React.createElement('label',{key:key},key,React.createElement('input',{'aria-label':'填写'+key,value:fields[0][key]||'',placeholder:key,onChange:function(event){var next=Object.assign({},fields[0]);next[key]=event.target.value;fields[1](next);draft[1](fillPrompt(base[0],next));dirty[1](true);}}));})):null,
-    React.createElement('label',{className:'dsh-chat-full-prompt'},'发给AI的话（可修改）',React.createElement('textarea',{'aria-label':'提示词全文',value:draft[0],disabled:!loaded[0],maxLength:16000,rows:3,onChange:function(event){draft[1](event.target.value);manual[1](true);dirty[1](true);notice[1]('');}})),
-    React.createElement('div',{className:'dsh-chat-actions'},React.createElement('button',{type:'button',disabled:!loaded[0]||!draft[0].trim(),onClick:insert},'插入到输入框'),
-      React.createElement('button',{type:'button',disabled:!loaded[0]||!draft[0].trim(),onClick:copy},'复制提示词'),React.createElement('span',{role:'status'},saved[0])),
-    promptFields(draft[0]).length?React.createElement('small',null,'还有方括号占位内容，请在发送前补充。'):null,
-    React.createElement('details',null,React.createElement('summary',null,'保存为我的模板'),React.createElement('label',null,'模板名称 ',React.createElement('input',{'aria-label':'模板名称',value:title[0],maxLength:60,onChange:function(event){title[1](event.target.value);}})),
-      React.createElement('button',{type:'button',disabled:busy[0]||!title[0].trim()||!draft[0].trim(),onClick:saveTemplate},'保存个人模板'),React.createElement('small',null,'同模式、同名称会更新原模板。最多30个，保存在本机。')),
-    notice[0]?React.createElement('p',{role:'status'},notice[0]):null);
+  /** 打开抽屉时捕获到的落点若为非空区间，说明输入框里选着一段文字（v6 第 3.3 节第 8 条）。 */
+  function replacesSelection(){var s=props.insertion&&props.insertion.current;
+    return !!(s&&typeof s.start==='number'&&typeof s.end==='number'&&s.end>s.start);}
+  function saveAs(){if(!selected||!saveAsName[0].trim())return;busy[1](true);var nextId='mine-'+Date.now().toString(36);
+    // 填信息模式保存可复用的模板（保留 {{占位}}）；直接编辑模式保存冻结的纯文本，
+    // 只保留仍在正文中的字段声明，避免声明了正文没有的字段。
+    var body=editMode[0]==='fields'?selected.text:text[0];
+    var present=Array.from(new Set((String(body).match(/\{\{([a-zA-Z0-9_]+)\}\}/g)||[]).map(function(s){return s.slice(2,-2);})));
+    var req=(selected.required||[]).filter(function(k){return present.indexOf(k)>=0;});
+    var opt=(selected.optional||[]).filter(function(k){return present.indexOf(k)>=0;});
+    return api('prompt.library',{sessionId:props.sessionId,action:'save-as',newId:nextId,template:{id:nextId,title:saveAsName[0].trim(),group:'自定义',text:body,required:req,optional:opt,keywords:[]}}).then(function(result){
+      if(!result.ok)throw Error(chatError(result));saveAsName[1]('');return load().then(function(){switchTo(nextId);});notice[1]('已另存为我的模板');
+    }).catch(function(error){notice[1](error.message);}).finally(function(){busy[1](false);});}
+  function resolveConflict(mode){var c=conflict[0];if(!c)return;
+    if(mode==='server'){values[1](c.server.fields||{});editMode[1](c.server.editMode||'fields');text[1](c.server.text||'');draftRev.current=c.server.revision;saveState[1]('已载入另一窗口版本');}
+    else{draftRev.current=c.server.revision;persist(c.local.templateId||selected.id,{expectedRevision:c.server.revision,editMode:c.local.editMode||'fields',fields:c.local.fields||{},text:c.local.text||''});saveState[1]('已用本地版本另存');}
+    conflict[1](null);}
+  var shown=all.filter(function(row){if(scope[0]==='mine'&&row.builtin)return false;return true;});
+  if(query[0].trim()){var q=query[0].trim().toLowerCase();shown=shown.filter(function(row){return [row.id,row.title,row.group].concat(row.keywords||[]).join(' ').toLowerCase().indexOf(q)>=0;});}
+  shown=shown.slice().sort(function(a,b){var af=favorites[0].indexOf(a.id)>=0?0:1,bf=favorites[0].indexOf(b.id)>=0?0:1;return af-bf;});
+  var missing=selected?promptMissing(selected,values[0],fields):[];
+  var canInsert=!!selected&&text[0].trim()&&missing.length===0;
+  // 还有没加载出来的用户模板时给「加载更多」；每页 30 条只是加载数量，没有总数上限。
+  var userMore=(lib[0]&&lib[0].user&&Number.isInteger(lib[0].user.more))?lib[0].user.more:0;
+  if(!props.open)return null;
+  return React.createElement('div',{className:'dsh-prompt-drawer',role:'dialog','aria-modal':'false','aria-label':'提示词模板',onKeyDown:function(event){if(event.key==='Escape'){event.stopPropagation();props.onClose();}}},
+    React.createElement('div',{className:'dsh-prompt-head'},React.createElement('strong',null,'提示词模板'),React.createElement('button',{type:'button',onClick:props.onClose,'aria-label':'关闭提示词模板'},'关闭')),
+    // 面板顶部与工具行悬停用同一句解释（v6 第 5.1 节），不另写一套术语。
+    React.createElement('p',{className:'dsh-prompt-hint'},'选一段需求文字，改目标和重点后发送。只编辑或复制；插入后仍由用户发送。'),
+    React.createElement('div',{className:'dsh-prompt-body'},
+      React.createElement('div',{className:'dsh-prompt-list'},
+        React.createElement('input',{type:'search','aria-label':'模板搜索',placeholder:'搜索：越权 / 接口 / Nday…',value:query[0],onChange:function(e){query[1](e.target.value);}}),
+        React.createElement('div',{className:'dsh-prompt-scopes',role:'tablist'},[['common','常用'],['mine','我的'],['all','全部']].map(function(row){return React.createElement('button',{key:row[0],type:'button',role:'tab','aria-selected':scope[0]===row[0],className:scope[0]===row[0]?'is-active':'',onClick:function(){scope[1](row[0]);}},row[1]);})),
+        React.createElement('div',{className:'dsh-prompt-io'},
+          React.createElement('button',{type:'button',onClick:function(){if(importRef.current)importRef.current.click();}},'导入'),
+          React.createElement('input',{ref:importRef,type:'file',accept:'application/json,.json',style:{display:'none'},'aria-label':'导入模板文件',onChange:function(e){var file=e.target.files&&e.target.files[0];e.target.value='';importFile(file);}}),
+          React.createElement('button',{type:'button',onClick:exportTemplates},'导出')),
+        React.createElement('ul',{className:'dsh-prompt-items'},shown.map(function(row){return React.createElement('li',{key:row.id},React.createElement('button',{type:'button',className:row.id===selectedId[0]?'is-active':'',onClick:function(){switchTo(row.id);}},
+          React.createElement('span',{className:'dsh-prompt-item-title'},row.title),React.createElement('span',{className:'dsh-prompt-item-hint'},(row.group||'')+(row.builtin?'':' · 我的'+(row.updatedAt?(' · '+String(row.updatedAt).slice(0,16).replace('T',' ')):'')))));})),
+        userMore>0?React.createElement('button',{type:'button',className:'dsh-prompt-more',onClick:loadMoreUser},'加载更多（还有 '+userMore+' 条）'):null,
+        showEmptySmall(shown.length,query[0])),
+      React.createElement('div',{className:'dsh-prompt-main'},
+        selected?React.createElement('div',{className:'dsh-prompt-titlebar'},React.createElement('strong',null,selected.title),React.createElement('button',{type:'button',className:favorites[0].indexOf(selected.id)>=0?'is-active':'',onClick:toggleFavorite},favorites[0].indexOf(selected.id)>=0?'已收藏':'收藏'),
+          React.createElement('div',{className:'dsh-prompt-modes',role:'tablist'},React.createElement('button',{type:'button',role:'tab','aria-selected':editMode[0]==='fields',className:editMode[0]==='fields'?'is-active':'',onClick:useGenerated},'填关键信息'),React.createElement('button',{type:'button',role:'tab','aria-selected':editMode[0]==='manual',className:editMode[0]==='manual'?'is-active':'',onClick:beginManual},'直接编辑'))):null,
+        selected?React.createElement('div',{className:'dsh-prompt-fields'},
+          (selected.required||[]).map(function(key){return fieldControl(key,values[0][key],setField,fields,missing);}),
+          (selected.optional||[]).length?React.createElement('details',{open:optional[0],onToggle:function(e){optional[1](e.target.open);}},React.createElement('summary',null,'更多信息（'+(selected.optional||[]).length+'）'),
+            (selected.optional||[]).map(function(key){return fieldControl(key,values[0][key],setField,fields,missing);})):null):React.createElement('div',{className:'dsh-prompt-blank'},
+              React.createElement('strong',null,'先选一个模板'),
+              React.createElement('p',null,'从左侧挑一个符合这次需求的模板，填 0–2 项关键信息，再把完整文字插入输入框。'),
+              React.createElement('ol',null,
+                React.createElement('li',null,'没有合适的？切到“直接编辑”自己写，或另存成我的模板。'),
+                React.createElement('li',null,'首次打开保持空白，不会自动替你选模板，也不会创建任务。'))),
+        selected?React.createElement('label',{className:'dsh-prompt-full'},'最终文字（发送前可修改）',React.createElement('textarea',{'aria-label':'提示词全文',value:text[0],readOnly:editMode[0]==='fields',maxLength:16000,onChange:function(e){text[1](e.target.value);editMode[1]('manual');markDirty();}})):null,
+        conflict[0]&&conflict[0].local&&conflict[0].local.templateId===selectedId[0]?React.createElement('div',{className:'dsh-prompt-conflict',role:'alert'},React.createElement('p',null,'其他窗口已修改这份草稿，两份都保留：'),React.createElement('button',{type:'button',onClick:function(){resolveConflict('server');}},'载入另一窗口版本'),React.createElement('button',{type:'button',onClick:function(){resolveConflict('local');}},'用本地版本另存')):null,
+        importNotice[0]?React.createElement('p',{role:'status'},importNotice[0]):null,
+        notice[0]?React.createElement('p',{role:'status'},notice[0]):null),
+    ),
+    React.createElement('div',{className:'dsh-prompt-foot'},
+      React.createElement('span',{role:'status'},saveState[0]||(selected?'':'未选择模板')),
+      React.createElement('label',{className:'dsh-prompt-saveas'},'另存为',React.createElement('input',{'aria-label':'另存为名称',value:saveAsName[0],placeholder:'名称',onChange:function(e){saveAsName[1](e.target.value);}}),React.createElement('button',{type:'button',disabled:busy[0]||!selected||!saveAsName[0].trim(),onClick:saveAs},'另存')),
+      React.createElement('button',{type:'button',disabled:!selected||!text[0].trim(),onClick:copy},'复制'),
+      React.createElement('button',{type:'button',className:'is-primary',disabled:!canInsert,title:missing.length?'先填写：'+missing.join('、'):'',onClick:insert},replacesSelection()?'替换选中文字':'插入输入框')));
 }
+function showEmptySmall(count,query){return count?null:React.createElement('p',{className:'dsh-prompt-empty'},query?('没有匹配“'+query+'”的模板'):'这里还没有模板');}
+function fieldControl(key,value,setField,fields,missing){var f=fields[key]||{label:key};var needs=missing.indexOf(f.label)>=0;var common={'aria-label':f.label,value:value||'',placeholder:f.placeholder||'',onChange:function(e){setField(key,e.target.value);}};
+  // 用独立子节点，不要用 `+` 拼：f.help 为空时 `'标签' + null` 会渲染出字面量 “null”。
+  return React.createElement('label',{key:key,className:'dsh-prompt-field'+(needs?' is-missing':'')},
+    f.label,
+    f.help?React.createElement('small',null,f.help):null,
+    f.type==='textarea'?React.createElement('textarea',common):React.createElement('input',common),
+    needs?React.createElement('small',{className:'dsh-prompt-need'},'填写'+f.label):null);}
+// 用量行（v6 第 5.1 节）：本任务网站请求、模型用量与时间；明细展开查看缓存与主子会话。
+// 未知用量不显示为零；这里只读计数，不额外调用模型。
+function usageDuration(seconds) {
+  if (seconds == null) return '未知';
+  if (seconds < 60) return seconds + ' 秒';
+  return Math.floor(seconds / 60) + ' 分 ' + (seconds % 60) + ' 秒';
+}
+function UsageRow(props) {
+  var data = useState(null), error = useState(''), open = useState(false);
+  var diag = useState(null), diagError = useState('');
+  var request = useRef(0), diagRequest = useRef(0);
+  function load() {
+    var revision = ++request.current;
+    return api('usage.get', { sessionId: props.sessionId })
+      .then(function (result) { if (!result.ok) throw Error(result.error || '读取用量失败'); if (revision !== request.current) return; data[1](result); error[1](''); })
+      .catch(function (failure) { if (revision === request.current) error[1](failure.message); });
+  }
+  useEffect(function () { var active = true; load(); var timer = setInterval(function () { if (active) load(); }, 10000); return function () { active = false; request.current++; clearInterval(timer); }; }, [props.sessionId]);
+  // 本次模型输入分项（v6 第 6.3 节）：只在用户展开明细时读一次，不参与轮询。
+  function loadDiag() {
+    var revision = ++diagRequest.current;
+    return api('diagnostics.request', { sessionId: props.sessionId })
+      .then(function (result) { if (!result.ok) throw Error(result.error || '读取模型输入分项失败'); if (revision !== diagRequest.current) return; diag[1](result); diagError[1](''); })
+      .catch(function (failure) { if (revision === diagRequest.current) diagError[1](failure.message); });
+  }
+  var current = data[0];
+  if (!current || !current.configured) return null;
+  var ops = current.operations || { used: 0, budget: 0 }, un = current.unmetered || { used: 0, budget: 0 }, cost = current.cost || {};
+  var receipts = current.receipts || { total: 0 };
+  var local = current.localTools || { used: 0 };
+  var model = '模型调用 ' + (cost.modelCalls ?? 0) + (cost.unknownUsageCalls ? '（' + cost.unknownUsageCalls + ' 次用量未知）' : '') + (cost.totalTokens != null ? ' · ' + cost.totalTokens + ' tokens' : '');
+  var sessions = cost.sessions || [];
+  return React.createElement('div', { className: 'dsh-usage-row', 'aria-label': '本任务用量' },
+    // 工具调用与网站回执分开显示：工具调用数是预算计数，回执数才是真落库的目标请求；
+    // 用宿主 shell 发出去的请求不进回执，这一列让差异看得见（第 8.2 节）。
+    React.createElement('span', null, '工具调用 ' + ops.used + '/' + ops.budget + (un.budget ? '（未计量 ' + un.used + '/' + un.budget + '）' : '') + ' · 网站回执 ' + receipts.total + ' · 本地工具 ' + local.used),
+    React.createElement('span', null, model),
+    React.createElement('span', null, '用时 ' + usageDuration(current.elapsedSeconds)),
+    current.refused ? React.createElement('span', { role: 'status', title: current.refused.message || '' }, '上次生成未发出（' + (current.refused.code || '已拒绝') + '）') : null,
+    React.createElement('button', { type: 'button', 'aria-expanded': open[0], onClick: function () { var next = !open[0]; open[1](next); if (next && !diag[0]) loadDiag(); } }, open[0] ? '收起明细' : '明细'),
+    error[0] ? React.createElement('span', { role: 'alert' }, error[0]) : null,
+    open[0] ? React.createElement('div', { className: 'dsh-usage-detail' },
+      React.createElement('div', null, '输入 ' + (cost.inputTokens ?? '未知') + ' · 输出 ' + (cost.outputTokens ?? '未知') + ' · 缓存读 ' + (cost.cacheReadTokens ?? '未知')),
+      sessions.length ? React.createElement('div', null, sessions.map(function (row) {
+        return (row.role === 'main' ? '主任务' : '子任务 ' + String(row.sessionId).slice(0, 8)) + '：调用 ' + row.modelCalls + '，工具 ' + row.toolCalls + (row.totalTokens != null ? '，' + row.totalTokens + ' tokens' : '，用量未知');
+      }).join('；')) : null,
+      cost.unavailableSessions ? React.createElement('div', null, '有 ' + cost.unavailableSessions + ' 个会话的用量暂不可读') : null,
+      // 高级诊断「本次模型输入」：分项列出固定说明、工具定义、任务事实、知识、用户消息和历史。
+      React.createElement('div', { className: 'dsh-usage-diagnostics', 'aria-label': '本次模型输入' },
+        React.createElement('strong', null, '本次模型输入'),
+        diag[0] ? React.createElement('div', { className: 'dsh-usage-diag-items' }, (diag[0].items || []).map(function (item) {
+          return React.createElement('span', { key: item.name }, item.label + ' ' + item.bytes + ' 字节');
+        })) : React.createElement('small', null, '正在读取…'),
+        diag[0] ? React.createElement('small', null, '合计 ' + diag[0].total + ' 字节 · ' + (diag[0].note || '')) : null,
+        diagError[0] ? React.createElement('small', { role: 'alert' }, diagError[0]) : null),
+      React.createElement('small', null, '金额未知时不显示为零；缓存计入总数，历史压缩后重读按实际计费。')) : null);
+}
+// 知识库入口（v6 第 5.6 节）：只有一个布尔开关；用途说明固定；不加载整库。
+// 测试内容（v6 第 4.3/5.5 节）：折叠区选择 17 项；默认全选由 AI 挑选相关项；全不选=只分析已添加内容。
+// 添加测试资料（v6 第 5.1/7.1 节）：识别→解析→去重→保存；只保存原文并建立引用，
+// 不立刻发送、不访问网站。
+function MaterialsEntry(props) {
+  var fallbackOpen = useState(false), text = useState(''), name = useState('');
+  var busy = useState(false), notice = useState(''), error = useState('');
+  var summary = useState(null);
+  var fileRef = useRef(null), dirRef = useRef(null), root = useRef(null), trigger = useRef(null);
+  // 面板由 ChatSetup 统一管（四入口互斥）；单独挂载时退回本地状态。
+  var open = [props.open === undefined ? fallbackOpen[0] : props.open,
+    function (next) { if (props.onOpenChange) props.onOpenChange(next); else fallbackOpen[1](next); }];
+  function closeEntry() { open[1](false); if (trigger.current && trigger.current.focus) trigger.current.focus(); }
+  // Esc / 点面板外都能关，焦点回到入口按钮（v6 第 10.5 节 UI09/UI12）。
+  useEffect(function () {
+    if (!open[0]) return;
+    if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') return;
+    function onDown(event) { var el = root.current; if (el && el.contains && el.contains(event.target)) return; closeEntry(); }
+    function onKey(event) { if (event.key === 'Escape') { event.stopPropagation(); closeEntry(); } }
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return function () { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [open[0]]);
+  // 导入进度与结果（v6 第 7.1 节）：识别→解析→去重→保存；完成显示各类计数与失败清单。
+  var IMPORT_STEPS = ['识别', '解析', '去重', '保存'];
+  function summarize(rows) {
+    var requests = 0, files = 0, failed = 0, skipped = 0, identities = 0, entries = 0, broken = 0, errors = [];
+    for (var i = 0; i < rows.length; i += 1) {
+      var row = rows[i];
+      if (!row.ok) {
+        if (row.skipped) { skipped += 1; continue; }
+        failed += 1; errors.push(row.name + '：' + (row.error || '导入失败')); continue;
+      }
+      if (['http', 'har', 'curl'].indexOf(String(row.format || '')) >= 0) requests += 1;
+      else files += 1;
+      // 身份线索只记「带了哪种身份头」，名称与秘密分开；归属未确定就是待关联（v6 第 7.1 节）。
+      if (Array.isArray(row.identities)) identities += row.identities.length;
+      // HAR/扫描导出的条目数与坏记录数（v6 第 10.3 节 E09）：一份 HAR 里有几条、坏了几条要说清。
+      if (Number.isInteger(row.entries)) entries += row.entries;
+      if (Number.isInteger(row.broken)) broken += row.broken;
+    }
+    return { requests: requests, files: files, failed: failed, skipped: skipped, identities: identities, entries: entries, broken: broken, errors: errors };
+  }
+  function save() {
+    if (!text[0].trim()) { error[1]('请先粘贴请求、响应或代码，或选择一个文件'); return Promise.resolve(); }
+    busy[1](true); error[1](''); notice[1](''); summary[1](null);
+    return api('materials.import', { sessionId: props.sessionId, name: name[0], text: text[0] })
+      .then(function (result) {
+        if (!result.ok) throw Error(result.error || '保存测试资料失败');
+        var m = result.material;
+        summary[1](summarize([{ ok: true, format: m.format, name: m.name || '粘贴内容', identities: m.identities,
+          entries: m.summary && m.summary.entries, broken: m.summary && m.summary.broken }]));
+        notice[1]((m.reused ? '相同内容已存在，已合并来源' : '已保存') + '：' + m.format + '，' + m.bytes + ' 字节');
+        text[1](''); name[1]('');
+        if (props.onImported) props.onImported();
+      })
+      .catch(function (failure) { error[1](failure.message); summary[1]({ requests: 0, files: 0, failed: 1, errors: [failure.message] }); })
+      .finally(function () { busy[1](false); });
+  }
+  function readFile(file) {
+    return new Promise(function (resolve) {
+      var reader = new FileReader();
+      reader.onload = function () { resolve(String(reader.result || '')); };
+      reader.onerror = function () { resolve(''); };
+      reader.readAsText(file);
+    });
+  }
+  function pickFiles(event) {
+    var files = [...(event.target.files || [])].slice(0, 30);
+    event.target.value = '';
+    if (!files.length) return;
+    busy[1](true); error[1](''); notice[1]('');
+    summary[1](null);
+    Promise.all(files.map(function (file) { return readFile(file).then(function (body) { return { name: file.name, body }; }); }))
+      .then(function (rows) {
+        var results = [];
+        return rows.reduce(function (chain, row) {
+          return chain.then(function () {
+            if (!row.body.trim()) { results.push({ name: row.name, ok: false, skipped: true }); return; }
+            return api('materials.import', { sessionId: props.sessionId, name: row.name, text: row.body })
+              .then(function (result) {
+                if (!result.ok) throw Error(result.error || '保存失败');
+                results.push({ name: row.name, ok: true, format: result.material && result.material.format,
+                  identities: result.material && result.material.identities,
+                  entries: result.material && result.material.summary && result.material.summary.entries,
+                  broken: result.material && result.material.summary && result.material.summary.broken });
+              })
+              .catch(function (failure) { results.push({ name: row.name, ok: false, error: failure.message }); });
+          });
+        }, Promise.resolve()).then(function () {
+          var s = summarize(results);
+          summary[1](s);
+          notice[1]('已保存 ' + (s.requests + s.files) + '/' + rows.length + ' 个文件' + (s.skipped ? '（跳过 ' + s.skipped + ' 个空文件）' : ''));
+          if (props.onImported) props.onImported();
+        });
+      })
+      .catch(function (failure) { error[1](failure.message); })
+      .finally(function () { busy[1](false); });
+  }
+  return React.createElement('div', { className: 'dsh-materials-entry', ref: root },
+    React.createElement('button', { ref: trigger, type: 'button', className: 'dsh-chat-toolbar-button', 'aria-expanded': open[0],
+      title: '把本次网站的请求、代码或文件交给 AI 分析。保存原文并添加引用；不立刻发送或访问网站。',
+      onClick: function () { open[1](!open[0]); } }, '添加测试资料'),
+    open[0] ? React.createElement('div', { className: 'dsh-materials-import' },
+      React.createElement('div', { className: 'dsh-chat-panel-head' }, React.createElement('strong', null, '添加测试资料'),
+        React.createElement('button', { type: 'button', 'aria-label': '关闭添加测试资料', onClick: closeEntry }, '关闭')),
+      React.createElement('p', null, '原始 HTTP、HAR、curl 文本、JS、源码或扫描导出都可以。保存原文并建立引用；不立刻发送，也不访问网站。'),
+      React.createElement('div', { className: 'dsh-materials-import-actions' },
+        React.createElement('button', { type: 'button', disabled: busy[0], onClick: function () { if (fileRef.current) fileRef.current.click(); } }, '选择文件'),
+        React.createElement('button', { type: 'button', disabled: busy[0], onClick: function () { if (dirRef.current) dirRef.current.click(); } }, '选择代码文件夹'),
+        React.createElement('input', { ref: fileRef, type: 'file', multiple: true, style: { display: 'none' }, onChange: pickFiles }),
+        React.createElement('input', { ref: dirRef, type: 'file', webkitdirectory: '', multiple: true, style: { display: 'none' }, onChange: pickFiles })),
+      React.createElement('label', { className: 'dsh-materials-import-paste' }, '粘贴请求、响应或代码',
+        React.createElement('textarea', { 'aria-label': '粘贴测试资料', rows: 5, maxLength: 200000, value: text[0],
+          placeholder: '例如：GET /api/orders HTTP/1.1 或 HAR JSON 片段', onChange: function (event) { text[1](event.target.value); } })),
+      React.createElement('label', { className: 'dsh-materials-import-name' }, '名称（可选）',
+        React.createElement('input', { 'aria-label': '测试资料名称', value: name[0], onChange: function (event) { name[1](event.target.value); } })),
+      React.createElement('button', { type: 'button', className: 'is-primary', disabled: busy[0], onClick: save }, busy[0] ? '正在保存…' : '保存到本任务资料'),
+      // 导入进度与结果（v6 第 7.1 节）：识别→解析→去重→保存；完成显示计数，失败可展开看具体原因。
+      React.createElement('div', { className: 'dsh-materials-progress' },
+        React.createElement('span', { className: 'dsh-materials-steps' }, IMPORT_STEPS.join(' → ') + (busy[0] ? '（进行中…）' : summary[0] ? '（已完成）' : '')),
+        summary[0] ? React.createElement('small', null, '导入完成：请求 ' + summary[0].requests + '、文件 ' + summary[0].files
+          + (summary[0].identities ? '、身份 ' + summary[0].identities + '（待关联）' : '')
+          + (summary[0].entries ? '、条目 ' + summary[0].entries + (summary[0].broken ? '（其中 ' + summary[0].broken + ' 条坏记录）' : '') : '')
+          + (summary[0].skipped ? '、跳过空文件 ' + summary[0].skipped : '') + '；失败 ' + summary[0].failed) : null,
+        summary[0] && summary[0].errors.length ? React.createElement('details', { className: 'dsh-materials-errors' },
+          React.createElement('summary', null, '查看错误 ' + summary[0].errors.length + ' 条'),
+          React.createElement('ul', null, summary[0].errors.map(function (text, index) { return React.createElement('li', { key: index }, text); }))) : null),
+      notice[0] ? React.createElement('small', { role: 'status' }, notice[0]) : null,
+      error[0] ? React.createElement('p', { role: 'alert' }, error[0]) : null) : null);
+}
+function TestContentSection(props) {
+  var data = useState(null), busy = useState(false), error = useState(''), notice = useState('');
+  function load() {
+    return api('test.content', { sessionId: props.sessionId })
+      .then(function (result) { if (!result.ok) throw Error(result.error || '读取测试内容失败'); data[1](result); error[1](''); if (props.onSelection) props.onSelection(result.selection.active); })
+      .catch(function (failure) { error[1](failure.message); });
+  }
+  useEffect(function () { load(); }, [props.sessionId]);
+  function save(active) {
+    var current = data[0]; if (!current) return Promise.resolve();
+    busy[1](true); error[1]( ''); notice[1]('');
+    return api('test.content', { sessionId: props.sessionId, action: 'save', active: active,
+      mode: current.selection.mode, rev: current.selection.rev, policyRev: current.selection.policyRev })
+      .then(function (result) { if (!result.ok) throw Error(result.error || '保存测试内容失败'); data[1]({ ...current, selection: result.selection }); if (props.onSelection) props.onSelection(result.selection.active); notice[1]('已保存'); })
+      .catch(function (failure) { error[1](failure.message); }).finally(function () { busy[1](false); });
+  }
+  var current = data[0];
+  if (!current) return null;
+  var active = new Set(current.selection.active || []);
+  var groups = current.catalog || [];
+  var allSelected = active.size === (current.keys || []).length;
+  return React.createElement('details', { className: 'dsh-test-content', open: false },
+    React.createElement('summary', null, '选择测试内容 · ' + (allSelected ? '全选（由 AI 选择相关项）' : '已选 ' + active.size + '/' + (current.keys || []).length)),
+    React.createElement('p', null, '全选=允许 AI 按当前问题挑选相关项，不等于逐项扫描。不选时只分析已添加内容，不再访问网站。'),
+    React.createElement('div', { className: 'dsh-test-content-actions' },
+      React.createElement('button', { type: 'button', disabled: busy[0], onClick: function () { return save([...current.keys]); } }, '全选'),
+      React.createElement('button', { type: 'button', disabled: busy[0], onClick: function () { return save([]); } }, '全不选')),
+    groups.map(function (group) {
+      return React.createElement('fieldset', { key: group.id },
+        React.createElement('legend', null, group.label),
+        group.items.map(function (item) {
+          return React.createElement('label', { key: item.id, title: item.purpose },
+            React.createElement('input', { type: 'checkbox', 'aria-label': item.label, checked: active.has(item.id), disabled: busy[0],
+              onChange: function (event) {
+                var next = new Set(active);
+                if (event.target.checked) next.add(item.id); else next.delete(item.id);
+                return save((current.keys || []).filter(key => next.has(key)));
+              } }), item.label);
+        }));
+    }),
+    active.size === 0 ? React.createElement('p', { role: 'status' }, '只分析已添加内容，不再访问网站。') : null,
+    notice[0] ? React.createElement('small', null, notice[0]) : null,
+    error[0] ? React.createElement('p', { role: 'alert' }, error[0]) : null);
+}
+// 停止状态（v6 第 5.2 节）：点击停止后先显示“正在停止…”，收到代理退出依据后才显示“已停止”。
+// 给助手选择模型（v6 第 5.5 节）：可选模型来自宿主自己的授权偏好；未配置时给出配置入口，不悄悄换模型。
+function WorkerModelSection(props) {
+  var data = useState(null), error = useState('');
+  useEffect(function () {
+    var active = true;
+    api('chat.models', { sessionId: props.sessionId })
+      .then(function (result) { if (!result.ok) throw Error(result.error || '读取可选模型失败'); if (active) data[1](result); })
+      .catch(function (failure) { if (active) error[1](failure.message); });
+    return function () { active = false; };
+  }, [props.sessionId]);
+  var current = data[0];
+  if (error[0]) return React.createElement('details', { className: 'dsh-worker-model' },
+    React.createElement('summary', null, '给助手选择模型'), React.createElement('p', { role: 'alert' }, error[0]));
+  if (!current) return React.createElement('details', { className: 'dsh-worker-model' },
+    React.createElement('summary', null, '给助手选择模型'), React.createElement('p', null, '正在读取可选模型…'));
+  var models = current.models || [], enabled = current.enabled === true && models.length > 0;
+  var values = props.values || {};
+  var labels = { workerModel: '查找问题', reviewModel: '复核结果', reportModel: '整理报告' };
+  var summary = Object.keys(labels).map(function (key) {
+    var value = values[key] || null;
+    return labels[key] + '：' + (value ? value.provider + ' / ' + value.model : '继承');
+  }).join(' · ');
+  function selectFor(key) {
+    var value = values[key] || null;
+    var currentKey = value ? value.provider + '::' + value.model : '';
+    return React.createElement('label', null, labels[key] + ' ', React.createElement('select', {
+      'aria-label': labels[key] + '模型',
+      disabled: props.disabled || !enabled,
+      value: currentKey,
+      onChange: function (event) {
+        var next = String(event.target.value);
+        if (!next) return props.onChange(key, null);
+        var at = next.indexOf('::');
+        return props.onChange(key, { provider: next.slice(0, at), model: next.slice(at + 2) });
+      }
+    },
+      React.createElement('option', { value: '' }, enabled ? '沿用当前会话模型' : '当前会话模型（未配置可选模型）'),
+      models.map(function (row) {
+        return React.createElement('option', { key: row.provider + '::' + row.model, value: row.provider + '::' + row.model }, row.provider + ' / ' + row.model);
+      })));
+  }
+  return React.createElement('details', { className: 'dsh-worker-model' },
+    React.createElement('summary', null, '给助手选择模型 · ' + summary),
+    React.createElement('p', null, '默认三用途都继承当前会话模型；只有用户显式选择时才覆盖，不常驻创建助手。'),
+    selectFor('workerModel'),
+    selectFor('reviewModel'),
+    selectFor('reportModel'),
+    React.createElement('small', null, enabled
+      ? '查找问题用于站点子任务；复核结果与整理报告只在对应动作发生时按需创建有界原生任务，模型调用计入本任务共享额度。'
+      : '未配置可选模型：三用途都会沿用当前会话模型。可在宿主「插件」页的“子代理模型选择设置”里开启并勾选允许的模型；这里不会替你换模型。'));
+}
+// 登录账号（v6 第 5.5 节）：列表只显示名称与状态；秘密单独保存，不回显、不进测试资料。
+var ACCOUNT_STATUS_LABEL = { valid: '有效', unconfirmed: '待确认', expired: '已失效' };
+function AccountsSection(props) {
+  var data = useState(null), error = useState(''), busy = useState(false), notice = useState('');
+  var name = useState(''), status = useState('unconfirmed'), secret = useState('');
+  function load() {
+    return api('account.list', { sessionId: props.sessionId })
+      .then(function (result) { if (!result.ok) throw Error(result.error || '读取账号失败'); data[1](result); error[1](''); })
+      .catch(function (failure) { error[1](failure.message); });
+  }
+  useEffect(function () { load(); }, [props.sessionId]);
+  function call(endpoint, payload) {
+    busy[1](true); error[1](''); notice[1]('');
+    return api(endpoint, Object.assign({ sessionId: props.sessionId }, payload || {}))
+      .then(function (result) { if (!result.ok) throw Error(result.error || '账号操作失败'); data[1]({ accounts: result.accounts, statuses: data[0] && data[0].statuses }); return result; })
+      .catch(function (failure) { error[1](failure.message); })
+      .finally(function () { busy[1](false); });
+  }
+  var accounts = (data[0] && data[0].accounts) || [];
+  return React.createElement('details', { className: 'dsh-accounts' },
+    React.createElement('summary', null, '登录账号（可选）' + (accounts.length ? ' · ' + accounts.length + ' 个' : '')),
+    React.createElement('p', null, '秘密单独保存，不进测试资料、也不进提示词字段；待确认与已失效不会被当成有效，程序会拒绝用它们发请求。'
+      + '有效账号另存的 Cookie/Authorization 会套到“身份名称相同、且请求自身没带认证头”的已存请求上；秘密不会写进回执。'),
+    accounts.map(function (row) {
+      return React.createElement('div', { key: row.id, className: 'dsh-account-row' },
+        React.createElement('span', null, row.name + ' · ' + row.statusLabel + (row.hasSecret ? ' · 秘密已另存' : '')),
+        React.createElement('button', { type: 'button', disabled: busy[0], onClick: function () { return call('account.remove', { id: row.id }); } }, '移除'));
+    }),
+    React.createElement('div', { className: 'dsh-account-add' },
+      React.createElement('input', { 'aria-label': '账号名称', placeholder: '账号名称', value: name[0], onChange: function (event) { name[1](event.target.value); } }),
+      React.createElement('select', { 'aria-label': '账号状态', value: status[0], onChange: function (event) { status[1](event.target.value); } },
+        ['valid', 'unconfirmed', 'expired'].map(function (value) { return React.createElement('option', { key: value, value: value }, ACCOUNT_STATUS_LABEL[value]); })),
+      React.createElement('input', { 'aria-label': '账号秘密', type: 'password', placeholder: '密码或 Cookie（只保存，不回显）', value: secret[0], onChange: function (event) { secret[1](event.target.value); } }),
+      React.createElement('button', { type: 'button', disabled: busy[0] || !name[0].trim(), onClick: function () {
+        return call('account.save', { name: name[0], status: status[0], secret: secret[0] }).then(function (result) {
+          if (result) { name[1](''); secret[1](''); notice[1]('已保存账号'); }
+        });
+      } }, '添加账号')),
+    notice[0] ? React.createElement('small', { role: 'status' }, notice[0]) : null,
+    error[0] ? React.createElement('p', { role: 'alert' }, error[0]) : null);
+}
+function taskStatusLabel(current, policy) {
+  // 任务状态词表（v6 第 8.2 节）：准备 / 运行 / 等待信息 / 暂停中 / 已暂停 / 已完成 / 失败。
+  switch (current.phase) {
+    case 'preparing': return '准备中';
+    case 'running': return '本轮进行中';
+    case 'waiting-info': return '等待你确认';
+    case 'pausing': return '正在停止…';
+    case 'paused': return '已停止';
+    case 'completed': return '本轮已完成';
+    case 'failed': return '本轮失败';
+    default: break;
+  }
+  if (!current.stopped) return '本轮进行中';
+  if (current.reason === 'plan_complete') return '本轮已完成';
+  if (current.reason === 'turn_ended') return '本轮已结束';
+  if (policy && policy.cancelled === true && current.agentRunning) return '正在停止…';
+  return '已停止';
+}
+function KnowledgeEntry(props) {
+  var data = useState(null), fallbackOpen = useState(false), busy = useState(false), error = useState('');
+  var usage = useState(null), usageOpen = useState(false);
+  var notice = useState('');
+  var request = useRef(0), retry = useRef(null), trigger = useRef(null), root = useRef(null), popPos = useState(null);
+  // 面板由 ChatSetup 统一管（四入口互斥）；单独挂载时退回本地状态。
+  var open = [props.open === undefined ? fallbackOpen[0] : props.open,
+    function (next) { if (props.onOpenChange) props.onOpenChange(next); else fallbackOpen[1](next); }];
+  function closeEntry() { open[1](false); if (trigger.current && trigger.current.focus) trigger.current.focus(); }
+  // Esc / 点面板外都能关，焦点回到入口按钮（v6 第 10.5 节 UI09/UI12）。
+  useEffect(function () {
+    if (!open[0]) return;
+    if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') return;
+    function onDown(event) { var el = root.current; if (el && el.contains && el.contains(event.target)) return; closeEntry(); }
+    function onKey(event) { if (event.key === 'Escape') { event.stopPropagation(); closeEntry(); } }
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return function () { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [open[0]]);
+  function load(attempt) {
+    attempt = attempt || 0;
+    var revision = ++request.current;
+    return api('knowledge.status', { sessionId: props.sessionId })
+      .then(function (result) { if (!result.ok) throw Error(result.error || '读取知识库开关失败'); if (revision !== request.current) return; data[1](result.knowledge); error[1](''); })
+      .catch(function (failure) {
+        if (revision !== request.current) return;
+        // 会话可能还没在宿主注册好（dock 先挂载、会话随后才恢复），这类读取失败是
+        // 暂时的。短重试几次，别把“请选择当前可用的渗透会话”永久留在浮层里。
+        if (!data[0] && attempt < 4) { retry.current = setTimeout(function () { load(attempt + 1); }, 600 * (attempt + 1)); return; }
+        error[1](failure.message);
+      });
+  }
+  useEffect(function () {
+    request.current++; data[1](null); error[1]('');
+    if (retry.current) { clearTimeout(retry.current); retry.current = null; }
+    if (!props.sessionId) return;
+    load(0);
+    return function () { request.current++; if (retry.current) clearTimeout(retry.current); };
+  }, [props.sessionId]);
+  // 窄窗里浮层不能越出视口：打开时按触发器位置算一次，横向夹进 [16, 视口宽-16]，
+  // 纵向贴在触发器上方；窗口尺寸变化时重算。（原先 right:0 在窄窗会把左半边推到屏外。）
+  useEffect(function () {
+    if (!open[0]) { popPos[1](null); return; }
+    function place() {
+      var el = trigger.current;
+      var viewport = typeof window === 'undefined' ? 320 : window.innerWidth;
+      var fallbackWidth = Math.min(320, Math.max(200, viewport - 32));
+      // 量不到触发器（宿主未挂载/无 DOM）时也要给一个贴边默认值，不能退回 right:0 越界。
+      if (!el || typeof window === 'undefined' || typeof el.getBoundingClientRect !== 'function') {
+        popPos[1]({ position: 'fixed', left: '16px', right: 'auto', width: fallbackWidth + 'px', bottom: '96px' });
+        return;
+      }
+      var rect = el.getBoundingClientRect();
+      var width = Math.min(320, Math.max(200, window.innerWidth - 32));
+      var maxLeft = Math.max(16, window.innerWidth - 16 - width);
+      var left = Math.min(Math.max(16, rect.right - width), maxLeft);
+      popPos[1]({ position: 'fixed', left: left + 'px', right: 'auto', width: width + 'px',
+        bottom: Math.max(12, window.innerHeight - rect.top + 6) + 'px' });
+    }
+    place();
+    if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+    window.addEventListener('resize', place);
+    return function () { window.removeEventListener('resize', place); };
+  }, [open[0]]);
+  function toggle() {
+    if (!data[0]) return; busy[1](true); error[1]('');
+    return api('knowledge.toggle', { sessionId: props.sessionId, enabled: !data[0].enabled })
+      .then(function (result) { if (!result.ok) throw Error(result.error || '保存知识库开关失败'); data[1](result.knowledge); })
+      .catch(function (failure) { error[1](failure.message); }).finally(function () { busy[1](false); });
+  }
+  function loadUsage() {
+    var next = !usageOpen[0]; usageOpen[1](next); error[1]('');
+    if (!next) return Promise.resolve();
+    return api('knowledge.usage', { sessionId: props.sessionId, page: 1, pageSize: 50 })
+      .then(function (result) { if (!result.ok) throw Error(result.error || '读取已用条目失败'); usage[1](result); })
+      .catch(function (failure) { error[1](failure.message); });
+  }
+  // 「管理知识库」不复制宿主页面：直接打开宿主自己的「设置 → 知识库」。
+  // 宿主设置不是插件插槽，也没有对外的打开 API，只能按可读文字点击它的菜单项。
+  function openHostKnowledge() {
+    if (typeof document === 'undefined') return;
+    var pick = function (text, prefix) {
+      var els = [...document.querySelectorAll('button,[role=menuitem],[role=tab],a')]
+        .filter(function (el) { var s = (el.textContent || '').trim(); return prefix ? s.indexOf(text) === 0 : s === text; });
+      // 宿主的底栏触发按钮用指针事件，取最后一个（底栏那个），并用完整事件序列。
+      return els[els.length - 1] || null;
+    };
+    // 宿主控件监听 pointer/mouse 序列；只调 el.click() 不会打开它的菜单。
+    var press = function (el) {
+      if (!el) return;
+      try { el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); } catch { /* 旧内核无 PointerEvent */ }
+      el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      try { el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })); } catch { /* 同上 */ }
+      el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      el.click();
+    };
+    notice[1]('');
+    press(pick('更多', true));
+    setTimeout(function () {
+      press(pick('设置', true));
+      setTimeout(function () {
+        var knowledge = pick('知识库');
+        if (knowledge) { press(knowledge); open[1](false); }
+        else notice[1]('请在「设置」里选择「知识库」查看来源与索引。');
+      }, 700);
+    }, 500);
+  }
+  var on = data[0] ? data[0].enabled : null;
+  return React.createElement('div', { className: 'dsh-knowledge', ref: root },
+    React.createElement('button', { ref: trigger, type: 'button', className: 'dsh-chat-toolbar-button', 'aria-expanded': open[0], title: '查阅通用漏洞说明、版本条件和产品公告。本任务开启/关闭相关知识读取；不加载整库。', onClick: function () { var next = !open[0]; open[1](next); if (next && props.sessionId) { error[1](''); load(0); } } }, '知识库：' + (on === null ? '…' : on ? '开启' : '关闭')),
+    open[0] ? React.createElement('div', { className: 'dsh-knowledge-pop', style: popPos[0] || undefined },
+      React.createElement('div', { className: 'dsh-chat-panel-head' }, React.createElement('strong', null, '知识库'), React.createElement('button', { type: 'button', 'aria-label': '关闭知识库面板', onClick: closeEntry }, '关闭')),
+      React.createElement('label', null, React.createElement('input', { type: 'checkbox', 'aria-label': '本任务使用知识库', checked: !!on, disabled: busy[0] || on === null, onChange: toggle }), '本任务使用知识库'),
+      React.createElement('p', null, '查阅通用漏洞说明、版本条件和产品公告，只读取与当前问题相关的内容，不加载整库。'),
+      // 适配器能力如实说明（v6 第 5.6 节）：缺自动匹配时写明「本版本由 AI 主动查询」，开关语义不变。
+      data[0] && data[0].autoMatch === false
+        ? React.createElement('small', { className: 'dsh-knowledge-capability' }, '本版本由 AI 主动查询知识；不会自动补充相关条目。')
+        : null,
+      React.createElement('small', null, '关闭后停止本任务新的自动补充与知识工具读取；历史引用与已经发送给模型的内容保留。'),
+      // 对话只放「本次查阅了 N 条漏洞资料」链接，且只在条目确实送入模型后显示（v6 第 6.3 节）。
+      React.createElement('button', { type: 'button', 'aria-expanded': usageOpen[0], onClick: loadUsage },
+        usageOpen[0] ? '收起已用条目'
+          : (data[0] && data[0].sentCount > 0 ? '本次已发送 ' + data[0].sentCount + ' 条漏洞资料'
+            : (data[0] && data[0].pendingCount > 0 ? '有 ' + data[0].pendingCount + ' 条知识待发送' : '查看已用条目'))),
+      React.createElement('button', { type: 'button', onClick: openHostKnowledge }, '管理知识库'),
+      usageOpen[0] && usage[0] ? React.createElement('div', { className: 'dsh-knowledge-usage' },
+        usage[0].total === 0 ? React.createElement('small', null, '本任务还没有把知识内容交给模型。') : null,
+        (usage[0].items || []).map(function (item) {
+          return React.createElement('div', { key: item.id, className: 'dsh-knowledge-usage-row' },
+            React.createElement('span', null, (item.title || item.docPath || item.query || '高相关片段') + ' · ' + (item.reason || '')),
+            React.createElement('small', null, (item.source ? item.source + ' · ' : '')
+              + (item.docPath && item.title ? item.docPath + ' · ' : '')
+              + (item.contentBytes ? item.contentBytes + ' 字节' : '字节未知')
+              + (item.deliveryState && item.deliveryState !== 'sent'
+                ? ' · ' + (item.deliveryState === 'legacy' ? '历史记录·发送未核实' : '尚未确认发送') : '')
+              + ' · ' + new Date(item.at).toLocaleString()),
+            // 片段原文（v6 第 6.3 节）：列表里直接看模型实际收到的那一段，不用回原文。
+            item.excerpt ? React.createElement('pre', { className: 'dsh-knowledge-usage-excerpt' }, item.excerpt) : null);
+        }),
+        (usage[0].items || []).length && usage[0].items[0] ? React.createElement('small', null, usage[0].note) : null) : null,
+      notice[0] ? React.createElement('small', { role: 'status' }, notice[0]) : null,
+      error[0] ? React.createElement('p', { role: 'alert' }, error[0]) : null) : null);
+}
+// 任务工作区（发现页/资料页）要能打开输入框上方的「添加测试资料」面板，但两者是宿主的不同 slot，
+// 拿不到彼此的 props。模块级桥接只暴露一个「打开资料面板」动作，不引入新的全局状态。
+var materialsPanelBridge = { open: null };
+// 保存设置后的变更摘要用词（v6 第 4.2 节）：与后端 settingsDiff 的字段一一对应，不另造术语。
+var SETTING_CHANGE_LABELS = { reporting: '什么时候汇报', explain: '解释原理', workers: '助手上限', workerModel: '助手模型',
+  allowTargetNetwork: '允许访问网站', readOnly: '不改动网站数据', excludedPaths: '排除路径',
+  requestRatePerMinute: '扫描速率', requestConcurrency: '并发上限', startMode: '起步方式', workflow: '测试安排',
+  mode: '方向', interaction: '什么时候问我' };
 function ChatSetup(props) {
-  var state=useState(null), busy=useState(false), notice=useState(''), error=useState(''), open=useState(false), more=useState(false);
+  var state=useState(null), busy=useState(false), notice=useState(''), error=useState(''), panel=useState(null);
+  // 「继续其他检查」只关掉本会话这一条提示，不改变任何任务状态（v6 第 5.2 节）。
+  var attentionDismissed=useState(false);
   var readError=useState('');
-  var request=useRef(0), mounted=useRef(true), saving=useRef(false), openButton=useRef(null);
-  var workerDraft=useState('1');
+  var request=useRef(0), mounted=useRef(true), saving=useRef(false), openButton=useRef(null), moreButton=useRef(null), overlayRoot=useRef(null);
+  // v6 第 3.3 节第 8 条：提示词抽屉的插入落点必须在**打开抽屉之前**捕获，否则宿主 caretSpan 已经
+  // 因为编辑器失焦而退化成文档末尾，原来的光标/选区就丢了。
+  var promptInsertion=useRef(null);
+  // 四个入口共用一份「当前打开哪个面板」：始终最多一个（v6 第 10.5 节 UI09/UI12）。
+  function setPanelOnly(name, next){ panel[1](function(previous){ if(next) return name; return previous===name?null:previous; }); }
+  var open=[panel[0]==='prompt', function(next){ setPanelOnly('prompt',next); }];
+  var more=[panel[0]==='settings', function(next){ setPanelOnly('settings',next); }];
+  var workerDraft=useState('2'), draft=useState(null), targetInput=useState(''), contentDefault=useState(null);
+  // 本轮预算（开始测试时用）：放在抽屉的「限制请求和用量」折叠里，任务页单独使用时由 TaskPanel 自己管。
+  var budget=useState({calls:'30',modelCalls:'',tokens:'',minutes:'15',unmetered:'0',discovery:'5'});
+  function setBudget(patch){budget[1](function(previous){return Object.assign({},previous||{},patch);});}
   var decisionNote=useState('');
   function load(){var revision=++request.current;return api('chat.settings',{sessionId:props.sessionId}).then(function(result){
-    if(!result.ok)throw Error(chatError(result.error));
+    if(!result.ok)throw Error(chatError(result));
     if(!mounted.current||request.current!==revision||saving.current)return result;
     // Reading or polling must not turn displayed defaults into a user choice.
     // Explicit controls persist preferences through run('task.choose', ...).
     return result;
   }).then(function(result){
-    if(!result.ok)throw Error(chatError(result.error));if(mounted.current&&request.current===revision&&!saving.current){state[1](result);readError[1]('');}
+    if(!result.ok)throw Error(chatError(result));if(mounted.current&&request.current===revision&&!saving.current){state[1](result);readError[1]('');}
   }).catch(function(failure){if(mounted.current&&request.current===revision)readError[1](failure.message);});}
   useEffect(function(){mounted.current=true;load();var timer=setInterval(load,3000);return function(){mounted.current=false;request.current++;clearInterval(timer);};},[props.sessionId]);
+  // 下限降到 96px：短视口时让弹层缩短并内部滚动，而不是把顶部顶出屏幕。
+  useEffect(function(){if(!open[0]&&!more[0])return;var root=overlayRoot.current;if(typeof window==='undefined'||!root||typeof root.getBoundingClientRect!=='function')return;function fit(){var rect=root.getBoundingClientRect(),boundary=0;for(var el=root.parentElement;el;el=el.parentElement){var overflow=getComputedStyle(el).overflowY;if(overflow==='auto'||overflow==='scroll'||overflow==='hidden'){boundary=el.getBoundingClientRect().top;break;}}var available=Math.floor(rect.top-Math.max(boundary,0)-18);root.style.setProperty('--dsh-chat-overlay-max-height',Math.max(96,Math.min(520,available))+'px');}fit();window.addEventListener('resize',fit);return function(){window.removeEventListener('resize',fit);if(root)root.style.removeProperty('--dsh-chat-overlay-max-height');};},[open[0],more[0]]);
+  // 设置草稿（PLAN 5.5）：面板里的改动先留在草稿，保存才写回本任务，取消直接丢弃。
+  useEffect(function(){draft[1](more[0]?{}:null);},[more[0]]);
   function run(endpoint,payload){saving.current=true;request.current++;busy[1](true);error[1]('');notice[1]('');
-    return api(endpoint,Object.assign({sessionId:props.sessionId},payload||{})).then(function(result){if(!result.ok)throw Error(chatError(result.error));
+    return api(endpoint,Object.assign({sessionId:props.sessionId},payload||{})).then(function(result){if(!result.ok)throw Error(chatError(result));
       if(endpoint==='task.continue')decisionNote[1]('');
-      if(endpoint==='task.new-round')return api('task.choose',Object.assign({sessionId:props.sessionId},payload.preferences)).then(function(value){if(!value.ok)throw Error(chatError(value.error));notice[1]('已有记录已保留。请填写新的测试内容。');});
+      if(endpoint==='task.new-round')return api('task.choose',Object.assign({sessionId:props.sessionId},payload.preferences)).then(function(value){if(!value.ok)throw Error(chatError(value));notice[1]('已有记录已保留。请填写新的测试内容。');});
       notice[1](({'task.continue':'已确认，正在继续','task.cancel':'已停止本轮','chat.defaults':'已保存为新会话默认'}[endpoint])||'设置已保存');})
       .catch(function(failure){error[1](failure.message);}).finally(function(){saving.current=false;busy[1](false);return load();});
   }
   var current=state[0], policy=current&&current.policy, options=current&&current.options||{}, mode=policy?policy.mode:current&&current.choice||'regular';
-  var interaction=policy?policy.interaction:options.interaction||'continuous', workers=policy?policy.workerLimit:options.workers??1, reporting=chatReporting(policy||options), cooperation=cooperationValue(interaction);
+  var interaction=policy?policy.interaction:options.interaction||'auto', workers=policy?policy.workerLimit:options.workers??2, reporting=chatReporting(policy||options), cooperation=cooperationValue(interaction), startMode=policy?(policy.startMode||'materials-first'):(options.startMode||'materials-first');
+  var explainValue=policy?(policy.explain===true):(options.explain===true);
+  var hostWorkerLimit=current&&Number.isInteger(current.hostWorkerLimit)?current.hostWorkerLimit:16;
+  if(workers>hostWorkerLimit)workers=hostWorkerLimit;
+  var workerOptions=[0,1,2,4,8,16].filter(function(value){return value<=hostWorkerLimit;});
   var labels={regular:'常规测试',nday:'Nday发现','0day':'0Day挖掘'};
-  function change(patch){if(policy){if(patch.interaction!==undefined||patch.reporting!==undefined)return run('task.interaction',{interaction:patch.interaction??interaction,reporting:patch.reporting??reporting});return run('task.workers',{workers:patch.workers});}
-    var next=Object.assign({mode:mode,workflow:mode==='regular'?(options.workflow||'single'):'single',workers:workers,interaction:interaction,reporting:reporting},patch);
+  function change(patch){if(policy){if(patch.explain!==undefined)return run('task.explain',{explain:patch.explain});if(patch.interaction!==undefined||patch.reporting!==undefined)return run('task.interaction',{interaction:patch.interaction??interaction,reporting:patch.reporting??reporting});return run('task.workers',{workers:patch.workers});}
+    var next=Object.assign({mode:mode,workflow:mode==='regular'?(options.workflow||'single'):'single',workers:workers,interaction:interaction,reporting:reporting,explain:explainValue,startMode:startMode},patch);
     if(next.mode!=='regular')next.workflow='single';return run('task.choose',next);
   }
   function close(){open[1](false);if(openButton.current)openButton.current.focus();}
+  // 关闭提示词模板/设置并把焦点还给对应的入口按钮（v6 第 10.5 节 UI09/UI12）。
+  function closePanels(){
+    if(panel[0]==='prompt'){ panel[1](null); if(openButton.current&&openButton.current.focus)openButton.current.focus(); }
+    else if(panel[0]==='settings'){ panel[1](null); if(moreButton.current&&moreButton.current.focus)moreButton.current.focus(); }
+  }
+  useEffect(function(){
+    if(panel[0]!=='prompt'&&panel[0]!=='settings')return;
+    if(typeof document==='undefined'||typeof document.addEventListener!=='function')return;
+    function onDown(event){ var root=overlayRoot.current; if(root&&root.contains&&root.contains(event.target))return; closePanels(); }
+    function onKey(event){ if(event.key==='Escape'){ event.stopPropagation(); closePanels(); } }
+    document.addEventListener('mousedown',onDown);
+    document.addEventListener('keydown',onKey);
+    return function(){ document.removeEventListener('mousedown',onDown); document.removeEventListener('keydown',onKey); };
+  },[panel[0]]);
+  // 任务工作区里的「添加测试资料」通过桥接打开同一个面板；卸载时清掉，避免指向已销毁组件。
+  useEffect(function(){
+    materialsPanelBridge.open=function(){ setPanelOnly('materials',true); };
+    return function(){ materialsPanelBridge.open=null; };
+  },[props.sessionId]);
+  useEffect(function(){ attentionDismissed[1](false); },[props.sessionId]);
   function editWorkers(){workerDraft[1](String(workers));more[1](true);}
-  function saveWorkers(){var value=Number(workerDraft[0]);if(!workerDraft[0].trim()||!Number.isInteger(value)||value<0||value>16){error[1]('请输入0–16的整数');return;}return change({workers:value});}
-  return React.createElement('section',{'aria-label':'聊天任务设置',className:'dsh-chat-setup',onKeyDown:function(event){if(event.key==='Escape'&&open[0]){event.stopPropagation();close();}}},
+  var draftValues=draft[0]||{};
+  var liveWorkflow=policy?(policy.flow?.kind||'single'):options.workflow||'single';
+  var draftReporting=draftValues.reporting===undefined?reporting:draftValues.reporting;
+  var draftExplain=draftValues.explain===undefined?explainValue:draftValues.explain;
+  var draftStartMode=draftValues.startMode===undefined?startMode:draftValues.startMode;
+  var draftWorkflow=draftValues.workflow===undefined?liveWorkflow:draftValues.workflow;
+  var draftWorkersRaw=draftValues.workers===undefined?workerDraft[0]:String(draftValues.workers);
+  var liveWorkerModel=policy?(policy.workerModel??null):(options.workerModel??null);
+  var liveReviewModel=policy?(policy.reviewModel??null):(options.reviewModel??null);
+  var liveReportModel=policy?(policy.reportModel??null):(options.reportModel??null);
+  var draftWorkerModel=draftValues.workerModel===undefined?liveWorkerModel:draftValues.workerModel;
+  var draftReviewModel=draftValues.reviewModel===undefined?liveReviewModel:draftValues.reviewModel;
+  var draftReportModel=draftValues.reportModel===undefined?liveReportModel:draftValues.reportModel;
+  // 动作限制（v6 第 4.3/5.5 节）：允许访问网站 / 不改动网站数据。未开始时读选择，已开始读策略。
+  var liveAllowTargetNetwork=policy?(policy.allowTargetNetwork!==false):(options.allowTargetNetwork!==false);
+  var liveReadOnly=policy?(policy.readOnly===true):(options.readOnly===true);
+  var liveExcludedPaths=policy?(Array.isArray(policy.excludedPaths)?policy.excludedPaths:[]):(Array.isArray(options.excludedPaths)?options.excludedPaths:[]);
+  function limitText(value){return value===undefined||value===null?'':String(value);}
+  var liveRequestRate=limitText(policy?policy.requestRatePerMinute:options.requestRatePerMinute);
+  var liveRequestConcurrency=limitText(policy?policy.requestConcurrency:options.requestConcurrency);
+  var draftAllowTargetNetwork=draftValues.allowTargetNetwork===undefined?liveAllowTargetNetwork:draftValues.allowTargetNetwork;
+  var draftReadOnly=draftValues.readOnly===undefined?liveReadOnly:draftValues.readOnly;
+  var draftExcludedPaths=draftValues.excludedPaths===undefined?liveExcludedPaths.join('\n'):draftValues.excludedPaths;
+  var draftRequestRate=draftValues.requestRatePerMinute===undefined?liveRequestRate:draftValues.requestRatePerMinute;
+  var draftRequestConcurrency=draftValues.requestConcurrency===undefined?liveRequestConcurrency:draftValues.requestConcurrency;
+  // 全不选时必须关闭网站访问：复选框置灰且显示为关，重新选项目也不暗中恢复。
+  var contentSelectionEmpty=Array.isArray(contentDefault[0])&&contentDefault[0].length===0;
+  var effectiveAllowTargetNetwork=contentSelectionEmpty?false:draftAllowTargetNetwork;
+  // 函数式更新：同一次渲染里连续改两项（例如先关网站访问再勾只读）不会互相覆盖。
+  function patchDraft(patch){error[1]('');draft[1](function(previous){return Object.assign({},previous||{},patch);});}
+  function draftChanges(){var d=draft[0]||{},out={};
+    if(d.reporting!==undefined&&d.reporting!==reporting)out.reporting=d.reporting;
+    if(d.explain!==undefined&&d.explain!==explainValue)out.explain=d.explain;
+    if(d.workers!==undefined&&String(d.workers).trim()!==String(workers))out.workers=d.workers;
+    if(d.workerModel!==undefined&&JSON.stringify(d.workerModel)!==JSON.stringify(liveWorkerModel))out.workerModel=d.workerModel;
+    if(d.reviewModel!==undefined&&JSON.stringify(d.reviewModel)!==JSON.stringify(liveReviewModel))out.reviewModel=d.reviewModel;
+    if(d.reportModel!==undefined&&JSON.stringify(d.reportModel)!==JSON.stringify(liveReportModel))out.reportModel=d.reportModel;
+    if(d.allowTargetNetwork!==undefined&&d.allowTargetNetwork!==liveAllowTargetNetwork)out.allowTargetNetwork=d.allowTargetNetwork;
+    if(d.readOnly!==undefined&&d.readOnly!==liveReadOnly)out.readOnly=d.readOnly;
+    if(d.excludedPaths!==undefined&&String(d.excludedPaths).trim()!==liveExcludedPaths.join('\n').trim())out.excludedPaths=d.excludedPaths;
+    if(d.requestRatePerMinute!==undefined&&String(d.requestRatePerMinute).trim()!==liveRequestRate)out.requestRatePerMinute=d.requestRatePerMinute;
+    if(d.requestConcurrency!==undefined&&String(d.requestConcurrency).trim()!==liveRequestConcurrency)out.requestConcurrency=d.requestConcurrency;
+    if(d.startMode!==undefined&&d.startMode!==startMode)out.startMode=d.startMode;
+    if(d.workflow!==undefined&&d.workflow!==liveWorkflow)out.workflow=d.workflow;
+    return out;}
+  function cancelDraft(){draft[1](null);error[1]('');more[1](false);}
+  function saveDraft(){
+    var changes=draftChanges();
+    if(!Object.keys(changes).length){notice[1]('没有需要保存的改动');draft[1](null);more[1](false);return Promise.resolve();}
+    if(changes.workers!==undefined){var raw=String(changes.workers).trim(),parsed=Number(raw);
+      if(!raw||!Number.isInteger(parsed)||parsed<0||parsed>hostWorkerLimit){error[1]('请输入0–'+hostWorkerLimit+'的整数');return Promise.resolve();}
+      changes.workers=parsed;}
+    var chain=Promise.resolve();
+    if(policy){
+      if(changes.explain!==undefined)chain=chain.then(function(){return run('task.explain',{explain:changes.explain});});
+      if(changes.reporting!==undefined)chain=chain.then(function(){return run('task.interaction',{interaction:interaction,reporting:changes.reporting});});
+      if(changes.workers!==undefined)chain=chain.then(function(){return run('task.workers',{workers:changes.workers});});
+      if(changes.allowTargetNetwork!==undefined||changes.readOnly!==undefined||changes.excludedPaths!==undefined||changes.requestRatePerMinute!==undefined||changes.requestConcurrency!==undefined)chain=chain.then(function(){return run('task.limits',{allowTargetNetwork:changes.allowTargetNetwork,readOnly:changes.readOnly,excludedPaths:changes.excludedPaths,requestRatePerMinute:changes.requestRatePerMinute,requestConcurrency:changes.requestConcurrency});});
+    }else{
+      var next=Object.assign({mode:mode,workflow:mode==='regular'?liveWorkflow:'single',workers:workers,interaction:interaction,reporting:reporting,explain:explainValue,startMode:startMode,
+        workerModel:liveWorkerModel,reviewModel:liveReviewModel,reportModel:liveReportModel,
+        allowTargetNetwork:effectiveAllowTargetNetwork,readOnly:draftReadOnly,excludedPaths:draftExcludedPaths,requestRatePerMinute:draftRequestRate,requestConcurrency:draftRequestConcurrency},changes);
+      if(next.mode!=='regular')next.workflow='single';
+      chain=chain.then(function(){return run('task.choose',next);});
+    }
+    return chain.then(function(){draft[1](null);more[1](false);
+      // 保存后把实际改了哪些设置说清楚（v6 第 4.2 节）：不只说「已保存」。
+      var labels=Object.keys(changes).map(function(key){return SETTING_CHANGE_LABELS[key]||key;});
+      notice[1](labels.length?'设置已保存：'+labels.join('、'):'设置已保存');});
+  }
+  return React.createElement('section',{ref:overlayRoot,'aria-label':'聊天任务设置',className:'dsh-chat-setup'},
     React.createElement('div',{className:'dsh-chat-settings-row'},
-      React.createElement('label',{className:'dsh-chat-chip',title:policy?'本轮方向已固定':'这次研究的重点'},React.createElement(ChatIcon,{name:'direction'}),React.createElement('select',{'aria-label':'任务方向',value:mode,disabled:busy[0]||!current||!!policy,onChange:function(event){return change({mode:event.target.value});}},['regular','nday','0day'].map(function(value){return React.createElement('option',{key:value,value:value},labels[value]);}))),
-      React.createElement('label',{className:'dsh-chat-chip',title:CHAT_COOPERATION_HINT[cooperation]},React.createElement(ChatIcon,{name:'chat'}),React.createElement('select',{'aria-label':'聊天协作方式',value:cooperation,disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){return change({interaction:event.target.value});}},
-        ['guided','confirm','continuous'].map(function(value){return React.createElement('option',{key:value,value:value},CHAT_COOPERATION[value]);}))),
-      React.createElement('label',{className:'dsh-chat-chip',title:'按需分派，当前占用 '+(current?.active||0)+'/'+workers},React.createElement(ChatIcon,{name:'users'}),React.createElement('select',{'aria-label':'聊天子代理上限',value:String(workers),disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){return event.target.value==='custom'?editWorkers():change({workers:Number(event.target.value)});}},[0,1,2,4,8,16].concat([0,1,2,4,8,16].includes(workers)?[]:[workers]).sort(function(a,b){return a-b;}).map(function(value){return React.createElement('option',{key:value,value:String(value)},value===0?'仅主代理':'子代理 '+value);}),React.createElement('option',{value:'custom'},'自定义人数…'))),
+      React.createElement('label',{className:'dsh-chat-chip saker-ui-select',title:policy?'本轮方向已固定':'这次研究的重点'},React.createElement(ChatIcon,{name:'direction'}),React.createElement('select',{'aria-label':'任务方向',value:mode,disabled:busy[0]||!current||!!policy,onChange:function(event){return change({mode:event.target.value});}},['regular','nday','0day'].map(function(value){return React.createElement('option',{key:value,value:value},labels[value]);}))),
+      React.createElement('label',{className:'dsh-chat-chip saker-ui-select',title:CHAT_COOPERATION_HINT[cooperation]},React.createElement(ChatIcon,{name:'chat'}),React.createElement('select',{'aria-label':'聊天协作方式',value:cooperation,disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){return change({interaction:event.target.value});}},
+        ['auto','confirm-data-change','confirm-step'].map(function(value){return React.createElement('option',{key:value,value:value},CHAT_COOPERATION[value]);}))),
+      React.createElement('label',{className:'dsh-chat-chip saker-ui-select',title:'按需分派，当前占用 '+(current?.active||0)+'/'+workers},React.createElement(ChatIcon,{name:'users'}),React.createElement('select',{'aria-label':'聊天子代理上限',value:String(workers),disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){return event.target.value==='custom'?editWorkers():change({workers:Number(event.target.value)});}},workerOptions.concat(workerOptions.includes(workers)?[]:[workers]).sort(function(a,b){return a-b;}).map(function(value){return React.createElement('option',{key:value,value:String(value)},value===0?'只用当前 AI':value===2?'自动，最多 2 个':'最多 '+value+' 个');}),React.createElement('option',{value:'custom'},'自定义人数…'))),
       React.createElement('span',{className:'dsh-chat-toolbar-spacer'}),
-      React.createElement('button',{ref:openButton,type:'button',className:open[0]?'dsh-chat-toolbar-button is-active':'dsh-chat-toolbar-button','aria-expanded':open[0],onClick:function(){open[1](!open[0]);}},React.createElement(ChatIcon,{name:'prompt'}),'写提示词'),
-      React.createElement('button',{type:'button',className:more[0]?'dsh-chat-toolbar-button is-active':'dsh-chat-toolbar-button','aria-expanded':more[0],onClick:function(){workerDraft[1](String(workers));more[1](!more[0]);}},React.createElement(ChatIcon,{name:'settings'}),'设置')),
+      React.createElement('div',{className:'dsh-chat-entry-group'},
+      React.createElement('button',{ref:openButton,type:'button',className:open[0]?'dsh-chat-toolbar-button saker-ui-btn is-active':'dsh-chat-toolbar-button saker-ui-btn','aria-expanded':open[0],title:'选一段需求文字，改目标和重点后发送。只编辑或复制；插入后仍由用户发送。',onClick:function(){var next=!open[0];if(next){promptInsertion.current=props.inputActions&&typeof props.inputActions.captureInsertion==='function'?props.inputActions.captureInsertion():null;}open[1](next);if(next)more[1](false);}},React.createElement(ChatIcon,{name:'prompt'}),'提示词模板'),
+      React.createElement(MaterialsEntry,{key:props.sessionId+'-materials-entry',sessionId:props.sessionId,open:panel[0]==='materials',onOpenChange:function(next){setPanelOnly('materials',next);}}),
+      React.createElement('button',{ref:moreButton,type:'button',className:more[0]?'dsh-chat-toolbar-button is-active':'dsh-chat-toolbar-button','aria-expanded':more[0],title:'选择什么时候问你、怎么汇报，以及助手数量。保存后更新本任务；不改别的会话。',onClick:function(){var next=!more[0];workerDraft[1](String(workers));more[1](next);if(next)open[1](false);}},React.createElement(ChatIcon,{name:'settings'}),'测试设置'),
+      React.createElement(KnowledgeEntry,{key:props.sessionId+'-knowledge',sessionId:props.sessionId,open:panel[0]==='knowledge',onOpenChange:function(next){setPanelOnly('knowledge',next);}}))),
     more[0]?React.createElement('div',{className:'dsh-chat-more','aria-label':'聊天协作设置'},
-      React.createElement('div',{className:'dsh-chat-panel-head'},React.createElement('strong',null,'这次如何协作'),React.createElement('button',{type:'button','aria-label':'关闭协作设置',onClick:function(){more[1](false);}},'关闭')),
+      React.createElement('div',{className:'dsh-chat-panel-head'},React.createElement('strong',null,'本次测试设置'),React.createElement('button',{type:'button','aria-label':'关闭测试设置',onClick:closePanels},'关闭')),
+      React.createElement('p',{className:'dsh-chat-setting-hint'},'只影响当前任务，保存后生效。'),
+      React.createElement('p',{className:'dsh-chat-setting-hint'},'选择什么时候问你、怎么汇报，以及助手数量；不改别的会话。'),
+      React.createElement('label',{className:'dsh-chat-target'},React.createElement('span',null,'测试哪些网站（选填）'),
+        React.createElement('input',{'aria-label':'测试哪些网站（选填）',type:'text',value:targetInput[0],placeholder:'例如 https://example.com；只测试已获授权的网站',onChange:function(event){targetInput[1](event.target.value);}})),
+      React.createElement(TestContentSection,{key:props.sessionId+'-content',sessionId:props.sessionId,onSelection:function(active){contentDefault[1](active);}}),
+      // 执行入口与观测范围（v6 第 8.1 节）：如实列出已接通的能力，以及不在 Saker 观测内的通道，
+      // 不拿"工具已装"冒充全部计量。
+      React.createElement('details',{className:'dsh-execution-scope'},
+        React.createElement('summary',null,'哪些请求会留下记录'),
+        React.createElement('ul',null,
+          React.createElement('li',null,'Saker 发送的 HTTP 请求：可查看目标、时间、状态和响应回执。范围、排除路径、速率和取消设置在发送前检查。'),
+          React.createElement('li',null,'浏览器、命令和 MCP：可查看工具调用；工具内部发了多少请求，可能无法统计，界面会标为未知。'))),
+      React.createElement('details',{className:'dsh-action-limits'},
+        React.createElement('summary',null,'限制请求和用量'),
+        React.createElement('label',{className:'dsh-chat-explain'},
+          React.createElement('input',{type:'checkbox','aria-label':'允许访问网站',checked:effectiveAllowTargetNetwork,disabled:contentSelectionEmpty||busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){return patchDraft({allowTargetNetwork:event.target.checked});}}),
+          '允许访问网站'),
+        React.createElement('small',null,'关闭后只分析已添加的内容；程序会拒绝新的目标网络操作（MCP、扫描器、shell、浏览器、已存请求与基线复查）。'),
+        React.createElement('label',{className:'dsh-chat-explain'},
+          React.createElement('input',{type:'checkbox','aria-label':'不改动网站数据',checked:draftReadOnly,disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){return patchDraft({readOnly:event.target.checked});}}),
+          '不改动网站数据'),
+        React.createElement('small',null,'只允许 GET/HEAD 这类读取请求；提交、修改或删除业务数据会被程序拒绝。'),
+        React.createElement('label',{className:'dsh-chat-exclude'},React.createElement('span',null,'排除的地址或路径（选填）'),
+          React.createElement('textarea',{'aria-label':'排除的地址或路径',rows:2,value:draftExcludedPaths,placeholder:'例如 /payment、/delete',disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){return patchDraft({excludedPaths:event.target.value});}})),
+        React.createElement('small',null,'每行一条，按路径前缀排除（/payment 会排除 /payment 及其子路径）；命中的请求会被程序拒绝，不会发出。'),
+        React.createElement('div',{className:'dsh-limit-row'},
+          React.createElement('label',null,'扫描速率（每分钟请求数）',
+            React.createElement('input',{'aria-label':'扫描速率（每分钟请求数）',type:'number',min:1,max:600,value:draftRequestRate,placeholder:'未设置',disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){return patchDraft({requestRatePerMinute:event.target.value});}})),
+          React.createElement('label',null,'并发上限（同时进行）',
+            React.createElement('input',{'aria-label':'并发上限（同时进行）',type:'number',min:1,max:16,value:draftRequestConcurrency,placeholder:'未设置',disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){return patchDraft({requestConcurrency:event.target.value});}}))),
+        React.createElement('small',null,'留空表示未设置，实际沿用宿主当前限制；只约束本插件派发的目标请求，排队超时会拒绝而不是硬发。'),
+        policy?React.createElement('small',null,'本轮预算已生效：操作 '+(policy.budget?.toolCalls??'未设')+' 次'
+          +(policy.budget?.modelCalls!==undefined?' · 模型调用 '+policy.budget.modelCalls+' 次':'')
+          +(policy.budget?.tokens!==undefined?' · 模型 token '+policy.budget.tokens:'')
+          +(policy.budget?.unmeteredToolCalls!==undefined?' · 未计量扫描 '+policy.budget.unmeteredToolCalls+' 次':'')
+          +'。开始后不再改变，要改请在新建下一轮时设置。')
+          :React.createElement('div',null,
+            React.createElement('div',{className:'dsh-limit-row'},
+              React.createElement('label',null,'最多运行多久（分钟）',
+                React.createElement('input',{'aria-label':'最多运行多久（分钟）',type:'number',min:1,value:budget[0].minutes,placeholder:'未设置',disabled:busy[0]||!current,onChange:function(event){setBudget({minutes:event.target.value});}})),
+              React.createElement('label',null,'网站请求上限（次）',
+                React.createElement('input',{'aria-label':'网站请求上限（次）',type:'number',min:1,value:budget[0].calls,placeholder:'未设置',disabled:busy[0]||!current,onChange:function(event){setBudget({calls:event.target.value});}}))),
+            React.createElement('div',{className:'dsh-limit-row'},
+              React.createElement('label',null,'模型调用上限（次）',
+                React.createElement('input',{'aria-label':'模型调用上限（次）',type:'number',min:1,value:budget[0].modelCalls,placeholder:'未设置',disabled:busy[0]||!current,onChange:function(event){setBudget({modelCalls:event.target.value});}})),
+              React.createElement('label',null,'模型用量上限（token）',
+                React.createElement('input',{'aria-label':'模型用量上限（token）',type:'number',min:1,value:budget[0].tokens,placeholder:'未设置',disabled:busy[0]||!current,onChange:function(event){setBudget({tokens:event.target.value});}}))),
+            React.createElement('div',{className:'dsh-limit-row'},
+              React.createElement('label',null,'未计量扫描额度（次工具调用）',
+                React.createElement('input',{'aria-label':'未计量扫描额度（次工具调用）',type:'number',min:0,value:budget[0].unmetered,placeholder:'未设置',disabled:busy[0]||!current,onChange:function(event){setBudget({unmetered:event.target.value});}})),
+              mode==='0day'?React.createElement('label',null,'初步观察预算（次）',
+                React.createElement('input',{'aria-label':'初步观察预算（次）',type:'number',min:0,value:budget[0].discovery,placeholder:'未设置',disabled:busy[0]||!current,onChange:function(event){setBudget({discovery:event.target.value});}})):null),
+            React.createElement('small',null,'这些是“开始测试”时的本轮预算，留空表示未设置，实际沿用宿主当前限制；未设置时不额外收紧。')),
+        contentSelectionEmpty?React.createElement('p',{role:'status'},'只分析已添加内容，不再访问网站。再次选择项目后，需明确打开“允许访问网站”。'):null,
+        // v6 第 4.3 节：再次选项目不暗中恢复网络访问，界面要明说「访问网站仍已关闭」。
+        (!contentSelectionEmpty&&!effectiveAllowTargetNetwork)?React.createElement('p',{role:'status'},'访问网站仍已关闭：重新选择测试内容不会恢复网络访问，需要访问时请明确打开上面的“允许访问网站”。'):null),
+      React.createElement(WorkerModelSection,{key:props.sessionId+'-worker-model',sessionId:props.sessionId,
+        values:{workerModel:draftWorkerModel,reviewModel:draftReviewModel,reportModel:draftReportModel},
+        disabled:busy[0]||!current||!!policy,onChange:function(key,value){var patch={};patch[key]=value;patchDraft(patch);}}),
+      React.createElement(AccountsSection,{key:props.sessionId+'-accounts',sessionId:props.sessionId}),
       React.createElement('p',{className:'dsh-chat-setting-hint'},CHAT_COOPERATION_HINT[cooperation]),
-      React.createElement('fieldset',{className:'dsh-chat-reporting'},React.createElement('legend',null,'进度汇报'),[['summary','结束时汇总'],['milestone','每阶段简报']].map(function(row){return React.createElement('label',{key:row[0]},React.createElement('input',{type:'radio',name:'chat-reporting-'+props.sessionId,'aria-label':row[1],value:row[0],checked:reporting===row[0],disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(){return change({reporting:row[0]});}}),row[1]);}),React.createElement('small',null,'只影响进度消息；需要你研判或确认时，仍会即时说明。')),
-      React.createElement('label',{className:'dsh-chat-worker-custom'},'子代理上限',React.createElement('input',{type:'number',min:0,max:16,step:1,'aria-label':'自定义子代理上限',value:workerDraft[0],disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){workerDraft[1](event.target.value);}}),React.createElement('button',{type:'button',disabled:busy[0]||!current||!!(policy&&policy.parentSession),onClick:saveWorkers},'应用人数')),
-      mode==='regular'?React.createElement('label',null,'测试安排 ',React.createElement('select',{'aria-label':'聊天测试安排',value:policy?policy.flow.kind:options.workflow||'single',disabled:busy[0]||!current||!!policy,onChange:function(event){return change({workflow:event.target.value});}},
+      React.createElement('fieldset',{className:'dsh-chat-reporting'},React.createElement('legend',null,'什么时候汇报'),['end','notable','step'].map(function(value){return React.createElement('label',{key:value},React.createElement('input',{type:'radio',name:'chat-reporting-'+props.sessionId,'aria-label':CHAT_REPORTING[value],value:value,checked:draftReporting===value,disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(){return patchDraft({reporting:value});},onClick:function(){return patchDraft({reporting:value});}}),CHAT_REPORTING[value]);}),React.createElement('small',null,'进度、错误和必须提问一直可见；汇报偏好不额外调用模型总结。')),
+      React.createElement('label',{className:'dsh-chat-explain'},React.createElement('input',{type:'checkbox','aria-label':'解释测试原理',checked:draftExplain,disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){return patchDraft({explain:event.target.checked});}}),'解释测试原理',React.createElement('small',null,'在结果后解释关键判断，适合学习；不改变结论标准。')),
+      React.createElement('label',{className:'dsh-chat-worker-custom'},'子代理上限',React.createElement('input',{type:'number',min:0,max:hostWorkerLimit,step:1,'aria-label':'自定义子代理上限',value:draftWorkersRaw,disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){workerDraft[1](event.target.value);patchDraft({workers:event.target.value});}})),
+      React.createElement('label',null,'起步方式 ',React.createElement('select',{'aria-label':'聊天起步方式',value:draftStartMode,disabled:busy[0]||!current||!!policy,onChange:function(event){return patchDraft({startMode:event.target.value});}},Object.keys(START_MODE).map(function(value){return React.createElement('option',{key:value,value:value},START_MODE[value]);}))),
+      React.createElement('small',null,START_MODE_HINT[draftStartMode]),
+      mode==='regular'?React.createElement('label',null,'测试安排 ',React.createElement('select',{'aria-label':'聊天测试安排',value:draftWorkflow,disabled:busy[0]||!current||!!policy,onChange:function(event){return patchDraft({workflow:event.target.value});}},
       React.createElement('option',{value:'single'},'只做当前方向'),React.createElement('option',{value:'regular-to-nday'},'常规收集后接 Nday'),React.createElement('option',{value:'regular-with-nday'},'常规与 Nday 一起推进'))):null,
-      React.createElement('small',null,'支持0–16个。按需分派，共用预算；人数不代表一定创建这么多代理，增加人数可能增加用量。'),
-      React.createElement('button',{type:'button',disabled:busy[0]||!current||!!(policy&&policy.parentSession),onClick:function(){return run('chat.defaults',{interaction:interaction,reporting:reporting,workers:workers});}},'设为新会话默认'),
-      React.createElement('small',null,'保存协作、汇报和人数；已有设置和运行中的任务保持原配置。'),
+      React.createElement('small',null,'宿主当前支持0–'+hostWorkerLimit+'个。按需分派，共用预算；人数不代表一定创建这么多代理，增加人数可能增加用量。'),
+      React.createElement('div',{className:'dsh-chat-settings-actions'},
+        React.createElement('button',{type:'button',disabled:busy[0],onClick:cancelDraft},'取消'),
+        React.createElement('button',{type:'button',disabled:busy[0]||!current,onClick:saveDraft},'保存'),
+        Object.keys(draftChanges()).length?React.createElement('small',{role:'status'},'尚未保存'):null),
+      // v6 第 5.5 节：控件名是「存为默认偏好」。原来的提示只写「协作、汇报和人数」，
+      // 但它实际还会保存解释原理与测试内容偏好——提示必须说全，否则用户不知道点了会存什么。
+      React.createElement('button',{type:'button',disabled:busy[0]||!current||!!(policy&&policy.parentSession),onClick:function(){return run('chat.defaults',{interaction:interaction,reporting:reporting,workers:workers,explain:explainValue,content:contentDefault[0]===null?undefined:contentDefault[0],workerModel:draftWorkerModel,reviewModel:draftReviewModel,reportModel:draftReportModel});}},'存为默认偏好'),
+      React.createElement('small',null,'只保存询问、汇报、解释原理、助手和测试内容偏好；目标、账号、排除路径和已用量不会复制到新任务。'),
       current&&!policy?.parentSession?React.createElement('details',null,React.createElement('summary',null,policy?'本轮任务与预算':'开始任务与预算'),
         React.createElement('small',null,'可在首次模型调用前设定本轮问题和额度；点击开始后立即执行。'),
-        React.createElement(TaskPanel,{key:props.sessionId+'-budget',sessionId:props.sessionId})):null):null,
-    policy&&policy.awaitingConfirmation?React.createElement('div',{className:'dsh-chat-checkpoint','aria-label':'聊天阶段确认'},React.createElement('strong',null,cooperation==='guided'?'一起判断下一步':'需要你确认下一步'),React.createElement('p',null,policy.awaitingConfirmation.note),
-      current.reason!=='interaction_confirmation_required'?React.createElement('p',null,({'time_budget_exhausted':'原时间上限已到，不能继续本轮。','tool_budget_exhausted':'原操作额度已用完，不能继续本轮。'}[current.reason])||'本轮还有未处理的停止原因，请在任务详情查看。'):null,
-      cooperation==='guided'?React.createElement('label',{className:'dsh-chat-full-prompt'},'补充你的思路（可选）',React.createElement('textarea',{'aria-label':'补充你的思路',rows:2,maxLength:2000,value:decisionNote[0],placeholder:'补充观察事实、业务疑问或下一步方向',onChange:function(event){decisionNote[1](event.target.value);}})):null,
-      React.createElement('button',{type:'button',disabled:busy[0]||current.agentRunning||current.reason!=='interaction_confirmation_required',onClick:function(){return run('task.continue',{note:decisionNote[0]});}},current.agentRunning?'正在收尾，请稍候':cooperation==='guided'?'按当前思路继续':'确认并继续'),
+        React.createElement(TaskPanel,{key:props.sessionId+'-budget',sessionId:props.sessionId,targetState:targetInput,budgetDraft:{value:budget[0],set:setBudget}})):null):null,
+    policy&&policy.awaitingConfirmation?React.createElement('div',{className:'dsh-chat-checkpoint','aria-label':'聊天阶段确认'},React.createElement('strong',null,cooperation==='confirm-step'?'需要你确认这一步':'需要你确认下一步'),React.createElement('p',null,policy.awaitingConfirmation.note),
+            current.reason!=='interaction_confirmation_required'?React.createElement('p',null,({'time_budget_exhausted':'原时间上限已到，不能继续本轮。','tool_budget_exhausted':'原操作额度已用完，不能继续本轮。','turn_ended':'模型已结束本轮，目标操作已停止；可继续下一轮。'}[current.reason])||'本轮还有未处理的停止原因，请在任务详情查看。'):null,
+      cooperation==='confirm-step'?React.createElement('label',{className:'dsh-chat-full-prompt'},'补充你的思路（可选）',React.createElement('textarea',{'aria-label':'补充你的思路',rows:2,maxLength:2000,value:decisionNote[0],placeholder:'补充观察事实、业务疑问或下一步方向',onChange:function(event){decisionNote[1](event.target.value);}})):null,
+      React.createElement('button',{type:'button',disabled:busy[0]||current.agentRunning||current.reason!=='interaction_confirmation_required',onClick:function(){return run('task.continue',{note:decisionNote[0]});}},current.agentRunning?'正在收尾，请稍候':cooperation==='confirm-step'?'按当前思路继续':'确认并继续'),
       React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){return run('task.cancel');}},'停止本轮'),React.createElement('small',null,'改变协作或汇报设置不会解除当前等待；原截止时间仍有效。')):null,
-    policy&&!policy.awaitingConfirmation?React.createElement('div',{className:'dsh-chat-task-status',role:'status'},React.createElement('span',null,current.stopped?(current.reason==='plan_complete'?'本轮已完成':'本轮已停止'):'本轮进行中'),(current.active||0)>0?React.createElement('span',null,'子代理 '+current.active+'/'+workers):null,
-      current.stopped&&!policy.blocker&&!policy.parentSession?React.createElement('button',{type:'button',disabled:busy[0]||current.agentRunning||(current.active||0)>0,onClick:function(){return run('task.new-round',{preferences:{mode:policy.flow.kind==='single'?policy.mode:'regular',workflow:policy.flow.kind,interaction:policy.interaction,reporting:reporting,workers:policy.workerLimit}});}},'新建测试'):null):null,
-    current?React.createElement(ChatPromptEditor,{key:props.sessionId+'-'+mode,sessionId:props.sessionId,mode:mode,open:open[0],onClose:close,inputActions:props.inputActions}):null,
+    policy&&!policy.awaitingConfirmation?React.createElement('div',{className:'dsh-chat-task-status',role:'status'},React.createElement('span',null,taskStatusLabel(current,policy)),(current.active||0)>0?React.createElement('span',null,'子代理 '+current.active+'/'+workers):null,
+      // 当前动作来自真实执行回执（v6 第 5.1 节）：只在运行中显示，没运行时不给状态栏堆零指标。
+      policy&&!current.stopped&&current.currentAction?React.createElement('span',{className:'dsh-chat-action'},current.currentAction):null,
+      // 停止按钮在运行状态始终可见（v6 第 5.2 节）：不等用户先点开设置或确认区。
+      !current.stopped?React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){return run('task.cancel');}},'停止本轮'):null,
+      current.stopped&&!policy.blocker&&!policy.parentSession?React.createElement('button',{type:'button',disabled:busy[0]||current.agentRunning||(current.active||0)>0,onClick:function(){return run('task.new-round',{preferences:{mode:(policy.flow?.kind||'single')==='single'?policy.mode:'regular',workflow:policy.flow?.kind||'single',interaction:policy.interaction,reporting:reporting,workers:policy.workerLimit,allowTargetNetwork:policy.allowTargetNetwork!==false,readOnly:policy.readOnly===true}});}},'新建测试'):null):null,
+    // 需要用户处理时只显示单条具体事项（v6 第 5.2 节）：说清哪一项受影响，并给出重新绑定/继续两条路。
+    current&&Array.isArray(current.attention)&&current.attention.length&&!attentionDismissed[0]?React.createElement('div',{className:'dsh-chat-attention',role:'alert'},
+      React.createElement('span',null,current.attention[0].message),
+      React.createElement('button',{type:'button',onClick:function(){more[1](true);}},'重新绑定账号'),
+      React.createElement('button',{type:'button',onClick:function(){attentionDismissed[1](true);}},'继续其他检查')):null,
+    React.createElement(UsageRow,{key:props.sessionId+'-usage',sessionId:props.sessionId}),
+    current?React.createElement(ChatPromptEditor,{key:props.sessionId+'-'+mode,sessionId:props.sessionId,mode:mode,open:open[0],onClose:close,inputActions:props.inputActions,insertion:promptInsertion}):null,
     error[0]||readError[0]?React.createElement('p',{role:'alert'},error[0]||readError[0]):notice[0]?React.createElement('span',{role:'status'},notice[0]):null);
 }
 function ChatSetupEntry(props) {
@@ -1628,26 +2601,190 @@ function ChatSetupEntry(props) {
 }
 function installChatSetupStyles() {
   var style=document.createElement('style');style.id='saker-chat-setup-style';
-  style.textContent=".dsh-chat-setup{box-sizing:border-box;width:min(var(--dsh-composer-card-max-width,100%),calc(100% - 2 * var(--dsh-composer-side-clearance,16px)));margin-inline:auto;container-type:inline-size;min-width:0;text-align:left;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-primary,inherit)}.dsh-chat-settings-row,.dsh-chat-actions,.dsh-chat-panel-head{display:flex;align-items:center;flex-wrap:wrap;gap:6px}.dsh-chat-settings-row{padding:0;gap:8px;min-height:32px}.dsh-chat-chip{box-sizing:border-box;display:inline-flex;align-items:center;gap:5px;height:32px;padding:0 9px;border-radius:8px;background:var(--dsw-alias-bg-l1,rgba(128,128,128,.055));color:var(--dsw-alias-label-secondary,inherit);border:1px solid transparent}.dsh-chat-chip:hover{background:var(--dsw-alias-bg-hover,rgba(128,128,128,.10))}.dsh-chat-toolbar-spacer{flex:1;min-width:4px}.dsh-chat-setup button,.dsh-chat-setup select,.dsh-chat-setup input,.dsh-chat-setup textarea{font:inherit;color:inherit;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));background:var(--dsw-alias-bg-base,transparent);border-radius:8px;padding:6px 9px;max-width:100%;box-sizing:border-box}.dsh-chat-setup .dsh-chat-chip select{border:0;padding:3px 0;background:transparent;max-width:150px;cursor:pointer}.dsh-chat-chip svg{flex-shrink:0;opacity:.7}.dsh-chat-setup button{cursor:pointer}.dsh-chat-setup .dsh-chat-toolbar-button{height:32px;display:inline-flex;align-items:center;gap:5px;border-color:transparent;background:transparent;padding:6px 8px}.dsh-chat-setup button:hover{background:var(--dsw-alias-bg-hover,rgba(128,128,128,.08))}.dsh-chat-setup .is-active{color:var(--dsw-alias-state-business-primary,#4b74d9);background:var(--dsw-alias-state-business-primary-alpha,rgba(75,116,217,.08))}.dsh-chat-setup button:disabled,.dsh-chat-setup select:disabled,.dsh-chat-setup input:disabled{opacity:.5;cursor:default}.dsh-chat-setup :focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4b74d9);outline-offset:2px}.dsh-chat-setup p{margin:8px 0}.dsh-chat-setting-hint,.dsh-chat-setup small{color:var(--dsw-alias-label-secondary,inherit);font-size:11px;opacity:.8}.dsh-chat-setup small{display:block;margin:5px 0}.dsh-chat-more,.dsh-chat-checkpoint,.dsh-chat-prompt{padding:14px 16px;margin:5px 0 8px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));border-radius:12px;background:var(--dsw-alias-bg-base,transparent)}.dsh-chat-prompt,.dsh-chat-more{max-height:min(390px,44vh);overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}.dsh-chat-prompt[hidden]{display:none}.dsh-chat-panel-head{justify-content:space-between;margin-bottom:8px}.dsh-chat-panel-head strong{font-size:13px;font-weight:600}.dsh-chat-panel-head button{border-color:transparent;padding:3px 7px;color:var(--dsw-alias-label-secondary,inherit)}.dsh-chat-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr));gap:8px;margin:10px 0}.dsh-chat-fields input{display:block;width:100%;margin-top:4px}.dsh-chat-full-prompt{display:block;margin:10px 0}.dsh-chat-full-prompt textarea{display:block;width:100%;resize:vertical;min-height:105px;max-height:230px;margin-top:5px;line-height:1.6}.dsh-chat-actions{margin-top:8px}.dsh-chat-actions button:first-child{background:var(--dsw-alias-state-business-primary,#4b74d9);color:#fff;border-color:transparent}.dsh-chat-checkpoint{border-left:3px solid var(--dsw-alias-state-business-primary,#4b74d9)}.dsh-chat-checkpoint button{margin-right:7px}.dsh-chat-reporting{border:0;padding:0;margin:12px 0}.dsh-chat-reporting legend{font-weight:500;margin-bottom:5px}.dsh-chat-reporting label{display:inline-flex;align-items:center;gap:5px;margin-right:16px}.dsh-chat-reporting input{padding:0;accent-color:var(--dsw-alias-state-business-primary,#4b74d9)}.dsh-chat-worker-custom{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:12px 0}.dsh-chat-worker-custom input{width:66px}.dsh-chat-setup [role=alert]{color:var(--dsw-alias-state-error-primary,#c84040)}.dsh-chat-setup *{animation:none!important;transition:none!important}@media(max-width:760px){.dsh-chat-toolbar-spacer{display:none}.dsh-chat-settings-row{gap:4px}.dsh-chat-more,.dsh-chat-prompt{padding:12px}.dsh-chat-fields{grid-template-columns:1fr 1fr}}@media(max-width:500px){.dsh-chat-fields{grid-template-columns:1fr}}.dsh-chat-task-status{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:6px;font-size:11px;color:var(--dsw-alias-label-secondary,inherit)}.dsh-chat-task-status button{padding:2px 7px}.dsh-task-workspace{width:100%;max-width:var(--dsh-composer-card-max-width,1120px);margin-inline:auto;padding:16px 24px 24px;box-sizing:border-box;font-size:13px}.dsh-task-nav{display:flex;align-items:center;flex-wrap:wrap;gap:4px;border-bottom:1px solid var(--dsw-alias-border-l1,#ddd);padding-bottom:10px;margin-bottom:16px}.dsh-task-nav button{font:inherit;cursor:pointer;background:transparent;color:var(--dsw-alias-label-secondary,inherit);border:0;border-radius:8px;padding:7px 16px}.dsh-task-nav button[aria-current=page]{background:var(--dsw-alias-bg-hover,rgba(75,116,217,.08));color:var(--dsw-alias-state-business-primary,#4b74d9);font-weight:600}.dsh-task-workspace :focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4b74d9);outline-offset:2px}.dsh-task-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}.dsh-task-panel h3{margin:0;font-size:16px}.dsh-task-panel p{margin:10px 0;line-height:1.6}.dsh-task-panel small{color:var(--dsw-alias-label-secondary,inherit)}.dsh-task-panel details,.dsh-task-fold{margin:12px 0;padding:10px 12px;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:8px}.dsh-task-workspace summary{cursor:pointer;line-height:1.6}.dsh-task-scope{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px}.dsh-task-scope select,.dsh-task-panel input,.dsh-task-panel select{font:inherit;color:inherit;background:var(--dsw-alias-bg-base,transparent);border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;padding:6px 8px;box-sizing:border-box;max-width:100%}@container(max-width:540px){.dsh-chat-toolbar-spacer{display:none}.dsh-chat-settings-row{gap:4px}.dsh-chat-chip{padding-inline:6px}}@media(max-width:760px){.dsh-task-workspace{padding:12px}}";
+  style.textContent=".dsh-chat-setup{box-sizing:border-box;width:min(var(--dsh-composer-card-max-width,100%),calc(100% - 2 * var(--dsh-composer-side-clearance,16px)));margin-inline:auto;container-type:inline-size;min-width:0;text-align:left;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-primary,inherit)}.dsh-chat-settings-row,.dsh-chat-actions,.dsh-chat-panel-head{display:flex;align-items:center;flex-wrap:wrap;gap:8px}.dsh-chat-settings-row{padding:0;gap:8px;min-height:32px}.dsh-chat-chip{box-sizing:border-box;display:inline-flex;align-items:center;gap:4px;height:32px;padding:0 9px;border-radius:6px;background:var(--dsw-alias-bg-l1,rgba(128,128,128,.055));color:var(--dsw-alias-label-secondary,inherit);border:1px solid transparent}.dsh-chat-chip:hover{background:var(--dsw-alias-bg-hover,rgba(128,128,128,.10))}.dsh-chat-toolbar-spacer{flex:1;min-width:4px}.dsh-chat-setup button,.dsh-chat-setup select,.dsh-chat-setup input,.dsh-chat-setup textarea{font:inherit;color:inherit;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));background:var(--dsw-alias-bg-base,transparent);border-radius:8px;padding:6px 9px;max-width:100%;box-sizing:border-box}.dsh-chat-setup .dsh-chat-chip select{border:0;padding:3px 0;background:transparent;max-width:150px;cursor:pointer}.dsh-chat-chip svg{flex-shrink:0;opacity:.7}.dsh-chat-setup button{cursor:pointer}.dsh-chat-setup .dsh-chat-toolbar-button{height:32px;display:inline-flex;align-items:center;gap:4px;border-color:transparent;background:transparent;padding:6px 8px}.dsh-chat-setup button:hover{background:var(--dsw-alias-bg-hover,rgba(128,128,128,.08))}.dsh-chat-setup .is-active{color:var(--dsw-alias-state-business-primary,#4b74d9);background:var(--dsw-alias-state-business-primary-alpha,rgba(75,116,217,.08))}.dsh-chat-setup button:disabled,.dsh-chat-setup select:disabled,.dsh-chat-setup input:disabled{opacity:.5;cursor:default}.dsh-chat-setup :focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4b74d9);outline-offset:2px}.dsh-chat-setup p{margin:8px 0}.dsh-chat-setting-hint,.dsh-chat-setup small{color:var(--dsw-alias-label-secondary,inherit);font-size:12px;opacity:.8}.dsh-chat-setup small{display:block;margin:4px 0}.dsh-chat-more,.dsh-chat-checkpoint,.dsh-chat-prompt{padding:16px 16px;margin:4px 0 8px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));border-radius:12px;background:var(--dsw-alias-bg-base,transparent)}.dsh-chat-prompt,.dsh-chat-more{max-height:min(390px,44vh);overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}.dsh-chat-prompt[hidden]{display:none}.dsh-chat-panel-head{justify-content:space-between;margin-bottom:8px}.dsh-chat-panel-head strong{font-size:13px;font-weight:600}.dsh-chat-panel-head button{border-color:transparent;padding:3px 7px;color:var(--dsw-alias-label-secondary,inherit)}.dsh-chat-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr));gap:8px;margin:12px 0}.dsh-chat-fields input{display:block;width:100%;margin-top:4px}.dsh-chat-full-prompt{display:block;margin:12px 0}.dsh-chat-full-prompt textarea{display:block;width:100%;resize:vertical;min-height:105px;max-height:230px;margin-top:4px;line-height:1.5}.dsh-chat-actions{margin-top:8px}.dsh-chat-actions button:first-child{background:var(--dsw-alias-state-business-primary,#4b74d9);color:#fff;border-color:transparent}.dsh-chat-checkpoint{border-left:3px solid var(--dsw-alias-state-business-primary,#4b74d9)}.dsh-chat-checkpoint button{margin-right:8px}.dsh-chat-reporting{border:0;padding:0;margin:12px 0}.dsh-chat-reporting legend{font-weight:500;margin-bottom:4px}.dsh-chat-reporting label{display:inline-flex;align-items:center;gap:4px;margin-right:16px}.dsh-chat-reporting input{padding:0;accent-color:var(--dsw-alias-state-business-primary,#4b74d9)}.dsh-chat-worker-custom{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:12px 0}.dsh-chat-worker-custom input{width:66px}.dsh-chat-setup [role=alert]{color:var(--dsw-alias-state-error-primary,#c84040)}.dsh-chat-setup *{animation:none!important;transition:none!important}@media(max-width:760px){.dsh-chat-toolbar-spacer{display:none}.dsh-chat-settings-row{gap:4px}.dsh-chat-more,.dsh-chat-prompt{padding:12px}.dsh-chat-fields{grid-template-columns:1fr 1fr}}@media(max-width:500px){.dsh-chat-fields{grid-template-columns:1fr}}.dsh-chat-task-status{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:8px;font-size:12px;color:var(--dsw-alias-label-secondary,inherit)}.dsh-chat-task-status button{padding:2px 7px}.dsh-task-workspace{width:100%;max-width:var(--dsh-composer-card-max-width,1120px);margin-inline:auto;padding:16px 24px 24px;box-sizing:border-box;font-size:13px}.dsh-task-nav{display:flex;align-items:center;flex-wrap:wrap;gap:4px;border-bottom:1px solid var(--dsw-alias-border-l1,#ddd);padding-bottom:12px;margin-bottom:16px}.dsh-task-nav button{font:inherit;cursor:pointer;background:transparent;color:var(--dsw-alias-label-secondary,inherit);border:0;border-radius:6px;padding:7px 16px}.dsh-task-nav button[aria-current=page]{background:var(--dsw-alias-bg-hover,rgba(75,116,217,.08));color:var(--dsw-alias-state-business-primary,#4b74d9);font-weight:600}.dsh-task-workspace :focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4b74d9);outline-offset:2px}.dsh-task-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}.dsh-task-panel h3{margin:0;font-size:16px}.dsh-task-panel p{margin:12px 0;line-height:1.5}.dsh-task-panel small{color:var(--dsw-alias-label-secondary,inherit)}.dsh-task-panel details,.dsh-task-fold{margin:12px 0;padding:12px 12px;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:8px}.dsh-task-workspace summary{cursor:pointer;line-height:1.5}.dsh-task-scope{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px}.dsh-task-scope select,.dsh-task-panel input,.dsh-task-panel select{font:inherit;color:inherit;background:var(--dsw-alias-bg-base,transparent);border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;padding:6px 8px;box-sizing:border-box;max-width:100%}@container(max-width:540px){.dsh-chat-toolbar-spacer{display:none}.dsh-chat-settings-row{gap:4px}.dsh-chat-chip{padding-inline:6px}}@media(max-width:760px){.dsh-task-workspace{padding:12px}}";
   style.textContent += '.dsh-chat-setup .dsh-rtr-btn.is-primary{background:var(--dsw-alias-state-business-primary,#4b74d9);color:#fff;border-color:transparent}.dsh-chat-setup .dsh-rtr-btn.is-primary:hover{filter:brightness(.95)}';
+  style.textContent += '.dsh-chat-entry-group{display:flex;align-items:center;gap:4px;max-width:100%;margin-left:auto;flex-wrap:wrap}.dsh-chat-entry-group>button{white-space:nowrap}@media(max-width:720px){.dsh-chat-entry-group{margin-left:0;flex-basis:100%}}';
+  // v6 第 5.7 节令牌层：小控件 6px、抽屉 12px。上面旧组件样式里小控件散成 8px，
+  // 这里按方案与设计稿统一覆盖；选择器特异性更高，不靠声明顺序碰运气。
+  style.textContent += '.dsh-chat-setup .dsh-chat-chip,.dsh-chat-setup button,.dsh-chat-setup select,.dsh-chat-setup input,.dsh-chat-setup textarea{border-radius:6px}'
+    + '.dsh-chat-setup .dsh-prompt-drawer,.dsh-chat-setup .dsh-chat-more{border-radius:12px}';
+  // v6 第 5.7 节动效：覆盖层 120ms 淡入/展开；减少动态效果时关闭。
+  // 上面 `.dsh-chat-setup *` 把动画一刀切关掉了，这里只给覆盖层开口子，其余仍无动画。
+  style.textContent += '.dsh-chat-setup .dsh-chat-more,.dsh-chat-setup .dsh-chat-prompt,.dsh-chat-setup .dsh-prompt-drawer{animation:dsh-overlay-in 120ms ease-out!important}'
+    + '@keyframes dsh-overlay-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}'
+    + '@media(prefers-reduced-motion:reduce){.dsh-chat-setup .dsh-chat-more,.dsh-chat-setup .dsh-chat-prompt,.dsh-chat-setup .dsh-prompt-drawer{animation:none!important}}';
+  style.textContent += '.dsh-chat-setup{position:relative}.dsh-chat-more,.dsh-chat-prompt{position:absolute;bottom:calc(100% + 6px);left:0;right:0;z-index:650;box-sizing:border-box;margin:0;max-height:var(--dsh-chat-overlay-max-height,min(70vh,520px));overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;background:var(--dsw-alias-bg-base,#fff);box-shadow:0 10px 32px rgba(0,0,0,.18)}';
+  // 设计稿（saker-ui-v6.html）：设置类抽屉 .drawer.narrow 宽 440px、右对齐；窄窗用 min(440px,100%) 防止溢出遮挡输入框。
+  style.textContent += '.dsh-chat-more{left:auto;right:0;width:min(440px,100%)}';
+  // 弹层高度同时受"可用高度"和"视口高度"限制：短视口/高缩放下不会把标题和关闭按钮顶出屏幕。
+  style.textContent += '.dsh-chat-settings-actions{display:flex;align-items:center;gap:8px;margin:16px 0 8px;position:sticky;bottom:0;z-index:1;background:var(--dsw-alias-bg-base,#fff);padding:8px 0}.dsh-chat-settings-actions button:last-of-type{background:var(--dsw-alias-state-business-primary,#4b74d9);color:#fff;border-color:transparent}.dsh-chat-settings-actions small{color:var(--dsw-alias-label-secondary,inherit)}';
+  style.textContent += '.dsh-chat-target{display:block;margin:12px 0}.dsh-chat-target span{display:block;font-size:12px;color:var(--dsw-alias-label-secondary,inherit);margin-bottom:4px}.dsh-chat-target input{width:100%}';
+  style.textContent += '.dsh-worker-model{display:block;margin:12px 0}.dsh-worker-model summary{cursor:pointer;line-height:1.5}.dsh-worker-model label{display:inline-flex;align-items:center;gap:8px;margin:8px 0}.dsh-worker-model p{margin:8px 0}';
+  style.textContent += '.dsh-action-limits{display:block;margin:12px 0}.dsh-action-limits summary{cursor:pointer;line-height:1.5}.dsh-action-limits label{display:inline-flex;align-items:center;gap:8px;margin:8px 0}.dsh-action-limits p{margin:8px 0}';
+  style.textContent += '.dsh-chat-exclude{display:block;margin:12px 0}.dsh-chat-exclude span{display:block;font-size:12px;color:var(--dsw-alias-label-secondary,inherit);margin-bottom:4px}.dsh-chat-exclude textarea{display:block;width:100%;min-height:56px;resize:vertical;font:inherit;line-height:1.5}';
+  style.textContent += '.dsh-limit-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}.dsh-limit-row label{display:grid;gap:4px;font-size:12px;color:var(--dsw-alias-label-secondary,inherit)}.dsh-limit-row input{font:inherit;color:inherit;width:100%;box-sizing:border-box}@media(max-width:520px){.dsh-limit-row{grid-template-columns:1fr}}';
+  style.textContent += '.dsh-accounts{display:block;margin:12px 0}.dsh-accounts summary{cursor:pointer;line-height:1.5}.dsh-account-row{display:flex;align-items:center;gap:8px;margin:8px 0}.dsh-account-add{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}.dsh-account-add input,.dsh-account-add select{flex:1 1 140px;min-width:0}';
+  // 提示词模板是右侧抽屉（v6 第 3.2 节）：贴内容区右上角，高度不超过输入框上方的可用空间，
+  // 打开模板时必须还能看见会话（2026-10-17 用户反馈：视口右上角的 880×520 抽屉把整条会话列
+  // 和标题栏一起盖住，只剩输入框）。改成和「设置」浮层同一套定位：贴着输入框工具行向上展开、
+  // 右对齐到会话列，宽度只占 560px，会话列左侧保持原样可见；高度同时受可用高度与视口高度限制，
+  // 短视口下不会把标题和关闭按钮顶出屏幕。宿主给 .dsh-chat-setup 设的 contain 只影响 fixed 定位，
+  // 这里仍显式改回 container-type:normal，并用 @media 承担窄窗样式。
+  style.textContent += '.dsh-chat-setup .dsh-prompt-drawer{position:absolute;top:auto;right:0;bottom:calc(100% + 6px);left:auto;z-index:660;box-sizing:border-box;width:min(560px,100%);display:flex;flex-direction:column;max-height:var(--dsh-chat-overlay-max-height,min(70vh,520px));background:var(--dsw-alias-bg-base,#fff);border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.18));border-radius:12px;box-shadow:0 12px 36px rgba(0,0,0,.2);overflow:hidden;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-primary,inherit)}'
+    + '.dsh-chat-setup{container-type:normal}'
+    + '.dsh-chat-attention{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:8px;padding:8px 12px;border:1px solid var(--dsw-alias-state-warning-primary,#c8912a);border-radius:8px;background:var(--dsw-alias-bg-l1,rgba(200,145,42,.08));font-size:12px}'
+    + '.dsh-chat-attention button{padding:2px 8px}'
+    + '.dsh-chat-action{max-width:min(320px,50vw);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+    + '.dsh-execution-scope{margin:8px 0;padding:8px 12px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));border-radius:8px}'
+    + '.dsh-execution-scope ul{margin:8px 0 0;padding-left:16px;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-secondary,inherit)}'
+    + '@media(max-width:540px){.dsh-chat-toolbar-spacer{display:none}.dsh-chat-settings-row{gap:4px}.dsh-chat-chip{padding-inline:6px}}'
+    + '.dsh-prompt-head{display:flex;align-items:center;justify-content:space-between;height:52px;padding:0 16px;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16))}'
+    + '.dsh-prompt-head strong{font-size:14px}'
+    + '.dsh-prompt-hint{margin:0;padding:8px 16px;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));color:var(--dsw-alias-label-secondary,inherit);font-size:12px}'
+    + '.dsh-prompt-body{display:flex;flex:1;min-height:0}'
+    + '.dsh-prompt-list{width:208px;flex-shrink:0;border-right:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));display:flex;flex-direction:column;min-height:0}'
+    + '.dsh-prompt-list input[type=search]{margin:12px;padding:6px 8px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;background:transparent;color:inherit;font:inherit}'
+    + '.dsh-prompt-io{display:flex;gap:8px;padding:0 12px 8px}'
+    + '.dsh-prompt-io button{flex:1;height:28px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;background:transparent;color:inherit;cursor:pointer;font:inherit;font-size:12px}'
+    + '.dsh-prompt-more{margin:8px 12px;height:28px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;background:transparent;color:inherit;cursor:pointer;font:inherit;font-size:12px}'
+    + '.dsh-prompt-scopes{display:flex;gap:4px;padding:0 12px 8px}'
+    + '.dsh-prompt-scopes button{flex:1;border:0;border-radius:6px;padding:4px 0;background:transparent;color:var(--dsw-alias-label-secondary,inherit);cursor:pointer;font:inherit}'
+    + '.dsh-prompt-scopes button.is-active{background:var(--dsw-alias-bg-hover,rgba(75,116,217,.10));color:var(--dsw-alias-state-business-primary,#4b74d9)}'
+    + '.dsh-prompt-items{list-style:none;margin:0;padding:0 8px 8px;overflow:auto;flex:1}'
+    + '.dsh-prompt-items button{display:flex;flex-direction:column;width:100%;text-align:left;border:0;border-radius:6px;padding:6px 8px;background:transparent;color:inherit;cursor:pointer;font:inherit}'
+    + '.dsh-prompt-items button:hover{background:var(--dsw-alias-bg-hover,rgba(128,128,128,.08))}'
+    + '.dsh-prompt-items button.is-active{background:var(--dsw-alias-state-business-primary-alpha,rgba(75,116,217,.12));color:var(--dsw-alias-state-business-primary,#4b74d9)}'
+    + '.dsh-prompt-item-title{font-weight:500}'
+    + '.dsh-prompt-item-hint{font-size:12px;opacity:.7}'
+    + '.dsh-prompt-empty{padding:8px 12px;color:var(--dsw-alias-label-secondary,inherit);font-size:12px}'
+    + '.dsh-prompt-blank{display:flex;flex-direction:column;gap:8px;margin:auto 0;padding:16px 4px;color:var(--dsw-alias-label-secondary,inherit)}'
+    + '.dsh-prompt-blank strong{color:var(--dsw-alias-label-primary,inherit);font-size:14px}'
+    + '.dsh-prompt-blank p{margin:0;font-size:12px;line-height:1.5}'
+    + '.dsh-prompt-blank ol{margin:0;padding-left:16px;display:flex;flex-direction:column;gap:4px;font-size:12px;line-height:1.5}'
+    + '.dsh-prompt-main{flex:1;min-width:0;display:flex;flex-direction:column;padding:12px 16px;overflow:auto}'
+    + '.dsh-prompt-titlebar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}'
+    + '.dsh-prompt-titlebar strong{font-size:16px;margin-right:auto}'
+    + '.dsh-prompt-modes{display:inline-flex;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;overflow:hidden}'
+    + '.dsh-prompt-modes button{border:0;padding:4px 10px;background:transparent;color:inherit;cursor:pointer;font:inherit}'
+    + '.dsh-prompt-modes button.is-active{background:var(--dsw-alias-state-business-primary,#4b74d9);color:#fff}'
+    + '.dsh-prompt-fields{display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:12px}'
+    + '.dsh-prompt-field{display:flex;flex-direction:column;gap:4px}'
+    + '.dsh-prompt-field input,.dsh-prompt-field textarea,.dsh-prompt-full textarea{width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;background:transparent;color:inherit;font:inherit}'
+    + '.dsh-prompt-field textarea{min-height:54px;resize:vertical}'
+    + '.dsh-prompt-field.is-missing input,.dsh-prompt-field.is-missing textarea{border-color:var(--dsw-alias-state-error-primary,#c84040)}'
+    + '.dsh-prompt-need{color:var(--dsw-alias-state-error-primary,#c84040)}'
+    + '.dsh-prompt-full{display:block;margin-bottom:8px}'
+    + '.dsh-prompt-full textarea{min-height:200px;resize:vertical;line-height:1.5}'
+    + '.dsh-prompt-conflict{margin:8px 0;padding:8px 12px;border:1px solid var(--dsw-alias-state-warning-primary,#c8912a);border-radius:6px}'
+    + '.dsh-prompt-conflict button{margin-right:8px}'
+    + '.dsh-prompt-foot{display:flex;align-items:center;gap:8px;height:56px;padding:0 16px;border-top:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));flex-wrap:nowrap}'
+    + '.dsh-prompt-foot [role=status]{margin-right:auto;color:var(--dsw-alias-label-secondary,inherit);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+    + '.dsh-prompt-saveas{display:inline-flex;align-items:center;gap:4px}'
+    + '.dsh-prompt-saveas input{width:96px;padding:4px 6px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;background:transparent;color:inherit;font:inherit}'
+    + '.dsh-prompt-foot button{border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;padding:6px 12px;background:transparent;color:inherit;cursor:pointer;font:inherit;white-space:nowrap}'
+    + '.dsh-prompt-foot button.is-primary{background:var(--dsw-alias-state-business-primary,#4b74d9);border-color:transparent;color:#fff}'
+    + '.dsh-prompt-foot button:disabled{opacity:.5;cursor:default}'
+    + '@media(max-width:720px){.dsh-chat-setup .dsh-prompt-drawer{width:100%}.dsh-prompt-body{flex-direction:column}.dsh-prompt-list{width:auto;max-height:180px;border-right:0;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16))}}';
+  style.textContent += '.dsh-materials-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}'
+    + '.dsh-materials-types{display:inline-flex;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:8px;overflow:hidden}'
+    + '.dsh-materials-types button{border:0;padding:6px 12px;background:transparent;color:inherit;cursor:pointer;font:inherit}'
+    + '.dsh-materials-types button.is-active{background:var(--dsw-alias-state-business-primary,#4b74d9);color:#fff}'
+    + '.dsh-materials-tools input[type=search]{flex:1;min-width:160px;padding:6px 9px;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;background:transparent;color:inherit;font:inherit}'
+    + '.dsh-materials-tools button{border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;padding:6px 12px;background:transparent;color:inherit;cursor:pointer;font:inherit}'
+    + '.dsh-materials-tools label{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--dsw-alias-label-secondary,inherit)}'
+    + '.dsh-materials-tools select{font:inherit;color:inherit;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;padding:6px 8px;background:var(--dsw-alias-bg-base,transparent);max-width:140px}'
+    + '.dsh-materials-tools button.is-primary{background:var(--dsw-alias-state-business-primary,#4b74d9);border-color:transparent;color:#fff}'
+    + '.dsh-materials-tools button:disabled{opacity:.5;cursor:default}'
+    + '.dsh-materials-table{width:100%;border-collapse:collapse;font-size:12px}'
+    + '.dsh-materials-table th,.dsh-materials-table td{text-align:left;padding:8px 8px;border-bottom:1px solid var(--dsw-alias-border-l1,#eee);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+    + '.dsh-materials-table th{color:var(--dsw-alias-label-secondary,inherit);font-weight:500}'
+    + '.dsh-materials-table td button{border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;padding:3px 8px;background:transparent;color:inherit;cursor:pointer;font:inherit}'
+    + '.dsh-materials-foot{display:flex;align-items:center;gap:12px;margin-top:12px;color:var(--dsw-alias-label-secondary,inherit);font-size:12px}'
+    + '.dsh-materials-foot button{border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;padding:4px 10px;background:transparent;color:inherit;cursor:pointer;font:inherit}'
+    + '.dsh-materials-foot button:disabled{opacity:.5;cursor:default}'
+    + '.dsh-materials-empty{padding:16px;border:1px dashed var(--dsw-alias-border-l1,#ddd);border-radius:8px;color:var(--dsw-alias-label-secondary,inherit)}';
+  style.textContent += '.dsh-materials-new{display:flex;align-items:center;gap:8px;margin:0 0 8px;padding:6px 10px;border:1px solid var(--dsw-alias-state-business-primary,#4b74d9);border-radius:8px;background:var(--dsw-alias-state-business-primary-alpha,rgba(75,116,217,.08));font-size:12px}'
+    + '.dsh-materials-new button{border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;padding:2px 8px;background:transparent;color:inherit;cursor:pointer;font:inherit}';
+  style.textContent += '.dsh-materials-detail{margin:12px 0;padding:12px 14px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.18));border-radius:10px;background:var(--dsw-alias-bg-l1,rgba(128,128,128,.04))}'
+    + '.dsh-materials-panes{display:grid;grid-template-columns:1fr 1fr;gap:12px}'
+    + '@media(max-width:720px){.dsh-materials-panes{grid-template-columns:1fr}}'
+    + '.dsh-materials-panes pre{max-height:220px;overflow:auto;margin:4px 0 0;padding:8px;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;background:var(--dsw-alias-bg-base,#fff);font-size:12px;white-space:pre-wrap;word-break:break-all}'
+    + '.dsh-materials-preview{max-height:220px;overflow:auto;margin:8px 0;padding:8px;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;font-size:12px;white-space:pre-wrap}'
+    + '.dsh-materials-detail small{display:block;color:var(--dsw-alias-label-secondary,inherit);margin-top:8px}'
+    + '.dsh-materials-table td button+button{margin-left:8px}';
+  style.textContent += '.dsh-execution-tools{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}'
+    + '.dsh-execution-usage{color:var(--dsw-alias-label-secondary,inherit);font-size:12px}'
+    + '.dsh-execution-tools>button{margin-left:auto;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;padding:4px 12px;background:transparent;color:inherit;cursor:pointer;font:inherit}'
+    + '.dsh-execution-tools>button:disabled{opacity:.5;cursor:default}';
+  style.textContent += '.dsh-usage-row{display:flex;align-items:center;flex-wrap:wrap;gap:12px;min-height:24px;margin-top:4px;font-size:12px;color:var(--dsw-alias-label-secondary,inherit)}'
+    + '.dsh-usage-row button{border:0;background:transparent;color:inherit;cursor:pointer;font:inherit;text-decoration:underline;padding:0}'
+    + '.dsh-usage-diagnostics{display:flex;flex-direction:column;gap:4px;margin-top:8px;padding-top:8px;border-top:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16))}'
+    + '.dsh-usage-diag-items{display:flex;flex-wrap:wrap;gap:8px}'
+    + '.dsh-usage-diag-items span{white-space:nowrap}'
+    + '.dsh-usage-detail{flex-basis:100%;margin-top:4px;padding:8px 12px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));border-radius:8px;background:var(--dsw-alias-bg-l1,rgba(128,128,128,.04));line-height:1.5;color:var(--dsw-alias-label-primary,inherit)}'
+    + '.dsh-usage-detail small{display:block;color:var(--dsw-alias-label-secondary,inherit);margin-top:4px}';
+  style.textContent += '.dsh-chat-explain{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0}'
+    + '.dsh-chat-explain input{padding:0;accent-color:var(--dsw-alias-state-business-primary,#4b74d9)}'
+    + '.dsh-chat-explain small{flex-basis:100%;margin:0;color:var(--dsw-alias-label-secondary,inherit);font-size:12px}';
+  style.textContent += '.dsh-test-content{margin:12px 0;padding:8px 10px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.18));border-radius:8px}'
+    + '.dsh-test-content summary{cursor:pointer;font-weight:500}'
+    + '.dsh-test-content p{margin:8px 0;font-size:12px;color:var(--dsw-alias-label-secondary,inherit)}'
+    + '.dsh-test-content-actions{display:flex;gap:8px;margin:8px 0}'
+    + '.dsh-test-content-actions button{border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;padding:4px 10px;background:transparent;color:inherit;cursor:pointer;font:inherit}'
+    + '.dsh-test-content-actions button:disabled{opacity:.5;cursor:default}'
+    + '.dsh-test-content fieldset{border:0;padding:0;margin:8px 0}'
+    + '.dsh-test-content legend{font-weight:600;font-size:12px;color:var(--dsw-alias-label-secondary,inherit);margin-bottom:4px}'
+    + '.dsh-test-content label{display:inline-flex;align-items:center;gap:4px;margin:4px 16px 4px 0;font-size:12px}'
+    + '.dsh-test-content input{padding:0;accent-color:var(--dsw-alias-state-business-primary,#4b74d9)}';
+  style.textContent += '.dsh-materials-entry{position:relative;display:inline-flex}'
+    + '.dsh-materials-import{position:absolute;bottom:calc(100% + 6px);left:0;z-index:660;box-sizing:border-box;width:min(420px,calc(100vw - 32px));max-height:min(70vh,540px);overflow:auto;padding:12px 16px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.18));border-radius:10px;background:var(--dsw-alias-bg-base,#fff);box-shadow:0 10px 32px rgba(0,0,0,.18);font-size:12px;line-height:1.5;color:var(--dsw-alias-label-primary,inherit)}'
+    + '.dsh-materials-progress{display:flex;flex-direction:column;gap:4px;margin-top:8px}'
+    + '.dsh-materials-steps{color:var(--dsw-alias-label-secondary,inherit);font-size:12px}'
+    + '.dsh-materials-errors{margin-top:4px}'
+    + '.dsh-materials-errors summary{cursor:pointer;font-size:12px;color:var(--dsw-alias-label-secondary,inherit)}'
+    + '.dsh-materials-errors ul{margin:4px 0 0;padding-left:16px;font-size:12px;color:var(--dsw-alias-state-error-primary,#c84040)}'
+    + '.dsh-materials-import-actions{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}'
+    + '.dsh-materials-import-actions button{border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;padding:5px 10px;background:transparent;color:inherit;cursor:pointer;font:inherit}'
+    + '.dsh-materials-import label{display:block;margin:8px 0}'
+    + '.dsh-materials-import textarea,.dsh-materials-import input[type=text],.dsh-materials-import-name input{display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:6px 8px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;background:transparent;color:inherit;font:inherit}'
+    + '.dsh-materials-import textarea{min-height:90px;resize:vertical;font-family:ui-monospace,Consolas,monospace}'
+    + '.dsh-materials-import button.is-primary{margin-top:8px;background:var(--dsw-alias-state-business-primary,#4b74d9);border-color:transparent;color:#fff}'
+    + '.dsh-materials-import small{display:block;margin-top:8px;color:var(--dsw-alias-label-secondary,inherit)}'
+    + '.dsh-materials-import [role=alert]{color:var(--dsw-alias-state-error-primary,#c84040)}';
+  style.textContent += '.dsh-knowledge{position:relative;display:inline-flex}'
+    + '.dsh-knowledge-pop{position:absolute;bottom:calc(100% + 6px);right:0;z-index:660;box-sizing:border-box;width:min(320px,calc(100vw - 32px));max-height:min(70vh,540px);overflow:auto;overscroll-behavior:contain;padding:12px 16px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.18));border-radius:12px;background:var(--dsw-alias-bg-base,#fff);box-shadow:0 10px 32px rgba(0,0,0,.18);font-size:12px;line-height:1.5;color:var(--dsw-alias-label-primary,inherit)}'
+    + '.dsh-knowledge-pop label{display:flex;align-items:center;gap:8px;margin:8px 0}'
+    + '.dsh-knowledge-pop input{padding:0;accent-color:var(--dsw-alias-state-business-primary,#4b74d9)}'
+    + '.dsh-knowledge-pop p{margin:8px 0}'
+    + '.dsh-knowledge-pop small{display:block;color:var(--dsw-alias-label-secondary,inherit);font-size:12px}'
+    + '.dsh-knowledge-pop [role=alert]{color:var(--dsw-alias-state-error-primary,#c84040)}';
+  style.textContent += '.dsh-knowledge-pop>button{margin:8px 0;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;padding:4px 10px;background:transparent;color:inherit;cursor:pointer;font:inherit}'
+    + '.dsh-knowledge-usage{margin-top:8px;border-top:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));padding-top:8px}'
+    + '.dsh-knowledge-usage-row{display:flex;flex-direction:column;padding:4px 0;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.10))}'
+    + '.dsh-knowledge-usage-row small{color:var(--dsw-alias-label-secondary,inherit);font-size:12px}'
+    + '.dsh-knowledge-usage-excerpt{margin:4px 0 0;padding:8px 8px;max-height:120px;overflow:auto;white-space:pre-wrap;word-break:break-word;font:inherit;font-size:12px;line-height:1.5;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));border-radius:6px;background:var(--dsw-alias-bg-l1,rgba(128,128,128,.04))}';
   style.textContent += [
-    '.dsh-task-workspace{max-width:none;margin:0;padding:10px 16px 18px;font-size:12px;line-height:1.45}',
-    '.dsh-task-nav{margin-bottom:10px;padding-bottom:6px;gap:2px}.dsh-task-nav button{padding:5px 11px;font-size:12px}',
-    '.dsh-task-nav select{margin-left:auto;font:inherit;color:inherit;background:var(--dsw-alias-bg-base,transparent);border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:5px;padding:4px 7px;max-width:100%}',
-    '.dsh-task-heading{margin-bottom:7px;gap:8px}.dsh-task-panel h3,.dsh-task-panel h4{font-size:13px;margin:0;font-weight:600}.dsh-task-panel p{margin:5px 0;line-height:1.45}',
-    '.dsh-task-summary{padding:8px 0;border:0;border-bottom:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:0}.dsh-task-eyebrow{font-size:11px;color:var(--dsw-alias-label-secondary,inherit)}.dsh-task-summary h2{font-size:14px;line-height:1.45;margin:4px 0;font-weight:600;overflow-wrap:anywhere}.dsh-task-summary p{color:var(--dsw-alias-label-secondary,inherit);overflow-wrap:anywhere}',
-    '.dsh-task-next{padding:5px 0;margin:4px 0;background:transparent;border-radius:0}.dsh-task-next p{margin:3px 0}',
-    '.dsh-task-metrics{display:flex;flex-wrap:wrap;gap:6px 20px;margin:6px 0 10px;padding:7px 0;border-top:1px solid var(--dsw-alias-border-l1,#ddd);border-bottom:1px solid var(--dsw-alias-border-l1,#ddd)}.dsh-task-metrics strong{font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}',
-    '.dsh-task-recent-row{padding:7px 0;border-top:1px solid var(--dsw-alias-border-l1,#ddd);overflow-wrap:anywhere}.dsh-task-recent-row>div{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}.dsh-task-recent-row p{margin:3px 0;color:var(--dsw-alias-label-secondary,inherit)}',
-    '.dsh-task-panel details,.dsh-task-fold{margin:7px 0;padding:6px 8px;border-radius:5px}.dsh-task-panel .dsh-rtr-btn{font-size:12px;padding:4px 8px;border-radius:5px}',
-    '.dsh-task-file-list{display:grid;gap:7px}.dsh-task-file,.dsh-task-empty{padding:9px 10px;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;overflow-wrap:anywhere}.dsh-task-empty{margin:10px 0;padding:12px}.dsh-task-file-head{display:flex;justify-content:space-between;align-items:center;gap:10px}.dsh-task-file-head small{display:block;margin-top:4px}.dsh-task-file code{user-select:text;font-size:11px}',
-    '.dsh-finding-preview{padding:0 12px 9px;font-size:12px;overflow-wrap:anywhere}.dsh-finding-preview p{margin:4px 0;line-height:1.45}.dsh-task-workspace .dsh-rtr-rowhead{flex-wrap:wrap;gap:6px;padding:8px 10px}.dsh-task-workspace .dsh-rtr-title{flex:1;min-width:140px;white-space:normal;font-size:12px}.dsh-task-actions{display:flex;gap:6px;margin-top:6px}',
-    '.dsh-task-state-line{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.dsh-task-mode{font-size:11px;color:var(--dsw-alias-label-secondary,#666)}.dsh-task-stop-reason{font-size:11px;padding:2px 7px;border-radius:4px;background:var(--dsw-alias-bg-layer-2,#f4f5f7);color:var(--dsw-alias-label-secondary,#666)}',
-    '.dsh-task-result{display:flex;align-items:baseline;gap:24px;margin:9px 0 7px;font-size:12px}.dsh-task-result strong{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;margin-right:3px}.dsh-task-pending{color:var(--dsw-alias-label-primary,inherit)}.dsh-task-metrics{color:var(--dsw-alias-label-secondary,#666);border-top:0;margin-top:0;padding-top:3px;gap:6px 18px}',
-    '.dsh-task-panel .dsh-task-recent-row{margin:0;padding:9px 0;border:0;border-top:1px solid var(--dsw-alias-border-l1,#e7e8eb);border-radius:0}.dsh-task-recent-row>summary{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;cursor:pointer;list-style:none}.dsh-task-recent-row>summary::-webkit-details-marker{display:none}.dsh-task-recent-row>summary:focus-visible{outline:2px solid var(--dsw-alias-border-focus,#587cf6);outline-offset:3px}.dsh-task-finding-title{font-weight:600}.dsh-task-finding-title:before{content:"›";display:inline-block;margin-right:7px;color:var(--dsw-alias-label-secondary,#888)}.dsh-task-recent-row[open] .dsh-task-finding-title:before{transform:rotate(90deg)}.dsh-task-finding-target,.dsh-task-finding-note{grid-column:1/-1;color:var(--dsw-alias-label-secondary,#666);overflow-wrap:anywhere}.dsh-task-finding-note{color:var(--dsw-alias-label-primary,inherit)}.dsh-task-recent-row[open]>summary{margin-bottom:8px}.dsh-task-summary{padding-top:1px;border-bottom:0}',
-    '.dsh-task-field{display:grid;grid-template-columns:118px minmax(0,600px);align-items:center;gap:8px;margin:7px 0}.dsh-task-field input,.dsh-task-field select{box-sizing:border-box;max-width:100%;min-width:0;font:inherit;color:inherit;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:5px;background:var(--dsw-alias-bg-base,transparent);padding:5px 7px}.dsh-task-field input[type=number]{width:76px}.dsh-task-field select{width:fit-content}.dsh-task-mode-options{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}',
-    '@media(max-width:600px){.dsh-task-workspace{padding:8px 10px}.dsh-task-file-head{align-items:flex-start;flex-wrap:wrap}.dsh-task-metrics{gap:5px 12px}.dsh-task-field{grid-template-columns:1fr;gap:4px}}'
+    '.dsh-task-workspace{max-width:none;margin:0;padding:12px 16px 16px;font-size:12px;line-height:1.5}',
+    '.dsh-task-nav{margin-bottom:12px;padding-bottom:8px;gap:4px}.dsh-task-nav button{padding:5px 11px;font-size:12px}',
+    '.dsh-task-nav select{margin-left:auto;font:inherit;color:inherit;background:var(--dsw-alias-bg-base,transparent);border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;padding:4px 7px;max-width:100%}',
+    '.dsh-task-heading{margin-bottom:8px;gap:8px}.dsh-task-panel h3,.dsh-task-panel h4{font-size:13px;margin:0;font-weight:600}.dsh-task-panel p{margin:4px 0;line-height:1.5}',
+    '.dsh-task-summary{padding:8px 0;border:0;border-bottom:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:0}.dsh-task-eyebrow{font-size:12px;color:var(--dsw-alias-label-secondary,inherit)}.dsh-task-summary h2{font-size:14px;line-height:1.5;margin:4px 0;font-weight:600;overflow-wrap:anywhere}.dsh-task-summary p{color:var(--dsw-alias-label-secondary,inherit);overflow-wrap:anywhere}',
+    '.dsh-task-next{padding:4px 0;margin:4px 0;background:transparent;border-radius:0}.dsh-task-next p{margin:4px 0}',
+    '.dsh-task-metrics{display:flex;flex-wrap:wrap;gap:8px 24px;margin:8px 0 12px;padding:8px 0;border-top:1px solid var(--dsw-alias-border-l1,#ddd);border-bottom:1px solid var(--dsw-alias-border-l1,#ddd)}.dsh-task-metrics strong{font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}',
+    '.dsh-task-recent-row{padding:8px 0;border-top:1px solid var(--dsw-alias-border-l1,#ddd);overflow-wrap:anywhere}.dsh-task-recent-row>div{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}.dsh-task-recent-row p{margin:4px 0;color:var(--dsw-alias-label-secondary,inherit)}',
+    '.dsh-task-panel details,.dsh-task-fold{margin:8px 0;padding:8px 8px;border-radius:5px}.dsh-task-panel .dsh-rtr-btn{font-size:12px;padding:4px 8px;border-radius:6px}',
+    '.dsh-task-file-list{display:grid;gap:8px}.dsh-task-file,.dsh-task-empty{padding:8px 12px;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;overflow-wrap:anywhere}.dsh-task-empty{margin:12px 0;padding:12px}.dsh-task-file-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.dsh-task-file-head small{display:block;margin-top:4px}.dsh-task-file code{user-select:text;font-size:12px}',
+    '.dsh-finding-preview{padding:0 12px 8px;font-size:12px;overflow-wrap:anywhere}.dsh-finding-preview p{margin:4px 0;line-height:1.5}.dsh-task-workspace .dsh-rtr-rowhead{flex-wrap:wrap;gap:8px;padding:8px 12px}.dsh-task-workspace .dsh-rtr-title{flex:1;min-width:140px;white-space:normal;font-size:12px}.dsh-task-actions{display:flex;gap:8px;margin-top:8px}',
+    '.dsh-task-state-line{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.dsh-task-mode{font-size:12px;color:var(--dsw-alias-label-secondary,#666)}.dsh-task-stop-reason{font-size:12px;padding:4px 8px;border-radius:4px;background:var(--dsw-alias-bg-layer-2,#f4f5f7);color:var(--dsw-alias-label-secondary,#666)}',
+    '.dsh-task-result{display:flex;align-items:baseline;gap:24px;margin:8px 0 8px;font-size:12px}.dsh-task-result strong{font-size:16px;font-weight:600;font-variant-numeric:tabular-nums;margin-right:4px}.dsh-task-pending{color:var(--dsw-alias-label-primary,inherit)}.dsh-task-metrics{color:var(--dsw-alias-label-secondary,#666);border-top:0;margin-top:0;padding-top:4px;gap:8px 16px}',
+    '.dsh-task-brief{display:flex;flex-wrap:wrap;gap:4px 16px;margin:4px 0 4px;font-size:12px;color:var(--dsw-alias-label-secondary,#666)}.dsh-task-brief span{overflow-wrap:anywhere}.dsh-task-gaps{margin:4px 0 4px;font-size:12px}.dsh-task-gaps p{margin:4px 0 0;color:var(--dsw-alias-label-secondary,#666);overflow-wrap:anywhere}.dsh-task-entries{margin:4px 0 4px;font-size:12px}.dsh-task-entries p{margin:4px 0 0;color:var(--dsw-alias-label-secondary,#666);overflow-wrap:anywhere}',
+    '.dsh-task-panel .dsh-task-recent-row{margin:0;padding:8px 0;border:0;border-top:1px solid var(--dsw-alias-border-l1,#e7e8eb);border-radius:0}.dsh-task-recent-row>summary{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;cursor:pointer;list-style:none}.dsh-task-recent-row>summary::-webkit-details-marker{display:none}.dsh-task-recent-row>summary:focus-visible{outline:2px solid var(--dsw-alias-border-focus,#587cf6);outline-offset:3px}.dsh-task-finding-title{font-weight:600}.dsh-task-finding-title:before{content:"›";display:inline-block;margin-right:8px;color:var(--dsw-alias-label-secondary,#888)}.dsh-task-recent-row[open] .dsh-task-finding-title:before{transform:rotate(90deg)}.dsh-task-finding-target,.dsh-task-finding-note{grid-column:1/-1;color:var(--dsw-alias-label-secondary,#666);overflow-wrap:anywhere}.dsh-task-finding-note{color:var(--dsw-alias-label-primary,inherit)}.dsh-task-recent-row[open]>summary{margin-bottom:8px}.dsh-task-summary{padding-top:0px;border-bottom:0}',
+    '.dsh-task-field{display:grid;grid-template-columns:118px minmax(0,600px);align-items:center;gap:8px;margin:8px 0}.dsh-task-field input,.dsh-task-field select{box-sizing:border-box;max-width:100%;min-width:0;font:inherit;color:inherit;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;background:var(--dsw-alias-bg-base,transparent);padding:5px 7px}.dsh-task-field input[type=number]{width:76px}.dsh-task-field select{width:fit-content}.dsh-task-mode-options{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}',
+    '@media(max-width:600px){.dsh-task-workspace{padding:8px 12px}.dsh-task-file-head{align-items:flex-start;flex-wrap:wrap}.dsh-task-metrics{gap:4px 12px}.dsh-task-field{grid-template-columns:1fr;gap:4px}}'
   ].join('');
+  // v6 第 5.7 节共享组件层：控件尺寸改由 shared/ui-kit/ui-kit.css 提供
+  // （scripts/sync-ui-kit.mjs 注入到 SAKER_UI_KIT_CSS），这里不再重复写一套。
+  style.textContent += SAKER_UI_KIT_CSS;
   document.head.appendChild(style);return function(){style.remove();};
 }
 
@@ -1657,18 +2794,40 @@ function WorkerFindings(props) {
   return React.createElement('div',null,React.createElement(Btn,{onClick:load},'查看子任务成果'),error[0]?React.createElement('div',{role:'alert'},error[0]):null,
     expanded[0]&&result[0]?React.createElement('div',null,React.createElement('p',null,'成果 '+result[0].list.total+'；详细记录保留在子会话 '+props.childId),result[0].list.rows.map(function(f){return React.createElement('details',{key:f.id},React.createElement('summary',null,f.title+' · '+(STATUS_LABEL[f.status]||f.status)),React.createElement(Detail,{f:Object.assign({},f,{sessionId:props.childId}),mode:'pentest',sessionId:props.childId,meta:MODE_META.pentest,onEffectReview:load}));})):null);
 }
+function modelCallPurposeLabel(value) {
+  return {'conversation':'对话','session-title':'会话标题','compaction':'上下文整理'}[value] || value || '模型调用';
+}
+function modelCallStateLabel(value) {
+  return {reserved:'等待发送',dispatched:'发送中',settled:'已结算',unknown:'用量未知',cancelled:'未发送'}[value] || value;
+}
+function modelWireLabel(wire) {
+  if (!wire) return '未观测到原生 fetch 发送';
+  return '原生发送 '+wire.protocol+' · '+wire.bytes+' 字节'+(wire.maximumOutput!==null&&wire.maximumOutput!==undefined?' · 输出上限 '+wire.maximumOutput:'');
+}
 function TaskPanel(props) {
   var status=useState(null), error=useState(''), busy=useState(false);
   var records=useState({rows:[],stats:null,loading:true,error:''}), request=useRef(0);
-  var selected=useState('regular'), question=useState(''), target=useState(''), calls=useState('30'), modelCalls=useState(''), discovery=useState('5'), minutes=useState('15'), workers=useState('1'), resolution=useState('');
-  var flow=useState('single'), interaction=useState('continuous');
-  function load(){var revision=++request.current;return api('task.status',{sessionId:props.sessionId}).then(function(value){if(!value.ok)throw Error(value.error||'读取任务失败');if(revision!==request.current)return;error[1]('');status[1](value);if(!value.configured){if(value.choice)selected[1](value.choice);if(value.options){flow[1](value.options.workflow);workers[1](String(value.options.workers));interaction[1](value.options.interaction||'continuous');}}if(value.configured&&value.isPentest)return api('findings.list',{sessionId:props.sessionId,scope:'session',mode:'pentest',page:1,pageSize:5}).then(function(value){if(revision!==request.current)return;if(value.ok===false)throw Error(value.error||'读取最近记录失败');records[1]({rows:value.list?.rows||[],stats:value.stats||null,loading:false,error:''});}).catch(function(failure){if(revision===request.current)records[1]({rows:[],stats:null,loading:false,error:failure.message||String(failure)});});}).catch(function(e){if(revision===request.current)error[1](e.message);});}
+  var selected=useState('regular'), question=useState(''), target=useState(''), ownCalls=useState('30'), ownModelCalls=useState(''), ownTokens=useState(''), ownDiscovery=useState('5'), ownMinutes=useState('15'), workers=useState('2'), ownUnmetered=useState('0'), resolution=useState('');
+  // 预算字段可以由设置抽屉托管（受控）；没传就用本组件自己的 state（任务页单独使用时）。
+  var budgetDraft=props.budgetDraft;
+  function budgetPair(key){
+    if(budgetDraft)return [budgetDraft.value[key],function(value){var patch={};patch[key]=value;budgetDraft.set(patch);}];
+    return {calls:ownCalls,modelCalls:ownModelCalls,tokens:ownTokens,minutes:ownMinutes,unmetered:ownUnmetered,discovery:ownDiscovery}[key];
+  }
+  var flow=useState('single'), interaction=useState('auto'), startMode=useState('materials-first');
+  function load(){var revision=++request.current;return api('task.status',{sessionId:props.sessionId}).then(function(value){if(!value.ok)throw Error(value.error||'读取任务失败');if(revision!==request.current)return;error[1]('');status[1](value);if(value.configured&&value.policy)startMode[1](value.policy.startMode||'materials-first');if(!value.configured){if(value.choice)selected[1](value.choice);if(value.options){flow[1](value.options.workflow);var nextWorkers=Number(value.options.workers);if(value.hostWorkerLimit&&nextWorkers>value.hostWorkerLimit)nextWorkers=value.hostWorkerLimit;workers[1](String(nextWorkers));interaction[1](value.options.interaction||'continuous');startMode[1](value.options.startMode||'materials-first');}}if(value.configured&&value.isPentest)return api('findings.list',{sessionId:props.sessionId,scope:'session',mode:'pentest',page:1,pageSize:5}).then(function(value){if(revision!==request.current)return;if(value.ok===false)throw Error(value.error||'读取最近记录失败');records[1]({rows:value.list?.rows||[],stats:value.stats||null,loading:false,error:''});}).catch(function(failure){if(revision===request.current)records[1]({rows:[],stats:null,loading:false,error:failure.message||String(failure)});});}).catch(function(e){if(revision===request.current)error[1](e.message);});}
   useEffect(function(){var active=true;load();var timer=setInterval(function(){if(active)load();},5000);return function(){active=false;request.current++;clearInterval(timer);};},[props.sessionId]);
   function run(endpoint,payload){busy[1](true);error[1]('');return api(endpoint,Object.assign({sessionId:props.sessionId},payload||{})).then(function(value){if(!value.ok)throw Error(value.error||'操作失败');status[1](value);return value;}).catch(function(e){error[1](e.message);}).finally(function(){busy[1](false);});}
-  function choose(mode){selected[1](mode);if(mode!=='regular')flow[1]('single');return run('task.choose',{mode:mode,workflow:mode==='regular'?flow[0]:'single',workers:Number(workers[0]),interaction:interaction[0]});}
-  function start(){var budget={toolCalls:Number(calls[0]),workers:Number(workers[0])};if(modelCalls[0]!=='')budget.modelCalls=Number(modelCalls[0]);if(minutes[0]!=='')budget.minutes=Number(minutes[0]);if(selected[0]==='0day')budget.discoveryCalls=Number(discovery[0]);var policy={mode:selected[0],workflow:flow[0],interaction:interaction[0],question:question[0].trim(),budget:budget};if(target[0].trim())policy.target=target[0].trim();return run('task.choose',{mode:selected[0],workflow:flow[0],workers:budget.workers,interaction:interaction[0]}).then(function(value){if(value)return run('task.start',{policy:policy});});}
+  function choose(mode){selected[1](mode);if(mode!=='regular')flow[1]('single');return run('task.choose',{mode:mode,workflow:mode==='regular'?flow[0]:'single',workers:Number(workers[0]),interaction:interaction[0],startMode:startMode[0]});}
+  function start(){var callsValue=budgetPair('calls')[0],modelCallsValue=budgetPair('modelCalls')[0],tokensValue=budgetPair('tokens')[0],minutesValue=budgetPair('minutes')[0],unmeteredValue=budgetPair('unmetered')[0],discoveryValue=budgetPair('discovery')[0];var budget={toolCalls:Number(callsValue),workers:Number(workers[0]),unmeteredToolCalls:Number(unmeteredValue||0)};if(modelCallsValue!=='')budget.modelCalls=Number(modelCallsValue);if(tokensValue!=='')budget.tokens=Number(tokensValue);if(minutesValue!=='')budget.minutes=Number(minutesValue);if(selected[0]==='0day')budget.discoveryCalls=Number(discoveryValue);var policy={mode:selected[0],workflow:flow[0],interaction:interaction[0],startMode:startMode[0],question:question[0].trim(),budget:budget};var targetText=props.targetState?String(props.targetState[0]||''):target[0];if(targetText.trim())policy.target=targetText.trim();return run('task.choose',{mode:selected[0],workflow:flow[0],workers:budget.workers,interaction:interaction[0],startMode:startMode[0]}).then(function(value){if(value)return run('task.start',{policy:policy});});}
   var current=status[0], labels={regular:'常规测试',nday:'Nday发现','0day':'0Day挖掘'}, workerLabels={starting:'正在启动',running:'正在工作',closing:'正在关闭','cleanup-failed':'关闭失败',released:'已释放'};
-  var reasons={interaction_confirmation_required:'等待你确认是否继续',cancelled:'你已停止测试',time_budget_exhausted:'已到设置的停止时间',tool_budget_exhausted:current?.policy?.used.toolCalls+' 次操作已用完',first_verified_high:'已确认一个高危漏洞',first_verified_rce:'已确认代码执行漏洞',queue_complete:'已检查所有候选漏洞',plan_complete:'已完成这次测试',observation_budget_exhausted:'初步检查次数已用完',model_budget_exhausted:'模型调用次数已用完'};
+  var reasons={interaction_confirmation_required:'等待你确认是否继续',cancelled:'你已停止测试',turn_ended:'本轮已结束，可继续下一轮',time_budget_exhausted:'已到设置的停止时间',tool_budget_exhausted:current?.policy?.used.toolCalls+' 次操作已用完',first_verified_high:'已确认一个高危漏洞',first_verified_rce:'已确认代码执行漏洞',queue_complete:'已检查所有候选漏洞',plan_complete:'已完成这次测试',observation_budget_exhausted:'初步检查次数已用完',model_budget_exhausted:'模型调用次数已用完'};
+  var nextActions={interpret:'先解读已记录的对照差异','interpret-recorded-comparison':'先解读已记录的对照差异','record-observation-or-close':'记录观察或结束这个方向','independently-verify-impact':'独立验证影响','minimal-check-with-control':'带正常对照做最小检查','create-direction-on-observed-input':'用已观测的输入建立新方向','collect-new-entry-or-record-gap':'补充入口或记录缺项'};
+  var hasTarget=Boolean(current?.policy?.target);
+  var next=current?.next||null, counts=current?.counts||{};
+  var briefEndpoint=next?.endpoint||next?.requests?.[0]?.endpoint||current?.gaps?.[0]?.endpoint||'';
+  var briefIdentity=next?.authContext||next?.requests?.[0]?.authContext||'';
+  var briefAction=nextActions[next?.action]||'';
   var stats=records[0].stats, pending=stats?.delivery?Math.max(0,stats.delivery.incomplete-(stats.byStatus?.['false-positive']||0)-(stats.byStatus?.fixed||0)):null;
   var taskQuestion=current?.policy?.question;
   if(taskQuestion==='有限观察已有目标，向用户建议具体研究问题')taskQuestion='';
@@ -1678,14 +2837,26 @@ function TaskPanel(props) {
     current&&current.configured?React.createElement('div',null,
       React.createElement('article',{className:'dsh-task-summary','aria-label':'当前任务'},
         React.createElement('div',{className:'dsh-task-state-line'},React.createElement('span',{className:'dsh-task-mode'},labels[current.policy.mode]),current.stopped?React.createElement('span',{className:'dsh-task-stop-reason'},reasons[current.reason]||'测试已暂停'):null),
-        React.createElement('div',{className:'dsh-task-result','aria-label':'本会话测试结果'},stats?.delivery?React.createElement(React.Fragment,null,React.createElement('span',null,React.createElement('strong',null,stats.delivery.ready),' 个已确认'),React.createElement('span',{className:pending?'dsh-task-pending':''},React.createElement('strong',null,pending),' 个待验证')):React.createElement('span',null,records[0].error?'结果读取失败':records[0].loading?'正在读取结果…':'暂无结果统计')),
+        React.createElement('div',{className:'dsh-task-result','aria-label':'本会话测试结果'},hasTarget&&stats?.delivery?React.createElement(React.Fragment,null,React.createElement('span',null,React.createElement('strong',null,stats.delivery.ready),' 个已确认'),React.createElement('span',{className:pending?'dsh-task-pending':''},React.createElement('strong',null,pending),' 个待验证')):React.createElement('span',null,records[0].error?'结果读取失败':records[0].loading?'正在读取结果…':hasTarget?'暂无结果统计':'尚未指定目标，先在授权范围内给一个入口、请求或身份')),
         taskQuestion?React.createElement('p',null,'测试内容：'+taskQuestion):null,
-        React.createElement('p',null,'目标：'+(current.policy.target||'未填写'))),
+        React.createElement('p',null,'目标：'+(current.policy.target||'尚未指定目标')),
+        React.createElement('div',{className:'dsh-task-brief','aria-label':'进度要点'},
+          React.createElement('span',null,'入口：'+(briefEndpoint||'尚未记录')),
+          React.createElement('span',null,'身份：'+(briefIdentity||'尚未记录')),
+          React.createElement('span',null,'下一步：'+(briefAction||'等待已有材料')),
+          React.createElement('span',null,'依据：资产 '+(counts.assets||0)+' · 请求 '+(counts.requests||0)+' · 方法 '+(counts.methods||0)+' · 检查记录 '+(counts.checks||0))),
+        (next&&next.requests||[]).length?React.createElement('details',{className:'dsh-task-entries','aria-label':'可测入口'},
+          React.createElement('summary',null,'可测入口（'+next.requests.length+'，另有 '+(next.moreRequests||0)+' 条）'),
+          next.requests.map(function(row){return React.createElement('p',{key:row.requestId+'|'+row.requestRevision},
+            (row.endpoint||'未记录地址')+' · 身份 '+(row.authContext||'未记录')+' · 输入 '+((row.inputs||[]).map(function(field){return field.name;}).join('、')||'未记录')+' · 证据 '+row.requestId+'@'+row.requestRevision);})):null,
+        (current.gaps||[]).length?React.createElement('details',{className:'dsh-task-gaps'},React.createElement('summary',null,'缺项（'+current.gaps.length+'）'),
+          current.gaps.map(function(gap){return React.createElement('p',{key:gap.id+'|'+gap.endpoint},gap.endpoint+' · '+gap.missing.join('、'));})):null),
       current.policy.flow&&current.policy.flow.kind!=='single'?React.createElement('div',{'aria-label':'流程进度'},React.createElement('p',null,({'regular-to-nday':'收集后自动接 Nday','regular-with-nday':'常规与 Nday 同时进行'}[current.policy.flow.kind])+' · 当前：'+({regular:'信息收集',nday:'Nday检查',parallel:'共同推进',done:'已完成'}[current.policy.flow.phase])),React.createElement('p',null,'常规：'+(current.policy.flow.completed.regular?'已完成':'进行中')+' · Nday：'+(current.policy.flow.completed.nday?'已完成':current.policy.flow.phase==='regular'?'等待收集':'进行中')),React.createElement('details',null,React.createElement('summary',null,'查看衔接记录'),current.policy.flow.history.map(function(row,i){return React.createElement('p',{key:i},new Date(row.at).toLocaleString()+' · '+row.note);}))) :null,
-      current.policy.modelBudgetBlock?React.createElement('p',{role:'alert'},current.policy.modelBudgetBlock.message+' 保留已有资料后，可为下一轮设置新额度。'):null,
+      current.policy.modelBudgetBlock?React.createElement('p',{role:'alert'},current.policy.modelBudgetBlock.message+(current.policy.modelBudgetBlock.priorWireAttempts>0?' 此前已有 '+current.policy.modelBudgetBlock.priorWireAttempts+' 次原生发送。':'')+' 保留已有资料后，可为下一轮设置新额度。'):null,
       current.policy.awaitingConfirmation?React.createElement('div',null,React.createElement('p',null,current.policy.awaitingConfirmation.note),React.createElement(Btn,{primary:true,disabled:busy[0]||current.reason!=='interaction_confirmation_required',onClick:function(){return run('task.continue');}},'确认并继续')):null,
       React.createElement('div',{className:'dsh-task-metrics'},
         React.createElement('span',null,'已用操作 ',current.policy.used.toolCalls+' / '+current.policy.budget.toolCalls),
+        React.createElement('span',null,'未计量目标流量 '+(current.policy.used.unmeteredToolCalls||0)+' / '+(current.policy.budget.unmeteredToolCalls||0)+'（实际请求数未知）'),
         React.createElement('span',null,'运行中的子代理 ',current.active||0),
         current.roundCost?.elapsedModelMs!=null?React.createElement('span',null,'模型运行 ',Math.ceil(current.roundCost.elapsedModelMs/1000)+' 秒'):null),
       React.createElement('section',{className:'dsh-task-recent','aria-label':'最近发现'},React.createElement('div',{className:'dsh-task-heading'},React.createElement('h4',null,'最近发现'),React.createElement(Btn,{onClick:props.onFindings},'全部记录')),
@@ -1694,7 +2865,11 @@ function TaskPanel(props) {
       current.modelBudget&&current.modelBudget.limits.modelCalls!==null?React.createElement('p',null,'共享模型调用 '+current.modelBudget.chargedCalls+'/'+current.modelBudget.limits.modelCalls+'；剩余 '+Math.max(0,current.modelBudget.limits.modelCalls-current.modelBudget.chargedCalls)+' 次。包含主代理、子代理和辅助调用。'):null,
       React.createElement('p',null,'从开始测试经过 '+Math.floor((current.elapsedSeconds||0)/60)+' 分 '+((current.elapsedSeconds||0)%60)+' 秒（含停止后的时间）。'),
       current.roundCost?React.createElement('p',null,'本轮会话生成记录 '+current.roundCost.modelCalls+'（含准入被拒绝的回合） · 工具调用 '+current.roundCost.toolCalls+' · 会话 token '+(current.roundCost.totalTokens===null?'未取得':current.roundCost.totalTokens)+'（含缓存读取 '+(current.roundCost.cacheReadTokens===null?'未知':current.roundCost.cacheReadTokens)+'）'):null,
-      current.modelBudget?React.createElement('p',null,'共享模型请求 '+current.modelBudget.chargedCalls+'/'+(current.modelBudget.limits.modelCalls??'未设上限')+'（含重试、压缩和标题）；已取得 token '+current.modelBudget.knownTokens+'，未知 '+current.modelBudget.unknownCalls+'，尚未结算 '+current.modelBudget.unresolvedCalls+'。'+(current.modelBudget.limits.tokens!==null?'严格 token 上限 '+current.modelBudget.limits.tokens+'；预留 '+current.modelBudget.heldTokens+'。':'')):null,
+      current.modelBudget?React.createElement('p',null,'已登记模型调用 '+current.modelBudget.chargedCalls+'/'+(current.modelBudget.limits.modelCalls??'未设上限')+'（含重试、压缩和标题）；已观测原生发送 '+current.modelBudget.wireAttempts+' 次，未观测 '+current.modelBudget.unobservedCalls+' 次。已取得 token '+current.modelBudget.knownTokens+'，未知 '+current.modelBudget.unknownCalls+'，尚未结算 '+current.modelBudget.unresolvedCalls+'。'+(current.modelBudget.limits.tokens!==null?'严格 token 上限 '+current.modelBudget.limits.tokens+'；预留 '+current.modelBudget.heldTokens+'。':'')):null,
+      current.modelBudget&&current.modelBudget.calls.length?React.createElement('details',{'aria-label':'模型发送明细'},
+        React.createElement('summary',null,'模型发送明细（最近 '+current.modelBudget.calls.length+' 次）'),
+        React.createElement('p',null,'只覆盖原生 fetch 的 Messages、Chat Completions 和 Responses；SDK 私有传输不会在这里冒充已观测发送。'),
+        current.modelBudget.calls.map(function(row){return React.createElement('p',{key:row.id},modelCallPurposeLabel(row.purpose)+' · '+modelCallStateLabel(row.state)+' · '+modelWireLabel(row.wire))})):null,
       current.roundCost?React.createElement('p',null,'本轮模型运行含收尾 '+(current.roundCost.elapsedModelMs===null?'未取得':Math.ceil(current.roundCost.elapsedModelMs/1000)+' 秒')+'；父子代理并发时间合并计算。'):null,
       current.cost?React.createElement('details',null,React.createElement('summary',null,'主代理与全部子代理累计成本'),
         React.createElement('p',null,'总 token '+(current.cost.totalTokens===null?'未取得':current.cost.totalTokens)+' · 模型调用 '+current.cost.modelCalls+' · 工具调用 '+current.cost.toolCalls),
@@ -1706,12 +2881,18 @@ function TaskPanel(props) {
       current.more?React.createElement('p',null,'另有 '+current.more+' 条历史子任务；详细证据保留在原会话'):null):null,
       current.stopped&&!current.policy.awaitingConfirmation?(current.policy.blocker?null:React.createElement(Btn,{primary:true,disabled:busy[0]||(current.active||0)>0,onClick:function(){question[1]('');return run('task.new-round');}},'新建测试')):React.createElement(Btn,{disabled:busy[0],onClick:function(){return run('task.cancel');}},'停止本轮与子代理')):
     !current?React.createElement('p',{role:'status'},error[0]?'请刷新重试。':'正在读取本轮任务…'):!current.isPentest?React.createElement('p',null,'此会话没有渗透测试任务，可在“发现”中查看审计记录。',React.createElement(Btn,{onClick:props.onFindings},'查看发现')):React.createElement('div',null,
-      React.createElement('div',{className:'dsh-task-mode-options',role:'group','aria-label':'选择子模式'},['regular','nday','0day'].map(function(mode){return React.createElement(Btn,{key:mode,primary:selected[0]===mode,disabled:busy[0],onClick:function(){return choose(mode);}},labels[mode]);})),
-      React.createElement('p',null,selected[0]==='regular'?'检查登录、权限和业务功能。':selected[0]==='nday'?'根据产品及版本，查找并验证已公开漏洞。':'分析代码和业务逻辑，查找并验证可疑问题。'),
+      // 抽屉已经托管方向 / 测试安排 / 助手人数 / 起步方式时，任务面板不再重复第二套控件。
+      budgetDraft?null:React.createElement('div',{className:'dsh-task-mode-options',role:'group','aria-label':'选择子模式'},['regular','nday','0day'].map(function(mode){return React.createElement(Btn,{key:mode,primary:selected[0]===mode,disabled:busy[0],onClick:function(){return choose(mode);}},labels[mode]);})),
+      budgetDraft?null:React.createElement('p',null,selected[0]==='regular'?'检查登录、权限和业务功能。':selected[0]==='nday'?'根据产品及版本，查找并验证已公开漏洞。':'分析代码和业务逻辑，查找并验证可疑问题。'),
       current&&current.previousRounds?React.createElement('p',null,'已保留 '+current.previousRounds+' 次测试的记录。'):null,
-      React.createElement(FlowControls,{mode:selected[0],workflow:flow[0],workers:Number(workers[0]),interaction:interaction[0],disabled:busy[0],onChange:function(patch){return run('task.choose',{mode:selected[0],workflow:patch.workflow||flow[0],workers:patch.workers!==undefined?patch.workers:Number(workers[0]),interaction:patch.interaction||interaction[0]}).then(function(value){if(value&&value.options){flow[1](value.options.workflow);workers[1](String(value.options.workers));interaction[1](value.options.interaction||'continuous');}});}}),
-      input('这一轮要查什么',question),input('目标站点（选填）',target),
-      React.createElement('details',null,React.createElement('summary',null,'本轮预算'),input('操作预算',calls,'number'),input('模型调用上限（可选，含子代理和辅助调用）',modelCalls,'number'),input('时间上限（分钟）',minutes,'number'),selected[0]==='0day'?input('初步观察预算',discovery,'number'):null),
+      budgetDraft?null:React.createElement(FlowControls,{mode:selected[0],workflow:flow[0],workers:Number(workers[0]),interaction:interaction[0],startMode:startMode[0],disabled:busy[0],onChange:function(patch){return run('task.choose',{mode:selected[0],workflow:patch.workflow||flow[0],workers:patch.workers!==undefined?patch.workers:Number(workers[0]),interaction:patch.interaction||interaction[0],startMode:patch.startMode||startMode[0]}).then(function(value){if(value&&value.options){flow[1](value.options.workflow);workers[1](String(value.options.workers));interaction[1](value.options.interaction||'continuous');startMode[1](value.options.startMode||'materials-first');}});}}),
+      input('这一轮要查什么',question),
+      budgetDraft?null:React.createElement('details',null,React.createElement('summary',null,'限制请求和用量'),
+        React.createElement('small',null,'留空表示未设置，实际沿用宿主当前限制；未设置时不额外收紧。'),
+        input('操作预算',budgetPair('calls'),'number'),input('模型调用上限（可选，含子代理和辅助调用）',budgetPair('modelCalls'),'number'),
+        input('模型 token 上限（可选，含子代理和辅助调用）',budgetPair('tokens'),'number'),
+        input('时间上限（分钟）',budgetPair('minutes'),'number'),input('未计量扫描额度（一次工具调用不等于一个目标请求）',budgetPair('unmetered'),'number'),
+        selected[0]==='0day'?input('初步观察预算',budgetPair('discovery'),'number'):null),
       React.createElement(Btn,{primary:true,disabled:busy[0]||!question[0].trim(),onClick:start},'开始测试')));
 }
 
@@ -1807,7 +2988,7 @@ function MethodPackagesPanel(props) {
   var method = selected[0], doc = method && method.document;
   return React.createElement('details', { style: { padding: 16 }, 'aria-label': '精选方法包管理' },
     React.createElement('summary', null, '精选方法包'),
-    React.createElement('div', { style: { display: 'flex', gap: 10, alignItems: 'center', marginTop: 12 } },
+    React.createElement('div', { style: { display: 'flex', gap: 12, alignItems: 'center', marginTop: 12 } },
       React.createElement(Btn, { disabled: busy[0], onClick: function () { return load(offset[0]); } }, '读取方法目录'),
       React.createElement('label', null, '导入方法包 ', React.createElement('input', { type: 'file', accept: '.json,application/json', disabled: busy[0], 'aria-label': '导入方法包', onChange: function (event) { return importFile(event, 'stage'); } }))),
     index[0] ? React.createElement('div', null,
@@ -1877,6 +3058,8 @@ function ModePage(props) {
 	var loading = useState(true); var setLoading = loading[1];
 	var notice = useState(""); var setNotice = notice[1];
 	var exportMenu = useState(null); var setExportMenu = exportMenu[1];
+	// 报告"先预览再导出"（v6 第 9.2 节）：导出不再直接下载，先在页面里看一遍。
+	var reportPreview = useState(null); var setReportPreview = reportPreview[1];
 	var page = useState(1); var setPage = page[1];
 	var severity = useState(""); var setSeverity = severity[1];
 	var status = useState(""); var setStatus = status[1];
@@ -1892,6 +3075,9 @@ function ModePage(props) {
 	var range = useState("all"); var setRange = range[1];
 	var customFrom = useState(""); var setCustomFrom = customFrom[1];
 	var customTo = useState(""); var setCustomTo = customTo[1];
+	// 「首次空页」（v6 第 5.3 节）：本会话、没有任何筛选、也没有任何记录时才提示怎么开始；
+	// 有筛选或历史范围时空了要说"没有匹配"，不能把用户引到"添加资料"。必须放在全部筛选 state 之后。
+	var firstEmpty = scope === 'session' && !severity[0] && !status[0] && delivery[0] === 'all' && !q[0] && range[0] === 'all';
 	var rt = rangeIso(range[0], customFrom[0], customTo[0]);
 	var metaDraft = useState({ targetLabel: "", version: "", scope: "" }); var setMetaDraft = metaDraft[1];
 	// 人工复核标记向导：原生 confirm/prompt 会阻塞渲染进程（Agent 驱动整页卡死），改为组件内三步状态机
@@ -1907,7 +3093,8 @@ function ModePage(props) {
 		setLoading(true);
 		api("findings.list", {
 			scope: scope, sessionId: sessionId, mode: mode,
-			page: o.page !== undefined ? o.page : page[0], pageSize: 10,
+			// 发现页每页 50 条（v6 第 5.3 节）；分页仍由服务端切片。
+			page: o.page !== undefined ? o.page : page[0], pageSize: 50,
 			severity: o.severity !== undefined ? o.severity : severity[0],
 			status: o.status !== undefined ? o.status : status[0],
 			delivery: delivery[0],
@@ -2081,10 +3268,12 @@ function ModePage(props) {
 		}
 		return pageOf(1);
 	}
+	// 先预览再导出（v6 第 9.2 节）：把要下载的文本放进预览面板，用户看过再点下载。
+	function previewReport(name, text, mime) { setReportPreview({ name: name, text: text, mime: mime || "text/markdown" }); }
 	function exportAll() {
 		fetchAllForExport().then(function (all) {
-			download(meta.allName + localDate() + ".md", mdTable(all, meta.tableTitle, mode));
-			setNotice("已导出 " + all.length + " 条（当前筛选范围）");
+			previewReport(meta.allName + localDate() + ".md", mdTable(all, meta.tableTitle, mode));
+			setNotice("已生成 " + all.length + " 条预览（当前筛选范围）");
 		});
 	}
 	function exportSelected() {
@@ -2093,28 +3282,28 @@ function ModePage(props) {
 		var picked = pool.filter(function (f) { return selected[0][uidOf(f)]; });
 		if (picked.length === 0) { setNotice("先勾选要导出的成果"); return; }
 		var text = picked.map(function (f) { return mdReport(f, mode); }).join("\n---\n\n");
-		download(meta.reportName + localDate() + ".md", text);
-		setNotice("已导出 " + picked.length + " 份报告（MD）");
+		previewReport(meta.reportName + localDate() + ".md", text);
+		setNotice("已生成 " + picked.length + " 份报告预览（MD）");
 	}
 	function exportOne(f) {
-		download("finding-" + mode + "-" + f.seq + "-" + localDate() + ".md", mdReport(f, mode));
+		previewReport("finding-" + mode + "-" + f.seq + "-" + localDate() + ".md", mdReport(f, mode));
 	}
 	function exportOverview() {
 		fetchAllForExport().then(function (all) {
-			download(mode + "-overview-" + localDate() + ".md", mdOverview(sesMeta, stats, all, mode));
-			setNotice("总览报告已导出（MD）");
+			previewReport(mode + "-overview-" + localDate() + ".md", mdOverview(sesMeta, stats, all, mode));
+			setNotice("总览报告已生成预览（MD）");
 		});
 	}
 	function exportHtml() {
 		fetchAllForExport().then(function (all) {
-			download(mode + "-report-" + localDate() + ".html", htmlReport(sesMeta, stats, all, mode), "text/html");
-			setNotice("报告包已导出（HTML，可浏览器打印成 PDF）");
+			previewReport(mode + "-report-" + localDate() + ".html", htmlReport(sesMeta, stats, all, mode), "text/html");
+			setNotice("报告包已生成预览（HTML，可浏览器打印成 PDF）");
 		});
 	}
 	function exportJson() {
 		fetchAllForExport().then(function (all) {
-			download(mode + "-report-" + localDate() + ".json", jsonReport(sesMeta, stats, all, mode), "application/json");
-			setNotice("结构化报告已导出（JSON）");
+			previewReport(mode + "-report-" + localDate() + ".json", jsonReport(sesMeta, stats, all, mode), "application/json");
+			setNotice("结构化报告已生成预览（JSON）");
 		});
 	}
 	function saveMeta() {
@@ -2136,7 +3325,12 @@ function ModePage(props) {
 				}),
 				React.createElement("span", { className: "dsh-rtr-seq" }, "#" + f.seq),
 				React.createElement(Chip, { severity: f.severity, typeLabel: LABEL_BY_TYPE_MODES[mode] ? (f.type || "未标注") : null }),
-				React.createElement("span", { className: "dsh-rtr-st dsh-rtr-st-" + (mode === "pentest" && f.status === "verified" && !f.delivery?.ready ? "pending" : f.status) }, statusTextFor(f, mode, stLabelSet)),
+				// 「复测中」优先于原状态显示（v6 第 5.3 节）：复核/复测消息已发出但还没有结论。
+				f.verifying ? React.createElement("span", { className: "dsh-rtr-st dsh-rtr-st-retesting" }, "复测中")
+					// 复测结论为「本次未复现」时按 v6 第 5.3 节的叫法显示，不混进原状态词。
+					: f.retest && f.retest.latest && f.retest.latest.verdict === 'not-reproduced'
+						? React.createElement("span", { className: "dsh-rtr-st" }, "本次未复现")
+						: React.createElement("span", { className: "dsh-rtr-st dsh-rtr-st-" + (mode === "pentest" && f.status === "verified" && !f.delivery?.ready ? "pending" : f.status) }, statusTextFor(f, mode, stLabelSet)),
 				mode === "code-audit" && f.auditMode ? React.createElement("span", { className: "dsh-rtr-am dsh-rtr-am-" + f.auditMode }, AUDIT_MODE_LABEL[f.auditMode] || f.auditMode) : null,
 				React.createElement("span", { className: "dsh-rtr-title" }, f.title),
 				mode !== 'pentest' ? React.createElement("span", { className: "dsh-rtr-summ" }, f.summary || "") : null,
@@ -2151,7 +3345,7 @@ function ModePage(props) {
 				f.summary ? React.createElement('p',null,f.summary) : null,
 				React.createElement('p',null,findingSummary(f)),
 				expanded[0]===uid?React.createElement('div',{className:'dsh-task-actions'},React.createElement(Btn,{onClick:function(){onVerify(f);}},'复核状态'),React.createElement(Btn,{danger:true,onClick:function(){onDelete(f);}},confirmDel[0]===uid?'确认删除':'删除记录')):null):null,
-				expanded[0] === uid ? React.createElement(Detail, { f: f, mode: mode, meta: meta, onVerify: onVerify, onLiveVerify: onLiveVerify, onExportOne: exportOne, onEffectReview: onEffectReview }) : null);
+				expanded[0] === uid ? React.createElement(Detail, { f: f, mode: mode, meta: meta, onVerify: onVerify, onLiveVerify: onLiveVerify, onExportOne: exportOne, onEffectReview: onEffectReview, onPreview: previewReport, onClose: function () { toggle(f); }, onOpenExecution: props.onOpenExecution }) : null);
 	};
 
 	var tlItem = function (f) {
@@ -2183,7 +3377,7 @@ function ModePage(props) {
 						React.createElement("span", null, "主机 ", React.createElement("b", null, f.target || "（未填）")),
 						React.createElement("span", null, "证据 ", React.createElement("b", null, f.evidence || "（未填）")),
 						React.createElement("span", { className: "dsh-rtr-tl-concl" }, f.summary || "")),
-					open ? React.createElement(Detail, { f: f, mode: mode, meta: meta, onVerify: onVerify, onLiveVerify: onLiveVerify, onExportOne: exportOne, onEffectReview: onEffectReview }) : null)));
+					open ? React.createElement(Detail, { f: f, mode: mode, meta: meta, onVerify: onVerify, onLiveVerify: onLiveVerify, onExportOne: exportOne, onEffectReview: onEffectReview, onPreview: previewReport, onClose: function () { toggle(f); }, onOpenExecution: props.onOpenExecution }) : null)));
 	};
 
 	var cpItem = function (f) {
@@ -2217,7 +3411,7 @@ function ModePage(props) {
 					hop("权限", f.permission),
 					hop("资源", f.resource || f.target),
 					hop("影响", f.impact || f.summary)),
-				open ? React.createElement(Detail, { f: f, mode: mode, meta: meta, onVerify: onVerify, onLiveVerify: onLiveVerify, onExportOne: exportOne, onEffectReview: onEffectReview }) : null));
+				open ? React.createElement(Detail, { f: f, mode: mode, meta: meta, onVerify: onVerify, onLiveVerify: onLiveVerify, onExportOne: exportOne, onEffectReview: onEffectReview, onPreview: previewReport, onClose: function () { toggle(f); }, onOpenExecution: props.onOpenExecution }) : null));
 	};
 
 	var listBody;
@@ -2262,19 +3456,35 @@ function ModePage(props) {
 			});
 	} else {
 		listBody = rows.length === 0
-			? React.createElement("div", { className: "dsh-rtr-empty" },
-				emptyMessage, React.createElement("br", null),
-				"发现会在保存后显示。若对话中已有结论，可请 AI 整理并保存发现与证据。")
+			? (firstEmpty
+				? React.createElement("div", { className: "dsh-rtr-empty" },
+					"测试中发现的异常会保存在这里。",
+					React.createElement("br", null),
+					"添加网站请求或代码，AI 就能从这些内容开始检查。",
+					props.onAddMaterials ? React.createElement("div", { className: "dsh-rtr-empty-actions" },
+						React.createElement("button", { type: "button", onClick: function () { props.onAddMaterials(); } }, "添加测试资料")) : null)
+				: React.createElement("div", { className: "dsh-rtr-empty" },
+					emptyMessage, React.createElement("br", null),
+					"发现会在保存后显示。若对话中已有结论，可请 AI 整理并保存发现与证据。"))
 			: rows.map(rowEl);
 	}
 
 	return React.createElement(React.Fragment, null,
 		mode === 'pentest' && sessionId && scope !== 'all' ? React.createElement(CheckedList, { key: sessionId, sessionId: sessionId }) : null,
 		(notice[0] && String(notice[0]).trim()) ? React.createElement("div", { className: "dsh-rtr-notice" }, notice[0]) : null,
+		// 报告预览（v6 第 9.2 节）：看过再下载，秘密已在生成时遮蔽。
+		reportPreview[0] ? React.createElement("div", { className: "dsh-rtr-report-preview", role: "dialog", "aria-label": "报告预览" },
+			React.createElement("div", { className: "dsh-rtr-preview-head" },
+				React.createElement("strong", null, "报告预览"),
+				React.createElement("span", { className: "dsh-rtr-preview-name" }, reportPreview[0].name),
+				React.createElement("span", { className: "dsh-rtr-spacer" }),
+				React.createElement(Btn, { primary: true, onClick: function () { download(reportPreview[0].name, reportPreview[0].text, reportPreview[0].mime); setNotice("已下载 " + reportPreview[0].name); } }, "下载"),
+				React.createElement(Btn, { onClick: function () { setReportPreview(null); } }, "关闭")),
+			React.createElement("pre", { className: "dsh-rtr-preview-body" }, reportPreview[0].text)) : null,
 		// 人工复核向导弹层（原生对话框会阻塞渲染进程，故全部就地渲染）
-		(rv[0] ? React.createElement("div", { style: { position: "fixed", left: "50%", top: "72px", transform: "translateX(-50%)", zIndex: 3000, width: "min(580px, 92vw)", maxHeight: "70vh", overflowY: "auto", background: "var(--dsw-alias-bg-base,#fff)", border: "1px solid var(--dsw-alias-border-l1,#d9d9de)", borderRadius: 10, boxShadow: "0 12px 40px rgba(0,0,0,.2)", padding: "14px 16px", whiteSpace: "normal" } },
-			React.createElement("div", { style: { fontWeight: 700, marginBottom: 6 } }, "人工复核标记 #" + rv[0].f.seq + " " + rv[0].f.title),
-			React.createElement("div", { style: { fontSize: 12, color: "#b45309", marginBottom: 10, whiteSpace: "pre-wrap", maxHeight: 140, overflowY: "auto" } }, rv[0].error),
+		(rv[0] ? React.createElement("div", { style: { position: "fixed", left: "50%", top: "72px", transform: "translateX(-50%)", zIndex: 3000, width: "min(580px, 92vw)", maxHeight: "70vh", overflowY: "auto", background: "var(--dsw-alias-bg-base,#fff)", border: "1px solid var(--dsw-alias-border-l1,#d9d9de)", borderRadius: 6, boxShadow: "0 12px 40px rgba(0,0,0,.2)", padding: "14px 16px", whiteSpace: "normal" } },
+			React.createElement("div", { style: { fontWeight: 700, marginBottom: 8 } }, "人工复核标记 #" + rv[0].f.seq + " " + rv[0].f.title),
+			React.createElement("div", { style: { fontSize: 12, color: "#b45309", marginBottom: 12, whiteSpace: "pre-wrap", maxHeight: 140, overflowY: "auto" } }, rv[0].error),
 			rvStep[0] === 1 ? React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
 				React.createElement(Btn, { primary: true, onClick: function () { setRvStatus("verified"); setRvNote(reviewNoteFor("verified")); setRvStep(2); } }, "标记「" + rv[0].posText + "」"),
 				(rv[0].negativeOptions || []).map(function (opt) {
@@ -2472,7 +3682,7 @@ function BigScreen(props) {
 						return (ov.recent || []).reduce(function (n, f) { return n + (FM[f.mode] && (f.severity === "critical" || f.severity === "high") ? 1 : 0); }, 0);
 					})(), "严重+高危（漏洞型）", "is-bad"))),
 			React.createElement("div", { className: "dsh-scr-grid" },
-				React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 14 } },
+				React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 16 } },
 					React.createElement("div", { className: "dsh-scr-panel" },
 						React.createElement("h4", null, "模式成果分布"),
 						SCR_MODE_VOCAB.map(function (m, i) {
@@ -2511,7 +3721,7 @@ function BigScreen(props) {
 									React.createElement(Btn, { disabled: pgCur <= 0, onClick: function () { setScrPg(pgCur - 1); } }, "上一页"),
 									"第 " + (pgCur + 1) + " / " + (pgMax + 1) + " 页 · 共 " + stRows.length + " 条",
 									React.createElement(Btn, { disabled: pgCur >= pgMax, onClick: function () { setScrPg(pgCur + 1); } }, "下一页")) : null)))), 
-				React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 14 } },
+				React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 16 } },
 					React.createElement("div", { className: "dsh-scr-panel" },
 						React.createElement("h4", null, "风险等级占比"),
 						React.createElement("div", { className: "dsh-scr-b3d" },
@@ -2550,7 +3760,10 @@ function ComingSoon(props) {
 function ProjectFilesPanel(props) {
   var state = useState({ loading: true, snapshot: null, error: '' }), copied = useState(''), revision = useRef(0);
   var workspace = '';
-  try { workspace = props.sessionsStore.list.getSnapshot().byId[props.sessionId].cwd || ''; } catch (_) { /* session not ready */ }
+  try {
+    var sessionSnapshot = props.sessionsStore.list.getSnapshot().byId[props.sessionId];
+    workspace = sessionSnapshot.workingDirectory || sessionSnapshot.cwd || '';
+  } catch (_) { /* session not ready */ }
   function load() {
     var request = ++revision.current;
     state[1](function (old) { return { loading: true, snapshot: old.snapshot, error: '' }; });
@@ -2604,10 +3817,257 @@ function ProjectFilesPanel(props) {
       })) : null) : null);
 }
 
+// 执行记录页（v6 第 5.3 节）：只列真实发生的调用、时间、结果与用量；请求原文留在测试资料页。
+var EXECUTION_RESULT_LABEL = { all: '全部', returned: '已返回', failed: '失败', unknown: '结果未知' };
+// 调用状态（v6 第 8.2 节）：比结果分类多一档「取消」，用于显示被用户/任务停止打断的那一次。
+var EXECUTION_CALL_STATE_LABEL = { returned: '已返回', failed: '失败', cancelled: '取消', unknown: '结果未知' };
+function executionWhen(value) { if (!value) return '—'; var d = new Date(value); return isNaN(d.getTime()) ? String(value) : d.toLocaleString(); }
+function ExecutionPanel(props) {
+  var result = useState('all'), page = useState(1);
+  var data = useState(null), error = useState(''), loading = useState(false);
+  var request = useRef(0);
+  function load() {
+    var revision = ++request.current; loading[1](true);
+    return api('execution.list', { sessionId: props.sessionId, result: result[0], page: page[0], pageSize: 50 })
+      .then(function (value) { if (!value.ok) throw Error(value.error || '读取执行记录失败'); if (revision !== request.current) return; data[1](value); error[1](''); })
+      .catch(function (failure) { if (revision === request.current) error[1](failure.message); })
+      .finally(function () { if (revision === request.current) loading[1](false); });
+  }
+  useEffect(function () { if (!props.sessionId) return; load(); return function () { request.current++; }; }, [props.sessionId, result[0], page[0]]);
+  var current = data[0], counts = (current && current.counts) || { all: 0, returned: 0, failed: 0, unknown: 0 };
+  return React.createElement('div', { className: 'dsh-execution' },
+    React.createElement('div', { className: 'dsh-execution-tools' },
+      React.createElement('div', { className: 'dsh-materials-types', role: 'tablist' }, ['all', 'returned', 'failed', 'unknown'].map(function (key) {
+        return React.createElement('button', { key: key, type: 'button', role: 'tab', 'aria-selected': result[0] === key, className: result[0] === key ? 'is-active' : '',
+          onClick: function () { page[1](1); result[1](key); } }, EXECUTION_RESULT_LABEL[key] + ' ' + (counts[key] || 0));
+      })),
+      current ? React.createElement('span', { className: 'dsh-execution-usage' }, '工具调用 ' + current.usage.toolCalls + ' · 模型调用 ' + current.usage.modelCalls + (current.usage.unknownUsageCalls ? '（其中 ' + current.usage.unknownUsageCalls + ' 次用量未知）' : '')) : null,
+      React.createElement('button', { type: 'button', disabled: !props.onOpenMaterials, onClick: function () { if (props.onOpenMaterials) props.onOpenMaterials(); } }, '查看请求原文')),
+    error[0] ? React.createElement('p', { role: 'alert' }, error[0]) : null,
+    loading[0] && !current ? React.createElement('p', { role: 'status' }, '正在读取执行记录…') : null,
+    current && current.total === 0 ? React.createElement('p', { className: 'dsh-materials-empty' }, '还没有执行记录。正常调用、失败和检查未见异常都会保存在这里；异常结论在“发现的问题”。') : null,
+    current && current.total > 0 ? React.createElement('table', { className: 'dsh-materials-table saker-ui-table' },
+      React.createElement('thead', null, React.createElement('tr', null, ['时间', '来源/动作', '目标', '结果', '状态', '身份', '用时', '引用/用量'].map(function (label) { return React.createElement('th', { key: label }, label); }))),
+      React.createElement('tbody', null, current.rows.map(function (row) {
+        var action = row.kind === 'http' ? 'HTTP ' + (row.host || row.target || '')
+          : row.kind === 'model' ? '模型调用' + (row.usage && row.usage.totalTokens != null ? ' · ' + row.usage.totalTokens + ' tok' : ' · 用量未知')
+            : '工具 ' + (row.toolName || '未知');
+        var target = row.kind === 'http' ? (row.host || row.target || '—') : '—';
+        var ref = row.kind === 'http' ? (row.requestRef || row.id) : (row.callId || row.id);
+        return React.createElement('tr', { key: row.id },
+          React.createElement('td', null, executionWhen(row.at)),
+          React.createElement('td', { title: action }, action),
+          React.createElement('td', { title: row.target }, target),
+          React.createElement('td', null, EXECUTION_CALL_STATE_LABEL[row.callState] || EXECUTION_RESULT_LABEL[row.result] || row.result),
+          React.createElement('td', null, row.status == null ? (row.outcome || '—') : String(row.status)),
+          // 身份引用（v6 第 8.1 节）：只显示本任务请求记录里的身份名，秘密仍留在账号管理。
+          React.createElement('td', { title: row.identity || '' }, row.identity || '—'),
+          React.createElement('td', null, row.elapsedMs == null ? '—' : row.elapsedMs + ' ms'),
+          React.createElement('td', { title: ref }, ref));
+      })) ) : null,
+    current && current.total > 0 ? React.createElement('div', { className: 'dsh-materials-foot' },
+      React.createElement('span', null, '共 ' + current.total + ' 条'),
+      React.createElement('button', { type: 'button', disabled: page[0] <= 1, onClick: function () { page[1](Math.max(1, page[0] - 1)); } }, '上一页'),
+      React.createElement('span', null, '第 ' + page[0] + ' 页'),
+      React.createElement('button', { type: 'button', disabled: !current.more, onClick: function () { page[1](page[0] + 1); } }, '下一页')) : null,
+    current && current.note ? React.createElement('small', null, current.note) : null);
+}
+// 测试资料页（v6 第 5.4 节）：只列当前会话的资产/请求/文件；不显示知识文章与账号；
+// 引用到输入框只更新输入内容，不发送、不标记为已读取、不调用模型。
+var MATERIALS_TYPE_LABEL = { all: '全部', asset: '网站与端口', request: '请求', file: '文件' };
+function materialsColumns(kind) {
+if (kind === 'asset') return ['主机/地址', '协议', '端口', '产品线索', '来源', '范围', 'AI 是否读过'];
+if (kind === 'request') return ['方法', '主机/路径', '账号', '响应', '状态', 'AI 是否读过'];
+return ['名称', '来源', '线索', '状态', 'AI 是否读过'];
+}
+function materialsCells(row) {
+  var m = row.meta || {};
+// 「模型是否读过」只认模型真的读过原文那一次；本地浏览详情单独标「本地看过」，
+// 引用到输入框仍显示「尚未读取」（v6 第 5.4 节：本地查看与模型收到分别保存）。
+var readCell = row.modelRead ? '已收到对应片段' : (row.viewedAt ? '本地看过' : '尚未读取');
+if (row.kind === 'asset') return [m.host || row.title, m.protocol || '—', m.port || '—', m.product || '—', m.source || '—', m.inScope ? '范围内' : '范围外', readCell];
+if (row.kind === 'request') return [m.method || '—', (m.host || '') + (m.path || ''), m.account || '—', m.status == null ? '—' : String(m.status), m.valid ? '正常' : '待确认', readCell];
+  var detail = m.hints != null ? m.hints + ' 条' : '—';
+  if (m.format) detail += ' · ' + String(m.format).toUpperCase();
+  if (m.entries != null) detail += ' · ' + m.entries + ' 条目';
+  // 坏记录要看得见（v6 第 10.3 节 E09）：解析不了的条目单独计数，不能只报"已索引"。
+  if (m.broken) detail += ' · ' + m.broken + ' 条坏记录';
+  if (m.bytes != null) detail += ' · ' + m.bytes + ' 字节';
+return [row.title, m.source || '—', detail, m.broken ? '有坏记录' : (m.unresolved ? '存在未解析' : '已索引'), readCell];
+}
+function MaterialsPanel(props) {
+  var type = useState('all'), query = useState(''), page = useState(1), read = useState('all');
+  var data = useState(null), error = useState(''), loading = useState(false), notice = useState('');
+  var detail = useState(null);
+  // 「有 N 条新记录」（v6 第 5.7 节）：轮询发现新行时只提示数量，不跳页、不打断正在看的内容。
+  var newCount = useState(0);
+  var request = useRef(0);
+  function load() {
+    var revision = ++request.current; loading[1](true);
+    return api('materials.list', { sessionId: props.sessionId, type: type[0], query: query[0], read: read[0], page: page[0], pageSize: 50 })
+      .then(function (result) {
+        if (!result.ok) throw Error(result.error || '读取测试资料失败');
+        if (revision !== request.current) return;
+        // 同一筛选下的增量比较：只统计真的新行，行本身靠 key 原地更新，不整页重绘。
+        var previous = data[0];
+        if (previous && previous.type === result.type && previous.read === result.read && page[0] === 1) {
+          var fresh = Number(result.total || 0) - Number(previous.total || 0);
+          newCount[1](fresh > 0 ? fresh : 0);
+        } else newCount[1](0);
+        data[1](result); error[1]('');
+      })
+      .catch(function (failure) { if (revision === request.current) error[1](failure.message); })
+      .finally(function () { if (revision === request.current) loading[1](false); });
+  }
+  useEffect(function () { if (!props.sessionId) return; load(); return function () { request.current++; }; }, [props.sessionId, type[0], read[0], page[0]]);
+  // 轻量轮询（v6 第 5.7 节）：只读本地列表接口，不调模型；发现新行时由上面的比较给出数量提示。
+  useEffect(function () {
+    if (!props.sessionId || typeof setInterval !== 'function') return;
+    var timer = setInterval(function () { if (!loading[0]) load(); }, 8000);
+    return function () { clearInterval(timer); };
+  }, [props.sessionId, type[0], read[0], page[0]]);
+  // 引用文案：可读名称 + 内部引用 + 必要定位信息。列表行与详情主操作共用一处，
+  // 保证送进输入框的东西完全一致，且只含被选中的这一条（不含全库清单）。
+  function referenceText(item) {
+    var title = item.title || (item.kind === 'request' ? item.endpoint : item.kind === 'asset' ? item.url : item.name) || item.id;
+    var bytes = item.kind === 'file' ? (item.meta && item.meta.bytes != null ? item.meta.bytes : item.totalBytes) : null;
+    return '[' + (MATERIALS_TYPE_LABEL[item.kind] || item.kind) + '] ' + title + '（' + item.id + '）'
+      + (bytes != null ? ' · ' + bytes + ' 字节' : '');
+  }
+  function reference(item) {
+    try {
+      if (!props.inputActions || typeof props.inputActions.insertText !== 'function') throw Error('输入框暂不可用，请复制后再粘贴');
+      // 宿主插入 API 需要先取插入点（revision 保护的 span），再连同它一起插入；
+      // 只调 insertText(text) 会读到 undefined 的 span 并抛错。引用只改输入框，不发送、不记为已读取。
+      var span = typeof props.inputActions.captureInsertion === 'function' ? props.inputActions.captureInsertion() : undefined;
+      if (!props.inputActions.insertText(referenceText(item), span)) throw Error('输入框正在变化，请稍后重试');
+      notice[1]('已引用到输入框，发送前请补充要问的问题。');
+    } catch (failure) { notice[1](failure.message); }
+  }
+  function openDetail(row) {
+    error[1]('');
+    return api('materials.detail', { sessionId: props.sessionId, kind: row.kind, id: row.id })
+      .then(function (result) {
+        if (!result.ok) throw Error(result.error || '读取资料详情失败');
+        detail[1](result.detail);
+        // 本地查看与模型读取分开记录（v6 第 5.4 节）：读取详情保持纯读，这里显式补一条本地状态；
+        // 失败不打扰用户（本地标记丢了也不影响看内容）。
+        return api('materials.viewed', { sessionId: props.sessionId, kind: row.kind, id: row.id })
+          .then(function () { return load(); })
+          .catch(function () {});
+      })
+      .catch(function (failure) { error[1](failure.message); });
+  }
+  // 大文件分段续读（v6 第 9.3 节）：按 nextOffset 取下一段并**追加**到已读内容，
+  // 而不是只给前 6000 字节；一次一段，避免把整文件灌进上下文。
+  function nextSegment() {
+    var current = detail[0];
+    if (!current || current.kind !== 'file' || current.nextOffset === null || current.nextOffset === undefined) return Promise.resolve();
+    error[1]('');
+    return api('materials.detail', { sessionId: props.sessionId, kind: 'file', id: current.id, offset: current.nextOffset, limit: current.limit })
+      .then(function (result) {
+        if (!result.ok) throw Error(result.error || '继续读取失败');
+        var next = result.detail;
+        detail[1](Object.assign({}, next, { preview: (current.preview || '') + (next.preview || ''), offset: current.offset, nextOffset: next.nextOffset }));
+      })
+      .catch(function (failure) { error[1](failure.message); });
+  }
+  // 从本任务移除（v6 第 5.4 节）：默认动作只移除**引用**，不删磁盘原文；
+  // 仍被问题引用时由服务端拒绝，界面如实显示原因。
+  function removeCurrent() {
+    var currentDetail = detail[0];
+    if (!currentDetail || currentDetail.kind !== 'file') return Promise.resolve();
+    error[1]('');
+    return api('materials.remove', { sessionId: props.sessionId, id: currentDetail.id })
+      .then(function (result) {
+        if (!result.ok) throw Error(result.error || '移除失败');
+        detail[1](null); notice[1](result.note || '已从本任务移除');
+        return load();
+      })
+      .catch(function (failure) { error[1](failure.message); });
+  }
+  var current = data[0], counts = (current && current.counts) || { all: 0, asset: 0, request: 0, file: 0 };
+  return React.createElement('div', { className: 'dsh-materials' },
+    React.createElement('div', { className: 'dsh-materials-tools' },
+      React.createElement('div', { className: 'dsh-materials-types', role: 'tablist' }, ['all', 'asset', 'request', 'file'].map(function (key) {
+        return React.createElement('button', { key: key, type: 'button', role: 'tab', 'aria-selected': type[0] === key, className: type[0] === key ? 'is-active' : '',
+          onClick: function () { page[1](1); type[1](key); } }, MATERIALS_TYPE_LABEL[key] + ' ' + (counts[key] || 0));
+      })),
+      React.createElement('input', { type: 'search', 'aria-label': '搜索测试资料', placeholder: '搜索地址、账号或文件名', value: query[0], onChange: function (e) { query[1](e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') { page[1](1); load(); } } }),
+      React.createElement('button', { type: 'button', 'aria-label': '搜索测试资料', onClick: function () { page[1](1); load(); } }, '搜索'),
+      // 读取状态筛选（v6 第 5.4 节）：用户明确筛选「AI 读过的内容」时展示实际使用记录；
+      // 本地看过与模型收到分开，互不冒充。
+      React.createElement('label', { className: 'dsh-materials-read' }, '读取状态',
+        React.createElement('select', { 'aria-label': '读取状态筛选', value: read[0], onChange: function (event) { page[1](1); read[1](event.target.value); } },
+          [['all', '全部'], ['model', 'AI 读过'], ['local', '本地看过'], ['unread', '都没读过']].map(function (option) {
+            return React.createElement('option', { key: option[0], value: option[0] }, option[1]);
+          }))),
+      React.createElement('button', { type: 'button', className: 'is-primary', disabled: !props.onAddMaterials, title: props.onAddMaterials ? '' : '请用输入框左侧的“添加测试资料”', onClick: function () { if (props.onAddMaterials) props.onAddMaterials(); } }, '添加测试资料')),
+    // 新记录只提示数量（v6 第 5.7 节）：不自动跳页、不打断正在看的内容。
+    newCount[0] > 0 ? React.createElement('div', { className: 'dsh-materials-new', role: 'status' },
+      React.createElement('span', null, '有 ' + newCount[0] + ' 条新资料'),
+      React.createElement('button', { type: 'button', onClick: function () { newCount[1](0); return load(); } }, '刷新查看')) : null,
+    error[0] ? React.createElement('p', { role: 'alert' }, error[0]) : null,
+    loading[0] && !current ? React.createElement('p', { role: 'status' }, '正在读取测试资料…') : null,
+    current && current.total === 0 ? React.createElement('div', { className: 'dsh-materials-empty' },
+      // 只有真的没有任何资料时才说“添加…开始检查”；类型/搜索/读取状态筛掉全部时要说“没有匹配”。
+      React.createElement('p', null, (query[0] || type[0] !== 'all' || read[0] !== 'all') ? '没有匹配的资料。' : '添加网站请求或代码，AI 就能从这些内容开始检查。'),
+      React.createElement('small', null, '支持原始 HTTP、HAR、curl 文本、JS、源码与扫描导出；保存原文，按需要读取。')) : null,
+    current && current.total > 0 ? React.createElement('table', { className: 'dsh-materials-table saker-ui-table' },
+      React.createElement('thead', null, React.createElement('tr', null,
+        React.createElement('th', null, '类型'), materialsColumns(current.rows[0] ? current.rows[0].kind : 'asset').map(function (label) { return React.createElement('th', { key: label }, label); }), React.createElement('th', null, '操作'))),
+      React.createElement('tbody', null, current.rows.map(function (row) {
+        return React.createElement('tr', { key: row.kind + '-' + row.id }, React.createElement('td', null, MATERIALS_TYPE_LABEL[row.kind] || row.kind),
+          materialsCells(row).map(function (cell, index) { return React.createElement('td', { key: index, title: String(cell) }, String(cell)); }),
+          React.createElement('td', null,
+            React.createElement('button', { type: 'button', onClick: function () { openDetail(row); } }, '查看'),
+            React.createElement('button', { type: 'button', onClick: function () { reference(row); } }, '引用到输入框')));
+      })) ) : null,
+    detail[0] ? React.createElement('div', { className: 'dsh-materials-detail', 'aria-label': '资料详情' },
+      React.createElement('div', { className: 'dsh-chat-panel-head' }, React.createElement('strong', null, detail[0].kind === 'request' ? '请求详情' : detail[0].kind === 'file' ? '文件详情' : '资产详情'),
+        // 详情主操作是“引用到输入框”（v6 第 5.4 节）：只追加引用到输入框，不发送、不记为已读取。
+        React.createElement('div', { className: 'dsh-chat-actions' },
+          React.createElement('button', { type: 'button', onClick: function () { reference(detail[0]); } }, '引用到输入框'),
+          React.createElement('button', { type: 'button', onClick: function () { detail[1](null); } }, '关闭'))),
+      detail[0].kind === 'request' ? React.createElement('div', null,
+        React.createElement('p', null, detail[0].endpoint + ' · 账号 ' + detail[0].authContext + (detail[0].valid ? ' · 正常对照' : '')),
+        React.createElement('div', { className: 'dsh-materials-panes' },
+          React.createElement('label', null, '请求原文', React.createElement('pre', null, detail[0].request || '（未保存）')),
+          React.createElement('label', null, '响应原文', React.createElement('pre', null, detail[0].response || '（未保存）'))),
+        detail[0].relatedChecks && detail[0].relatedChecks.length ? React.createElement('small', null, '关联入口检查 ' + detail[0].relatedChecks.length + ' 条') : null,
+        detail[0].relatedFindings && detail[0].relatedFindings.length ? React.createElement('small', null, '关联问题 ' + detail[0].relatedFindings.length + ' 条：' + detail[0].relatedFindings.map(function (f) { return f.id; }).join('、')) : null) : null,
+      detail[0].kind === 'asset' ? React.createElement('div', null,
+        React.createElement('p', null, detail[0].url + ' · ' + (detail[0].inScope ? '范围内' : '范围外') + (detail[0].reachable ? ' · 可达' : '')),
+        detail[0].relatedRequests && detail[0].relatedRequests.length ? React.createElement('ul', null, detail[0].relatedRequests.map(function (row) { return React.createElement('li', { key: row.id + row.revision }, row.endpoint + ' · ' + row.authContext); })) : React.createElement('small', null, '还没有关联请求')) : null,
+      detail[0].kind === 'file' ? React.createElement('div', null,
+        React.createElement('p', null, detail[0].name + ' · ' + detail[0].source),
+        detail[0].missing ? React.createElement('small', null, '本地原文已不可读，仅保留索引记录。') : React.createElement('div', null,
+          React.createElement('pre', { className: 'dsh-materials-preview' }, (detail[0].preview || '') + (detail[0].nextOffset !== null && detail[0].nextOffset !== undefined ? '\n…（下面还有内容）' : '')),
+          detail[0].nextOffset !== null && detail[0].nextOffset !== undefined
+            ? React.createElement('button', { type: 'button', onClick: nextSegment }, '继续读取（已读 ' + detail[0].nextOffset + ' / ' + (detail[0].totalBytes === null || detail[0].totalBytes === undefined ? '未知' : detail[0].totalBytes) + ' 字节）')
+            : null),
+        detail[0].relatedFindings && detail[0].relatedFindings.length ? React.createElement('small', null, '关联问题 ' + detail[0].relatedFindings.length + ' 条：' + detail[0].relatedFindings.map(function (f) { return f.id; }).join('、')) : null,
+        detail[0].identities && detail[0].identities.length ? React.createElement('small', null, '身份待关联：这份原文带 ' + detail[0].identities.map(function (item) { return item.kind; }).join('、') + '，尚未关联到账号；秘密不在资料里。') : null,
+        // 坏记录可定位（v6 第 10.5 节 UI05）：说清是第几条、为什么，而不是只报一个总数。
+        detail[0].importSummary && detail[0].importSummary.broken ? React.createElement('small', { role: 'status' },
+          '导入时 ' + detail[0].importSummary.entries + ' 条里有 ' + detail[0].importSummary.broken + ' 条坏记录：'
+          + detail[0].importSummary.brokenEntries.map(function (item) { return '第 ' + item.index + ' 条（' + item.reason + '）'; }).join('、')
+          + (detail[0].importSummary.broken > detail[0].importSummary.brokenEntries.length ? ' 等' : '')) : null,
+        React.createElement('button', { type: 'button', onClick: removeCurrent, title: '只从本任务移除引用，不删磁盘原文' }, '从本任务移除')) : null,
+      React.createElement('small', null, detail[0].note)) : null,
+    current && current.total > 0 ? React.createElement('div', { className: 'dsh-materials-foot' },
+      React.createElement('span', null, '共 ' + current.total + ' 条'),
+      React.createElement('button', { type: 'button', disabled: page[0] <= 1, onClick: function () { page[1](Math.max(1, page[0] - 1)); } }, '上一页'),
+      React.createElement('span', null, '第 ' + page[0] + ' 页'),
+      React.createElement('button', { type: 'button', disabled: !current.more, onClick: function () { page[1](page[0] + 1); } }, '下一页')) : null,
+    notice[0] ? React.createElement('p', { role: 'status' }, notice[0]) : null);
+}
 function ResultsView(props) {
 	var sessionId = props.sessionId != null ? String(props.sessionId) : "";
+	// 任务工作区里的「添加测试资料」走模块级桥接打开输入框上方的同一个面板（v6 第 5.3/5.4 节）。
+	var openMaterialsPanel = props.onAddMaterials || function () { if (materialsPanelBridge.open) materialsPanelBridge.open(); };
 	var mode = useState(props.defaultMode === 'code-audit' ? 'code-audit' : 'pentest');
-	var area = useState(props.defaultMode === 'code-audit' ? 'findings' : 'task');
+	var area = useState(props.fixedArea || (props.defaultMode === 'code-audit' ? 'findings' : 'execution'));
 	var historyMode = useState('pentest');
 	var counts = useState({}), countError = useState(''), countRequest = useRef(0);
 	var history = area[0] === 'history';
@@ -2621,18 +4081,9 @@ function ResultsView(props) {
 	useEffect(function () { refreshCounts(); return function () { countRequest.current++; }; }, [refreshCounts]);
 	if (!sessionId) return React.createElement('div', { className: 'dsh-rtr-skel' }, '等待会话上下文…');
 	return React.createElement('div', { className: 'dsh-task-workspace' },
-		React.createElement('nav', { className: 'dsh-task-nav', 'aria-label': '进度与发现导航' },
-			[['task','概览'],['findings','发现'],['files','文件']].map(function (row) {
-				return React.createElement('button', { key: row[0], type: 'button', 'aria-current': area[0] === row[0] ? 'page' : undefined,
-					onClick: function () { countRequest.current++; counts[1]({}); countError[1](''); area[1](row[0]); } }, row[1]);
-			}), React.createElement('select', { 'aria-label': '更多记录', value: ['materials','history'].includes(area[0]) ? area[0] : '', onChange: function (event) { if (event.target.value) area[1](event.target.value); } },
-				React.createElement('option', { value: '' }, '更多记录'), React.createElement('option', { value: 'materials' }, '本会话资料'), React.createElement('option', { value: 'history' }, '所有会话历史'))),
 		countError[0] ? React.createElement('p', { role: 'alert' }, countError[0]) : null,
-		area[0] === 'task' ? React.createElement(TaskPanel, { key: sessionId + '-task', sessionId: sessionId, onFindings: function () { area[1]('findings'); } }) : null,
-		area[0] === 'files' ? React.createElement(ProjectFilesPanel, { key: sessionId + '-files', sessionId: sessionId, sessionsStore: props.sessionsStore, connection: props.connection }) : null,
-		area[0] === 'materials' ? React.createElement('div', { className: 'dsh-task-materials' },
-			React.createElement(ContextPanel, { sessionId: sessionId }), React.createElement(ResearchPanel, { sessionId: sessionId }),
-			React.createElement(MethodPackagesPanel, { sessionId: sessionId })) : null,
+		area[0] === 'materials' ? React.createElement(MaterialsPanel, { key: sessionId + '-materials', sessionId: sessionId, inputActions: props.inputActions, onAddMaterials: openMaterialsPanel }) : null,
+		area[0] === 'execution' ? React.createElement(ExecutionPanel, { key: sessionId + '-execution', sessionId: sessionId, onOpenMaterials: function () { area[1]('materials'); } }) : null,
 		area[0] === 'findings' || history ? React.createElement('div', null,
 			React.createElement('div', { className: 'dsh-task-scope' }, React.createElement('strong', null, history ? '所有会话的历史记录' : '本会话发现'),
 				React.createElement('select', { 'aria-label': history ? '历史记录类型' : '发现类型', value: history ? historyMode[0] : mode[0],
@@ -2641,7 +4092,9 @@ function ResultsView(props) {
 					history ? React.createElement('option', { value: '__ledger__' }, '历史统计') : null)),
 			history && historyMode[0] === '__ledger__' ? React.createElement(BigScreen, { sessionId: sessionId })
 				: React.createElement(ModePage, { key: sessionId + '-' + (history ? 'history-' + historyMode[0] : mode[0]),
-					sessionId: sessionId, mode: history ? historyMode[0] : mode[0], scope: history ? 'all' : 'session', onRefreshCounts: refreshCounts })) : null);
+					sessionId: sessionId, mode: history ? historyMode[0] : mode[0], scope: history ? 'all' : 'session',
+					onRefreshCounts: refreshCounts, onAddMaterials: openMaterialsPanel,
+					onOpenExecution: function () { area[1]('execution'); } })) : null);
 }
 
 var REDTEAM_MANAGER_UI_NAMESPACE = "redteam-manager-ui";
@@ -2682,17 +4135,23 @@ function apply(ctx) {
 	ctx.effect(function () { return installStyles(); }, "dsh-redteam-results: styles");
 	ctx.effect(function () { return installChatSetupStyles(); }, "dsh-redteam-results: chat setup styles");
 	ctx.slots.inject('conversation.input.dock',function(){return ctx.slots.register({name:'conversation.input.dock',id:'saker-chat-setup',order:-20},ChatSetupEntry);});
-	ctx.inject(['sessions'], function (scope) { injectVisibleConversationView(ctx, "showRedteamResults", function () {
-		return ctx.slots.register({
-			name: "conversation.view",
-			id: "redteam-results",
-			order: 55,
-			label: function () { return "进度与发现"; }
-		}, function (props) {
-			var preset = props.useProjection('agentPreset');
-			return React.createElement(ResultsView, Object.assign({}, props, { key: props.sessionId, sessionsStore: scope.sessions, connection: ctx.connection, defaultMode: preset === 'code-audit' ? 'code-audit' : 'pentest' }));
+	ctx.inject(['sessions'], function (scope) {
+		[['redteam-execution', '执行记录', 'execution', 55],
+			['redteam-findings', '发现的问题', 'findings', 56],
+			['redteam-materials', '测试资料', 'materials', 57]].forEach(function (row) {
+			injectVisibleConversationView(ctx, "showRedteamResults", function () {
+				return ctx.slots.register({
+					name: "conversation.view",
+					id: row[0],
+					order: row[3],
+					label: function () { return row[1]; }
+				}, function (props) {
+					var preset = props.useProjection('agentPreset');
+					return React.createElement(ResultsView, Object.assign({}, props, { key: props.sessionId, sessionsStore: scope.sessions, connection: ctx.connection, defaultMode: preset === 'code-audit' ? 'code-audit' : 'pentest', fixedArea: row[2] }));
+				});
+			});
 		});
-	}); });
+	});
 }
 
 module.exports = { name: "dsh-redteam-results-client", inject: ["slots", "configForms", "connection"], apply: apply, ChatSetup: ChatSetup };

@@ -1,5 +1,5 @@
 1. 抓首页与常见静态资源（favicon、js 库路径、/robots、报错页），用 DSH_TOOL_HTTPX 批量探测，比对公开指纹库与 favicon hash。
 2. 记录：框架/CMS、版本（精确到小版本）、中间件、WAF/网关、语言与反代特征。
-3. 版本 → 关联已知 CVE（先在知识库 knowledge_search 查 PATT 对应章节，再考虑 EDB 查 PoC）。
-4. 产出：scripts/<target>/fingerprint.md；结果供 exploit 组选择攻击方向。
+3. 先记录产品、版本和证据；只有当前任务需要 Nday 或已有明确适用线索时，才检索对应 CVE/资料，不因指纹自动切换到 Nday。
+4. 保存实际观察值和判断依据，供当前问题选择后续检查方向。
 边界：仅做无害最小验证。

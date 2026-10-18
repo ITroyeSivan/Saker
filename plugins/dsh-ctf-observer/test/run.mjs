@@ -216,7 +216,7 @@ ok("MODE_ID 就是 ctf-solver（其余模式零干扰的前提）", MODE_ID === 
 	// 8 个独立 node 进程同时各派一条单，断言一条不丢。
 	// ⚠️ 这条**只算冒烟、不算证伪**：实测本机无锁实现也能过它（临界区只有几十微秒，
 	//    8 个进程的读-改-写恰好错开）。真正能证伪锁的是
-	//    `_ref/tools/revcheck-board-lock.mjs`（无锁版加宽临界区 → 必然丢；加锁版同负载 → 一条不丢）。
+	//    反向检查脚本（无锁版加宽临界区 → 必然丢；加锁版同负载 → 一条不丢）。
 	const cw = mkdtempSync(join(tmpdir(), "ctf-board-conc-"));
 	const boardUrl = pathToFileURL(join(__dirname, "../lib/board.js")).href;
 	const kid = `import { dispatch } from ${JSON.stringify(boardUrl)};`
