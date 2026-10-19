@@ -48,7 +48,7 @@ function baseline(store, sessionId, binding) {
 function policy(store, sessionId) {
   const row = store.db.prepare('SELECT record FROM task_policy WHERE session_id=?').get(sessionId);
   const mode = row && JSON.parse(row.record).mode;
-  if (!['nday', 'regular', '0day'].includes(mode)) throw new Error('validation direction requires a configured pentest task');
+  if (!['nday', 'regular', '0day', 'project'].includes(mode)) throw new Error('validation direction requires a configured pentest task');
   return mode;
 }
 function knownCheck(input) {

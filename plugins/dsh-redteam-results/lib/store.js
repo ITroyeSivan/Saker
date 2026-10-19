@@ -220,6 +220,29 @@ CREATE TABLE IF NOT EXISTS session_meta (
 	scope      TEXT NOT NULL DEFAULT '',
 	updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS project_runs (
+ session_id TEXT NOT NULL, run_id TEXT NOT NULL, state TEXT NOT NULL,
+ control_rev INTEGER NOT NULL, record TEXT NOT NULL, updated_at TEXT NOT NULL,
+ PRIMARY KEY(session_id, run_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_project_runs_active ON project_runs(session_id)
+ WHERE state IN ('preparing','running','waiting','paused');
+CREATE TABLE IF NOT EXISTS project_sources (
+ session_id TEXT NOT NULL, source_id TEXT NOT NULL, source_revision TEXT NOT NULL,
+ record TEXT NOT NULL, updated_at TEXT NOT NULL,
+ PRIMARY KEY(session_id, source_id, source_revision)
+);
+CREATE TABLE IF NOT EXISTS project_checks (
+ session_id TEXT NOT NULL, run_id TEXT NOT NULL, check_id TEXT NOT NULL, check_revision INTEGER NOT NULL,
+ record TEXT NOT NULL, updated_at TEXT NOT NULL,
+ PRIMARY KEY(session_id, run_id, check_id)
+);
+CREATE TABLE IF NOT EXISTS project_actions (
+ session_id TEXT NOT NULL, run_id TEXT NOT NULL, action_id TEXT NOT NULL, state TEXT NOT NULL,
+ record TEXT NOT NULL, updated_at TEXT NOT NULL,
+ PRIMARY KEY(session_id, run_id, action_id)
+);
+CREATE INDEX IF NOT EXISTS idx_project_actions_state ON project_actions(session_id, run_id, state);
 `; }
 
 const COLS = "session_id,id,seq,mode,title,severity,status,evidence_level,type,target,summary,description,poc,chain,evidence,fix,verify_note,created_at,updated_at,verified_at,baseline,diff_evidence,marker_echo,impact,cvss,retest_note,retest_at,request_pkt,response_pkt,snippet_entry,snippet_sink,chain_tracer,chain_verdict,cwe,patch,source_origin,sample_hash,family,packer,iocs,detection_rule,timeline_at,entry,identity,permission,resource,audit_mode,second_rating,second_rating_note,proof_kind,reproduction,evidence_refs";
@@ -236,7 +259,7 @@ const MIGRATION_COLUMNS = [
 ];
 
 /** 库结构版本。写入 `PRAGMA user_version`，供后续迁移按版本排序与回退。 */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 /**
  * 库比本构建新时的拒绝错误。
@@ -571,10 +594,11 @@ export function updateFinding(store, sessionId, mode, id, patch = {}) {
 	cleanStatus(patch.status, mode, prev.status);
 	// fixed 只接受"此前已验证真实存在"的流转：先 verified、修复后复测不成功才可标记——
 	// 仅漏洞生命周期模式适用；redteam 台账语义 fixed=已路由（收口的替代路径），无此前置。
-	// 只在**状态真的流转到 fixed**时校验；已经是 fixed 的发现再改别的字段（如补复测说明）
-	// 不该被这条守卫误伤（否则"已修复"的发现永远改不了任何内容）。
-	const movingToFixed = mode !== "redteam" && statusSet.includes("fixed") && prev.status !== "fixed"
+	// 显式提交 status=fixed 时校验（无论首次流转还是已经是 fixed）：这样后续追加
+	// inconclusive/still-reproducible 不能与 fixed 状态共存；不写 status 的普通编辑不触发。
+	const declaresFixed = mode !== "redteam" && statusSet.includes("fixed") && patch.status !== undefined
 		&& cleanEnum(patch.status, statusSet, prev.status) === "fixed";
+	const movingToFixed = declaresFixed && prev.status !== "fixed";
 	if (movingToFixed && prev.status !== "verified") {
 	throw new Error("fixed 仅可用于此前已验证（verified）真实存在的 finding——先验证成立再流转标记（渗透/代审=已修复（修复复测不成功）；攻防=已交付；应急=已处置）");
 	}
@@ -583,7 +607,16 @@ export function updateFinding(store, sessionId, mode, id, patch = {}) {
 	// 不能拿一次没打中冒充已修复（retest.js 已在录入时挡掉这类结论）。
 	// 只有 fixed=「已修复/已处置」语义的模式才要求复测；attack-defense 的 fixed=已交付、
 	// redteam 的 fixed=已路由都不走这条（它们不是"修好了"的结论）。
-	if (movingToFixed && REPAIR_FIXED_MODES.has(mode)) requireCurrentRepairRetest(store, sessionId, id);
+	const finalReproduction = reproduction !== undefined ? reproduction : prev.reproduction;
+	const nextTarget = patch.target !== undefined ? cleanText(patch.target, 500) : prev.target;
+	const nextIdentity = patch.identity !== undefined ? cleanText(patch.identity) : prev.identity;
+	let nextEndpoint = "";
+	try { nextEndpoint = String(JSON.parse(finalReproduction || "{}")?.endpoint || ""); } catch { nextEndpoint = ""; }
+	if (declaresFixed && REPAIR_FIXED_MODES.has(mode)) requireCurrentRepairRetest(store, sessionId, id, {
+		target: nextTarget, identity: nextIdentity, endpoint: nextEndpoint,
+		identityChanged: patch.identity !== undefined && cleanText(patch.identity) !== prev.identity,
+		endpointChanged: reproduction !== undefined
+	});
 	// 二次复核成对校验：首次流转到 verified 必须同时给出独立二次评级与足量依据。
 	// 强制在"同一次调用"里给齐——分两次写等于把复核变成事后补笔记。
 	const reviewError = secondReviewError(mode, prev, patch);

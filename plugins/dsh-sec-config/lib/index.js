@@ -130,6 +130,7 @@ async function loadEgressLib() {
  * injected into the shell as DSH_TOOL_<NAME>.
  */
 export const TOOL_PRESETS = [
+  { key: 'chrome_for_testing', label: 'Chrome for Testing', category: '浏览器' },
   { key: 'subfinder', label: 'Subfinder', category: '信息收集' },
   { key: 'httpx', label: 'Httpx', category: '信息收集' },
   { key: 'nmap', label: 'Nmap', category: '信息收集' },
@@ -151,7 +152,7 @@ export const TOOL_PRESETS = [
   { key: 'bloodhound', label: 'BloodHound', category: '内网与横向' },
 ]
 
-export const TOOL_CATEGORIES = ['信息收集', '漏洞扫描', '目录与接口', '注入与利用', '令牌与认证', '内网与横向']
+export const TOOL_CATEGORIES = ['浏览器', '信息收集', '漏洞扫描', '目录与接口', '注入与利用', '令牌与认证', '内网与横向']
 
 /** Preset tool keys whose paths the shell receives as DSH_TOOL_<NAME>. */
 const TOOL_KEYS = TOOL_PRESETS.map((t) => t.key)

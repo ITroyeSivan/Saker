@@ -399,20 +399,26 @@ function write(store, sessionId, record) {
 export function startTaskPolicy(store, sessionId, input, now = Date.now()) {
   return taskTransaction(store, () => {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('policy must be an object');
-  const mode = input.mode === 'campaign' ? 'nday' : input.mode;
+  const scenario = input.scenario === undefined ? 'pentest' : input.scenario;
+  if (!['pentest', 'project'].includes(scenario)) throw new Error('invalid task scenario');
+  const isProject = scenario === 'project';
+  const mode = isProject ? 'project' : (input.mode === 'campaign' ? 'nday' : input.mode);
   const stop = input.stop || 'budget';
-  if (!modes.has(mode) || !stops.has(stop)) throw new Error('invalid task mode or stop policy');
-  const chosen = chosenTaskMode(store, sessionId);
+  if (!stops.has(stop)) throw new Error('invalid stop policy');
+  if (!isProject && !modes.has(mode)) throw new Error('invalid task mode');
+  const chosen = isProject ? null : chosenTaskMode(store, sessionId);
   const parentId = store.db.prepare('SELECT parent_session FROM site_workers WHERE child_id=?').get(sessionId)?.parent_session
     ?? (input.purposeTask === true ? input.parentSession : undefined);
   if (parentId && !readTaskPolicy(store, parentId)) throw new Error('parent task policy missing');
-  const choice = parentId ? null : chosenTaskOptions(store, sessionId);
+  const choice = parentId || isProject ? null : chosenTaskOptions(store, sessionId);
   const interaction = normalizeInteraction(input.interaction ?? choice?.interaction ?? (parentId ? readTaskPolicy(store, parentId)?.interaction : undefined));
   if (choice && interaction !== normalizeInteraction(choice.interaction)) throw new Error('interaction differs from the selected Desktop preference');
   const reporting = reportingFor({ interaction, reporting: input.reporting ?? choice?.reporting ?? (parentId ? reportingFor(readTaskPolicy(store, parentId)) : undefined) });
   if (choice && reporting !== reportingFor(choice)) throw Error('reporting differs from the selected Desktop preference');
   const explain = input.explain === undefined ? (choice?.explain ?? (parentId ? readTaskPolicy(store, parentId)?.explain : false) ?? false) : input.explain === true;
-  const flow = normalizeTaskFlow(input.workflow ?? choice?.workflow ?? 'single', mode);
+  const flow = isProject
+    ? { kind: 'project', phase: 'running', completed: { regular: false, nday: false }, history: [] }
+    : normalizeTaskFlow(input.workflow ?? choice?.workflow ?? 'single', mode);
   if (choice && flow.kind !== choice.workflow) throw new Error('workflow differs from the selected Desktop workflow');
   if (chosen && chosen !== mode) throw new Error('mode differs from the selected Desktop workflow');
   if (readTaskPolicy(store, sessionId)) throw new Error('task already started; budgets cannot be reset in this session');
@@ -422,7 +428,9 @@ export function startTaskPolicy(store, sessionId, input, now = Date.now()) {
   if (selectedStartMode && requestedStartMode !== undefined && requestedStartMode !== selectedStartMode) throw new Error('start mode differs from the selected Desktop preference');
   if (parentId && requestedStartMode !== undefined && requestedStartMode !== inheritedStartMode) throw new Error('子代理不能更改主任务的起步方式');
   const startMode = parentId ? inheritedStartMode : (selectedStartMode || requestedStartMode || 'materials-first');
-  const toolCalls = integer(input.budget?.toolCalls, 'budget.toolCalls', 1, 10000);
+  const toolCalls = isProject && (input.budget?.toolCalls === undefined || input.budget?.toolCalls === null)
+    ? null
+    : integer(input.budget?.toolCalls, 'budget.toolCalls', 1, 10000);
   const discoveryCalls = mode === '0day' ? integer(input.budget?.discoveryCalls ?? Math.min(5, toolCalls), 'budget.discoveryCalls', 0, toolCalls) : 0;
   // 未计量目标流量的显式额度：默认 0，即"没有明确允许就不发无法逐条计量的扫描流量"。
   // 起点方式决定**建议额度**：选了"自动信息收集"就是明确要采集，给一个有界默认（仍可显式改 0/改小）；
@@ -446,19 +454,24 @@ export function startTaskPolicy(store, sessionId, input, now = Date.now()) {
   if (parentSession && flow.kind !== 'single') throw new Error('子代理不能开启独立衔接流程');
   // 动作限制沿用桌面选择；子代理、基线复查与恢复任务都遵守主任务的同一份限制。
   const parentPolicy = parentSession ? readTaskPolicy(store, parentSession) : null;
-  const allowTargetNetwork = parentSession ? parentPolicy?.allowTargetNetwork !== false : (choice?.allowTargetNetwork ?? true);
-  const readOnly = parentSession ? parentPolicy?.readOnly === true : (choice?.readOnly ?? false);
-  const excludedPaths = parentSession ? normalizeExcludedPaths(parentPolicy?.excludedPaths) : normalizeExcludedPaths(choice?.excludedPaths);
-  const requestRatePerMinute = parentSession ? normalizeRequestRate(parentPolicy?.requestRatePerMinute) : normalizeRequestRate(choice?.requestRatePerMinute);
-  const requestConcurrency = parentSession ? normalizeRequestConcurrency(parentPolicy?.requestConcurrency) : normalizeRequestConcurrency(choice?.requestConcurrency);
+  const allowTargetNetwork = parentSession ? parentPolicy?.allowTargetNetwork !== false
+    : isProject ? input.allowTargetNetwork !== false : (choice?.allowTargetNetwork ?? true);
+  const readOnly = parentSession ? parentPolicy?.readOnly === true
+    : isProject ? input.readOnly === true : (choice?.readOnly ?? false);
+  const excludedPaths = parentSession ? normalizeExcludedPaths(parentPolicy?.excludedPaths)
+    : isProject ? normalizeExcludedPaths(input.excludedPaths) : normalizeExcludedPaths(choice?.excludedPaths);
+  const requestRatePerMinute = parentSession ? normalizeRequestRate(parentPolicy?.requestRatePerMinute)
+    : isProject ? normalizeRequestRate(input.requestRatePerMinute) : normalizeRequestRate(choice?.requestRatePerMinute);
+  const requestConcurrency = parentSession ? normalizeRequestConcurrency(parentPolicy?.requestConcurrency)
+    : isProject ? normalizeRequestConcurrency(input.requestConcurrency) : normalizeRequestConcurrency(choice?.requestConcurrency);
   let modules = {};
-  if (!parentSession) {
+  if (!parentSession && !isProject) {
     const home = store.dbPath === ':memory:' ? (process.env.DSH_HOME || '.') : path.dirname(path.dirname(store.dbPath));
     const config = moduleInitialization(home, sessionId, mode);
     taskModuleSelection(store, sessionId, config);
     modules = adoptPreparedModules(store, sessionId);
   }
-  return write(store, sessionId, { mode, flow, startMode, interaction, reporting, explain: explain === true, stop, question, target, workerLimit,
+  return write(store, sessionId, { scenario, mode, flow, startMode, interaction, reporting, explain: explain === true, stop, question, target, workerLimit,
     workerModel: choice?.workerModel ?? null, reviewModel: choice?.reviewModel ?? null, reportModel: choice?.reportModel ?? null,
     allowTargetNetwork, readOnly, excludedPaths, requestRatePerMinute, requestConcurrency, ...modules, ...(parentSession ? { parentSession } : {}),
     ...(parentSession ? { parentRound: readTaskPolicy(store, parentSession)?.startedAt } : {}),
@@ -718,7 +731,7 @@ export function taskPolicyStatus(store, sessionId, now = Date.now()) {
   else if (policy.stop === 'budget' && policy.planComplete) reason = 'plan_complete';
   else if (policy.turnEndedAt) reason = 'turn_ended';
   else if (policy.budget.deadline !== null && now >= policy.budget.deadline) reason = 'time_budget_exhausted';
-  else if (policy.used.toolCalls >= policy.budget.toolCalls) reason = 'tool_budget_exhausted';
+  else if (policy.budget.toolCalls !== null && policy.budget.toolCalls !== undefined && policy.used.toolCalls >= policy.budget.toolCalls) reason = 'tool_budget_exhausted';
   else if (policy.stop === 'first-rce' && findings.some(finding => finding.proofKind === 'execution')) reason = 'first_verified_rce';
   else if (policy.stop === 'first-high' && findings.some(finding => ['high', 'critical'].includes(finding.secondRating))) reason = 'first_verified_high';
   else if (policy.awaitingConfirmation) reason = 'interaction_confirmation_required';
@@ -800,6 +813,18 @@ const RETEST_HINT = '复测已有发现时：先用可计量入口重新核对�
 function taskPromptBase(state, includeUsage = true, controlledInterface = false) {
   if (!state.configured) return (state.choice ? '用户选择了/pentest-'+state.choice+'。围绕给定站点和具体问题设置有限预算；选择菜单没有开始测试。' : '渗透测试：先明确本轮站点和小问题；用户已给则直接推进，只有URL先有限观察并建议方向。')+(state.options?'必须沿用桌面选择workflow='+state.options.workflow+'，子代理上限='+state.options.workers+'，不能自行增加。':'')+interactionPrompt(state.options?.interaction,false,reportingFor(state.options));
   const policy=state.policy;
+  if (policy.scenario === 'project') {
+    const projectUsage = includeUsage && policy.budget.toolCalls !== null && policy.budget.toolCalls !== undefined
+      ? '操作=' + policy.used.toolCalls + '/' + policy.budget.toolCalls + '；'
+      : '操作按实际调用统计（未设上限）；';
+    return '按文档连续测试：先读取用户提供的测试要求，逐项执行并保存结果；缺条件项写清缺什么并继续独立项；'
+      + '目标测试优先用受管 Chrome for Testing（CDP）在真实浏览器里观察和操作；需要原始 HTTP 时走 Saker 的可计量派发入口，'
+      + '不要用 shell curl 直接发目标请求——curl 不会自动带 Cookie/Origin/Referer/User-Agent 等浏览器请求头，容易误判结果；'
+      + '本轮问题：' + (policy.question || '按用户文档') + '；站点：' + (policy.target || '按已给授权范围，不能自行扩大') + '；' + projectUsage
+      + '停止规则=' + policy.stop + '。' + (includeUsage ? '' : '需要精确用量时调用 redteam_task action=status；宿主守卫按最新预算拦截。')
+      + (state.stopped ? '目标操作已停止：' + state.reason + '。只整理证据与交付。' : '使用实际观察结果；没有执行到的项写清未完成，不能写成通过。')
+      + (controlledInterface ? CONTROLLED_INTERFACE_HINT : '');
+  }
   const startModeLabel = { 'materials-first': '资料优先', 'auto-recon': '自动信息收集（先按缺项采集并落盘入口，再把一两个入口存成请求做常规检查）', 'direct-test': '直接测试' }[taskStartMode(policy)];
   // 易变计数不放进常驻快照：宿主每次发现快照文本变化都会追加新的 runtime-context
   // 消息，缓存会在每个工具调用后失效。精确用量改由 redteam_task status 按需查询，
@@ -866,7 +891,7 @@ export function taskOverview(store, sessionId) {
     for (const condition of check.conditions || []) if (condition.state === 'unknown') missing.push(condition.name + '未知');
     return missing.length ? [{ id: check.entryId, endpoint: check.endpoint, missing }] : [];
   });
-  return { ...state, ...(state.configured && !state.stopped ? { next: researchNext(store, sessionId) } : {}), counts: { assets: context?.assets.length || 0, requests: context?.requests.length || 0,
+  return { ...state, ...(state.configured && !state.stopped && state.policy.scenario !== 'project' ? { next: researchNext(store, sessionId) } : {}), counts: { assets: context?.assets.length || 0, requests: context?.requests.length || 0,
     methods: context?.methods.length || 0, checks: checks.length, blocked: checks.filter(row => row.status === 'blocked').length,
     notTested: checks.filter(row => row.status === 'not-tested').length }, gaps: gaps.slice(0, 20), moreGaps: Math.max(0, gaps.length - 20) };
 }

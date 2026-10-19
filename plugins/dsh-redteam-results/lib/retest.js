@@ -54,15 +54,31 @@ const sameOrigin = (a, b) => {
   try { return new URL(a).origin === new URL(b).origin; } catch { return false; }
 };
 
-/** 目标实例校验：finding.target 不是 URL 时无法比对，按"未声明"处理。 */
-function requireFindingTarget(store, sessionId, findingId, execution, role) {
-  const target = String(store.db.prepare('SELECT target FROM findings WHERE session_id=? AND id=?').get(sessionId, findingId)?.target || '');
-  if (!target) return;
-  let declared;
-  try { declared = new URL(target).origin; } catch { return; }
-  let actual;
-  try { actual = new URL(execution.endpoint).origin; } catch { actual = ''; }
-  if (declared !== actual) throw new Error(role + '回执与当前发现的目标实例不一致，请重新执行本次复测');
+const pathOf = value => {
+  try { return new URL(value).pathname.replace(/\/+$/, '') || '/'; } catch { return ''; }
+};
+
+/** 证明归属校验：优先使用本次待提交的最终事实，避免"先按旧目标校验、再写入新目标"。
+ * finding.target 不是 URL 时无法比对，按"未声明"处理；路径和身份只在本次显式变更时核对。 */
+function requireFindingTarget(store, sessionId, findingId, execution, role, context = {}) {
+  const row = store.db.prepare('SELECT target FROM findings WHERE session_id=? AND id=?').get(sessionId, findingId);
+  const target = context.target !== undefined ? String(context.target || '') : String(row?.target || '');
+  if (target) {
+    let declared;
+    try { declared = new URL(target).origin; } catch { declared = ''; }
+    if (declared) {
+      let actual;
+      try { actual = new URL(execution.endpoint).origin; } catch { actual = ''; }
+      if (declared !== actual) throw new Error(role + '回执与当前发现的目标实例不一致，请重新执行本次复测');
+      const declaredPath = pathOf(target);
+      if (declaredPath && declaredPath !== '/' && declaredPath !== pathOf(execution.endpoint))
+        throw new Error(role + '回执与当前发现的目标路径不一致，请重新执行本次复测');
+    }
+  }
+  if (context.endpointChanged && context.endpoint && pathOf(context.endpoint) !== pathOf(execution.endpoint))
+    throw new Error(role + '回执与当前发现的实际路径不一致，请重新执行本次复测');
+  if (context.identityChanged && context.identity && execution.authContext && context.identity !== execution.authContext)
+    throw new Error(role + '回执与当前发现的身份不一致，请重新执行本次复测');
 }
 
 /** 记录一次复测。返回新版本记录；不修改原发现。
@@ -117,11 +133,11 @@ export function recordRetest(store, sessionId, input = {}, options = {}) {
 }
 
 /** Recheck at both recording and the later fixed transition; stored history is not current proof. */
-export function requireCurrentRetestExecution(store, sessionId, findingId, execution, { role = '执行' } = {}) {
+export function requireCurrentRetestExecution(store, sessionId, findingId, execution, { role = '执行', ...context } = {}) {
   if (execution?.current !== true || execution.integrityValid !== true) throw new Error(role + '回执已失效或与当前请求不匹配，请重新执行本次复测');
   if (execution.outcome !== 'response') throw new Error(role + '没有取得目标响应：只能记无法确认');
   requireFreshExecutions([execution]);
-  requireFindingTarget(store, sessionId, findingId, execution, role);
+  requireFindingTarget(store, sessionId, findingId, execution, role, context);
   const roundStarted = Number(policyRecord(store, sessionId)?.startedAt);
   const verifyStarted = listVerifyStarted(store, sessionId).get(findingId) || 0;
   if (!Number.isFinite(Date.parse(execution.startedAt))
@@ -129,17 +145,17 @@ export function requireCurrentRetestExecution(store, sessionId, findingId, execu
     throw new Error(role + '回执早于本轮任务或本次复测，请重新执行');
 }
 
-export function requireCurrentRepairRetest(store, sessionId, findingId) {
+export function requireCurrentRepairRetest(store, sessionId, findingId, context = {}) {
   const latest = listRetests(store, sessionId, findingId, { limit: 1 })[0];
   if (latest?.verdict !== 'not-reproduced' || !latest.executionId)
     throw new Error('fixed 需要最新的「本次未复现」记录；最新结论为无法确认或仍可复现时，请重新复测');
   if (!latest.controlExecutionId) throw new Error('本次未复现缺少正常功能对照回执，不能标记已修复；请重新完成带对照的复测');
   const execution = readExecutionReceipt(store, sessionId, latest.executionId);
-  requireCurrentRetestExecution(store, sessionId, findingId, execution);
+  requireCurrentRetestExecution(store, sessionId, findingId, execution, context);
   if ([401, 407, 429].includes(Number(execution.status)) || Number(execution.status) >= 500)
     throw new Error('本次执行未能确认正常功能：只能记无法确认，不能标记已修复');
   const control = readExecutionReceipt(store, sessionId, latest.controlExecutionId);
-  requireCurrentRetestExecution(store, sessionId, findingId, control, { role: '正常功能对照' });
+  requireCurrentRetestExecution(store, sessionId, findingId, control, { ...context, role: '正常功能对照' });
   if (control.outcome !== 'response' || Number(control.status) < 200 || Number(control.status) >= 300)
     throw new Error('正常功能对照已经失效或不再是 2xx，不能标记已修复；请重新完成带对照的复测');
   if (!sameOrigin(control.endpoint, execution.endpoint) || control.authContext !== execution.authContext)

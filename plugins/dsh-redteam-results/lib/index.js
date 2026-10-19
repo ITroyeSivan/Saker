@@ -33,6 +33,12 @@ import { readOobConfig, issueCallbackHost, fetchOobRecords, recordInteraction, r
 import { runBrowserExecution, recordBrowserReceipt, readBrowserReceipt } from './browser-execution.js';
 import { runEffectJob, readEffectJob } from './effect-jobs.js';
 import { startTaskPolicy, updateTaskProgress, taskPolicyStatus, readTaskPolicy, taskExecutionGuard, taskPrompt, taskPromptStable, taskOverview, chooseTaskMode, pauseTaskPolicy, resumeTaskPolicy, archiveTaskRound, takeTaskContinuation, finishTaskOnTurnEnd, checkpointTask, setTaskInteraction, setTaskWorkers, setTaskExplain, setTaskActionLimits, updateTaskFromChat, targetTrafficDenial, effectivePolicy, confirmTaskCheckpoint } from './task-policy.js';
+import { projectContinuation, markProjectContinuation, pauseProjectRun, resumeProjectRun, projectExecutableChecks } from './project-runtime.js';
+import { activeProjectRun, readProjectRun, listProjectChecks, listProjectSources, listProjectActions, createProjectRun, transitionProjectRun, defineProjectChecks, recordProjectCheck, readProjectCheck } from './project-store.js';
+import { zipProjectDelivery, projectCounts } from './project-delivery.js';
+import { startBrowserSession } from './browser-session.js';
+import { executeProjectHttp } from './project-execution.js';
+import { readDocumentSection } from './project-documents.js';
 import { taskStartInput, taskProgressInput } from './task-inputs.js';
 import { chatDefaults, saveChatDefaults, promptDraft, promptTemplates } from './chat-setup.js';
 import { listAccounts, saveAccount, removeAccount, ACCOUNT_STATUSES } from './accounts.js';
@@ -779,6 +785,69 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
 		if (!sessionId) throw new Error("sessionId required");
 		return { ok: true, meta: setMeta(st, sessionId, p) };
 	}
+  if (String(endpoint).startsWith('project.')) {
+    const sessionId = String(p.sessionId || '');
+    if (!sessionId) throw new Error('sessionId required');
+    let sessions;
+    try { sessions = ctx.sessions || ctx.get?.('sessions'); } catch { /* unavailable */ }
+    const session = sessions?.get(sessionId);
+    if (!session || session.header?.agentPreset !== 'pentest') throw new Error('请选择当前可用的渗透会话');
+    const requestedRunId = String(p.runId || '');
+    if (endpoint === 'project.status') {
+      const run = activeProjectRun(st, sessionId) || (requestedRunId ? readProjectRun(st, sessionId, requestedRunId) : null);
+      const checks = run ? listProjectChecks(st, sessionId, run.runId) : [];
+      return { ok: true, configured: !!run, run, checks, sources: listProjectSources(st, sessionId), counts: projectCounts(checks) };
+    }
+    if (endpoint === 'project.start') {
+      const existing = activeProjectRun(st, sessionId);
+      if (existing) return { ok: true, existing: true, run: existing, counts: projectCounts(listProjectChecks(st, sessionId, existing.runId)) };
+      const policyInput = { ...(p.policy || {}), scenario: 'project' };
+      const currentPolicy = readTaskPolicy(st, sessionId);
+      let policy;
+      if (currentPolicy) {
+        // 方案 13.2：再次测试建立新 run 并保留旧结果；已有其他任务时拒绝混用。
+        if (currentPolicy.scenario !== 'project') throw new Error('当前会话已有其他任务；再次按文档测试请新建会话');
+        policy = policyInput.question ? writeTaskPolicy(st, sessionId, { ...currentPolicy, question: policyInput.question }, 'project-restart') : currentPolicy;
+      } else {
+        policy = startTaskPolicy(st, sessionId, policyInput);
+      }
+      const run = createProjectRun(st, sessionId, { policyRev: policy.policyRev, question: policy.question });
+      if (p.autoStart !== false) {
+        const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
+        if (typeof agent?.followup !== 'function' || agent.status === 'running') {
+          transitionProjectRun(st, sessionId, run.runId, 'failed', run.controlRev, { blocker: { code: 'needs-user', reason: '当前代理不可用或仍在运行' } });
+          throw new Error('当前代理不可用或仍在运行，任务尚未开始');
+        }
+        try {
+          agent.followup({ id: `saker-project-${sessionId}-${run.runId}`, role: 'user', source: { kind: 'user' },
+            content: [{ type: 'text', text: '请开始按文档测试：先读取本次添加的测试文档和用户说明，整理要检查的内容与来源，然后逐项执行；缺条件的项写清缺口并继续独立项。不要重复开始任务或重置预算。' }] });
+        } catch (error) {
+          transitionProjectRun(st, sessionId, run.runId, 'failed', run.controlRev, { blocker: { code: 'needs-user', reason: '模型未能开始', evidence: String(error.message || error) } });
+          throw new Error('模型未能开始，已停止本次运行：' + error.message);
+        }
+      }
+      return { ok: true, existing: false, run, counts: projectCounts([]) };
+    }
+    const run = requestedRunId ? readProjectRun(st, sessionId, requestedRunId) : activeProjectRun(st, sessionId);
+    if (!run) return { ok: false, error: '没有活动的项目运行' };
+    if (endpoint === 'project.pause') return { ok: true, run: pauseProjectRun(st, sessionId, run.runId, { code: 'needs-user', reason: '用户暂停', at: new Date().toISOString() }) };
+    if (endpoint === 'project.resume') return { ok: true, run: resumeProjectRun(st, sessionId, run.runId) };
+    if (endpoint === 'project.stop') return { ok: true, run: transitionProjectRun(st, sessionId, run.runId, 'cancelled', run.controlRev, { blocker: { code: 'cancelled', reason: '用户停止' } }) };
+    if (endpoint === 'project.check-detail') {
+      const check = readProjectCheck(st, sessionId, run.runId, String(p.checkId || ''));
+      if (!check) return { ok: false, error: '未找到该检查' };
+      return { ok: true, run, check, actions: listProjectActions(st, sessionId, run.runId).filter(action => (check.actionRefs || []).includes(action.actionId)) };
+    }
+    if (endpoint === 'project.define-checks') {
+      const checks = defineProjectChecks(st, sessionId, run.runId, Array.isArray(p.checks) ? p.checks : []);
+      return { ok: true, checks, counts: projectCounts(listProjectChecks(st, sessionId, run.runId)) };
+    }
+    if (endpoint === 'project.export') {
+      const bundle = zipProjectDelivery(st, sessionId, run.runId);
+      return { ok: true, filename: 'saker-project-' + run.runId + '.zip', archive: bundle.archive.toString('base64'), counts: bundle.counts };
+    }
+    return { ok: false, error: '未知的项目操作：' + endpoint };
+  }
 	if (endpoint === "finding.delete") {
 		const sessionId = String(p.sessionId ?? "");
 		if (!sessionId) throw new Error("sessionId required");
@@ -930,15 +999,27 @@ function apply(ctx) {
   ctx.on?.('agent/turn-stopping', ({ agent, signal }) => {
     const session = sessionOf(ctx, { agent });
     if (!session || session.mode !== 'pentest' || signal?.aborted || typeof agent.steer !== 'function') return;
-    const message = takeTaskContinuation(theStore(), session.id);
+    const store = theStore();
+    const project = projectContinuation(store, session.id);
+    if (project) {
+      // 项目接续：只在运行仍有效、存在可执行项且没有在途/未知写入时发生。
+      try {
+        agent.steer(project.text);
+        markProjectContinuation(store, session.id, project.runId, project.fingerprint, project.attempts);
+      } catch (error) {
+        pauseProjectRun(store, session.id, project.runId, { code: 'needs-user', reason: '自动衔接未能继续', evidence: String(error.message || error) });
+      }
+      return;
+    }
+    const message = takeTaskContinuation(store, session.id);
     if (message) {
       // 注入安全：agent/turn-stopping 在回合停止检查中派发，不在 Session.append 发布临界区内；steer 使宿主继续当前回合。
       try { agent.steer(message); }
-      catch (error) { pauseTaskPolicy(theStore(), session.id, { code: 'needs-user', reason: '自动衔接未能继续', evidence: String(error.message || error) }, 'host-continuation-failure'); }
+      catch (error) { pauseTaskPolicy(store, session.id, { code: 'needs-user', reason: '自动衔接未能继续', evidence: String(error.message || error) }, 'host-continuation-failure'); }
       return;
     }
-    try { finishTaskOnTurnEnd(theStore(), session.id); }
-    catch (error) { pauseTaskPolicy(theStore(), session.id, { code: 'needs-user', reason: '回合结束收口失败', evidence: String(error.message || error) }, 'host-turn-end-failure'); }
+    try { finishTaskOnTurnEnd(store, session.id); }
+    catch (error) { pauseTaskPolicy(store, session.id, { code: 'needs-user', reason: '回合结束收口失败', evidence: String(error.message || error) }, 'host-turn-end-failure'); }
   });
   const siteWorkers = createSiteWorkers(ctx, theStore);
   workerManagers.set(ctx, siteWorkers);
@@ -1067,7 +1148,7 @@ function apply(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "redteam_finding_update",
-		description: "按 id 更新 finding：状态、字段、复核/复测注记；首次转 verified 须给 secondRating 与 ≥40 字 secondRatingNote。",
+		description: "按 id 更新 finding：状态、字段、复核/复测注记；首次转 verified 须给 secondRating 与 ≥40 字依据。",
 		parameters: {
 			id: { type: "string", required: true, description: "finding id（如 pentest-3）" },
 			status: { type: "string", enum: ALL_STATUSES, description: "新状态；按当前模式终态规则，详见 finding-fields.md" },
@@ -1273,7 +1354,7 @@ function apply(ctx) {
   }));
   ctx.tools.register(defineTool({
     name: 'redteam_research',
-    description: '围绕实际输入研究具体问题，自动保留对照证据；无新信息即停。结论须独立复核，detail读完整记录。',
+    description: '围绕实际输入研究具体问题，保留对照证据；结论须独立复核。',
     parameters: {
       action: { type: 'string', required: true, enum: ['groups', 'list', 'detail', 'create', 'observe', 'assess', 'close'], description: '契约见README' },
       id: { type: 'string', description: 'detail/observe/assess/close必填：验证方向ID；不是观察id' },
@@ -1331,7 +1412,7 @@ function apply(ctx) {
       queueComplete: { type: 'boolean' },
       regularComplete: { type: 'boolean' },
       ndayComplete: { type: 'boolean' },
-      document: { type: 'string', description: '子代理：delegate(site/question/need/reason/focus)、send(childId/message)、report、pause、checkpoint、cleanup、update(交互/汇报/解释/助手数/预算/范围)' }
+      document: { type: 'string', description: '子代理：delegate/send/report/pause/checkpoint/cleanup/update（范围与预算）。' }
 		},
 		output: {
 			schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
@@ -1491,6 +1572,150 @@ function apply(ctx) {
 			} catch (error) { return Promise.resolve({ ok: false, error: error.message }); }
 		}
 	}));
+	//#region 项目测试工具（scenario=project）
+	const projectBrowsers = new Map();
+	const projectScopeOf = exec => {
+		const session = sessionOf(ctx, exec);
+		if (!session || session.mode !== 'pentest') return { error: '仅当前渗透会话可用' };
+		const store = theStore();
+		const policy = readTaskPolicy(store, session.id);
+		if (policy?.scenario !== 'project') return { error: '仅「按文档测试」场景可用' };
+		const run = activeProjectRun(store, session.id);
+		if (!run) return { error: '当前没有活动的项目运行' };
+		return { session, policy, run, store };
+	};
+	ctx.tools.register(defineTool({
+		name: 'project_document',
+		description: '项目文档：列出、搜索或分段读取。',
+		parameters: {
+			action: { type: 'string', required: true, enum: ['list', 'search', 'read'] },
+			query: { type: 'string' }, sourceId: { type: 'string' }, sourceRevision: { type: 'string' },
+			sectionId: { type: 'string' }, cursor: { type: 'integer' }, limit: { type: 'integer' }
+		},
+		output: { schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } }, render: (_args, value) => [{ type: 'text', text: value.ok ? value.text : value.error }] },
+		execute(args, exec) {
+			const scope = projectScopeOf(exec);
+			if (scope.error) return Promise.resolve({ ok: false, error: scope.error });
+			try {
+				const sources = listProjectSources(scope.store, scope.session.id);
+				if (args.action === 'list') {
+					const lines = sources.map(source => source.sourceId + ' ' + (source.displayName || '') + ' ' + source.sourceRevision + ' ' + source.parseState + '；段落：' + (source.sections || []).map(section => section.sectionId).slice(0, 30).join(', ')).join('\n');
+					return Promise.resolve({ ok: true, text: lines || '没有已保存的文档来源', sources: sources.map(source => ({ sourceId: source.sourceId, sourceRevision: source.sourceRevision, displayName: source.displayName, parseState: source.parseState })) });
+				}
+				if (args.action === 'search') {
+					const query = String(args.query || '').toLowerCase();
+					if (!query) throw new Error('search 需要 query');
+					const hits = [];
+					for (const source of sources) for (const section of source.sections || []) {
+						const index = String(section.text || '').toLowerCase().indexOf(query);
+						if (index >= 0) hits.push({ sourceId: source.sourceId, sourceRevision: source.sourceRevision, sectionId: section.sectionId, location: section.location, snippet: String(section.text).slice(Math.max(0, index - 60), index + 140) });
+					}
+					const shown = hits.slice(0, 20);
+					for (const hit of shown) recordMaterialRead(scope.store, scope.session.id, { materialId: 'project:' + hit.sourceId + '@' + hit.sourceRevision + ':' + hit.sectionId, bytes: Buffer.byteLength(hit.snippet, 'utf8') });
+					return Promise.resolve({ ok: true, text: shown.length ? shown.map(hit => hit.sourceId + ' ' + hit.sectionId + '：' + hit.snippet).join('\n') : '没有命中：' + args.query, hits: shown });
+				}
+				if (args.action === 'read') {
+					const source = sources.find(item => item.sourceId === args.sourceId && (!args.sourceRevision || item.sourceRevision === args.sourceRevision));
+					if (!source) throw new Error('未找到该来源：' + args.sourceId);
+					const result = readDocumentSection({ sections: source.sections || [] }, String(args.sectionId || ''), { cursor: args.cursor, limit: args.limit });
+					recordMaterialRead(scope.store, scope.session.id, { materialId: 'project:' + source.sourceId + '@' + source.sourceRevision + ':' + result.sectionId, bytes: Buffer.byteLength(result.text, 'utf8'), offset: result.location?.from ?? 0 });
+					return Promise.resolve({ ok: true, text: result.text, sourceId: source.sourceId, sourceRevision: source.sourceRevision, sectionId: result.sectionId, location: result.location, nextCursor: result.nextCursor, more: result.more });
+				}
+				throw new Error('未知的文档操作：' + args.action);
+			} catch (error) { return Promise.resolve({ ok: false, error: error.message }); }
+		}
+	}));
+	ctx.tools.register(defineTool({
+		name: 'project_check',
+		description: '项目检查：定义、领取、查看、记录。',
+		parameters: {
+			action: { type: 'string', required: true, enum: ['define', 'next', 'detail', 'record'] },
+			document: { type: 'string' }, checkId: { type: 'string' },
+			verdict: { type: 'string', enum: ['not_found', 'issue', 'needs_check', 'blocked', 'not_applicable'] },
+			checkedContent: { type: 'string' }, gaps: { type: 'string' }
+		},
+		output: { schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } }, render: (_args, value) => [{ type: 'text', text: value.ok ? value.text : value.error }] },
+		execute(args, exec) {
+			const scope = projectScopeOf(exec);
+			if (scope.error) return Promise.resolve({ ok: false, error: scope.error });
+			try {
+				if (args.action === 'define') {
+					const doc = JSON.parse(String(args.document || '{}'));
+					const checks = defineProjectChecks(scope.store, scope.session.id, scope.run.runId, Array.isArray(doc.checks) ? doc.checks : []);
+					return Promise.resolve({ ok: true, text: '已定义 ' + checks.length + ' 项检查', checks: checks.map(check => ({ checkId: check.checkId, requirement: check.requirement, sourceLocation: check.sourceLocation })) });
+				}
+				if (args.action === 'next') {
+					const check = projectExecutableChecks(scope.store, scope.session.id, scope.run.runId)[0];
+					if (!check) return Promise.resolve({ ok: true, text: '没有可执行的未完成检查', check: null });
+					return Promise.resolve({ ok: true, text: '当前检查：' + check.requirement + '（' + (check.sourceLocation || '未记录来源') + '）', check: { checkId: check.checkId, requirement: check.requirement, sourceLocation: check.sourceLocation, dependencies: check.dependencies } });
+				}
+				if (args.action === 'detail') {
+					const check = readProjectCheck(scope.store, scope.session.id, scope.run.runId, String(args.checkId || ''));
+					if (!check) throw new Error('未找到该检查');
+					return Promise.resolve({ ok: true, text: JSON.stringify(check, null, 2), check });
+				}
+				if (args.action === 'record') {
+					const check = recordProjectCheck(scope.store, scope.session.id, scope.run.runId, String(args.checkId || ''), {
+						executionState: 'ended', verdict: args.verdict, checkedContent: args.checkedContent, gaps: args.gaps
+					});
+					return Promise.resolve({ ok: true, text: '已记录：' + check.requirement + ' → ' + check.verdict, check });
+				}
+				throw new Error('未知的检查操作：' + args.action);
+			} catch (error) { return Promise.resolve({ ok: false, error: error.message }); }
+		}
+	}));
+	ctx.tools.register(defineTool({
+		name: 'saker_browser',
+		description: '受管 CfT 浏览器：打开、观察、操作、请求。',
+		parameters: {
+			action: { type: 'string', required: true, enum: ['open', 'observe', 'act', 'requests', 'request-detail', 'close'] },
+			url: { type: 'string' }, selector: { type: 'string' },
+			actType: { type: 'string', enum: ['click', 'type', 'select', 'navigate', 'upload', 'download', 'dialog'] },
+			text: { type: 'string' }, value: { type: 'string' },
+			files: { type: 'array', items: { type: 'string' } },
+			requestId: { type: 'string' }, screenshot: { type: 'boolean' }
+		},
+		output: { schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } }, render: (_args, value) => [{ type: 'text', text: value.ok ? value.text : value.error }] },
+		async execute(args, exec) {
+			const scope = projectScopeOf(exec);
+			if (scope.error) return { ok: false, error: scope.error };
+			try {
+				let browser = projectBrowsers.get(scope.session.id);
+				if (args.action === 'close') {
+					if (browser) { await browser.close(); projectBrowsers.delete(scope.session.id); }
+					return { ok: true, text: '浏览器会话已关闭' };
+				}
+				if (!browser) { browser = await startBrowserSession({ identity: scope.session.id }); projectBrowsers.set(scope.session.id, browser); }
+				if (args.action === 'open') { const page = await browser.open(String(args.url || '')); return { ok: true, text: JSON.stringify({ title: page.title, url: page.url }), page }; }
+				if (args.action === 'observe') { const page = await browser.observe({ selector: args.selector, screenshot: args.screenshot === true }); return { ok: true, text: String(page.text || '').slice(0, 2000), page }; }
+				if (args.action === 'act') { const result = await browser.act({ type: args.actType, url: args.url, selector: args.selector, text: args.text, value: args.value, files: args.files }); return { ok: true, text: JSON.stringify(result), result }; }
+				if (args.action === 'requests') { const requests = browser.listRequests(); return { ok: true, text: JSON.stringify(requests), requests }; }
+				if (args.action === 'request-detail') { const request = await browser.requestDetail(String(args.requestId || '')); return { ok: true, text: String(request.responseBody || '').slice(0, 2000), request }; }
+				throw new Error('未知的浏览器操作：' + args.action);
+			} catch (error) { return { ok: false, error: error.message }; }
+		}
+	}));
+	ctx.tools.register(defineTool({
+		name: 'project_request',
+		description: '项目 HTTP 请求，自动绑定检查、范围、身份。',
+		parameters: {
+			method: { type: 'string' }, url: { type: 'string', required: true },
+			headers: { type: 'object', additionalProperties: true }, body: { type: 'string' },
+			authContext: { type: 'string' }, timeoutMs: { type: 'integer' }, checkId: { type: 'string' }
+		},
+		output: { schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } }, render: (_args, value) => [{ type: 'text', text: value.ok ? value.text : value.error }] },
+		async execute(args, exec) {
+			const scope = projectScopeOf(exec);
+			if (scope.error) return { ok: false, error: scope.error };
+			try {
+				const checkId = String(args.checkId || scope.run.currentCheckId || projectExecutableChecks(scope.store, scope.session.id, scope.run.runId)[0]?.checkId || '');
+				if (!checkId) throw new Error('请先用 project_check 选择当前检查');
+				const result = await executeProjectHttp(scope.store, scope.session.id, scope.run.runId, checkId, args);
+				return { ok: true, text: result.summary, ...result };
+			} catch (error) { return { ok: false, error: error.message }; }
+		}
+	}));
+	//#endregion
 	ctx.tools.register(defineTool({
 		name: 'redteam_delivery',
 		description: '将已复核有效漏洞、复现材料与脱敏证据打为ZIP到会话工作目录；不完整成果不计入。',

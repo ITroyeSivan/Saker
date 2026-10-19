@@ -306,13 +306,19 @@ export function readExecutionReceipt(store, sessionId, id) {
       || result.capturedBytes !== body.length || !Number.isSafeInteger(result.responseBytes)
       || result.responseBytes < body.length) throw new Error('receipt metadata differs from captured bytes');
     integrityValid = true;
-    const currentRow = requestRow(store, sessionId, result.requestId, result.requestRevision);
-    let canonical = '';
-    try { canonical = parseRequest(currentRow).wireRequest; } catch { canonical = ''; }
-    // 新口径：按规范化报文比对（格式差异不算改动，内容/路径/身份变了仍会失效）；
-    // 旧口径：行原文直接比对，兼容本改动之前写入的回执。
-    current = (canonical !== '' && basis(currentRow, canonical) === result.requestBasis) || basis(currentRow) === result.requestBasis;
-    if (!current) currentReason = 'receipt request revision changed';
+    if (result.source === 'host-project-http-execution') {
+      // 项目回执不绑定实战研究方向；按自身 run/check 与请求原文核对是否仍匹配。
+      current = digest(JSON.stringify(['project', result.projectRunId, result.projectCheckId, result.request])) === result.requestBasis;
+      if (!current) currentReason = 'project receipt basis changed';
+    } else {
+      const currentRow = requestRow(store, sessionId, result.requestId, result.requestRevision);
+      let canonical = '';
+      try { canonical = parseRequest(currentRow).wireRequest; } catch { canonical = ''; }
+      // 新口径：按规范化报文比对（格式差异不算改动，内容/路径/身份变了仍会失效）；
+      // 旧口径：行原文直接比对，兼容本改动之前写入的回执。
+      current = (canonical !== '' && basis(currentRow, canonical) === result.requestBasis) || basis(currentRow) === result.requestBasis;
+      if (!current) currentReason = 'receipt request revision changed';
+    }
   } catch (error) { currentReason = error.message; /* Historical bytes remain readable, never silently repaired. */ }
   return { ...result, current, integrityValid, currentReason };
 }

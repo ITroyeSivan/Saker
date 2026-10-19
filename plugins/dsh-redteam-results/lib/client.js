@@ -2777,6 +2777,7 @@ function installChatSetupStyles() {
     '.dsh-finding-preview{padding:0 12px 8px;font-size:12px;overflow-wrap:anywhere}.dsh-finding-preview p{margin:4px 0;line-height:1.5}.dsh-task-workspace .dsh-rtr-rowhead{flex-wrap:wrap;gap:8px;padding:8px 12px}.dsh-task-workspace .dsh-rtr-title{flex:1;min-width:140px;white-space:normal;font-size:12px}.dsh-task-actions{display:flex;gap:8px;margin-top:8px}',
     '.dsh-task-state-line{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.dsh-task-mode{font-size:12px;color:var(--dsw-alias-label-secondary,#666)}.dsh-task-stop-reason{font-size:12px;padding:4px 8px;border-radius:4px;background:var(--dsw-alias-bg-layer-2,#f4f5f7);color:var(--dsw-alias-label-secondary,#666)}',
     '.dsh-task-result{display:flex;align-items:baseline;gap:24px;margin:8px 0 8px;font-size:12px}.dsh-task-result strong{font-size:16px;font-weight:600;font-variant-numeric:tabular-nums;margin-right:4px}.dsh-task-pending{color:var(--dsw-alias-label-primary,inherit)}.dsh-task-metrics{color:var(--dsw-alias-label-secondary,#666);border-top:0;margin-top:0;padding-top:4px;gap:8px 16px}',
+    '.dsh-task-project-table{width:100%;display:block;overflow-x:auto;border-collapse:collapse;font-size:12px}.dsh-task-project-table th,.dsh-task-project-table td{padding:6px 8px;border-bottom:1px solid rgba(120,150,190,.18);text-align:left;white-space:normal;word-break:break-word;vertical-align:top}.dsh-task-project-table th{color:var(--dsw-alias-label-secondary,#666);font-weight:600}',
     '.dsh-task-brief{display:flex;flex-wrap:wrap;gap:4px 16px;margin:4px 0 4px;font-size:12px;color:var(--dsw-alias-label-secondary,#666)}.dsh-task-brief span{overflow-wrap:anywhere}.dsh-task-gaps{margin:4px 0 4px;font-size:12px}.dsh-task-gaps p{margin:4px 0 0;color:var(--dsw-alias-label-secondary,#666);overflow-wrap:anywhere}.dsh-task-entries{margin:4px 0 4px;font-size:12px}.dsh-task-entries p{margin:4px 0 0;color:var(--dsw-alias-label-secondary,#666);overflow-wrap:anywhere}',
     '.dsh-task-panel .dsh-task-recent-row{margin:0;padding:8px 0;border:0;border-top:1px solid var(--dsw-alias-border-l1,#e7e8eb);border-radius:0}.dsh-task-recent-row>summary{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;cursor:pointer;list-style:none}.dsh-task-recent-row>summary::-webkit-details-marker{display:none}.dsh-task-recent-row>summary:focus-visible{outline:2px solid var(--dsw-alias-border-focus,#587cf6);outline-offset:3px}.dsh-task-finding-title{font-weight:600}.dsh-task-finding-title:before{content:"›";display:inline-block;margin-right:8px;color:var(--dsw-alias-label-secondary,#888)}.dsh-task-recent-row[open] .dsh-task-finding-title:before{transform:rotate(90deg)}.dsh-task-finding-target,.dsh-task-finding-note{grid-column:1/-1;color:var(--dsw-alias-label-secondary,#666);overflow-wrap:anywhere}.dsh-task-finding-note{color:var(--dsw-alias-label-primary,inherit)}.dsh-task-recent-row[open]>summary{margin-bottom:8px}.dsh-task-summary{padding-top:0px;border-bottom:0}',
     '.dsh-task-field{display:grid;grid-template-columns:118px minmax(0,600px);align-items:center;gap:8px;margin:8px 0}.dsh-task-field input,.dsh-task-field select{box-sizing:border-box;max-width:100%;min-width:0;font:inherit;color:inherit;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;background:var(--dsw-alias-bg-base,transparent);padding:5px 7px}.dsh-task-field input[type=number]{width:76px}.dsh-task-field select{width:fit-content}.dsh-task-mode-options{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}',
@@ -2803,6 +2804,36 @@ function modelCallStateLabel(value) {
 function modelWireLabel(wire) {
   if (!wire) return '未观测到原生 fetch 发送';
   return '原生发送 '+wire.protocol+' · '+wire.bytes+' 字节'+(wire.maximumOutput!==null&&wire.maximumOutput!==undefined?' · 输出上限 '+wire.maximumOutput:'');
+}
+function ProjectPanel(props) {
+  var project=useState(null), error=useState(''), busy=useState(false);
+  var resultLabels={not_found:'未发现问题',issue:'发现问题',needs_check:'需进一步确认',blocked:'缺少条件',not_applicable:'不适用'};
+  function load(){return api('project.status',{sessionId:props.sessionId}).then(function(value){if(!value.ok)throw Error(value.error||'读取项目状态失败');project[1](value);}).catch(function(e){error[1](e.message);});}
+  useEffect(function(){load();},[props.sessionId]);
+  function act(endpoint,payload){busy[1](true);error[1]('');var current=project[0];return api(endpoint,Object.assign({sessionId:props.sessionId,runId:current&&current.run?current.run.runId:undefined},payload||{})).then(function(value){if(!value.ok)throw Error(value.error||'操作失败');return load();}).catch(function(e){error[1](e.message);}).finally(function(){busy[1](false);});}
+  function exportResult(){error[1]('');var current=project[0];return api('project.export',{sessionId:props.sessionId,runId:current&&current.run?current.run.runId:undefined}).then(function(value){if(!value.ok)throw Error(value.error||'导出失败');downloadArchive(value.filename,value.archive);}).catch(function(e){error[1](e.message);});}
+  var status=project[0], run=status&&status.run, checks=(status&&status.checks)||[], counts=(status&&status.counts)||{}, sources=(status&&status.sources)||[];
+  return React.createElement('section',{'aria-label':'按文档测试',className:'dsh-task-panel'},
+    React.createElement('div',{className:'dsh-task-heading'},React.createElement('h3',null,'按文档测试'),React.createElement(Btn,{disabled:busy[0],onClick:load},'刷新状态')),
+    error[0]?React.createElement('div',{role:'alert'},error[0]):null,
+    !status?React.createElement('p',{role:'status'},'正在读取项目状态…'):
+    !status.configured?React.createElement('p',null,'还没有开始按文档测试。'):
+    React.createElement('div',null,
+      React.createElement('p',{className:'dsh-task-result'},'已检查 '+(counts.ended||0)+' 项 · 发现问题 '+(counts.issue||0)+' · 需进一步确认 '+(counts.needsCheck||0)+' · 缺少条件 '+(counts.blocked||0)+' · 未开始 '+(counts.pending||0)),
+      React.createElement('div',{className:'dsh-task-metrics'},
+        React.createElement(Btn,{disabled:busy[0]||run.state!=='running',onClick:function(){return act('project.pause');}},'暂停'),
+        React.createElement(Btn,{disabled:busy[0]||['paused','waiting'].indexOf(run.state)<0,onClick:function(){return act('project.resume');}},'继续'),
+        React.createElement(Btn,{disabled:busy[0]||['cancelled','completed'].indexOf(run.state)>=0,onClick:function(){return act('project.stop');}},'停止'),
+        React.createElement(Btn,{disabled:busy[0],onClick:exportResult},'导出结果'),
+        props.onFindings?React.createElement(Btn,{onClick:props.onFindings},'查看发现问题'):null),
+      checks.length?React.createElement('table',{className:'dsh-task-project-table'},
+        React.createElement('thead',null,React.createElement('tr',null,React.createElement('th',null,'文档要求'),React.createElement('th',null,'结果'),React.createElement('th',null,'说明'))),
+        React.createElement('tbody',null,checks.map(function(check){
+          var result=check.executionState!=='ended'?(check.executionState==='running'?'正在检查':'未开始'):(resultLabels[check.verdict]||'未得出结论');
+          return React.createElement('tr',{key:check.checkId},React.createElement('td',null,check.requirement),React.createElement('td',null,result),React.createElement('td',null,check.checkedContent||check.gaps||''));
+        }))):React.createElement('p',null,'还没有整理出的检查项。'),
+      React.createElement('details',null,React.createElement('summary',null,'文档来源（'+sources.length+'）'),
+        sources.length?sources.map(function(source){return React.createElement('p',{key:source.sourceId+'@'+source.sourceRevision},(source.displayName||source.sourceId)+' · '+source.sourceRevision+' · '+source.parseState);}):React.createElement('p',null,'没有已保存的来源。'))));
 }
 function TaskPanel(props) {
   var status=useState(null), error=useState(''), busy=useState(false);
@@ -2832,6 +2863,7 @@ function TaskPanel(props) {
   var taskQuestion=current?.policy?.question;
   if(taskQuestion==='有限观察已有目标，向用户建议具体研究问题')taskQuestion='';
   function input(label,state,type){return React.createElement('label',{className:'dsh-task-field'},React.createElement('span',null,label),React.createElement('input',{'aria-label':label,type:type||'text',value:state[0],onChange:function(e){state[1](e.target.value);},style:{width:type==='number'?76:'100%'}}));}
+  if(current&&current.configured&&current.policy&&current.policy.scenario==='project')return React.createElement(ProjectPanel,{sessionId:props.sessionId,status:current,onFindings:props.onFindings});
   return React.createElement('section',{'aria-label':'本轮测试任务',className:'dsh-task-panel'},
     React.createElement('div',{className:'dsh-task-heading'},React.createElement('h3',null,current&&current.configured?(current.stopped?'测试已停止':'正在测试'):'新建测试'),React.createElement(Btn,{disabled:busy[0],onClick:load},'刷新状态')),error[0]?React.createElement('div',{role:'alert'},error[0]):null,
     current&&current.configured?React.createElement('div',null,
