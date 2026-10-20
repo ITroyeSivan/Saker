@@ -88,10 +88,10 @@ Saker 是运行在 [DeepSeek Harness Desktop](https://github.com/deepseek-ai/dee
 
 ## 安装
 
-当前版本 **0.4.110**，适用于官方 Windows Desktop **0.2.1-rc.2**，同时兼容 **0.2.0-rc.2**。
+当前版本 **0.4.111**，适用于官方 Windows Desktop **0.2.1-rc.2**，同时兼容 **0.2.0-rc.2**。
 
 1. 安装官方 Desktop，完成初始化和模型配置，然后完全退出应用。
-2. 下载 `Saker-0.4.110-desktop.zip`，解压到长期保留的目录。
+2. 下载 `Saker-0.4.111-desktop.zip`，解压到长期保留的目录。
 3. 在解压目录打开 PowerShell：
 
 ```powershell

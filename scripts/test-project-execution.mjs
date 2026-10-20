@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
-import { startTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy.js';
+import { startTaskPolicy, readTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy.js';
 import { createProjectRun, transitionProjectRun, defineProjectChecks, listProjectActions, readProjectCheck } from '../plugins/dsh-redteam-results/lib/project-store.js';
 import { executeProjectHttp } from '../plugins/dsh-redteam-results/lib/project-execution.js';
 import { readExecutionReceipt } from '../plugins/dsh-redteam-results/lib/execution-receipts.js';
@@ -86,6 +86,31 @@ try {
       method: 'GET', url: origin + '/api/ok',
     }, controller.signal), /已取消/);
     assert.equal(listProjectActions(store, 'pe-cancel', run.runId).length, 0);
+  });
+
+  await test('等待速率槽时取消会结束 queued 动作且不扣派发额度', async () => {
+    startTaskPolicy(store, 'pe-queued-cancel', { scenario: 'project', question: '排队取消', target: origin,
+      requestRatePerMinute: 600, requestConcurrency: 1, budget: { minutes: 10 } });
+    const run = createProjectRun(store, 'pe-queued-cancel', { question: '排队取消' });
+    const running = transitionProjectRun(store, 'pe-queued-cancel', run.runId, 'running', run.controlRev);
+    const [check] = defineProjectChecks(store, 'pe-queued-cancel', run.runId, [{ requirement: '等待队列' }]);
+    const before = seen.length;
+    const first = await executeProjectHttp(store, 'pe-queued-cancel', running.runId, check.checkId, {
+      method: 'GET', url: origin + '/api/ok',
+    });
+    assert.equal(first.ok, true);
+    const controller = new AbortController();
+    const pending = executeProjectHttp(store, 'pe-queued-cancel', running.runId, check.checkId, {
+      method: 'GET', url: origin + '/api/queued',
+    }, controller.signal);
+    setTimeout(() => controller.abort(), 10);
+    await assert.rejects(() => pending, /取消|abort/i);
+    const actions = listProjectActions(store, 'pe-queued-cancel', running.runId);
+    assert.equal(actions.length, 2);
+    assert.equal(actions.at(-1).executionState, 'failed');
+    assert.equal(actions.at(-1).sideEffectUnknown, false);
+    assert.equal(seen.length, before + 1, '排队取消不能到达目标');
+    assert.equal(readTaskPolicy(store, 'pe-queued-cancel').used.toolCalls, 1, '排队取消不扣派发额度');
   });
 
   await test('写方法超时保留 sideEffectUnknown，不伪装未执行', async () => {

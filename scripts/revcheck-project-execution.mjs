@@ -11,11 +11,11 @@ const tmp = path.resolve(root, '../_ref/tmp');
 const runner = 'test-project-execution.mjs';
 const file = 'plugins/dsh-redteam-results/lib/project-execution.js';
 const variants = [
-  ['limit-denial', "  const denial = targetTrafficDenial(limits, { method }) || excludedPathDenial(limits, { url: url.href });\n  if (denial) throw new Error(denial);", '',
+  ['limit-denial', "  const denial = targetTrafficDenial(limits, { method }) || excludedPathDenial(limits, { url: url.href })\n    || targetScopeDenial(limits, url);\n  if (denial) throw new Error(denial);", '',
     '只读任务拒绝写方法'],
-  ['scope-check', "    if (allowed && allowed !== url.origin) throw new Error('request is outside the current task site');", '',
+  ['scope-check', "  if (allowed && allowed !== url.origin) return 'request is outside the current task site';", '',
     '范围外 URL 被拒绝'],
-  ['unknown-write', "    const sideEffectUnknown = !['GET', 'HEAD', 'OPTIONS'].includes(method);", '    const sideEffectUnknown = false;',
+  ['unknown-write', "    const sideEffectUnknown = dispatched && !['GET', 'HEAD', 'OPTIONS'].includes(method);", '    const sideEffectUnknown = false;',
     '写方法超时保留 sideEffectUnknown'],
 ];
 

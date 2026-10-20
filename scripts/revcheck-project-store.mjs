@@ -15,7 +15,7 @@ const variants = [
     '项目开始幂等'],
   ['control-rev', "    if (expectedControlRev !== undefined && run.controlRev !== expectedControlRev)\n      throw conflict('项目运行状态已变化，请刷新后重试');", '',
     '项目运行状态转移受词表和 controlRev 约束'],
-  ['single-action', "    const inflight = store.db.prepare(\"SELECT action_id FROM project_actions WHERE session_id=? AND run_id=? AND state='dispatched' LIMIT 1\")\n      .get(sessionId, runId);\n    if (inflight) throw conflict('同一项目运行同时只能有一个派发中的动作');", '',
+  ['single-action', "    const inflight = store.db.prepare(\"SELECT action_id FROM project_actions WHERE session_id=? AND run_id=? AND state IN ('queued','dispatched') LIMIT 1\")\n      .get(sessionId, runId);\n    if (inflight) throw conflict('同一项目运行同时只能有一个派发中的动作');", '',
     '同一运行同时最多一个派发中的动作'],
 ];
 

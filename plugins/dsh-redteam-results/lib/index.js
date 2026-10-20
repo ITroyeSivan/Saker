@@ -34,7 +34,7 @@ import { runBrowserExecution, recordBrowserReceipt, readBrowserReceipt } from '.
 import { runEffectJob, readEffectJob } from './effect-jobs.js';
 import { startTaskPolicy, updateTaskProgress, taskPolicyStatus, readTaskPolicy, taskExecutionGuard, taskPrompt, taskPromptStable, taskOverview, chooseTaskMode, pauseTaskPolicy, resumeTaskPolicy, archiveTaskRound, takeTaskContinuation, finishTaskOnTurnEnd, checkpointTask, setTaskInteraction, setTaskWorkers, setTaskExplain, setTaskActionLimits, updateTaskFromChat, targetTrafficDenial, effectivePolicy, confirmTaskCheckpoint } from './task-policy.js';
 import { projectContinuation, projectTurnDecision, markProjectContinuation, pauseProjectRun, resumeProjectRun, projectExecutableChecks, selectProjectCheck, startProjectTask, setProjectRunState, completeProjectRun } from './project-runtime.js';
-import { activeProjectRun, readProjectRun, listProjectRuns, listProjectChecks, listProjectSources, listProjectActions, defineProjectChecks, recordProjectCheck, readProjectCheck, upsertProjectSource } from './project-store.js';
+import { activeProjectRun, readProjectRun, listProjectRuns, listProjectChecks, listProjectSources, listProjectActions, defineProjectChecks, recordProjectCheck, readProjectCheck, upsertProjectSource, beginProjectAction, finishProjectAction } from './project-store.js';
 import { zipProjectDelivery, projectCounts, projectCheckView } from './project-delivery.js';
 import { startBrowserSession } from './browser-session.js';
 import { executeProjectHttp } from './project-execution.js';
@@ -91,6 +91,7 @@ const VERIFY_WINDOW_MS = 10 * 60 * 1000;
 const workerManagers = new WeakMap();
 const purposeManagers = new WeakMap();
 const modelAdmissions = new WeakMap();
+const projectBrowsers = new Map();
 
 const MODES = ["pentest", "code-audit", "ctf-solver"];
 const MODE_LABELS = {
@@ -815,7 +816,9 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
     if (endpoint === 'project.start') {
       const existing = activeProjectRun(st, sessionId);
       if (existing) return { ok: true, existing: true, run: existing, counts: projectCounts(listProjectChecks(st, sessionId, existing.runId)) };
-      const sourceSnapshot = listProjectSources(st, sessionId).map(source => ({
+      const latestSources = new Map();
+      for (const source of listProjectSources(st, sessionId)) if (!latestSources.has(source.sourceId)) latestSources.set(source.sourceId, source);
+      const sourceSnapshot = [...latestSources.values()].map(source => ({
         sourceId: source.sourceId,
         sourceRevision: source.sourceRevision,
         displayName: source.displayName || '',
@@ -846,10 +849,16 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
         ? pauseProjectRun(st, sessionId, run.runId, { code: 'needs-user', reason: '用户暂停', at: new Date().toISOString() }, p.expectedControlRev)
         : setProjectRunState(st, sessionId, run.runId, 'cancelled', p.expectedControlRev ?? run.controlRev, { blocker: { code: 'cancelled', reason: '用户停止' } });
       const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
+      let controlError = null;
       if (agent?.status === 'running') {
-        if (typeof agent.cancel !== 'function') throw new Error('已阻止新项目动作，但当前模型停止接口不可用，请核对在途状态');
-        agent.cancel({ kind: 'user' });
+        if (typeof agent.cancel !== 'function') controlError = new Error('已阻止新项目动作，但当前模型停止接口不可用，请核对在途状态');
+        else agent.cancel({ kind: 'user' });
       }
+      const browser = projectBrowsers.get(sessionId);
+      if (browser) {
+        try { await browser.close(); } finally { projectBrowsers.delete(sessionId); }
+      }
+      if (controlError) throw controlError;
       return { ok: true, run: next };
     }
     if (endpoint === 'project.resume') {
@@ -1029,9 +1038,19 @@ function importProjectSource(store, sessionId, input = {}) {
   if (buffer.length > 20 * 1024 * 1024) throw new Error('单个项目文档不能超过 20MB');
   const digest = crypto.createHash('sha256').update(buffer).digest('hex');
   const parsed = parseDocumentBuffer(buffer, { displayName });
+  const existingSources = listProjectSources(store, sessionId)
+    .filter(source => source.displayName === displayName)
+    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+  const sameContent = existingSources.find(source => source.snapshotRef === digest);
+  const sourceId = sameContent?.sourceId || existingSources[0]?.sourceId
+    || 'project-source-' + crypto.createHash('sha256').update(displayName).digest('hex').slice(0, 20);
+  const sourceRevision = sameContent?.sourceRevision || 'r' + (existingSources.reduce((max, source) => {
+    const match = /^r(\d+)$/.exec(String(source.sourceRevision || ''));
+    return Math.max(max, match ? Number(match[1]) : 0);
+  }, 0) + 1);
   const source = upsertProjectSource(store, sessionId, {
-    sourceId: 'project-source-' + digest.slice(0, 20),
-    sourceRevision: 'r1',
+    sourceId,
+    sourceRevision,
     displayName,
     kind: parsed.kind || 'text',
     parseState: (parsed.unread || []).length ? 'partial' : (parsed.parseState || 'ready'),
@@ -1085,6 +1104,8 @@ function apply(ctx) {
         }
         if (decision.action === 'completed') {
           completeProjectRun(store, session.id, decision.run.runId);
+          const browser = projectBrowsers.get(session.id);
+          if (browser) void browser.close().finally(() => projectBrowsers.delete(session.id));
           return;
         }
         return;
@@ -1658,7 +1679,6 @@ function apply(ctx) {
 		}
 	}));
 	//#region 项目测试工具（scenario=project）
-	const projectBrowsers = new Map();
 	const projectScopeOf = exec => {
 		const session = sessionOf(ctx, exec);
 		if (!session || session.mode !== 'pentest') return { error: '仅当前渗透会话可用' };
@@ -1684,19 +1704,31 @@ function apply(ctx) {
 			try {
 				const sources = listProjectSources(scope.store, scope.session.id);
 				if (args.action === 'list') {
-					const lines = sources.map(source => {
-						const sections = source.sections || [], unread = source.unread || [];
-						return source.sourceId + ' ' + (source.displayName || '') + ' ' + source.sourceRevision
-							+ ' ' + source.parseState + '；段落 ' + sections.length
-							+ (sections.length ? '：' + sections.map(section => section.sectionId).slice(0, 200).join(', ') : '')
-							+ (unread.length ? '；不可读区域 ' + unread.length : '');
-					}).join('\n');
-					return Promise.resolve({ ok: true, text: lines || '没有已保存的文档来源', sources: sources.map(source => ({
+					const entries = [];
+					for (const source of sources) {
+						const sections = source.sections || [];
+						const candidates = sections.length ? sections : [{ sectionId: '#source', location: null, kind: 'source' }];
+						for (const section of candidates) entries.push({
+							sourceId: source.sourceId, sourceRevision: source.sourceRevision,
+							displayName: source.displayName || '', parseState: source.parseState,
+							sectionId: section.sectionId, location: section.location ?? null, kind: section.kind || '',
+						});
+					}
+					const offset = Math.max(0, Number(args.cursor) || 0);
+					const limit = Math.max(1, Math.min(200, Number(args.limit) || 80));
+					const page = entries.slice(offset, offset + limit);
+					const header = sources.map(source => source.sourceId + ' ' + (source.displayName || '') + ' ' + source.sourceRevision
+						+ ' ' + source.parseState + '；段落 ' + (source.sections || []).length
+						+ (source.unread?.length ? '；不可读区域 ' + source.unread.length : '')).join('\n');
+					const text = (header ? header + '\n' : '') + (page.length
+						? '目录 ' + (offset + 1) + '-' + (offset + page.length) + '/' + entries.length + '\n'
+							+ page.map(item => item.sourceId + ' ' + item.sourceRevision + ' ' + item.sectionId
+								+ (item.location ? ' @' + JSON.stringify(item.location) : '')).join('\n')
+						: '没有可显示的文档段落');
+					return Promise.resolve({ ok: true, text, sources: sources.map(source => ({
 						sourceId: source.sourceId, sourceRevision: source.sourceRevision, displayName: source.displayName,
-						parseState: source.parseState,
-						sections: (source.sections || []).map(section => ({ sectionId: section.sectionId, location: section.location ?? null, kind: section.kind || '' })),
-						unread: (source.unread || []).map(item => ({ location: item.location ?? null, reason: item.reason || '' })),
-					})) });
+						parseState: source.parseState, sectionCount: (source.sections || []).length, unreadCount: (source.unread || []).length,
+					})), entries: page, nextCursor: offset + page.length < entries.length ? offset + page.length : null, more: offset + page.length < entries.length });
 				}
 				if (args.action === 'search') {
 					const query = String(args.query || '').toLowerCase();
@@ -1751,7 +1783,8 @@ function apply(ctx) {
       } } },
       document: { type: 'string', description: '兼容旧 JSON；新调用用 checks' }, checkId: { type: 'string' },
 			verdict: { type: 'string', enum: ['not_found', 'issue', 'needs_check', 'blocked', 'not_applicable'] },
-			checkedContent: { type: 'string' }, gaps: { type: 'string' }
+			checkedContent: { type: 'string' }, gaps: { type: 'string' },
+			findingRefs: { type: 'array', items: { type: 'string' } }
 		},
 		output: { schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } }, render: (_args, value) => [{ type: 'text', text: value.ok ? value.text : value.error }] },
 		execute(args, exec) {
@@ -1790,10 +1823,14 @@ function apply(ctx) {
 					return Promise.resolve({ ok: true, text: JSON.stringify(check, null, 2), check });
 				}
 				if (args.action === 'record') {
+					const findingRefs = Array.isArray(args.findingRefs) ? args.findingRefs.map(value => String(value)) : [];
+					for (const findingId of findingRefs) if (!getFinding(scope.store, scope.session.id, findingId))
+						throw new Error('未找到关联 finding：' + findingId);
 					const check = recordProjectCheck(scope.store, scope.session.id, scope.run.runId, String(args.checkId || ''), {
-						executionState: 'ended', verdict: args.verdict, checkedContent: args.checkedContent, gaps: args.gaps
+						executionState: 'ended', verdict: args.verdict, checkedContent: args.checkedContent, gaps: args.gaps, findingRefs
 					});
-					return Promise.resolve({ ok: true, text: '已记录：' + check.requirement + ' → ' + check.verdict, check });
+					return Promise.resolve({ ok: true, text: '已记录：' + check.requirement + ' → ' + check.verdict
+						+ (check.findingRefs?.length ? '（关联 ' + check.findingRefs.join('、') + '）' : ''), check });
 				}
 				throw new Error('未知的检查操作：' + args.action);
 			} catch (error) { return Promise.resolve({ ok: false, error: error.message }); }
@@ -1804,7 +1841,7 @@ function apply(ctx) {
 		description: '受管 CfT 浏览器：打开、观察、操作、请求。',
 		parameters: {
 			action: { type: 'string', required: true, enum: ['open', 'observe', 'act', 'requests', 'request-detail', 'close'] },
-			url: { type: 'string' }, selector: { type: 'string' },
+			url: { type: 'string' }, checkId: { type: 'string' }, selector: { type: 'string' },
 			actType: { type: 'string', enum: ['click', 'type', 'select', 'navigate', 'upload', 'download', 'dialog'] },
 			text: { type: 'string' }, value: { type: 'string' },
 			files: { type: 'array', items: { type: 'string' } },
@@ -1815,18 +1852,55 @@ function apply(ctx) {
 			const scope = projectScopeOf(exec);
 			if (scope.error) return { ok: false, error: scope.error };
 			try {
+				const action = String(args.action || '');
+				const targetAction = ['open', 'act'].includes(action);
+				let begun;
+				if (targetAction) {
+					if (scope.run.state !== 'running') throw new Error('项目运行当前不可派发浏览器动作');
+					if (exec.signal?.aborted) throw new Error('项目动作已取消');
+					const checkId = String(args.checkId || scope.run.currentCheckId
+						|| projectExecutableChecks(scope.store, scope.session.id, scope.run.runId)[0]?.checkId || '');
+					if (!checkId) throw new Error('请先用 project_check 选择当前检查，再执行浏览器目标动作');
+					const denied = taskExecutionGuard(scope.store, scope.session.id, 'recorded-project-execution', Date.now(), {
+						args: { url: args.url || '' },
+						onReserve: () => { begun = beginProjectAction(scope.store, scope.session.id, scope.run.runId, checkId, {
+							identityRef: String(args.identityRef || ''), controlRev: scope.run.controlRev,
+						}); },
+					});
+					if (denied) throw new Error(denied);
+				}
 				let browser = projectBrowsers.get(scope.session.id);
-				if (args.action === 'close') {
+				if (action === 'close') {
 					if (browser) { await browser.close(); projectBrowsers.delete(scope.session.id); }
 					return { ok: true, text: '浏览器会话已关闭' };
 				}
 				if (!browser) { browser = await startBrowserSession({ identity: scope.session.id }); projectBrowsers.set(scope.session.id, browser); }
-				if (args.action === 'open') { const page = await browser.open(String(args.url || '')); return { ok: true, text: JSON.stringify({ title: page.title, url: page.url }), page }; }
-				if (args.action === 'observe') { const page = await browser.observe({ selector: args.selector, screenshot: args.screenshot === true }); return { ok: true, text: String(page.text || '').slice(0, 2000), page }; }
-				if (args.action === 'act') { const result = await browser.act({ type: args.actType, url: args.url, selector: args.selector, text: args.text, value: args.value, files: args.files }); return { ok: true, text: JSON.stringify(result), result }; }
-				if (args.action === 'requests') { const requests = browser.listRequests(); return { ok: true, text: JSON.stringify(requests), requests }; }
-				if (args.action === 'request-detail') { const request = await browser.requestDetail(String(args.requestId || '')); return { ok: true, text: String(request.responseBody || '').slice(0, 2000), request }; }
-				throw new Error('未知的浏览器操作：' + args.action);
+				try {
+					let result;
+					if (action === 'open') result = await browser.open(String(args.url || ''));
+					else if (action === 'act') result = await browser.act({ type: args.actType, url: args.url, selector: args.selector, text: args.text, value: args.value, files: args.files });
+					else if (action === 'observe') result = await browser.observe({ selector: args.selector, screenshot: args.screenshot === true });
+					else if (action === 'requests') result = browser.listRequests();
+					else if (action === 'request-detail') result = await browser.requestDetail(String(args.requestId || ''));
+					else throw new Error('未知的浏览器操作：' + action);
+					if (action === 'open') {
+						await finishProjectAction(scope.store, scope.session.id, scope.run.runId, begun?.action?.actionId, { executionState: 'completed', pageRef: result.url });
+						return { ok: true, text: JSON.stringify({ title: result.title, url: result.url, executionId: begun?.action?.actionId || null }), page: result, actionId: begun?.action?.actionId || null };
+					}
+					if (action === 'act') {
+						await finishProjectAction(scope.store, scope.session.id, scope.run.runId, begun?.action?.actionId, { executionState: 'completed' });
+						return { ok: true, text: JSON.stringify(result), result, actionId: begun?.action?.actionId || null };
+					}
+					return { ok: true, text: action === 'request-detail' ? String(result.responseBody || '').slice(0, 2000) : JSON.stringify(result), [action === 'request-detail' ? 'request' : action === 'observe' ? 'page' : 'requests']: result };
+				} catch (error) {
+					if (begun) {
+						const sideEffectUnknown = action === 'act' && ['click', 'type', 'select', 'upload', 'dialog'].includes(String(args.actType || ''));
+						await finishProjectAction(scope.store, scope.session.id, scope.run.runId, begun.action.actionId, {
+							executionState: sideEffectUnknown ? 'unknown' : 'failed', error: error.message, sideEffectUnknown,
+						});
+					}
+					throw error;
+				}
 			} catch (error) { return { ok: false, error: error.message }; }
 		}
 	}));

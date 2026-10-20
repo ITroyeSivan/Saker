@@ -114,11 +114,12 @@ const networkFreeTools = new Set(['zday_pattern', 'attack_plan', 'asset_search',
   'nday_triage', 'nday_coverage', 'nday_draft', 'nday_handoff']);
 // redteam_execution 里真正会发出目标流量的动作；detail/job-detail/verify-effect 等只读动作不受网络限制。
 const targetTrafficExecutionActions = new Set(['run', 'run-pair', 'run-effect', 'browser-run']);
+const projectBrowserTargetActions = new Set(['open', 'act']);
 // **一次调用 = 一个可审计请求**的受控入口：不按"未计量"处理（它们本身就逐条可数）。
 // `exercise_request` 是本地效果基准的受控工具，靶场自己记录每一条请求；把它当成未计量扫描器
 // 会把基准的引用契约整体判死（2026-10-18 实测：h1 的 7 次 exercise_request 全被拒，requests=0）。
 // 它们仍属于"目标流量工具"：关闭"允许访问网站"时照样被拦。
-const meteredRequestTools = new Set(['exercise_request', 'recorded-http-execution', 'recorded-project-execution']);
+const meteredRequestTools = new Set(['exercise_request', 'recorded-http-execution', 'recorded-project-execution', 'saker_browser']);
 // 会改动业务数据的 HTTP 方法；“不改动网站数据”只放行 GET/HEAD 这类读取请求。
 const writeHttpMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 function executionActionOf(args) {
@@ -132,6 +133,7 @@ function executionActionOf(args) {
  */
 export function isTargetTrafficTool(store, sessionId, name, args, policy) {
   if (offlineToolCall(name, args)) return false;
+  if (name === 'saker_browser') return projectBrowserTargetActions.has(String(args?.action || '').trim());
   if (unmeteredTrafficTools.has(name)) return true;
   if (argsHitAuthorizedScope(store, sessionId, name, args, policy)) return true;
   if (name === 'redteam_execution') return targetTrafficExecutionActions.has(executionActionOf(args));
@@ -490,6 +492,8 @@ export function updateTaskProgress(store, sessionId, input) {
   try {
   const current = readTaskPolicy(store, sessionId);
   if (!current) throw new Error('task policy missing');
+  if (current.scenario === 'project' && (input.planComplete === true || input.queueComplete === true))
+    throw new Error('项目收尾由来源整理和检查状态判定，不能由模型直接标记完成');
   if (current.awaitingConfirmation && !input.cancelled) throw new Error('等待桌面确认，不能自行完成下一阶段');
   for (const key of Object.keys(input)) {
     if (key === 'note') continue;
@@ -912,17 +916,19 @@ export function taskExecutionGuard(store, sessionId, name, now = Date.now(), { o
   // Visibility restrictions cannot hide agent-scoped tools. Enforce ownership on every dispatch,
   // including PTC's eventual call, before the local-tool fast path. [] means no tools.
   const allowed = childAllowedTools(store, sessionId);
-  const permissionName = name === 'recorded-project-execution' ? 'project_request'
+  const permissionName = (name === 'recorded-project-execution' || name === 'saker_browser') ? 'project_request'
     : ['recorded-http-execution', 'recorded-browser-execution'].includes(name) ? 'redteam_execution' : name;
   if (allowed !== undefined && (!Array.isArray(allowed) || !allowed.includes(permissionName)))
     return 'worker_tool_not_allowed：当前助手未获准使用 ' + name;
   const isProject = readTaskPolicy(store, sessionId)?.scenario === 'project';
   // 外层只预检；实际派发适配器在建立动作的同一事务领取一次额度。
-  if (isProject && name === 'project_request')
+  if (isProject && (name === 'project_request'
+    || (name === 'saker_browser' && projectBrowserTargetActions.has(String(args?.action || '').trim()))))
     return taskExecutionGuard(store, sessionId, 'recorded-project-execution', now, { args, reserve: false });
   // 本地/规划类工具（status/context/research/读写/检索）不占**目标**预算，但也要如实计数：
   // 否则界面会显示"工具调用 0/16"而模型其实已经用了十几次——"分别计量"不等于"不计量"（第 8.2 节）。
-  if (localTools.has(name) || (isProject && projectMetadataTools.has(name)) || offlineToolCall(name, args)) {
+  if (localTools.has(name) || (name === 'saker_browser' && !projectBrowserTargetActions.has(String(args?.action || '').trim()))
+    || (isProject && projectMetadataTools.has(name)) || offlineToolCall(name, args)) {
     store.db.exec('BEGIN IMMEDIATE');
     try {
       const policy = readTaskPolicy(store, sessionId);

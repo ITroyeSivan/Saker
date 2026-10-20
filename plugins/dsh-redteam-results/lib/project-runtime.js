@@ -23,7 +23,10 @@ function syncProjectPolicy(store, sessionId, run) {
     projectCode: run.blocker?.code || run.state, recordedAt: Date.now(),
   };
   if (run.state === 'cancelled') next.cancelled = true;
-  if (run.state === 'completed') next.planComplete = true;
+  if (policy.scenario === 'project') {
+    next.planComplete = run.state === 'completed';
+    if (run.state !== 'completed') delete next.finishedAt;
+  }
   if (['completed', 'cancelled', 'failed'].includes(run.state)) next.finishedAt = Date.now();
   writeTaskPolicy(store, sessionId, next, 'project-control', { runId: run.runId, state: run.state });
 }
@@ -146,7 +149,9 @@ export function projectTurnDecision(store, sessionId) {
   const policy = readTaskPolicy(store, sessionId);
   if (!policy || policy.cancelled) return { action: 'none', run };
   const state = taskPolicyStatus(store, sessionId);
-  if (!state.configured || state.stopped) return { action: 'none', run, reason: state.reason };
+  if (!state.configured) return { action: 'none', run, reason: state.reason };
+  const prematurePlanComplete = state.stopped && state.reason === 'plan_complete';
+  if (state.stopped && !prematurePlanComplete) return { action: 'none', run, reason: state.reason };
   const actions = listProjectActions(store, sessionId, run.runId);
   if (actions.some(action => ['queued', 'dispatched'].includes(action.executionState))) return { action: 'none', run, reason: 'in-flight' };
   if (actions.some(action => action.sideEffectUnknown === true)) {
@@ -154,6 +159,8 @@ export function projectTurnDecision(store, sessionId) {
   }
   const sourceProgress = projectSourceProgress(store, sessionId, run.runId);
   if (sourceProgress.pending > 0) {
+    if (prematurePlanComplete)
+      return { action: 'waiting', run, blocker: { code: 'plan-complete-early', reason: '模型提前标记完成，但仍有来源区域未整理' } };
     const fingerprint = projectProgressFingerprint(store, sessionId, run.runId);
     const attempts = run.lastContinuationFingerprint === fingerprint ? (run.continuationNoProgress || 0) + 1 : 0;
     if (attempts >= 2) {
@@ -178,6 +185,8 @@ export function projectTurnDecision(store, sessionId) {
   const checks = listProjectChecks(store, sessionId, run.runId);
   const executable = projectExecutableChecks(store, sessionId, run.runId);
   if (executable.length) {
+    if (prematurePlanComplete)
+      return { action: 'waiting', run, blocker: { code: 'plan-complete-early', reason: '模型提前标记完成，但仍有检查未结束' } };
     if (run.state === 'running') {
       const continuation = projectContinuation(store, sessionId);
       return continuation ? { action: 'continue', run, continuation } : { action: 'none', run };

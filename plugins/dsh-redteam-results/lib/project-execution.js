@@ -6,7 +6,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readTaskPolicy, effectivePolicy, targetTrafficDenial, excludedPathDenial, taskExecutionGuard } from './task-policy.js';
 import { resolveTaskIdentity, identityDenial, identityRequestHeaders } from './identity-binding.js';
 import { acquireTargetSlot } from './request-pacing.js';
-import { beginProjectAction, finishProjectAction, readProjectRun, readProjectCheck } from './project-store.js';
+import { beginProjectAction, markProjectActionDispatched, finishProjectAction, readProjectRun, readProjectCheck } from './project-store.js';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
 
@@ -16,6 +16,14 @@ function parseTarget(input) {
   if (!['http:', 'https:'].includes(url.protocol)) throw new Error('项目请求只接受 HTTP(S) URL');
   if (url.username || url.password) throw new Error('项目请求 URL 不能内嵌凭据');
   return url;
+}
+
+function targetScopeDenial(limits, url) {
+  if (!limits.target) return undefined;
+  let allowed;
+  try { allowed = new URL(limits.target).origin; } catch { allowed = ''; }
+  if (allowed && allowed !== url.origin) return 'request is outside the current task site';
+  return undefined;
 }
 
 function wireRequest(method, url, headers, body) {
@@ -65,13 +73,9 @@ export async function executeProjectHttp(store, sessionId, runId, checkId, input
   const limits = effectivePolicy(store, policy);
   const url = parseTarget(input);
   const method = String(input.method || 'GET').toUpperCase();
-  const denial = targetTrafficDenial(limits, { method }) || excludedPathDenial(limits, { url: url.href });
+  const denial = targetTrafficDenial(limits, { method }) || excludedPathDenial(limits, { url: url.href })
+    || targetScopeDenial(limits, url);
   if (denial) throw new Error(denial);
-  if (limits.target) {
-    let allowed;
-    try { allowed = new URL(limits.target).origin; } catch { allowed = ''; }
-    if (allowed && allowed !== url.origin) throw new Error('request is outside the current task site');
-  }
   const authContext = String(input.authContext || '');
   const identity = resolveTaskIdentity(store, sessionId, authContext);
   const identityReason = identityDenial(identity);
@@ -80,18 +84,54 @@ export async function executeProjectHttp(store, sessionId, runId, checkId, input
   const identityHeaders = identityRequestHeaders({ headers }, identity);
   const outgoingHeaders = identityHeaders ? identityHeaders.headers : headers;
   const body = input.body === undefined || input.body === null ? '' : String(input.body);
-  let begun;
-  const admission = taskExecutionGuard(store, sessionId, 'recorded-project-execution', Date.now(), {
-    args: { method, url: url.href },
-    onReserve: () => { begun = beginProjectAction(store, sessionId, runId, checkId, { identityRef: authContext, controlRev: input.controlRev }); },
+  let dispatchHeaders = outgoingHeaders;
+  const begun = beginProjectAction(store, sessionId, runId, checkId, {
+    identityRef: authContext, controlRev: input.controlRev, executionState: 'queued',
   });
-  if (admission) throw new Error(admission);
-  const release = await acquireTargetSlot(sessionId, limits, signal);
-  let result;
+  let release;
   try {
-    result = await dispatch(url, method, outgoingHeaders, body, input.timeoutMs ?? 10000, signal);
+    release = await acquireTargetSlot(sessionId, limits, signal);
   } catch (error) {
-    const sideEffectUnknown = !['GET', 'HEAD', 'OPTIONS'].includes(method);
+    await finishProjectAction(store, sessionId, runId, begun.action.actionId, {
+      executionState: 'failed', error: 'cancelled-before-dispatch: ' + String(error?.message || error),
+    });
+    throw error;
+  }
+  let result;
+  let dispatched = false;
+  try {
+    signal?.throwIfAborted?.();
+    const currentRun = readProjectRun(store, sessionId, runId);
+    if (!currentRun || currentRun.state !== 'running') {
+      throw Object.assign(new Error('项目运行当前不可派发新动作'), { code: 'project-state-conflict' });
+    }
+    if (input.controlRev !== undefined && currentRun.controlRev !== input.controlRev) {
+      throw Object.assign(new Error('项目运行状态已变化，请刷新后重试'), { code: 'project-state-conflict' });
+    }
+    const currentPolicy = readTaskPolicy(store, sessionId);
+    const currentLimits = effectivePolicy(store, currentPolicy);
+    const lateDenial = targetTrafficDenial(currentLimits, { method }) || excludedPathDenial(currentLimits, { url: url.href });
+    if (lateDenial) throw new Error(lateDenial);
+    const currentScopeDenial = targetScopeDenial(currentLimits, url);
+    if (currentScopeDenial) throw new Error(currentScopeDenial);
+    const currentIdentity = resolveTaskIdentity(store, sessionId, authContext);
+    const currentIdentityReason = identityDenial(currentIdentity);
+    if (currentIdentityReason) throw new Error(currentIdentityReason);
+    const currentIdentityHeaders = identityRequestHeaders({ headers }, currentIdentity);
+    dispatchHeaders = currentIdentityHeaders ? currentIdentityHeaders.headers : headers;
+    const admission = taskExecutionGuard(store, sessionId, 'recorded-project-execution', Date.now(), {
+      args: { method, url: url.href },
+      onReserve: () => {
+        markProjectActionDispatched(store, sessionId, runId, begun.action.actionId, {
+          identityRef: authContext, controlRev: currentRun.controlRev,
+        });
+        dispatched = true;
+      },
+    });
+    if (admission) throw new Error(admission);
+    result = await dispatch(url, method, dispatchHeaders, body, input.timeoutMs ?? 10000, signal);
+  } catch (error) {
+    const sideEffectUnknown = dispatched && !['GET', 'HEAD', 'OPTIONS'].includes(method);
     await finishProjectAction(store, sessionId, runId, begun.action.actionId, {
       executionState: sideEffectUnknown ? 'unknown' : 'failed', error: String(error?.message || error), sideEffectUnknown,
     });

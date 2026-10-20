@@ -7,6 +7,7 @@ import { openStore, registerFinding } from '../plugins/dsh-redteam-results/lib/s
 import { startTaskPolicy, readTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy.js';
 import { saveTaskContext } from '../plugins/dsh-redteam-results/lib/task-context.js';
 import { recordKnowledgeUsage } from '../plugins/dsh-redteam-results/lib/knowledge-usage.js';
+import { createProjectRun, transitionProjectRun, defineProjectChecks, recordProjectCheck, upsertProjectSource, beginProjectAction, finishProjectAction } from '../plugins/dsh-redteam-results/lib/project-store.js';
 import { exportTaskArchive, verifyTaskArchive, importTaskArchive, TASK_ARCHIVE_SCHEMA } from '../plugins/dsh-redteam-results/lib/task-archive.js';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-task-archive-'));
@@ -66,6 +67,31 @@ try {
     // 源任务不受影响
     assert.equal(readTaskPolicy(store, 'src').restored, undefined);
     assert.equal(store.db.prepare('SELECT count(*) AS n FROM findings WHERE session_id=?').get('src').n, 1);
+  });
+  test('项目运行、来源、检查和动作随任务归档并在新任务中恢复归属', () => {
+    startTaskPolicy(store, 'project-src', { scenario: 'project', question: '项目归档', budget: { minutes: 10 } });
+    upsertProjectSource(store, 'project-src', {
+      sourceId: 'source-1', sourceRevision: 'r1', displayName: '要求.txt', parseState: 'ready',
+      sections: [{ sectionId: 'lines-1-1', text: '检查接口' }],
+    });
+    const run = createProjectRun(store, 'project-src', {
+      question: '项目归档', sourceSnapshot: [{ sourceId: 'source-1', sourceRevision: 'r1' }],
+    });
+    const running = transitionProjectRun(store, 'project-src', run.runId, 'running', run.controlRev);
+    const [check] = defineProjectChecks(store, 'project-src', run.runId, [{ checkId: 'check-1', requirement: '检查接口' }]);
+    const begun = beginProjectAction(store, 'project-src', run.runId, check.checkId, { executionState: 'queued' });
+    finishProjectAction(store, 'project-src', run.runId, begun.action.actionId, { executionState: 'failed', error: '归档样本' });
+    recordProjectCheck(store, 'project-src', run.runId, check.checkId, { executionState: 'ended', verdict: 'not_found', checkedContent: '未发现问题' });
+    const archive = exportTaskArchive(store, 'project-src');
+    for (const table of ['project_runs', 'project_sources', 'project_checks', 'project_actions']) assert(archive.manifest.sections[table] >= 1, table);
+    const restored = importTaskArchive(store, archive, { sessionId: 'restored-project' });
+    assert.equal(restored.sessionId, 'restored-project');
+    const restoredRun = store.db.prepare('SELECT record FROM project_runs WHERE session_id=? AND run_id=?').get('restored-project', running.runId);
+    assert(restoredRun);
+    const runRecord = JSON.parse(restoredRun.record);
+    assert.equal(runRecord.sessionId, 'restored-project', 'run JSON 归属必须随新任务重写');
+    const restoredCheck = store.db.prepare('SELECT record FROM project_checks WHERE session_id=? AND check_id=?').get('restored-project', 'check-1');
+    assert(restoredCheck && JSON.parse(restoredCheck.record).sessionId === 'restored-project');
   });
   test('restoring never overwrites an existing task and refuses an invalid archive', () => {
     const archive = exportTaskArchive(store, 'src');

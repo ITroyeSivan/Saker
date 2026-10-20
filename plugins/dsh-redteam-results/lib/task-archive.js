@@ -13,6 +13,7 @@ const TABLES = Object.freeze([
   'task_policy', 'task_flow_choice', 'task_choice', 'task_context', 'task_context_records',
   'findings', 'counters', 'execution_receipts', 'business_materials', 'task_policy_events',
   'task_rounds', 'knowledge_usage', 'work_leases', 'task_knowledge',
+  'project_runs', 'project_sources', 'project_checks', 'project_actions',
 ]);
 
 const sha = value => createHash('sha256').update(value).digest('hex');
@@ -88,7 +89,16 @@ export function importTaskArchive(store, archive, { sessionId = 'restored-' + ra
       const placeholders = columns.map(() => '?').join(',');
       const statement = store.db.prepare(`INSERT INTO ${table}(${columns.join(',')}) VALUES(${placeholders})`);
       for (const row of rows) {
-        const values = columns.map(column => column === 'session_id' ? sessionId : row[column]);
+        const values = columns.map(column => {
+          const value = column === 'session_id' ? sessionId : row[column];
+          if (column !== 'record' || typeof value !== 'string') return value;
+          try {
+            const record = JSON.parse(value);
+            if (record && typeof record === 'object' && record.sessionId === archive.manifest.sourceSession)
+              record.sessionId = sessionId;
+            return JSON.stringify(record);
+          } catch { return value; }
+        });
         statement.run(...values);
       }
     }

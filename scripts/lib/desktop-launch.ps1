@@ -54,6 +54,7 @@ $env:TEMP = $settings.tempDirectory
 $env:TMP = $settings.tempDirectory
 $env:TMPDIR = $settings.tempDirectory
 $env:DSH_HOME = $settings.home
+if ($settings.cftPath) { $env:SAKER_CFT_PATH = [string]$settings.cftPath }
 Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
 # The current dsh host rejects socks5h in ALL_PROXY during startup. Preserve
 # explicit HTTP(S) proxies and remove only the unsupported alias.

@@ -5,7 +5,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
-import { startTaskPolicy, pauseTaskPolicy, readTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy.js';
+import { startTaskPolicy, pauseTaskPolicy, updateTaskProgress, readTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy.js';
+import { writeTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy-record.js';
 import {
   createProjectRun, transitionProjectRun, defineProjectChecks, recordProjectCheck,
   beginProjectAction, finishProjectAction, readProjectRun,
@@ -340,6 +341,18 @@ test('无正文的来源可以作为来源级 reference 整理，不触发段落
   const decision = projectTurnDecision(store, sid);
   assert.equal(decision.action, 'waiting');
   assert.equal(decision.blocker.code, 'no-requirements');
+});
+
+test('模型提前标记 planComplete 不能绕过项目检查收尾', () => {
+  const sid = 'pr-premature-plan';
+  const { run } = prepare(sid, [{ requirement: '尚未执行的检查' }]);
+  const policy = readTaskPolicy(store, sid);
+  writeTaskPolicy(store, sid, { ...policy, planComplete: true, finishedAt: Date.now() }, 'legacy-early-complete');
+  const decision = projectTurnDecision(store, sid);
+  assert.equal(decision.action, 'waiting');
+  assert.equal(decision.blocker.code, 'plan-complete-early');
+  assert.throws(() => updateTaskProgress(store, sid, { planComplete: true }), /项目收尾由来源整理和检查状态判定/);
+  assert.equal(readProjectRun(store, sid, run.runId).state, 'running');
 });
 
 store.close();

@@ -5,9 +5,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
+import { openStore, registerFinding } from '../plugins/dsh-redteam-results/lib/store.js';
 import { startTaskPolicy, taskPolicyStatus, readTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy.js';
-import { createProjectRun, transitionProjectRun, defineProjectChecks, upsertProjectSource, readProjectRun, listProjectChecks } from '../plugins/dsh-redteam-results/lib/project-store.js';
+import { createProjectRun, transitionProjectRun, defineProjectChecks, upsertProjectSource, readProjectRun, listProjectChecks, listProjectActions } from '../plugins/dsh-redteam-results/lib/project-store.js';
 import { projectTurnDecision, completeProjectRun } from '../plugins/dsh-redteam-results/lib/project-runtime.js';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-project-tools-'));
@@ -218,6 +218,21 @@ try {
     assert.equal(listProjectChecks(store, sid, run.runId).length, 0, '无效整理决定不能留下半批检查');
   });
 
+  await test('同名来源修订递增，重复内容复用，运行快照只取最新修订', async () => {
+    const sid = 'pt-project-revisions';
+    const first = await dispatch(ctx, store, 'project.import', { sessionId: sid, name: '要求.txt', text: '第一版要求' });
+    const second = await dispatch(ctx, store, 'project.import', { sessionId: sid, name: '要求.txt', text: '第二版要求' });
+    const duplicate = await dispatch(ctx, store, 'project.import', { sessionId: sid, name: '要求.txt', text: '第二版要求' });
+    assert.equal(first.source.sourceId, second.source.sourceId);
+    assert.equal(first.source.sourceRevision, 'r1');
+    assert.equal(second.source.sourceRevision, 'r2');
+    assert.equal(duplicate.source.sourceId, second.source.sourceId);
+    assert.equal(duplicate.source.sourceRevision, 'r2', '相同内容重复导入不能制造新修订');
+    const started = await dispatch(ctx, store, 'project.start', { sessionId: sid, policy: { question: '按修订测试', budget: { minutes: 10 } }, autoStart: false });
+    assert.equal(started.run.sourceSnapshot.length, 1, '同一来源多个修订只把最新版放进本次快照');
+    assert.equal(started.run.sourceSnapshot[0].sourceRevision, 'r2');
+  });
+
   await test('项目 pause / resume 真正恢复投递并保持额度，stop 同步公共状态', async () => {
     const sid = 'pt-real-resume';
     const started = await dispatch(ctx, store, 'project.start', { sessionId: sid, policy: { question: '生命周期', target: origin } });
@@ -273,6 +288,15 @@ try {
     const search = await tool.execute({ action: 'search', query: '审批' }, exec('pt-doc'));
     assert.equal(search.ok, true, search.error);
     assert(search.text.includes('审批'));
+    upsertProjectSource(store, 'pt-doc', {
+      sourceId: 'doc-many', sourceRevision: 'r1', displayName: '长目录.txt', parseState: 'ready',
+      sections: Array.from({ length: 45 }, (_, index) => ({ sectionId: 's' + (index + 1), text: '段落 ' + (index + 1) })),
+    });
+    const page1 = await tool.execute({ action: 'list', limit: 10 }, exec('pt-doc'));
+    assert.equal(page1.more, true);
+    assert.equal(page1.nextCursor, 10);
+    const page2 = await tool.execute({ action: 'list', cursor: page1.nextCursor, limit: 20 }, exec('pt-doc'));
+    assert(page2.entries.some(entry => entry.sectionId === 's11'), '目录分页必须覆盖后续段落');
   });
 
   await test('project_check next / record / detail 可用', async () => {
@@ -282,7 +306,10 @@ try {
     const next = await tool.execute({ action: 'next' }, exec('pt-check'));
     assert.equal(next.ok, true, next.error);
     assert.equal(next.check.checkId, check.checkId);
-    const recorded = await tool.execute({ action: 'record', checkId: check.checkId, verdict: 'issue', checkedContent: '员工 B 读到员工 A 的电话' }, exec('pt-check'));
+    const finding = registerFinding(store, 'pt-check', 'pentest', { title: '项目证据关联样本', severity: 'medium', target: origin });
+    const invalid = await tool.execute({ action: 'record', checkId: check.checkId, verdict: 'issue', checkedContent: '无引用样本', findingRefs: ['missing'] }, exec('pt-check'));
+    assert.equal(invalid.ok, false);
+    const recorded = await tool.execute({ action: 'record', checkId: check.checkId, verdict: 'issue', checkedContent: '员工 B 读到员工 A 的电话', findingRefs: [finding.id] }, exec('pt-check'));
     assert.equal(recorded.ok, true, recorded.error);
     assert.equal(recorded.check.verdict, 'issue');
     const detail = await tool.execute({ action: 'detail', checkId: check.checkId }, exec('pt-check'));
@@ -318,8 +345,16 @@ try {
       assert(tool, 'saker_browser 已注册');
       const opened = await tool.execute({ action: 'open', url: origin + '/page' }, exec('pt-browser'));
       assert.equal(opened.ok, true, opened.error);
+      const actions = listProjectActions(store, 'pt-browser', run.runId);
+      assert.equal(actions.length, 1, '浏览器目标动作必须留下项目动作记录');
+      assert.equal(actions[0].executionState, 'completed');
       const observed = await tool.execute({ action: 'observe' }, exec('pt-browser'));
       assert.equal(observed.ok, true, observed.error);
+      assert.equal(readTaskPolicy(store, 'pt-browser').used.toolCalls, 1, '观察不额外扣目标额度');
+      await dispatch(ctx, store, 'project.pause', { sessionId: 'pt-browser', runId: run.runId });
+      const pausedOpen = await tool.execute({ action: 'open', url: origin + '/paused' }, exec('pt-browser'));
+      assert.equal(pausedOpen.ok, false);
+      assert.match(pausedOpen.error, /不可派发|已暂停/);
       const closed = await tool.execute({ action: 'close' }, exec('pt-browser'));
       assert.equal(closed.ok, true, closed.error);
     });

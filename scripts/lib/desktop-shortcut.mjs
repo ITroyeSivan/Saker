@@ -32,6 +32,8 @@ export function refreshDesktopShortcut({ desktopDirectory, workspace, userDataDi
     home: resolve(home), workspace: launchWorkspace,
     tempDirectory: join(launchWorkspace, '_ref', 'tmp'),
   }
+  const cftPath = old.cftPath || persistent.cftPath || ''
+  if (cftPath) config.cftPath = cftPath
   const launcher = join(toolsDirectory, 'Start-SakerDesktop.ps1')
   copyFileSync(join(dirname(fileURLToPath(import.meta.url)), 'desktop-launch.ps1'), launcher)
   // BOM permits Windows PowerShell 5.1 to read Chinese paths reliably.

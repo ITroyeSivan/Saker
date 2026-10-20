@@ -8,6 +8,7 @@ export const PROJECT_RUN_STATES = ['preparing', 'running', 'waiting', 'paused', 
 export const PROJECT_ACTIVE_STATES = ['preparing', 'running', 'waiting', 'paused'];
 export const PROJECT_CHECK_STATES = ['pending', 'running', 'paused', 'ended'];
 export const PROJECT_VERDICTS = ['not_found', 'issue', 'needs_check', 'blocked', 'not_applicable'];
+export const PROJECT_ACTION_STATES = ['queued', 'dispatched', 'completed', 'failed', 'unknown'];
 
 const RUN_TRANSITIONS = {
   preparing: ['running', 'waiting', 'paused', 'cancelled', 'failed'],
@@ -304,18 +305,19 @@ export function beginProjectAction(store, sessionId, runId, checkId, input = {})
       throw conflict('项目运行状态已变化，请刷新后重试');
     const check = readProjectCheck(store, sessionId, runId, checkId);
     if (!check) throw new Error('project check not found');
-    const inflight = store.db.prepare("SELECT action_id FROM project_actions WHERE session_id=? AND run_id=? AND state='dispatched' LIMIT 1")
+    const inflight = store.db.prepare("SELECT action_id FROM project_actions WHERE session_id=? AND run_id=? AND state IN ('queued','dispatched') LIMIT 1")
       .get(sessionId, runId);
     if (inflight) throw conflict('同一项目运行同时只能有一个派发中的动作');
     const actionId = 'project-action-' + randomUUID();
+    const executionState = input.executionState === 'queued' ? 'queued' : 'dispatched';
     const record = {
       sessionId, runId, checkId, actionId, controlRev: run.controlRev,
-      executionState: 'dispatched', identityRef: optionalText(input.identityRef, 300),
+      executionState, identityRef: optionalText(input.identityRef, 300),
       startedAt: nowIso(), endedAt: '', pageRef: '', requestRef: '', attachmentRef: '',
       error: null, sideEffectUnknown: false,
     };
     store.db.prepare('INSERT INTO project_actions(session_id,run_id,action_id,state,record,updated_at) VALUES(?,?,?,?,?,?)')
-      .run(sessionId, runId, actionId, 'dispatched', JSON.stringify(record), record.startedAt);
+      .run(sessionId, runId, actionId, executionState, JSON.stringify(record), record.startedAt);
     const nextCheck = { ...check, executionState: 'running', actionRefs: [...new Set([...(check.actionRefs || []), actionId])], updatedAt: nowIso() };
     store.db.prepare('UPDATE project_checks SET record=?,updated_at=? WHERE session_id=? AND run_id=? AND check_id=?')
       .run(JSON.stringify(nextCheck), nextCheck.updatedAt, sessionId, runId, checkId);
@@ -326,6 +328,27 @@ export function beginProjectAction(store, sessionId, runId, checkId, input = {})
   });
 }
 
+/** 排队动作在拿到速率槽并完成派发前重核后，才从 queued 切到 dispatched。 */
+export function markProjectActionDispatched(store, sessionId, runId, actionId, input = {}) {
+  return taskTransaction(store, () => {
+    const action = readProjectAction(store, sessionId, runId, actionId);
+    if (!action) throw new Error('project action not found');
+    if (action.executionState !== 'queued') throw conflict('项目动作已不在排队阶段');
+    const run = readProjectRun(store, sessionId, runId);
+    if (!run || run.state !== 'running') throw conflict('项目运行当前不可派发新动作');
+    if (input.controlRev !== undefined && run.controlRev !== input.controlRev)
+      throw conflict('项目运行状态已变化，请刷新后重试');
+    const next = {
+      ...action, executionState: 'dispatched', controlRev: run.controlRev,
+      identityRef: input.identityRef !== undefined ? optionalText(input.identityRef, 300) : action.identityRef,
+      dispatchedAt: nowIso(),
+    };
+    store.db.prepare('UPDATE project_actions SET state=?,record=?,updated_at=? WHERE session_id=? AND run_id=? AND action_id=?')
+      .run('dispatched', JSON.stringify(next), next.dispatchedAt, sessionId, runId, actionId);
+    return next;
+  });
+}
+
 /** 动作返回后按 actionId 保存真实结果；控制版本过期只补历史，不改当前运行状态。 */
 export function finishProjectAction(store, sessionId, runId, actionId, patch = {}) {
   return taskTransaction(store, () => {
@@ -333,7 +356,7 @@ export function finishProjectAction(store, sessionId, runId, actionId, patch = {
     if (!action) throw new Error('project action not found');
     const next = {
       ...action,
-      executionState: ['dispatched', 'completed', 'failed', 'unknown'].includes(patch.executionState) ? patch.executionState : 'completed',
+      executionState: PROJECT_ACTION_STATES.includes(patch.executionState) ? patch.executionState : 'completed',
       endedAt: nowIso(),
       pageRef: patch.pageRef !== undefined ? optionalText(patch.pageRef, 1000) : action.pageRef,
       requestRef: patch.requestRef !== undefined ? optionalText(patch.requestRef, 1000) : action.requestRef,
