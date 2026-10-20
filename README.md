@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/media/project-panel.png" alt="Saker 按文档测试面板" width="920">
+  <img src="docs/media/project-panel.png" alt="Saker 在官方 DeepSeek Harness Desktop 中完成按文档测试" width="920">
 </p>
 
 <h1 align="center">Saker · 猎隼</h1>
@@ -44,7 +44,7 @@ Saker 是运行在 [DeepSeek Harness Desktop](https://github.com/deepseek-ai/dee
 4. 所有来源处理完且检查结束后自动收尾；只有缺条件项时显示等待，不伪装完成。
 5. 报告、检查表和来源清单从同一份已保存事实导出，不会重新访问目标。
 
-![按文档测试面板](docs/media/project-panel.png)
+> 上图来自官方 Desktop 的真实完成态：检查由受管 Chrome for Testing 执行，实际观察、执行回执和自动收尾在同一页可见。
 
 ### 实战挖掘
 
@@ -88,10 +88,10 @@ Saker 是运行在 [DeepSeek Harness Desktop](https://github.com/deepseek-ai/dee
 
 ## 安装
 
-当前版本 **0.4.111**，适用于官方 Windows Desktop **0.2.1-rc.2**，同时兼容 **0.2.0-rc.2**。
+当前版本 **0.4.112**，适用于官方 Windows Desktop **0.2.1-rc.2**，同时兼容 **0.2.0-rc.2**。
 
 1. 安装官方 Desktop，完成初始化和模型配置，然后完全退出应用。
-2. 下载 `Saker-0.4.111-desktop.zip`，解压到长期保留的目录。
+2. 下载 `Saker-0.4.112-desktop.zip`，解压到长期保留的目录。
 3. 在解压目录打开 PowerShell：
 
 ```powershell
