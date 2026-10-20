@@ -9,15 +9,17 @@ import { startTaskPolicy, taskPolicyStatus, taskPromptStable } from '../plugins/
 import { createProjectRun, transitionProjectRun, defineProjectChecks, upsertProjectSource } from '../plugins/dsh-redteam-results/lib/project-store.js';
 import { setKnowledgeEnabled, knowledgeEnabled, knowledgeSwitchView } from '../plugins/dsh-redteam-results/lib/knowledge-switch.js';
 import { listMaterialReads } from '../plugins/dsh-redteam-results/lib/material-reads.js';
+import { projectContinuation, markProjectContinuation } from '../plugins/dsh-redteam-results/lib/project-runtime.js';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-project-knowledge-'));
 process.env.DSH_HOME = home;
 const store = openStore(path.join(home, 'redteam-results', 'results.db'));
 const tools = new Map();
+const disposers = [];
 const ctx = {
   tools: { register: tool => tools.set(tool.name, tool), guard: () => {} },
   webServer: { register: () => () => {} },
-  effect: fn => { const dispose = fn(); if (typeof dispose === 'function') dispose(); },
+  effect: fn => { const dispose = fn(); if (typeof dispose === 'function') disposers.push(dispose); },
   sessions: { get: id => ({ id, header: { agentPreset: 'pentest' } }) },
   agents: { get: () => ({ status: 'idle', followup: () => {} }) },
   get: () => null,
@@ -50,7 +52,10 @@ try {
     const tool = tools.get('project_document');
     const read = await tool.execute({ action: 'read', sourceId: 'doc-1', sectionId: 'p1' }, exec('pk-read'));
     assert.equal(read.ok, true, read.error);
-    assert.equal(read.text, DOCUMENT_TEXT);
+    assert(read.text.includes(DOCUMENT_TEXT), '正文必须保留');
+    assert(read.text.includes('来源：测试要求.docx'), '渲染文本必须让模型看见来源');
+    assert(read.text.includes('范围：[0,'), '渲染文本必须让模型看见实际读取范围');
+    assert(read.text.includes('后续：无'), '渲染文本必须区分是否还有内容');
     const search = await tool.execute({ action: 'search', query: '审批' }, exec('pk-read'));
     assert.equal(search.ok, true, search.error);
     assert(search.text.includes('审批'));
@@ -83,7 +88,35 @@ try {
     const reads = listMaterialReads(store, 'pk-read');
     assert(reads.size > 0, '关闭知识库不能删除文档读取记录');
   });
+
+  await test('真实文档工具读取新范围计进展，重读和搜索同片段不清零', async () => {
+    const sid = 'pk-progress';
+    const run = prepare(sid);
+    const tool = tools.get('project_document');
+    const mark = value => markProjectContinuation(store, sid, run.runId, value.fingerprint, value.attempts);
+    mark(projectContinuation(store, sid));
+    assert.equal((await tool.execute({ action: 'read', sourceId: 'doc-1', sectionId: 'p1', cursor: 0, limit: 8 }, exec(sid))).ok, true);
+    const firstRead = projectContinuation(store, sid);
+    assert.equal(firstRead.attempts, 0, '首次读取真正的新原文范围算进展');
+    mark(firstRead);
+    await tool.execute({ action: 'read', sourceId: 'doc-1', sectionId: 'p1', cursor: 4, limit: 2 }, exec(sid));
+    const repeated = projectContinuation(store, sid);
+    assert.equal(repeated.attempts, 1, '已读范围里的小片段不算新进展');
+    mark(repeated);
+    await tool.execute({ action: 'read', sourceId: 'doc-1', sectionId: 'p1', cursor: 8, limit: 8 }, exec(sid));
+    const newRange = projectContinuation(store, sid);
+    assert.equal(newRange.attempts, 0, '向后续读必须允许继续');
+    mark(newRange);
+    await tool.execute({ action: 'search', query: '员工' }, exec(sid));
+    const searched = projectContinuation(store, sid);
+    assert.equal(searched.attempts, 0, '搜索实际提供尚未读到的后半段算进展');
+    mark(searched);
+    await tool.execute({ action: 'search', query: '员工' }, exec(sid));
+    const duplicateSearch = projectContinuation(store, sid);
+    assert.equal(duplicateSearch.attempts, 1, '相同搜索片段不重复提供进展');
+  });
 } finally {
+  for (const dispose of disposers.reverse()) await dispose();
   store.close();
   fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 });
 }

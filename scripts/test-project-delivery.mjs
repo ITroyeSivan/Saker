@@ -9,6 +9,7 @@ import { startTaskPolicy, readTaskPolicy } from '../plugins/dsh-redteam-results/
 import { createProjectRun, transitionProjectRun, defineProjectChecks, recordProjectCheck, upsertProjectSource, readProjectRun, listProjectChecks } from '../plugins/dsh-redteam-results/lib/project-store.js';
 import { buildProjectDeliveryFiles, zipProjectDelivery, projectCounts } from '../plugins/dsh-redteam-results/lib/project-delivery.js';
 import { dispatch } from '../plugins/dsh-redteam-results/lib/index.js';
+import { writeTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy-record.js';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-project-delivery-'));
 process.env.DSH_HOME = home;
@@ -48,9 +49,10 @@ try {
     assert.equal(counts.ended, 3);
     assert.equal(counts.issue, 1);
     assert.equal(counts.blocked, 1);
-    assert.equal(counts.notFound, 1);
+    assert.equal(counts.notFound, 0, '部分完成不计作完整的未发现问题');
     assert.equal(counts.partial, 1, 'not_found 带缺口应计为部分完成');
     assert.equal(counts.pending, 1);
+    assert.equal(counts.checked, 1, '缺条件和部分完成不计作已经完成检查');
   });
 
   await test('导出包含要求、结果、说明与来源，未执行不写成通过', () => {
@@ -61,6 +63,9 @@ try {
     assert(report.includes('发现问题'));
     assert(report.includes('缺少条件'));
     assert(report.includes('未开始'));
+    assert.match(report, /公式列检查[^\n]*→ 部分完成/);
+    assert(report.includes('只检查了只读路径'), '已检查内容不能遮掉尚未完成的缺口');
+    assert(report.includes('=SUM(A1:A2) 计算结果与页面一致'));
     assert(!report.includes('尚未开始的项目（来源：第5段）→ 未发现问题'), '未执行不能写成未发现问题');
     const sources = bundle.files['delivery/project-sources.md'];
     assert(sources.includes('测试要求.xlsx'));
@@ -109,15 +114,30 @@ try {
     const resumed = await dispatch(ctx, store, 'project.resume', { sessionId: 'pd-start', runId: running.runId });
     assert.equal(resumed.run.state, 'preparing');
     const runningAgain = transitionProjectRun(store, 'pd-start', running.runId, 'running', resumed.run.controlRev);
+    const spent = readTaskPolicy(store, 'pd-start');
+    writeTaskPolicy(store, 'pd-start', { ...spent, used: { ...spent.used, toolCalls: 9 } });
     const stopped = await dispatch(ctx, store, 'project.stop', { sessionId: 'pd-start', runId: runningAgain.runId });
     assert.equal(stopped.run.state, 'cancelled');
     assert.equal(readProjectRun(store, 'pd-start', runningAgain.runId).state, 'cancelled');
+    const stoppedStatus = await dispatch(ctx, store, 'project.status', { sessionId: 'pd-start' });
+    assert.equal(stoppedStatus.configured, true, '停止后页面仍可查看已保存的项目');
+    assert.equal(stoppedStatus.run.runId, runningAgain.runId);
     const restarted = await dispatch(ctx, store, 'project.start', { sessionId: 'pd-start', policy: { question: '第二轮按文档测试', budget: { minutes: 30 } } });
     assert.equal(restarted.ok, true, restarted.error);
     assert.equal(restarted.existing, false, '结束后的再次开始必须建立新运行');
     assert.notEqual(restarted.run.runId, stopped.run.runId);
     assert.equal(readProjectRun(store, 'pd-start', runningAgain.runId).state, 'cancelled', '旧运行必须保留');
     assert.equal(readTaskPolicy(store, 'pd-start').question, '第二轮按文档测试');
+    const newPolicy = readTaskPolicy(store, 'pd-start');
+    assert(newPolicy.startedAt > spent.startedAt, '新 run 使用新的计量轮次');
+    assert(newPolicy.policyRev > spent.policyRev, '新轮次修订号继续递增');
+    assert.equal(newPolicy.used.toolCalls, 0, '新 run 不继承旧轮已耗用额度');
+    assert.equal(newPolicy.cancelled, false);
+    assert.equal(newPolicy.projectRunId, restarted.run.runId);
+    const archived = store.db.prepare('SELECT record FROM task_rounds WHERE session_id=? AND started_at=?').get('pd-start', spent.startedAt);
+    assert.equal(JSON.parse(archived.record).used.toolCalls, 9, '旧用量留在旧轮次，不被擦除');
+    const historical = await dispatch(ctx, store, 'project.status', { sessionId: 'pd-start', runId: runningAgain.runId });
+    assert.equal(historical.run.runId, runningAgain.runId, '明确指定历史运行时不能返回另一个活动运行');
   });
 } finally {
   store.close();

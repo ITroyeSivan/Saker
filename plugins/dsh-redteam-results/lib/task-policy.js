@@ -13,11 +13,14 @@ import { chatDefaults } from './chat-setup.js';
 import { normalizeModelChoice } from './model-choice.js';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import { moduleInitialization } from './content-catalog.js';
 import { taskTransaction, writeTaskPolicy, childAllowedTools, ownedPurposeTasks } from './task-policy-record.js';
 import { taskModuleSelection, adoptPreparedModules, retainRoundModules, bumpPreparedModules } from './task-modules.js';
 import { normalizeRequestRate, normalizeRequestConcurrency } from './request-pacing.js';
 import { TEST_CONTENT_KEYS, DEFAULT_EXCLUDED_CHECKS, EXCLUDED_CHECK_LABELS, testContentLabel } from './test-catalog.js';
+
+const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
 
 const modes = new Set(['nday', 'regular', '0day']);
 const stops = new Set(['first-high', 'first-rce', 'queue', 'budget']);
@@ -27,7 +30,9 @@ const localTools = new Set(['redteam_task', 'redteam_context', 'redteam_checks',
   'redteam_finding_register', 'redteam_finding_update', 'redteam_finding_delete', 'redteam_chain_reconcile',
   'read', 'write', 'edit', 'glob', 'grep', 'run_code', 'skill', 'tool_pack',
   // Local catalog/status reads do not contact a target and need no invented scope.
-  'nday_catalog', 'nday_policy_get', 'nday_metrics', 'mcp_search', 'exercise_submit']);
+  'nday_catalog', 'nday_policy_get', 'nday_metrics', 'mcp_search', 'exercise_submit',
+  'project_document', 'project_check']);
+const projectMetadataTools = new Set(['working_directory', 'get_goal', 'todo_write', 'read_image']);
 // 批次 A：方法编排与抽象工作台已退出运行。任何一次调用都直接拒绝并计数，
 // 不再当作"本地登记"放行——否则停用后模型仍能通过它们继续推进目标操作。
 const retiredTools = new Set(['saker_method', 'execution_modules',
@@ -113,7 +118,7 @@ const targetTrafficExecutionActions = new Set(['run', 'run-pair', 'run-effect', 
 // `exercise_request` 是本地效果基准的受控工具，靶场自己记录每一条请求；把它当成未计量扫描器
 // 会把基准的引用契约整体判死（2026-10-18 实测：h1 的 7 次 exercise_request 全被拒，requests=0）。
 // 它们仍属于"目标流量工具"：关闭"允许访问网站"时照样被拦。
-const meteredRequestTools = new Set(['exercise_request', 'recorded-http-execution']);
+const meteredRequestTools = new Set(['exercise_request', 'recorded-http-execution', 'recorded-project-execution']);
 // 会改动业务数据的 HTTP 方法；“不改动网站数据”只放行 GET/HEAD 这类读取请求。
 const writeHttpMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 function executionActionOf(args) {
@@ -466,7 +471,7 @@ export function startTaskPolicy(store, sessionId, input, now = Date.now()) {
     : isProject ? normalizeRequestConcurrency(input.requestConcurrency) : normalizeRequestConcurrency(choice?.requestConcurrency);
   let modules = {};
   if (!parentSession && !isProject) {
-    const home = store.dbPath === ':memory:' ? (process.env.DSH_HOME || '.') : path.dirname(path.dirname(store.dbPath));
+    const home = store.dbPath === ':memory:' ? DSH_HOME : path.dirname(path.dirname(store.dbPath));
     const config = moduleInitialization(home, sessionId, mode);
     taskModuleSelection(store, sessionId, config);
     modules = adoptPreparedModules(store, sessionId);
@@ -817,8 +822,8 @@ function taskPromptBase(state, includeUsage = true, controlledInterface = false)
     const projectUsage = includeUsage && policy.budget.toolCalls !== null && policy.budget.toolCalls !== undefined
       ? '操作=' + policy.used.toolCalls + '/' + policy.budget.toolCalls + '；'
       : '操作按实际调用统计（未设上限）；';
-    return '按文档连续测试：先读取用户提供的测试要求，逐项执行并保存结果；缺条件项写清缺什么并继续独立项；'
-      + '目标测试优先用受管 Chrome for Testing（CDP）在真实浏览器里观察和操作；需要原始 HTTP 时走 Saker 的可计量派发入口，'
+    return '按文档连续测试：先用 project_document list/read 读取用户提供的测试要求，用 project_check define/next 保存并领取检查、record 保存实际结果和缺口；继续独立项；'
+      + '目标测试优先用 saker_browser 的受管 Chrome for Testing（CDP）；原始 HTTP 用 project_request，'
       + '不要用 shell curl 直接发目标请求——curl 不会自动带 Cookie/Origin/Referer/User-Agent 等浏览器请求头，容易误判结果；'
       + '本轮问题：' + (policy.question || '按用户文档') + '；站点：' + (policy.target || '按已给授权范围，不能自行扩大') + '；' + projectUsage
       + '停止规则=' + policy.stop + '。' + (includeUsage ? '' : '需要精确用量时调用 redteam_task action=status；宿主守卫按最新预算拦截。')
@@ -898,21 +903,26 @@ export function taskOverview(store, sessionId) {
 /** 根任务当前有效的 Web 模块键（子任务沿用主任务）。只读；关掉的模块不能新发采集动作。 */
 function rootModuleKeys(store, sessionId) {
   const policy = readTaskPolicy(store, sessionId);
-  const home = store.dbPath === ':memory:' ? (process.env.DSH_HOME || '.') : path.dirname(path.dirname(store.dbPath));
+  const home = store.dbPath === ':memory:' ? DSH_HOME : path.dirname(path.dirname(store.dbPath));
   const config = moduleInitialization(home, sessionId, policy?.mode ?? 'regular');
   return new Set(taskModuleSelection(store, sessionId, config).active);
 }
 
-export function taskExecutionGuard(store, sessionId, name, now = Date.now(), { onReserve, baselineRecheck = false, moduleCheck, args } = {}) {
+export function taskExecutionGuard(store, sessionId, name, now = Date.now(), { onReserve, baselineRecheck = false, moduleCheck, args, reserve = true } = {}) {
   // Visibility restrictions cannot hide agent-scoped tools. Enforce ownership on every dispatch,
   // including PTC's eventual call, before the local-tool fast path. [] means no tools.
   const allowed = childAllowedTools(store, sessionId);
-  const permissionName = ['recorded-http-execution', 'recorded-browser-execution'].includes(name) ? 'redteam_execution' : name;
+  const permissionName = name === 'recorded-project-execution' ? 'project_request'
+    : ['recorded-http-execution', 'recorded-browser-execution'].includes(name) ? 'redteam_execution' : name;
   if (allowed !== undefined && (!Array.isArray(allowed) || !allowed.includes(permissionName)))
     return 'worker_tool_not_allowed：当前助手未获准使用 ' + name;
+  const isProject = readTaskPolicy(store, sessionId)?.scenario === 'project';
+  // 外层只预检；实际派发适配器在建立动作的同一事务领取一次额度。
+  if (isProject && name === 'project_request')
+    return taskExecutionGuard(store, sessionId, 'recorded-project-execution', now, { args, reserve: false });
   // 本地/规划类工具（status/context/research/读写/检索）不占**目标**预算，但也要如实计数：
   // 否则界面会显示"工具调用 0/16"而模型其实已经用了十几次——"分别计量"不等于"不计量"（第 8.2 节）。
-  if (localTools.has(name) || offlineToolCall(name, args)) {
+  if (localTools.has(name) || (isProject && projectMetadataTools.has(name)) || offlineToolCall(name, args)) {
     store.db.exec('BEGIN IMMEDIATE');
     try {
       const policy = readTaskPolicy(store, sessionId);
@@ -938,19 +948,19 @@ export function taskExecutionGuard(store, sessionId, name, now = Date.now(), { o
       else if (state.policy.parentSession && workerReportedFinished(store, sessionId))
         reason = 'worker_reported_finished：子任务已报告结束；只能整理最终回复，不能继续目标操作。';
     else if (state.stopped) reason = '任务已停止：' + state.reason + '；仅继续证据整理与交付，不能重置预算或继续目标操作。';
-    else if (state.policy.needsBaselineRecheck && !baselineRecheck) reason = 'baseline_recheck_required：用户已处理阻碍，先用redteam_execution run purpose=baseline复查已存正常GET/HEAD请求，不能直接重试探针。';
-    else if (!baselineRecheck && state.policy.parentSession && state.policy.mode === '0day' && !state.researchReady && name !== 'zday_pattern' && !hasResearch(store, sessionId)
+    else if (!isProject && state.policy.needsBaselineRecheck && !baselineRecheck) reason = 'baseline_recheck_required：用户已处理阻碍，先用redteam_execution run purpose=baseline复查已存正常GET/HEAD请求，不能直接重试探针。';
+    else if (!isProject && !baselineRecheck && state.policy.parentSession && state.policy.mode === '0day' && !state.researchReady && name !== 'zday_pattern' && !hasResearch(store, sessionId)
       && readTaskPolicy(store, state.policy.parentSession).used.discoveryCalls >= readTaskPolicy(store, state.policy.parentSession).budget.discoveryCalls)
       reason = 'parent_observation_budget_exhausted：主任务共享观察额度已用完；分析已存材料，不能由另一个子代理继续扩大观察。';
-    else if (!baselineRecheck && state.observationExhausted && name !== 'zday_pattern' && !hasResearch(store, sessionId)) reason = 'observation_budget_exhausted：停止扩大观察；先分析已有材料、请求和业务问题，形成具体假设，确实缺资料再讨论。';
-    else if (!baselineRecheck && state.policy.mode === '0day' && name !== 'zday_pattern' && (state.researchReady || hasResearch(store, sessionId))) reason = researchOperationBlock(store, sessionId, { reserve: true }) || undefined;
-    else if (!baselineRecheck && hasResearch(store, sessionId) && !['zday_pattern', 'nday_match', 'nday_scope_hunt', 'nday_priority_plan', 'attack_plan', 'asset_search', 'asset_search_batch', 'hunter'].includes(name)) {
+    else if (!isProject && !baselineRecheck && state.observationExhausted && name !== 'zday_pattern' && !hasResearch(store, sessionId)) reason = 'observation_budget_exhausted：停止扩大观察；先分析已有材料、请求和业务问题，形成具体假设，确实缺资料再讨论。';
+    else if (!isProject && !baselineRecheck && state.policy.mode === '0day' && name !== 'zday_pattern' && (state.researchReady || hasResearch(store, sessionId))) reason = researchOperationBlock(store, sessionId, { reserve: true }) || undefined;
+    else if (!isProject && !baselineRecheck && hasResearch(store, sessionId) && !['zday_pattern', 'nday_match', 'nday_scope_hunt', 'nday_priority_plan', 'attack_plan', 'asset_search', 'asset_search_batch', 'hunter'].includes(name)) {
       reason = researchOperationBlock(store, sessionId, { reserve: true }) || undefined;
     }
     // 模块闸：在**同一个准入事务**里核对最新模块选择。拒绝时不占额度、不发请求。
-    if (!reason && state.configured && !state.stopped && moduleCheck) reason = moduleCheck() || undefined;
+    if (!reason && !isProject && state.configured && !state.stopped && moduleCheck) reason = moduleCheck() || undefined;
     // 主动采集：关掉的模块不能新发这类动作；已有资料/历史回执仍可读取。
-    if (!reason && state.configured && !state.stopped && !baselineRecheck && collectionModules[name]) {
+    if (!reason && !isProject && state.configured && !state.stopped && !baselineRecheck && collectionModules[name]) {
       const active = rootModuleKeys(store, sessionId);
       const disabled = collectionModules[name].filter(key => !active.has(key));
       if (disabled.length) reason = 'collection_module_disabled：当前任务未启用 ' + disabled.join('、')
@@ -961,7 +971,7 @@ export function taskExecutionGuard(store, sessionId, name, now = Date.now(), { o
     if (!reason && state.configured && !state.stopped && effective.allowTargetNetwork === false
       && isTargetTrafficTool(store, sessionId, name, args, effective))
       reason = targetTrafficDenial(effective);
-    if (!reason && state.configured && !baselineRecheck && !rootModuleKeys(store, sessionId).size
+    if (!reason && !isProject && state.configured && !baselineRecheck && !rootModuleKeys(store, sessionId).size
       && isTargetTrafficTool(store, sessionId, name, args, effective))
       reason = 'all_test_content_disabled：本次未选择任何测试内容，只能分析已有资料。';
     // 未计量目标流量：已知扫描器，或命令里出现授权范围内 URL 的宿主 shell。
@@ -997,7 +1007,7 @@ export function taskExecutionGuard(store, sessionId, name, now = Date.now(), { o
       if (!reason && !urls.length && effective.excludedPaths?.length)
         reason = 'excluded_paths_unverified：此通道的实际地址未知，无法执行排除路径，请改用 redteam_execution 请求。';
     }
-    if (!reason && state.configured && !state.stopped) {
+    if (!reason && reserve && state.configured && !state.stopped) {
       const policy = state.policy;
       if (policy.flow?.needsContinuation) policy.flow.needsContinuation = false;
       policy.used.toolCalls++;

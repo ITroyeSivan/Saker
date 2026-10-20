@@ -41,6 +41,49 @@ function harness(component, props={}, override={}) {
 let failures=0;
 async function test(name,fn){try{await fn();console.log('ok   '+name);}catch(error){failures++;console.log('FAIL '+name+': '+error.stack);}}
 try {
+  await test('cold session reads use an owned header observation without activating an agent',async()=>{
+    let reads=0, disposed=0;
+    const cold={sessions:{get:()=>undefined},sessionQuery:{observeSession:async(id,options)=>{
+      reads++;assert.equal(id,'current');assert.equal(options.projectionMode,'none');assert(options.signal instanceof AbortSignal);
+      return {header:{agentPreset:'pentest'},[Symbol.dispose](){disposed++;}};
+    }}};
+    for(const endpoint of ['execution.list','materials.list','usage.get','knowledge.status','knowledge.usage','task.events','project.status']){
+      const value=await dispatch(cold,store,endpoint,{sessionId:'current'});
+      assert.equal(value.ok,true,endpoint);assert.equal(disposed,reads,endpoint+' releases its observation');
+    }
+    assert.equal(reads,7);
+    await assert.rejects(dispatch(cold,store,'project.start',{sessionId:'current'}),/请选择当前可用的渗透会话/);
+    await assert.rejects(dispatch(cold,store,'knowledge.toggle',{sessionId:'current',enabled:false}),/请选择当前可用的渗透会话/);
+    assert.equal(reads,7,'execution mutations cannot borrow a read-only header');
+  });
+  await test('cold read rejects wrong presets and missing sessions and releases its observation',async()=>{
+    let disposed=0;
+    const wrong={sessions:{get:()=>undefined},sessionQuery:{observeSession:async()=>({header:{agentPreset:'code-audit'},[Symbol.dispose](){disposed++;}})}};
+    await assert.rejects(dispatch(wrong,store,'execution.list',{sessionId:'wrong'}),error=>error.code==='session-preset-mismatch');
+    assert.equal(disposed,1);
+    const missing={sessions:{get:()=>undefined},sessionQuery:{observeSession:async()=>{throw Object.assign(Error('not found'),{code:'SESSION_QUERY_SESSION_NOT_FOUND'});}}};
+    await assert.rejects(dispatch(missing,store,'execution.list',{sessionId:'missing'}),error=>error.code==='session-not-found');
+    await assert.rejects(dispatch({sessions:{get:()=>undefined}},store,'execution.list',{sessionId:'current'}),error=>error.code==='session-read-unavailable');
+    for(const [hostCode,expected] of [['SESSION_QUERY_CORRUPT_SESSION','session-read-corrupt'],['SESSION_QUERY_ABORTED','session-read-timeout']]){
+      const broken={sessions:{get:()=>undefined},sessionQuery:{observeSession:async()=>{throw Object.assign(Error('host read failed'),{code:hostCode});}}};
+      await assert.rejects(dispatch(broken,store,'execution.list',{sessionId:'current'}),error=>error.code===expected);
+    }
+    const warm={...ctx,sessionQuery:{observeSession(){throw Error('live session must not cold-read');}}};
+    assert.equal((await dispatch(warm,store,'execution.list',{sessionId:'current'})).ok,true);
+  });
+  await test('execution load failure is retryable and does not display fabricated zero counts',async()=>{
+    let calls=0;
+    const ui=harness('ExecutionPanel',{}, {api:async()=>{
+      calls++;return calls===1?{ok:false,error:'Session is still loading'}:{ok:true,total:1,more:false,rows:[],counts:{all:1,returned:1,failed:0,unknown:0},usage:{toolCalls:0,modelCalls:0}};
+    }});
+    await ui.mount();await flush();
+    assert(JSON.stringify(ui.render()).includes('Session is still loading'));
+    assert(!ui.find(n=>n.type==='button'&&n.children.includes('全部 0')),'a failed read is not an empty ledger');
+    const retry=ui.button('重试');assert(retry,'visible retry action');
+    await retry.props.onClick();await flush();
+    assert.equal(calls,2);assert(!JSON.stringify(ui.render()).includes('Session is still loading'));
+    assert(ui.find(n=>n.type==='button'&&n.children.includes('全部 1')));
+  });
   // R06：四个入口由宿主 conversation.view 直接注册，工作区不再自带标签栏与「更多记录」下拉。
   await test('task workspace opens the execution tab directly and keeps other tabs lazy',async()=>{
     const ui=harness('ResultsView');await ui.mount();await ui.flush();

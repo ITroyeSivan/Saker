@@ -55,6 +55,10 @@ $env:TMP = $settings.tempDirectory
 $env:TMPDIR = $settings.tempDirectory
 $env:DSH_HOME = $settings.home
 Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
+# The current dsh host rejects socks5h in ALL_PROXY during startup. Preserve
+# explicit HTTP(S) proxies and remove only the unsupported alias.
+Remove-Item Env:ALL_PROXY -ErrorAction SilentlyContinue
+Remove-Item Env:all_proxy -ErrorAction SilentlyContinue
 $launchArguments = @('--user-data-dir="' + $settings.userDataDirectory + '"')
 if ($DebugPort -gt 0) { $launchArguments += '--remote-debugging-port=' + $DebugPort }
 Start-Process -FilePath $executable -ArgumentList $launchArguments -WorkingDirectory $settings.workspace -WindowStyle Normal | Out-Null

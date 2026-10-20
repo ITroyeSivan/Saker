@@ -19,6 +19,16 @@ const response = (status, body, type = 'application/json') => ({
 
 assert.equal((await readJsonResponse(response(200, '{"ok":true}'), '测试接口')).ok, true)
 await assert.rejects(() => readJsonResponse(response(500, 'server exploded', 'text/plain'), '测试接口'), /HTTP 500/)
+await assert.rejects(() => readJsonResponse(response(400, JSON.stringify({
+  ok: false, code: 'session-not-found', error: '未找到该会话，请重新选择', requestId: 'read-1', hint: 'internal hint',
+})), '测试接口'), error => {
+  assert.equal(error.message, '未找到该会话，请重新选择（HTTP 400）')
+  assert.equal(error.code, 'session-not-found')
+  assert.equal(error.requestId, 'read-1')
+  assert.equal(error.status, 400)
+  return true
+})
+await assert.rejects(() => readJsonResponse(response(502, '{"error":{"message":"unexpected shape"}}'), '测试接口'), /HTTP 502/)
 await assert.rejects(() => readJsonResponse(response(200, ''), '测试接口'), /响应为空/)
 await assert.rejects(() => readJsonResponse(response(200, '{bad json', 'application/json'), '测试接口'), /不是 JSON/)
 assert.match(source, /readJsonResponse\(r, "Saker " \+ endpoint\)/, 'the API path must use the shared parser')

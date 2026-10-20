@@ -195,6 +195,7 @@ export function readDocumentSection(parsed, sectionId, { cursor = 0, limit = 400
   if (!section) throw new Error('未找到该文档段落：' + sectionId);
   const text = String(section.text || '');
   const start = Math.max(0, Number(cursor) || 0);
+  if (start > text.length) throw new Error('文档读取位置超出段落范围：' + start + ' > ' + text.length);
   const end = Math.min(text.length, start + Math.max(1, Number(limit) || 4000));
   return { sectionId, location: section.location, text: text.slice(start, end), nextCursor: end < text.length ? end : null, more: end < text.length };
 }

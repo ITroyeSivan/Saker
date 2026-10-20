@@ -4,7 +4,10 @@
 // 记录格式、条目数与字节摘要，按内容去重。不访问目标、不调用模型、不立刻发送。
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
+
+const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
 
 const MAX_BYTES = 1024 * 1024; // 单次粘贴上限 1MB；更大请用文件/目录入口
 
@@ -155,7 +158,7 @@ export function importPastedMaterial(store, sessionId, input = {}, { home } = {}
     return { id: record.id, format, bytes, digest, reused: true, summary: record.summary ?? null,
       identities: Array.isArray(record.identities) ? record.identities : identities, note: '相同内容已存在，合并来源而不是重复保存。' };
   }
-  const root = home || (store.dbPath === ':memory:' ? (process.env.DSH_HOME || '.') : path.dirname(path.dirname(store.dbPath)));
+  const root = home || (store.dbPath === ':memory:' ? DSH_HOME : path.dirname(path.dirname(store.dbPath)));
   const dir = path.join(root, 'redteam-results', 'materials', String(sessionId).replace(/[^A-Za-z0-9._-]/g, '_'));
   fs.mkdirSync(dir, { recursive: true });
   const id = 'pasted-' + randomUUID();

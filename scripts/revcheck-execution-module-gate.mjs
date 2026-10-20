@@ -17,8 +17,8 @@ const variants = [
     'const late = moduleCheck();', 'const late = undefined;',
     'a content closed between admission and dispatch is caught before the network and the reservation is released'],
   ['guard-skips-module-check', 'task-policy.js',
-    'if (!reason && state.configured && !state.stopped && moduleCheck) reason = moduleCheck() || undefined;',
-    'if (!reason && state.configured && !state.stopped && false) reason = moduleCheck() || undefined;',
+    'if (!reason && !isProject && state.configured && !state.stopped && moduleCheck) reason = moduleCheck() || undefined;',
+    'if (!reason && !isProject && state.configured && !state.stopped && false) reason = moduleCheck() || undefined;',
     'closing the test content blocks the probe and nothing reaches the fixture or the budget'],
 ];
 for (const [name, file, from, to, expected] of variants) {

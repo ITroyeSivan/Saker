@@ -33,9 +33,11 @@ function prepareProject(sid) {
   const checks = defineProjectChecks(store, sid, run.runId, [
     { requirement: '员工只能查看自己的资料', sourceLocation: '表1 第2行' },
     { requirement: '普通员工不能审批', sourceLocation: '表1 第3行' },
+    { requirement: '文件下载权限', sourceLocation: '表1 第4行' },
   ]);
   recordProjectCheck(store, sid, run.runId, checks[0].checkId, { executionState: 'ended', verdict: 'issue', checkedContent: '员工 B 读取到员工 A 的电话' });
   recordProjectCheck(store, sid, run.runId, checks[1].checkId, { executionState: 'ended', verdict: 'blocked', gaps: '缺少审批人账号' });
+  recordProjectCheck(store, sid, run.runId, checks[2].checkId, { executionState: 'ended', verdict: 'not_found', checkedContent: '已检查自己的文件', gaps: '尚缺另一位员工的文件' });
   upsertProjectSource(store, sid, { sourceId: 'doc-1', sourceRevision: 'rev-1', displayName: '测试要求.xlsx', kind: 'xlsx', parseState: 'ready', sections: [] });
   return { run: running, checks };
 }
@@ -75,12 +77,17 @@ try {
     await new Promise(setImmediate);
     const view = ui.render();
     const text = textOf(view);
-    assert(text.includes('已检查 2 项'), '统计行必须显示已检查数量：' + JSON.stringify(view).slice(0, 800));
+    assert(text.includes('已检查 1 项'), '缺条件和部分完成不能计入已检查数量：' + JSON.stringify(view).slice(0, 800));
     assert(text.includes('发现问题 1'));
     assert(text.includes('缺少条件 1'));
     assert(text.includes('员工只能查看自己的资料'));
     assert(text.includes('员工 B 读取到员工 A 的电话'));
     assert(text.includes('测试要求.xlsx'));
+    assert(text.includes('部分完成 1'));
+    const row = nodes(view).find(node => node.type === 'tr' && textOf(node).includes('文件下载权限'));
+    assert(row && textOf(row).includes('部分完成'), '部分完成不能显示成未发现问题');
+    assert(textOf(row).includes('已检查自己的文件'));
+    assert(textOf(row).includes('尚缺另一位员工的文件'), '已检查内容和缺口都须可见');
     assert(text.includes('文档要求') && text.includes('结果') && text.includes('说明'));
   });
 
@@ -106,6 +113,14 @@ try {
     assert(source.includes('.dsh-task-project-table th,.dsh-task-project-table td'), '项目表格单元格样式存在');
     assert(source.includes('white-space:normal'), '单元格文本必须允许换行');
     assert(source.includes('word-break:break-word'), '长地址必须可断行');
+  });
+
+  await test('聊天入口提供按文档测试并接入项目来源导入', () => {
+    assert(source.includes("project:'按文档测试'"), '任务方向必须能选择按文档测试');
+    assert(source.includes("['regular','nday','0day','project']"), '项目场景入口必须出现在任务方向选择器');
+    assert(source.includes("api('project.import'"), '项目文档必须走真实导入接口');
+    assert(source.includes("scenario:activeScenario"), '资料入口必须知道当前是项目场景');
+    assert(source.includes("projectMode?'开始按文档测试':'开始测试'"), '项目开始按钮必须有明确动作');
   });
 } finally {
   store.close();

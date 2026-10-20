@@ -1,7 +1,7 @@
 // W02：项目场景的最小持久记录。四类记录各用一张小表加 JSON record：
 // 运行、文档来源、检查、动作。这里只负责归属、版本和状态转移；
 // 文档解析、浏览器执行和连续推进分别放在各自模块，不堆进本文件。
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { taskTransaction, taskEvent } from './task-policy-record.js';
 
 export const PROJECT_RUN_STATES = ['preparing', 'running', 'waiting', 'paused', 'completed', 'cancelled', 'failed'];
@@ -26,6 +26,15 @@ const text = (value, label, max = 2000) => {
   return result;
 };
 const optionalText = (value, max = 20000) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
+export const projectDocumentKey = (sourceId, sourceRevision, sectionId) => createHash('sha256')
+  .update(JSON.stringify([String(sourceId || ''), String(sourceRevision || ''), String(sectionId || '')]))
+  .digest('hex');
+const sectionState = (run, source, section) => {
+  const intervals = run.progressDocumentCoverage?.[projectDocumentKey(source.sourceId, source.sourceRevision, section.sectionId)] || [];
+  const length = String(section.text || '').length;
+  const covered = intervals.reduce((sum, [from, to]) => sum + Math.max(0, to - from), 0);
+  return { covered, length, full: length === 0 || covered >= length };
+};
 const parse = (row, label) => {
   try {
     const record = JSON.parse(row.record);
@@ -140,28 +149,111 @@ export function listProjectChecks(store, sessionId, runId) {
     .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
 }
 
-/** 定义本批检查要求；未执行时不要求 endpoint、身份或方法版本。 */
-export function defineProjectChecks(store, sessionId, runId, checks = []) {
+/**
+ * 定义本批检查要求和来源整理决定。checks 与 sectionDecisions 同事务提交；
+ * 任一条来源、范围或关联无效时整批不落库。
+ */
+export function defineProjectChecks(store, sessionId, runId, checks = [], sectionDecisions = []) {
   return taskTransaction(store, () => {
     const run = readProjectRun(store, sessionId, runId);
     if (!run) throw new Error('project run not found');
+    if (!Array.isArray(checks) || !Array.isArray(sectionDecisions)) throw new Error('checks 和 sectionDecisions 必须是数组');
+    if (!checks.length && !sectionDecisions.length) throw new Error('没有可保存的检查或来源整理决定');
     const existingCount = listProjectChecks(store, sessionId, runId).length;
+    const snapshot = new Set((run.sourceSnapshot || []).map(item => JSON.stringify([
+      String(item.sourceId || ''), String(item.sourceRevision || ''),
+    ])));
+    const sources = new Map();
+    const sourceOf = (sourceId, sourceRevision) => {
+      const key = JSON.stringify([String(sourceId || ''), String(sourceRevision || '')]);
+      if (!sources.has(key)) sources.set(key, readProjectSource(store, sessionId, sourceId, sourceRevision));
+      return sources.get(key);
+    };
+    const normalizedRef = ref => ({
+      sourceId: String(ref?.sourceId || ''),
+      sourceRevision: String(ref?.sourceRevision || ''),
+      sectionId: String(ref?.sectionId || ''),
+    });
+    const validateRef = ref => {
+      if (!ref.sourceId || !ref.sourceRevision || !ref.sectionId) throw new Error('sourceRefs 每项必须包含 sourceId、sourceRevision、sectionId');
+      if (!snapshot.has(JSON.stringify([ref.sourceId, ref.sourceRevision]))) throw new Error('来源不在本次运行的快照中：' + ref.sourceId + '@' + ref.sourceRevision);
+      const source = sourceOf(ref.sourceId, ref.sourceRevision);
+      if (!source) throw new Error('来源不存在：' + ref.sourceId + '@' + ref.sourceRevision);
+      const section = (source.sections || []).find(item => item.sectionId === ref.sectionId);
+      if (!section) throw new Error('来源段落不存在：' + ref.sourceId + '@' + ref.sourceRevision + ' ' + ref.sectionId);
+      if (!sectionState(run, source, section).full) throw new Error('来源段落尚未完整读取，不能声明已整理：' + ref.sectionId);
+    };
     const out = [];
     for (const [index, item] of checks.entries()) {
       const requirement = text(item?.requirement, 'check.requirement', 4000);
       const checkId = item?.checkId ? String(item.checkId) : 'project-check-' + randomUUID();
       const checkRevision = 1;
+      const sourceRefs = Array.isArray(item?.sourceRefs) ? item.sourceRefs.map(normalizedRef) : [];
+      for (const ref of sourceRefs) validateRef(ref);
       const record = {
         sessionId, runId, checkId, checkRevision,
         sourceLocation: optionalText(item?.sourceLocation, 1000),
+        sourceRefs,
         requirement, order: Number.isSafeInteger(item?.order) ? item.order : existingCount + index,
         dependencies: Array.isArray(item?.dependencies) ? item.dependencies.map(value => String(value)) : [],
         executionState: 'pending', verdict: '', checkedContent: '', gaps: '',
         findingRefs: [], actionRefs: [], createdAt: nowIso(), updatedAt: nowIso(),
       };
-      store.db.prepare('INSERT INTO project_checks(session_id,run_id,check_id,check_revision,record,updated_at) VALUES(?,?,?,?,?,?)')
-        .run(sessionId, runId, checkId, checkRevision, JSON.stringify(record), record.updatedAt);
+      if (out.some(check => check.checkId === checkId)) throw new Error('同批次 checkId 重复：' + checkId);
       out.push(record);
+    }
+    const byId = new Map(out.map(check => [check.checkId, check]));
+    const decisions = { ...(run.sectionDecisions || {}) };
+    for (const input of sectionDecisions) {
+      const decision = String(input?.decision || '');
+      if (!['requirements', 'reference', 'unreadable'].includes(decision))
+        throw new Error('sectionDecisions.decision 只能是 requirements、reference 或 unreadable');
+      const ref = normalizedRef(input);
+      const source = sourceOf(ref.sourceId, ref.sourceRevision);
+      if (!source || !snapshot.has(JSON.stringify([ref.sourceId, ref.sourceRevision])))
+        throw new Error('整理决定引用了本次运行之外的来源：' + ref.sourceId + '@' + ref.sourceRevision);
+      const sourceLevel = ref.sectionId === '#source';
+      const section = sourceLevel ? null : (source.sections || []).find(item => item.sectionId === ref.sectionId);
+      if (!sourceLevel && !section) throw new Error('整理决定引用了不存在的段落：' + ref.sectionId);
+      if (decision === 'unreadable') {
+        if (!sourceLevel && !sectionState(run, source, section).full)
+          throw new Error('无法读取的决定必须先核对实际段落范围：' + ref.sectionId);
+        if (!(source.unread || []).length && source.parseState !== 'unreadable' && source.parseState !== 'partial')
+          throw new Error('该来源没有记录不可解析区域，不能标记为无法读取：' + (ref.sectionId || '#source'));
+      } else if (sourceLevel && decision === 'requirements') {
+        throw new Error('来源级 #source 只能作为参考或无法读取决定，不能直接关联检查');
+      } else if (!sourceLevel && !sectionState(run, source, section).full) {
+        throw new Error('来源段落尚未完整读取，不能声明已整理：' + ref.sectionId);
+      }
+      const rationale = optionalText(input?.rationale, 2000);
+      if (decision !== 'requirements' && !rationale) throw new Error(decision + ' 决定需要具体 rationale');
+      const checkIds = Array.isArray(input?.checkIds) ? input.checkIds.map(value => String(value)) : [];
+      if (decision === 'requirements') {
+        if (!checkIds.length) throw new Error('requirements 决定必须关联至少一个本次保存的 checkId');
+        for (const checkId of checkIds) {
+          const check = byId.get(checkId);
+          if (!check) throw new Error('requirements 决定关联了本批次不存在的检查：' + checkId);
+          if (!check.sourceRefs.some(item => item.sourceId === ref.sourceId
+            && item.sourceRevision === ref.sourceRevision && item.sectionId === ref.sectionId))
+            throw new Error('检查 ' + checkId + ' 的 sourceRefs 未覆盖对应要求区域');
+        }
+      }
+      decisions[projectDocumentKey(ref.sourceId, ref.sourceRevision, ref.sectionId)] = {
+        ...ref, decision, rationale, checkIds, decidedAt: nowIso(),
+      };
+    }
+    for (const record of out) {
+      store.db.prepare('INSERT INTO project_checks(session_id,run_id,check_id,check_revision,record,updated_at) VALUES(?,?,?,?,?,?)')
+        .run(sessionId, runId, record.checkId, record.checkRevision, JSON.stringify(record), record.updatedAt);
+    }
+    if (sectionDecisions.length) {
+      const nextRun = {
+        ...run, sectionDecisions: decisions,
+        progressRevision: (run.progressRevision || 0) + 1,
+        updatedAt: nowIso(),
+      };
+      store.db.prepare('UPDATE project_runs SET record=?,updated_at=? WHERE session_id=? AND run_id=?')
+        .run(JSON.stringify(nextRun), nextRun.updatedAt, sessionId, runId);
     }
     return out;
   });

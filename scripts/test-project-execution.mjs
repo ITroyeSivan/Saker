@@ -49,6 +49,8 @@ try {
     const result = await executeProjectHttp(store, 'pe-ok', run.runId, check.checkId, { method: 'GET', url: origin + '/api/ok' });
     assert.equal(result.ok, true);
     assert.equal(result.status, 200);
+    assert(result.summary.includes('SAKER_PROJECT_HTTP'), '项目请求返回文本必须让模型看到正文');
+    assert(result.summary.includes('executionId='), '项目请求返回文本必须带执行回执');
     const receipt = readExecutionReceipt(store, 'pe-ok', result.executionId);
     assert.equal(receipt.source, 'host-project-http-execution');
     assert.equal(receipt.current, true);

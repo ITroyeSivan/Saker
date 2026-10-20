@@ -6,8 +6,9 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
-import { startTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy.js';
-import { createProjectRun, transitionProjectRun, defineProjectChecks, upsertProjectSource, readProjectRun } from '../plugins/dsh-redteam-results/lib/project-store.js';
+import { startTaskPolicy, taskPolicyStatus, readTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy.js';
+import { createProjectRun, transitionProjectRun, defineProjectChecks, upsertProjectSource, readProjectRun, listProjectChecks } from '../plugins/dsh-redteam-results/lib/project-store.js';
+import { projectTurnDecision, completeProjectRun } from '../plugins/dsh-redteam-results/lib/project-runtime.js';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-project-tools-'));
 process.env.DSH_HOME = home;
@@ -24,17 +25,38 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const origin = 'http://127.0.0.1:' + server.address().port;
 
 const tools = new Map();
+const guards = [];
+const contexts = [];
+const events = new Map();
+const followups = [];
+const failedFollowups = new Set();
+const agentFor = id => ({ status: 'idle', followup: message => {
+  if (failedFollowups.has(id)) throw new Error('受控宿主投递失败');
+  followups.push({ id, message });
+}, cancel: () => {} });
 const ctx = {
-  tools: { register: tool => tools.set(tool.name, tool), guard: () => {} },
+  tools: { register: tool => tools.set(tool.name, tool), guard: guard => guards.push(guard) },
+  systemPrompt: { section: () => {}, context: context => contexts.push(context) },
   webServer: { register: () => () => {} },
   effect: fn => { const dispose = fn(); if (typeof dispose === 'function') disposers.push(dispose); },
   sessions: { get: id => ({ id, header: { agentPreset: 'pentest' } }) },
-  agents: { get: () => ({ status: 'idle', followup: () => {} }) },
+  agents: { get: agentFor },
+  on: (name, handler) => events.set(name, [...(events.get(name) || []), handler]),
   get: () => null,
 };
-const { apply } = await import('../plugins/dsh-redteam-results/lib/index.js');
+const { apply, dispatch } = await import('../plugins/dsh-redteam-results/lib/index.js');
 apply(ctx);
 const exec = sid => ({ agent: { session: { id: sid, header: { agentPreset: 'pentest' } } } });
+async function invoke(sid, name, args) {
+  const scope = { ...exec(sid), name, arguments: args };
+  for (const guard of guards) {
+    const denied = await guard(scope);
+    assert.equal(denied, undefined, name + ': ' + denied);
+  }
+  const result = await tools.get(name).execute(args, scope);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), result, name + ' must return lossless JSON for the real host');
+  return result;
+}
 
 function prepareProject(sid) {
   startTaskPolicy(store, sid, { scenario: 'project', question: '按文档测试', target: origin, budget: { minutes: 30 } });
@@ -49,6 +71,195 @@ function prepareProject(sid) {
 }
 
 try {
+  await test('真实项目快照和宿主守卫接受项目场景，文档读取不套旧方向或扫描额度', async () => {
+    const sid = 'pt-guarded-entry';
+    const started = await dispatch(ctx, store, 'project.start', { sessionId: sid, policy: { question: '读取本地样本', target: origin, budget: { toolCalls: 1 } } });
+    upsertProjectSource(store, sid, { sourceId: 'entry-doc', sourceRevision: 'r1', displayName: '入口样本', kind: 'text', parseState: 'ready',
+      sections: [{ sectionId: 'p1', text: '仅检查回环服务是否能响应', kind: 'paragraph' }] });
+    const snapshot = contexts.find(context => context.name === 'saker-pentest-task-state').text(exec(sid));
+    assert.match(snapshot, /按文档连续测试/);
+    assert.match(snapshot, /project_document/);
+    assert(!snapshot.includes('状态无法读取'), snapshot);
+    assert.equal(readTaskPolicy(store, sid).modules, undefined, '项目不能初始化 regular 模块');
+    const listed = await invoke(sid, 'project_document', { action: 'list' });
+    assert.equal(listed.ok, true, listed.error);
+    const read = await invoke(sid, 'project_document', { action: 'read', sourceId: 'entry-doc', sectionId: 'p1' });
+    assert.equal(read.ok, true, read.error);
+    const defined = await invoke(sid, 'project_check', { action: 'define', checks: [{ requirement: '检查回环响应', sourceLocation: 'entry-doc r1 p1' }] });
+    assert.equal(defined.ok, true, defined.error);
+    const next = await invoke(sid, 'project_check', { action: 'next' });
+    assert.equal(next.ok, true, next.error);
+    assert(next.text.includes(next.check.checkId), '实际渲染文本必须带后续 record 需要的 checkId');
+    assert.equal(readTaskPolicy(store, sid).used.toolCalls, 0, '离线要求整理不消耗目标额度');
+    const response = await invoke(sid, 'project_request', { method: 'GET', url: origin + '/guarded', checkId: next.check.checkId });
+    assert.equal(response.ok, true, response.error);
+    assert(response.summary.includes('SAKER_PROJECT_TOOL'), '模型渲染文本必须包含可判断的响应正文');
+    assert(response.summary.includes('executionId='), '模型渲染文本必须带可续读回执引用');
+    assert.equal(readTaskPolicy(store, sid).used.toolCalls, 1, '外层守卫和派发不能重复扣额度');
+    const rejected = await tools.get('project_request').execute({ method: 'GET', url: origin + '/extra', checkId: next.check.checkId }, exec(sid));
+    assert.equal(rejected.ok, false, '直接到工具实现也不能绕过已耗尽额度');
+    assert.match(rejected.error, /tool_budget_exhausted/);
+    assert.equal(readTaskPolicy(store, sid).modules, undefined);
+    assert.equal(readProjectRun(store, sid, started.run.runId).state, 'running');
+  });
+
+  await test('项目入口修复保留网络关闭与未知实战方向的拒绝', async () => {
+    const sid = 'pt-guarded-disabled';
+    const started = await dispatch(ctx, store, 'project.start', { sessionId: sid, policy: { question: '仅离线分析', target: origin, allowTargetNetwork: false } });
+    const defined = await invoke(sid, 'project_check', { action: 'define', document: JSON.stringify({ checks: [{ requirement: '不访问服务' }] }) });
+    assert.equal(defined.ok, true, defined.error);
+    const next = await invoke(sid, 'project_check', { action: 'next' });
+    assert.equal(next.ok, true, next.error);
+    const response = await tools.get('project_request').execute({ method: 'GET', url: origin + '/disabled' }, exec(sid));
+    assert.equal(response.ok, false);
+    assert.match(response.error, /target_network_disabled/);
+    const browserDenied = guards[0]({ ...exec(sid), name: 'saker_browser', arguments: { action: 'open', url: origin } });
+    assert.match(browserDenied, /target_network_disabled/);
+    assert.equal(readTaskPolicy(store, sid).used.toolCalls, 0);
+    assert.throws(() => startTaskPolicy(store, 'pt-unknown-mode', { mode: 'project', question: '非项目字段不能伪装', budget: { toolCalls: 1 } }), /invalid task mode/);
+  });
+
+  await test('项目工具定义展示结构化检查格式，错误输入不能假报定义成功', async () => {
+    const sid = 'pt-check-contract';
+    await dispatch(ctx, store, 'project.start', { sessionId: sid, policy: { question: '检查输入合同', target: origin } });
+    const definition = tools.get('project_check');
+    assert.equal(definition.parameters.checks?.type, 'array');
+    assert.equal(definition.parameters.checks.items.properties.requirement.required, true);
+    for (const args of [{ action: 'define' }, { action: 'define', document: '{}' }, { action: 'define', checks: [] }, { action: 'define', checks: [{}] }]) {
+      const result = await invoke(sid, 'project_check', args);
+      assert.equal(result.ok, false, JSON.stringify(args));
+      assert(!String(result.text || '').includes('已定义 0'));
+    }
+    const legacy = await invoke(sid, 'project_check', { action: 'define', document: JSON.stringify({ checks: [{ requirement: '已有会话格式仍可读取' }] }) });
+    assert.equal(legacy.ok, true, legacy.error);
+  });
+
+  await test('真实 start 到 define / next 进入运行，不靠测试手工 transition', async () => {
+    const sid = 'pt-real-start';
+    const started = await dispatch(ctx, store, 'project.start', { sessionId: sid, policy: { question: '读取本地样本', target: origin } });
+    assert.equal(started.run.state, 'preparing');
+    assert.equal(followups.filter(item => item.id === sid).length, 1);
+    const defined = await tools.get('project_check').execute({ action: 'define', document: JSON.stringify({ checks: [{ requirement: '读取样本' }] }) }, exec(sid));
+    assert.equal(defined.ok, true, defined.error);
+    const next = await tools.get('project_check').execute({ action: 'next' }, exec(sid));
+    assert.equal(next.ok, true, next.error);
+    assert.equal(readProjectRun(store, sid, started.run.runId).state, 'running', '领取当前项应接通准备转运行');
+    assert.equal(readProjectRun(store, sid, started.run.runId).currentCheckId, next.check.checkId, '实际保存当前检查');
+    const result = await tools.get('project_request').execute({ method: 'GET', url: origin + '/entry' }, exec(sid));
+    assert.equal(result.ok, true, result.error);
+  });
+
+  await test('按文档入口真实导入来源，整理完并完成检查后自动收尾', async () => {
+    const sid = 'pt-project-source';
+    const content = '员工只能查看自己的资料，普通员工不能审批。';
+    const imported = await dispatch(ctx, store, 'project.import', {
+      sessionId: sid, name: '测试要求.txt', base64: Buffer.from(content).toString('base64'),
+    });
+    assert.equal(imported.ok, true, imported.error);
+    assert.equal(imported.source.parseState, 'ready');
+    assert.equal(imported.sections, 1);
+    const started = await dispatch(ctx, store, 'project.start', {
+      sessionId: sid, policy: { question: '按文档测试', target: origin, budget: { minutes: 30 } },
+    });
+    assert.equal(started.run.sourceSnapshot.length, 1, '开始后必须固定来源快照');
+    const listed = await invoke(sid, 'project_document', { action: 'list' });
+    assert(listed.text.includes('测试要求.txt'));
+    const read = await invoke(sid, 'project_document', { action: 'read', sourceId: imported.source.sourceId, sourceRevision: 'r1', sectionId: 'lines-1-1' });
+    assert.equal(read.ok, true, read.error);
+    assert(read.text.includes('来源：测试要求.txt'));
+    assert(read.text.includes('后续：无'));
+    const defined = await invoke(sid, 'project_check', {
+      action: 'define',
+      checks: [{
+        checkId: 'source-check-1', requirement: '检查员工资料权限',
+        sourceRefs: [{ sourceId: imported.source.sourceId, sourceRevision: 'r1', sectionId: 'lines-1-1' }],
+      }],
+      sectionDecisions: [{
+        sourceId: imported.source.sourceId, sourceRevision: 'r1', sectionId: 'lines-1-1',
+        decision: 'requirements', checkIds: ['source-check-1'],
+      }],
+    });
+    assert.equal(defined.ok, true, defined.error);
+    assert(defined.text.includes('本次累计 1 个区域'));
+    const next = await invoke(sid, 'project_check', { action: 'next' });
+    assert.equal(next.check.checkId, 'source-check-1');
+    const recorded = await invoke(sid, 'project_check', {
+      action: 'record', checkId: 'source-check-1', verdict: 'not_found', checkedContent: '普通员工审批入口返回无权限',
+    });
+    assert.equal(recorded.ok, true, recorded.error);
+    const decision = projectTurnDecision(store, sid);
+    assert.equal(decision.action, 'completed');
+    completeProjectRun(store, sid, started.run.runId);
+    assert.equal(readProjectRun(store, sid, started.run.runId).state, 'completed');
+  });
+
+  await test('来源整理批次任一条无效时整批不落库', async () => {
+    const sid = 'pt-project-atomic';
+    const imported = await dispatch(ctx, store, 'project.import', {
+      sessionId: sid, name: '原子要求.txt', text: '检查普通员工不能审批。',
+    });
+    await dispatch(ctx, store, 'project.start', {
+      sessionId: sid, policy: { question: '按文档测试', budget: { minutes: 30 } }, autoStart: false,
+    });
+    const read = await invoke(sid, 'project_document', {
+      action: 'read', sourceId: imported.source.sourceId, sourceRevision: 'r1', sectionId: 'lines-1-1',
+    });
+    assert.equal(read.ok, true, read.error);
+    const rejected = await invoke(sid, 'project_check', {
+      action: 'define',
+      checks: [{ checkId: 'atomic-1', requirement: '检查审批限制' }],
+      sectionDecisions: [{
+        sourceId: imported.source.sourceId, sourceRevision: 'r1', sectionId: 'missing',
+        decision: 'reference', rationale: '无效段落应拒绝整批',
+      }],
+    });
+    assert.equal(rejected.ok, false);
+    const run = readProjectRun(store, sid, (await dispatch(ctx, store, 'project.status', { sessionId: sid })).run.runId);
+    assert.equal(listProjectChecks(store, sid, run.runId).length, 0, '无效整理决定不能留下半批检查');
+  });
+
+  await test('项目 pause / resume 真正恢复投递并保持额度，stop 同步公共状态', async () => {
+    const sid = 'pt-real-resume';
+    const started = await dispatch(ctx, store, 'project.start', { sessionId: sid, policy: { question: '生命周期', target: origin } });
+    const before = taskPolicyStatus(store, sid).policy.startedAt;
+    await dispatch(ctx, store, 'project.pause', { sessionId: sid, runId: started.run.runId });
+    assert.equal(taskPolicyStatus(store, sid).stopped, true, '暂停同步公共任务状态');
+    await dispatch(ctx, store, 'project.resume', { sessionId: sid, runId: started.run.runId });
+    assert.equal(followups.filter(item => item.id === sid).length, 2, '继续必须真实投递，不只是改 preparing');
+    assert.equal(taskPolicyStatus(store, sid).policy.startedAt, before, '继续不重置计量轮次');
+    await dispatch(ctx, store, 'project.stop', { sessionId: sid, runId: started.run.runId });
+    assert.equal(taskPolicyStatus(store, sid).stopped, true, '停止后公共状态不能仍然进行中');
+  });
+
+  await test('恢复投递失败保留暂停，旧控制版本不能继续或停止', async () => {
+    const sid = 'pt-resume-failure';
+    const { run } = prepareProject(sid);
+    const paused = await dispatch(ctx, store, 'project.pause', { sessionId: sid, runId: run.runId, expectedControlRev: run.controlRev });
+    await assert.rejects(() => dispatch(ctx, store, 'project.resume', { sessionId: sid, runId: run.runId, expectedControlRev: run.controlRev }), /状态已变化/);
+    assert.equal(readProjectRun(store, sid, run.runId).state, 'paused');
+    failedFollowups.add(sid);
+    await assert.rejects(() => dispatch(ctx, store, 'project.resume', { sessionId: sid, runId: run.runId, expectedControlRev: paused.run.controlRev }), /投递失败/);
+    assert.equal(readProjectRun(store, sid, run.runId).state, 'paused');
+    assert.equal(taskPolicyStatus(store, sid).stopped, true);
+    await assert.rejects(() => dispatch(ctx, store, 'project.stop', { sessionId: sid, runId: run.runId, expectedControlRev: paused.run.controlRev }), /状态已变化/);
+  });
+
+  await test('生产 turn-stopping 钩子有界接续，暂停后不能被旧消息唤醒', async () => {
+    const sid = 'pt-host-continuation';
+    const { run, check } = prepareProject(sid);
+    const steers = [];
+    const agent = { ...exec(sid).agent, steer: text => steers.push(text) };
+    const handlers = events.get('agent/turn-stopping');
+    assert(handlers?.length);
+    for (let index = 0; index < 4; index++) for (const handler of handlers) await handler({ agent });
+    assert.equal(steers.length, 2, '第三次无进展必须停止投递');
+    assert.equal(readProjectRun(store, sid, run.runId).state, 'paused');
+    assert.equal(taskPolicyStatus(store, sid).stopped, true);
+    const recorded = await tools.get('project_check').execute({ action: 'record', checkId: check.checkId, verdict: 'not_found', checkedContent: '不应被写入' }, exec(sid));
+    assert.equal(recorded.ok, false, '暂停状态不接受迟到结论');
+    assert.match(recorded.error, /已暂停/);
+  });
+
   await test('project_document list / read / search 可用', async () => {
     const { run } = prepareProject('pt-doc');
     const tool = tools.get('project_document');
@@ -97,8 +308,8 @@ try {
     assert.match(String(result.error), /按文档测试/);
   });
 
-  const cft = process.env.SAKER_CFT_PATH
-    || ['E:/software/ChromeForTesting/chrome-win64/chrome.exe', 'E:/software/ChromeForTesting/chrome.exe'].find(candidate => { try { return fs.statSync(candidate).isFile(); } catch { return false; } });
+  const cft = process.env.SAKER_SKIP_CFT_TESTS !== '1' && (process.env.SAKER_CFT_PATH
+    || ['E:/software/ChromeForTesting/chrome-win64/chrome.exe', 'E:/software/ChromeForTesting/chrome.exe'].find(candidate => { try { return fs.statSync(candidate).isFile(); } catch { return false; } }));
   if (cft) {
     process.env.SAKER_CFT_PATH = cft;
     await test('saker_browser open / observe / close 可用', async () => {

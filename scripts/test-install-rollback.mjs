@@ -109,6 +109,8 @@ const ok = (label, cond, extra) => {
   // 脚本副本（含被改写的 legacy 版本 —— 反向验证时由 SAKER_INSTALL_ALL_SCRIPT 指过来）
   const srcScript = process.env.SAKER_INSTALL_ALL_SCRIPT || join(ROOT, 'scripts', 'install-all.mjs')
   writeFileSync(join(fixture, 'scripts', 'install-all.mjs'), readFileSync(srcScript, 'utf8'))
+  writeFileSync(join(fixture, 'scripts', 'lib', 'product-plugins.mjs'),
+    readFileSync(join(ROOT, 'scripts', 'lib', 'product-plugins.mjs'), 'utf8'))
   writeFileSync(join(fixture, 'scripts', 'lib', 'install-stash.mjs'),
     readFileSync(join(ROOT, 'scripts', 'lib', 'install-stash.mjs'), 'utf8'))
 

@@ -82,7 +82,9 @@ export function writeTaskPolicy(store, sessionId, record, kind = 'policy-updated
     const previous = policyRecord(store, sessionId);
     if (previous && (record.policyRev ?? 0) !== (previous.policyRev ?? 0))
       throw Object.assign(Error('任务状态已变化，请刷新后重试'), { code: 'task-policy-conflict' });
-    const policyRev = (previous?.policyRev ?? record.policyRev ?? 0) + 1;
+    // 新一轮删除当前 policy 后，修订号仍沿事件流递增，旧事件不能冒充新轮状态。
+    const lastRevision = previous?.policyRev ?? store.db.prepare('SELECT MAX(revision) AS revision FROM task_policy_events WHERE session_id=?').get(sessionId)?.revision ?? 0;
+    const policyRev = Math.max(lastRevision, record.policyRev ?? 0) + 1;
     if (!Number.isSafeInteger(policyRev) || policyRev < 1) throw Error('任务修订号无效');
     const next = { ...record, policyRev };
     store.db.prepare('INSERT INTO task_policy(session_id,parent_session,task_kind,record,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET parent_session=excluded.parent_session,task_kind=excluded.task_kind,record=excluded.record,updated_at=excluded.updated_at')

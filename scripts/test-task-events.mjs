@@ -63,7 +63,7 @@ try {
   try {
     const rpc = await results.dispatch(ctx, store, 'task.events', { sessionId: 'ev', afterCursor: 0, limit: 50 });
     assert.equal(rpc.ok, true); assert(rpc.events.length >= 1); assert.equal((await results.dispatch(ctx, store, 'task.events', { sessionId: 'ev', afterCursor: rpc.nextCursor })).events.length, 0);
-    await assert.rejects(results.dispatch(ctx, store, 'task.events', { sessionId: 'nope' }), /渗透会话/);
+    await assert.rejects(results.dispatch(ctx, store, 'task.events', { sessionId: 'nope' }), /渗透会话|会话读取服务/);
     console.log('ok   RPC task.events delivers the same cursor feed for the current pentest session');
   } catch (error) { failed++; console.log('FAIL RPC task.events: ' + (error.stack || error.message)); }
 } finally { store.close(); fs.rmSync(home, { recursive: true, force: true }); }

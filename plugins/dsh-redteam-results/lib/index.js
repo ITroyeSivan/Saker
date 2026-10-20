@@ -33,12 +33,13 @@ import { readOobConfig, issueCallbackHost, fetchOobRecords, recordInteraction, r
 import { runBrowserExecution, recordBrowserReceipt, readBrowserReceipt } from './browser-execution.js';
 import { runEffectJob, readEffectJob } from './effect-jobs.js';
 import { startTaskPolicy, updateTaskProgress, taskPolicyStatus, readTaskPolicy, taskExecutionGuard, taskPrompt, taskPromptStable, taskOverview, chooseTaskMode, pauseTaskPolicy, resumeTaskPolicy, archiveTaskRound, takeTaskContinuation, finishTaskOnTurnEnd, checkpointTask, setTaskInteraction, setTaskWorkers, setTaskExplain, setTaskActionLimits, updateTaskFromChat, targetTrafficDenial, effectivePolicy, confirmTaskCheckpoint } from './task-policy.js';
-import { projectContinuation, markProjectContinuation, pauseProjectRun, resumeProjectRun, projectExecutableChecks } from './project-runtime.js';
-import { activeProjectRun, readProjectRun, listProjectChecks, listProjectSources, listProjectActions, createProjectRun, transitionProjectRun, defineProjectChecks, recordProjectCheck, readProjectCheck } from './project-store.js';
-import { zipProjectDelivery, projectCounts } from './project-delivery.js';
+import { projectContinuation, projectTurnDecision, markProjectContinuation, pauseProjectRun, resumeProjectRun, projectExecutableChecks, selectProjectCheck, startProjectTask, setProjectRunState, completeProjectRun } from './project-runtime.js';
+import { activeProjectRun, readProjectRun, listProjectRuns, listProjectChecks, listProjectSources, listProjectActions, defineProjectChecks, recordProjectCheck, readProjectCheck, upsertProjectSource } from './project-store.js';
+import { zipProjectDelivery, projectCounts, projectCheckView } from './project-delivery.js';
 import { startBrowserSession } from './browser-session.js';
 import { executeProjectHttp } from './project-execution.js';
-import { readDocumentSection } from './project-documents.js';
+import { parseDocumentBuffer, readDocumentSection } from './project-documents.js';
+import { recordProjectDocumentRead } from './project-progress.js';
 import { taskStartInput, taskProgressInput } from './task-inputs.js';
 import { chatDefaults, saveChatDefaults, promptDraft, promptTemplates } from './chat-setup.js';
 import { listAccounts, saveAccount, removeAccount, ACCOUNT_STATUSES } from './accounts.js';
@@ -48,6 +49,7 @@ import { materialsList, materialsDetail, searchMaterials, readMaterialExcerpt, r
 import { importPastedMaterial } from './materials-import.js';
 import { listWorkDependingOnMaterial } from './work-lease.js';
 import { executionLedger } from './execution-view.js';
+import { readPentestSession } from './session-read.js';
 import { knowledgeSwitchView, setKnowledgeEnabled } from './knowledge-switch.js';
 import { testContentCatalog, TEST_CONTENT_KEYS } from './test-catalog.js';
 import { taskModuleSelection, saveTaskModules } from './task-modules.js';
@@ -73,7 +75,9 @@ import { openStore, registerFinding, updateFinding, removeFinding, getFinding, a
 const name = "dsh-redteam-results";
 // webServer/webRuntime 在 0.2.1 web profile 里可能由 host 平面后注册；
 // 不把它们放进硬 inject，否则整个插件会因缺少一个可选路由服务而不激活。
-const inject = ["tools", "agentPresets", "systemPrompt", "sessions", "agents", "subagents", "llm"];
+const inject = { tools: { required: true }, agentPresets: { required: true }, systemPrompt: { required: true },
+  sessions: { required: true }, agents: { required: true }, subagents: { required: true }, llm: { required: true },
+  sessionQuery: { required: false } };
 
 const ROUTE_PATH = "/dsh-redteam-results";
 /** 进程级 CSRF token：GET <route>/csrf 由同源页取走（跨源响应不可读），POST 须回带 x-dsh-csrf 头。 */
@@ -492,16 +496,14 @@ export async function dispatch(ctx, st, endpoint, payload) {
   }
   if (endpoint === 'materials.list') {
     const sessionId = String(p.sessionId || '');
-    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
-    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
+    const session = await readPentestSession(ctx, sessionId);
     // 带上会话工作区：资料列表要把工作区资产账本里"已收集"的资产也列出来（第 7.2 节）。
     const workspace = sessionWorkingDirectory(ctx, session, '');
     return { ok: true, ...materialsList(st, sessionId, { ...p, workspace }) };
   }
   if (endpoint === 'materials.detail') {
     const sessionId = String(p.sessionId || '');
-    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
-    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
+    await readPentestSession(ctx, sessionId);
     return { ok: true, detail: materialsDetail(st, sessionId, { kind: String(p.kind || ''), id: String(p.id || ''),
       offset: Number.isInteger(p.offset) ? p.offset : undefined, limit: Number.isInteger(p.limit) ? p.limit : undefined }) };
   }
@@ -523,8 +525,7 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
   }
   if (endpoint === 'materials.viewed') {
     const sessionId = String(p.sessionId || '');
-    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
-    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
+    await readPentestSession(ctx, sessionId);
     // 本地查看是普通数据动作：只记本地状态，不创建模型回合、不增加模型输入（v6 第 5.4.1 节）。
     // 与 materials.detail 分开，读取详情保持纯读。
     const kind = String(p.kind || ''), id = String(p.id || '');
@@ -533,14 +534,12 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
   }
   if (endpoint === 'execution.list') {
     const sessionId = String(p.sessionId || '');
-    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
-    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
+    await readPentestSession(ctx, sessionId);
     return { ok: true, ...executionLedger(st, sessionId, p) };
   }
   if (endpoint === 'usage.get') {
     const sessionId = String(p.sessionId || '');
-    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
-    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
+    await readPentestSession(ctx, sessionId);
     const overview = taskOverview(st, sessionId), cost = taskCostOverview(ctx, st, sessionId);
     const policy = overview.policy;
     return { ok: true, configured: overview.configured, elapsedSeconds: policy
@@ -562,7 +561,8 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
   }
   if (endpoint === 'knowledge.status' || endpoint === 'knowledge.toggle') {
     const sessionId = String(p.sessionId || '');
-    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    const session = endpoint === 'knowledge.status' ? await readPentestSession(ctx, sessionId)
+      : (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
     if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
     // 能力标志随开关视图一起给（v6 第 5.6 节）：缺自动匹配时浮层要如实说明。
     if (endpoint === 'knowledge.status') return { ok: true, knowledge: { ...knowledgeSwitchView(st, sessionId), autoMatch: knowledgeAutoMatchAvailable() } };
@@ -570,8 +570,7 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
   }
   if (endpoint === 'knowledge.usage') {
     const sessionId = String(p.sessionId || '');
-    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
-    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
+    await readPentestSession(ctx, sessionId);
     // 能力探测结果随用量一起返回（v6 第 5.6 节）：缺自动匹配时界面要如实说明。
     return { ok: true, knowledgeAutoMatch: knowledgeAutoMatchAvailable(),
       ...listKnowledgeUsage(st, sessionId, { page: Number.isInteger(p.page) ? p.page : 1, pageSize: Number.isInteger(p.pageSize) ? p.pageSize : 50 }) };
@@ -584,8 +583,7 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
   }
   if (endpoint === 'task.events') {
     const sessionId = String(p.sessionId || '');
-    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
-    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
+    await readPentestSession(ctx, sessionId);
     return { ok: true, ...listTaskEvents(st, sessionId, { afterCursor: Number.isInteger(p.afterCursor) ? p.afterCursor : 0, limit: Number.isInteger(p.limit) ? p.limit : 50 }) };
   }
   if (endpoint === 'test.content') {
@@ -790,39 +788,52 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
     if (!sessionId) throw new Error('sessionId required');
     let sessions;
     try { sessions = ctx.sessions || ctx.get?.('sessions'); } catch { /* unavailable */ }
-    const session = sessions?.get(sessionId);
+    const session = ['project.status', 'project.check-detail', 'project.export'].includes(endpoint)
+      ? await readPentestSession(ctx, sessionId) : sessions?.get(sessionId);
     if (!session || session.header?.agentPreset !== 'pentest') throw new Error('请选择当前可用的渗透会话');
     const requestedRunId = String(p.runId || '');
     if (endpoint === 'project.status') {
-      const run = activeProjectRun(st, sessionId) || (requestedRunId ? readProjectRun(st, sessionId, requestedRunId) : null);
+      const run = requestedRunId ? readProjectRun(st, sessionId, requestedRunId)
+        : activeProjectRun(st, sessionId) || listProjectRuns(st, sessionId, { limit: 1 })[0] || null;
+      if (requestedRunId && !run) return { ok: false, error: '未找到该项目运行' };
       const checks = run ? listProjectChecks(st, sessionId, run.runId) : [];
-      return { ok: true, configured: !!run, run, checks, sources: listProjectSources(st, sessionId), counts: projectCounts(checks) };
+      const sources = listProjectSources(st, sessionId).map(source => ({
+        sourceId: source.sourceId, sourceRevision: source.sourceRevision,
+        displayName: source.displayName || '', kind: source.kind || 'text',
+        parseState: source.parseState, sectionCount: (source.sections || []).length,
+        unreadCount: (source.unread || []).length,
+      }));
+      return { ok: true, configured: !!run, run, checks: checks.map(projectCheckView), sources, counts: projectCounts(checks) };
+    }
+    if (endpoint === 'project.import') {
+      const existingPolicy = readTaskPolicy(st, sessionId);
+      if (existingPolicy && existingPolicy.scenario !== 'project') throw new Error('当前会话已有安全测试任务，请新建会话后添加项目文档');
+      if (activeProjectRun(st, sessionId)) throw new Error('本次运行已开始，来源快照已固定；请在下一轮重新添加文档');
+      const imported = importProjectSource(st, sessionId, p);
+      return { ok: true, ...imported };
     }
     if (endpoint === 'project.start') {
       const existing = activeProjectRun(st, sessionId);
       if (existing) return { ok: true, existing: true, run: existing, counts: projectCounts(listProjectChecks(st, sessionId, existing.runId)) };
-      const policyInput = { ...(p.policy || {}), scenario: 'project' };
-      const currentPolicy = readTaskPolicy(st, sessionId);
-      let policy;
-      if (currentPolicy) {
-        // 方案 13.2：再次测试建立新 run 并保留旧结果；已有其他任务时拒绝混用。
-        if (currentPolicy.scenario !== 'project') throw new Error('当前会话已有其他任务；再次按文档测试请新建会话');
-        policy = policyInput.question ? writeTaskPolicy(st, sessionId, { ...currentPolicy, question: policyInput.question }, 'project-restart') : currentPolicy;
-      } else {
-        policy = startTaskPolicy(st, sessionId, policyInput);
-      }
-      const run = createProjectRun(st, sessionId, { policyRev: policy.policyRev, question: policy.question });
+      const sourceSnapshot = listProjectSources(st, sessionId).map(source => ({
+        sourceId: source.sourceId,
+        sourceRevision: source.sourceRevision,
+        displayName: source.displayName || '',
+        snapshotRef: source.snapshotRef || '',
+      }));
+      const run = startProjectTask(st, sessionId, { ...p, sourceSnapshot });
       if (p.autoStart !== false) {
         const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
         if (typeof agent?.followup !== 'function' || agent.status === 'running') {
-          transitionProjectRun(st, sessionId, run.runId, 'failed', run.controlRev, { blocker: { code: 'needs-user', reason: '当前代理不可用或仍在运行' } });
+          setProjectRunState(st, sessionId, run.runId, 'failed', run.controlRev, { blocker: { code: 'needs-user', reason: '当前代理不可用或仍在运行' } });
           throw new Error('当前代理不可用或仍在运行，任务尚未开始');
         }
         try {
-          agent.followup({ id: `saker-project-${sessionId}-${run.runId}`, role: 'user', source: { kind: 'user' },
-            content: [{ type: 'text', text: '请开始按文档测试：先读取本次添加的测试文档和用户说明，整理要检查的内容与来源，然后逐项执行；缺条件的项写清缺口并继续独立项。不要重复开始任务或重置预算。' }] });
+          // 注入安全：由同源 Desktop RPC 触发，不在 Session.append 发布临界区内。
+          await agent.followup({ id: `saker-project-${sessionId}-${run.runId}`, role: 'user', source: { kind: 'user' },
+            content: [{ type: 'text', text: '请开始按文档测试：先读取本次添加的来源和用户说明；用 project_check define 同批提交 checks 的 sourceRefs 与 sectionDecisions（requirements/reference/unreadable），然后逐项执行。缺条件的项写清缺口并继续独立项。不要重复开始任务或重置预算。' }] });
         } catch (error) {
-          transitionProjectRun(st, sessionId, run.runId, 'failed', run.controlRev, { blocker: { code: 'needs-user', reason: '模型未能开始', evidence: String(error.message || error) } });
+          setProjectRunState(st, sessionId, run.runId, 'failed', run.controlRev, { blocker: { code: 'needs-user', reason: '模型未能开始', evidence: String(error.message || error) } });
           throw new Error('模型未能开始，已停止本次运行：' + error.message);
         }
       }
@@ -830,9 +841,31 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
     }
     const run = requestedRunId ? readProjectRun(st, sessionId, requestedRunId) : activeProjectRun(st, sessionId);
     if (!run) return { ok: false, error: '没有活动的项目运行' };
-    if (endpoint === 'project.pause') return { ok: true, run: pauseProjectRun(st, sessionId, run.runId, { code: 'needs-user', reason: '用户暂停', at: new Date().toISOString() }) };
-    if (endpoint === 'project.resume') return { ok: true, run: resumeProjectRun(st, sessionId, run.runId) };
-    if (endpoint === 'project.stop') return { ok: true, run: transitionProjectRun(st, sessionId, run.runId, 'cancelled', run.controlRev, { blocker: { code: 'cancelled', reason: '用户停止' } }) };
+    if (endpoint === 'project.pause' || endpoint === 'project.stop') {
+      const next = endpoint === 'project.pause'
+        ? pauseProjectRun(st, sessionId, run.runId, { code: 'needs-user', reason: '用户暂停', at: new Date().toISOString() }, p.expectedControlRev)
+        : setProjectRunState(st, sessionId, run.runId, 'cancelled', p.expectedControlRev ?? run.controlRev, { blocker: { code: 'cancelled', reason: '用户停止' } });
+      const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
+      if (agent?.status === 'running') {
+        if (typeof agent.cancel !== 'function') throw new Error('已阻止新项目动作，但当前模型停止接口不可用，请核对在途状态');
+        agent.cancel({ kind: 'user' });
+      }
+      return { ok: true, run: next };
+    }
+    if (endpoint === 'project.resume') {
+      const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
+      if (typeof agent?.followup !== 'function' || agent.status === 'running') throw new Error('模型仍在收尾或不可用，请稍后继续');
+      const resumed = resumeProjectRun(st, sessionId, run.runId, p.expectedControlRev);
+      try {
+        // 注入安全：由同源 Desktop RPC 恢复空闲代理，不在 Session.append 临界区内。
+        await agent.followup({ id: `saker-project-resume-${resumed.runId}-${resumed.controlRev}`, role: 'user', source: { kind: 'user' },
+          content: [{ type: 'text', text: '继续当前文档测试。先核对影响当前项的环境和身份，读取已保存的要求、进度与缺口，继续未完成项；不重建运行、不重置额度、不重复已完成检查。' }] });
+      } catch (error) {
+        pauseProjectRun(st, sessionId, run.runId, { code: 'needs-user', reason: '模型未能恢复', evidence: String(error.message || error) });
+        throw new Error('模型未能恢复，已保留暂停状态：' + error.message);
+      }
+      return { ok: true, run: resumed };
+    }
     if (endpoint === 'project.check-detail') {
       const check = readProjectCheck(st, sessionId, run.runId, String(p.checkId || ''));
       if (!check) return { ok: false, error: '未找到该检查' };
@@ -976,6 +1009,7 @@ function wakeWorkersForMaterial(ctx, store, sessionId, materialId) {
     const child = agents?.get?.(work.worker);
     if (!child || typeof child.followup !== 'function') continue;
     try {
+      // 注入安全：资料更新由同源 RPC 处理，不在 Session.append 发布临界区内。
       child.followup({ id: 'saker-material-wake-' + work.workKey + '-' + Date.now(), role: 'user',
         content: [{ type: 'text', text: '[Saker 资料更新] 你依赖的资料 ' + materialId + ' 有新版本；请重新读取后再下结论，不要沿用旧版本。' }],
         source: { kind: 'user' } });
@@ -983,6 +1017,37 @@ function wakeWorkersForMaterial(ctx, store, sessionId, materialId) {
     } catch { /* 投递失败的工作保持原状，不假装已唤醒 */ }
   }
   return woken;
+}
+
+function importProjectSource(store, sessionId, input = {}) {
+  const displayName = String(input.name || input.displayName || '未命名文档').trim().slice(0, 300) || '未命名文档';
+  const base64 = String(input.base64 || '').trim();
+  const plainText = typeof input.text === 'string' ? input.text : '';
+  if (base64 && !/^[A-Za-z0-9+/=\r\n]+$/.test(base64)) throw new Error('文档 base64 内容无效');
+  const buffer = base64 ? Buffer.from(base64, 'base64') : Buffer.from(plainText, 'utf8');
+  if (!buffer.length) throw new Error('文档内容为空');
+  if (buffer.length > 20 * 1024 * 1024) throw new Error('单个项目文档不能超过 20MB');
+  const digest = crypto.createHash('sha256').update(buffer).digest('hex');
+  const parsed = parseDocumentBuffer(buffer, { displayName });
+  const source = upsertProjectSource(store, sessionId, {
+    sourceId: 'project-source-' + digest.slice(0, 20),
+    sourceRevision: 'r1',
+    displayName,
+    kind: parsed.kind || 'text',
+    parseState: (parsed.unread || []).length ? 'partial' : (parsed.parseState || 'ready'),
+    snapshotRef: digest,
+    sections: parsed.sections || [],
+    unread: parsed.unread || [],
+  });
+  return {
+    source: {
+      sourceId: source.sourceId, sourceRevision: source.sourceRevision,
+      displayName: source.displayName, kind: source.kind, parseState: source.parseState,
+    },
+    sections: (source.sections || []).length,
+    unread: (source.unread || []).length,
+    parseState: source.parseState,
+  };
 }
 
 function apply(ctx) {
@@ -1000,14 +1065,33 @@ function apply(ctx) {
     const session = sessionOf(ctx, { agent });
     if (!session || session.mode !== 'pentest' || signal?.aborted || typeof agent.steer !== 'function') return;
     const store = theStore();
-    const project = projectContinuation(store, session.id);
-    if (project) {
-      // 项目接续：只在运行仍有效、存在可执行项且没有在途/未知写入时发生。
+    if (readTaskPolicy(store, session.id)?.scenario === 'project') {
       try {
-        agent.steer(project.text);
-        markProjectContinuation(store, session.id, project.runId, project.fingerprint, project.attempts);
+        const decision = projectTurnDecision(store, session.id);
+        if (decision.action === 'continue') {
+          const continuation = decision.continuation;
+          const current = readProjectRun(store, session.id, decision.run.runId);
+          if (current?.state === decision.run.state && current.controlRev === decision.run.controlRev && !signal?.aborted
+            && !taskPolicyStatus(store, session.id).stopped) {
+            // 注入安全：turn-stopping 在 Session.append 临界区外派发；投递前重核本次控制版本。
+            agent.steer(continuation.text);
+            markProjectContinuation(store, session.id, decision.run.runId, continuation.fingerprint, continuation.attempts, continuation.controlRev);
+          }
+          return;
+        }
+        if (decision.action === 'waiting') {
+          setProjectRunState(store, session.id, decision.run.runId, 'waiting', decision.run.controlRev, { blocker: decision.blocker });
+          return;
+        }
+        if (decision.action === 'completed') {
+          completeProjectRun(store, session.id, decision.run.runId);
+          return;
+        }
+        return;
       } catch (error) {
-        pauseProjectRun(store, session.id, project.runId, { code: 'needs-user', reason: '自动衔接未能继续', evidence: String(error.message || error) });
+        const run = activeProjectRun(store, session.id);
+        if (run && ['preparing', 'running'].includes(run.state))
+          pauseProjectRun(store, session.id, run.runId, { code: 'needs-user', reason: '自动衔接未能继续', evidence: String(error.message || error) });
       }
       return;
     }
@@ -1040,8 +1124,9 @@ function apply(ctx) {
       try {
         const store = theStore();
         // v6 第 4.3 节：把当前测试内容选择一起交给提示，筛过才发一行已选重点。
-        const selection = rootModuleSelection(store, session.id).selection;
-        return taskPromptStable(taskPolicyStatus(store, session.id), { controlledInterface: controlledInterface(assembly?.agent), selection });
+        const state = taskPolicyStatus(store, session.id);
+        const selection = state.policy?.scenario === 'project' ? null : rootModuleSelection(store, session.id).selection;
+        return taskPromptStable(state, { controlledInterface: controlledInterface(assembly?.agent), selection });
       }
       catch { return '本会话任务状态无法读取，停止目标操作并报告原因；不要重建或重置历史。'; }
     });
@@ -1109,7 +1194,7 @@ function apply(ctx) {
 			identity: { type: "string", description: "利用身份（云）" },
 			permission: { type: "string", description: "权限（云）" },
 			resource: { type: "string", description: "目标资源（云）" },
-			status: { type: "string", enum: REGISTER_STATUSES, description: "默认pending，登记拒绝verified；复核用finding_update给secondRating及≥40字secondRatingNote。fixed仅redteam模式，详见finding-fields.md" },
+			status: { type: "string", enum: REGISTER_STATUSES, description: "默认pending；verified须二次复核和≥40字依据；fixed仅redteam。" },
 			evidenceLevel: { type: "string", enum: EVIDENCE_LEVELS, description: "证据等级；语义见 finding-fields.md" },
 			auditMode: { type: "string", enum: ["static", "dynamic"], description: "代码审计必填：static=静态，dynamic=动态复现成功" }
 		},
@@ -1264,7 +1349,7 @@ function apply(ctx) {
 	//#region Web 通道路由（better-sidebar 同款：webServer 自注册 + 同源栅栏）
   ctx.tools.register(defineTool({
     name: 'redteam_method',
-    description: '精选方法包：按摘要读取离线资料，暂存固定版本与正反例证据。激活/回退由成果页审阅操作完成。',
+    description: '精选方法包：读取固定版本；激活/回退须成果页审阅。',
     parameters: {
       action: { type: 'string', required: true, enum: ['list', 'detail', 'active', 'stage', 'review', 'verify'], description: '方法资料操作，契约见README' },
       digest: { type: 'string', description: '固定版本SHA256摘要' },
@@ -1358,7 +1443,7 @@ function apply(ctx) {
     parameters: {
       action: { type: 'string', required: true, enum: ['groups', 'list', 'detail', 'create', 'observe', 'assess', 'close'], description: '契约见README' },
       id: { type: 'string', description: 'detail/observe/assess/close必填：验证方向ID；不是观察id' },
-      document: { type: 'string', description: 'create JSON：id/requestId/requestRevision/question/expectedEffect/negativeResult/nextStep。observe绑定两张回执；close写理由；assess兼容旧JSON。' },
+      document: { type: 'string', description: 'create用独立字段；observe绑定回执；close写理由；assess兼容旧JSON。' },
       observationId: { type: 'string', description: 'assess：run-pair返回的观察ID，不重发请求' },
       outcome: { type: 'string', enum: ['support', 'counterevidence', 'no-information'], description: 'assess：支持/反证/无新信息；difference不能作为结论' },
       interpretation: { type: 'string', description: 'assess：身份、对象和实际效果如何支持或反驳；回执已保存，不另填阴性台账' },
@@ -1392,7 +1477,7 @@ function apply(ctx) {
   }));
 	ctx.tools.register(defineTool({
 		name: 'redteam_task',
-		description: 'start用独立字段。progress：单模式planComplete，衔接regularComplete/ndayComplete。checkpoint按频率等待；delegate说明必要性，结束cleanup。',
+		description: 'start用独立字段；progress写完成标记；checkpoint等待；delegate/cleanup管理子代理。',
 		parameters: {
 			action: { type: 'string', enum: ['start', 'status', 'next', 'progress', 'checkpoint', 'cancel', 'pause', 'delegate', 'workers', 'send', 'report', 'review', 'report-draft', 'cleanup', 'update'], required: true },
 			mode: { type: 'string', enum: ['regular', 'nday', '0day'] },
@@ -1599,8 +1684,19 @@ function apply(ctx) {
 			try {
 				const sources = listProjectSources(scope.store, scope.session.id);
 				if (args.action === 'list') {
-					const lines = sources.map(source => source.sourceId + ' ' + (source.displayName || '') + ' ' + source.sourceRevision + ' ' + source.parseState + '；段落：' + (source.sections || []).map(section => section.sectionId).slice(0, 30).join(', ')).join('\n');
-					return Promise.resolve({ ok: true, text: lines || '没有已保存的文档来源', sources: sources.map(source => ({ sourceId: source.sourceId, sourceRevision: source.sourceRevision, displayName: source.displayName, parseState: source.parseState })) });
+					const lines = sources.map(source => {
+						const sections = source.sections || [], unread = source.unread || [];
+						return source.sourceId + ' ' + (source.displayName || '') + ' ' + source.sourceRevision
+							+ ' ' + source.parseState + '；段落 ' + sections.length
+							+ (sections.length ? '：' + sections.map(section => section.sectionId).slice(0, 200).join(', ') : '')
+							+ (unread.length ? '；不可读区域 ' + unread.length : '');
+					}).join('\n');
+					return Promise.resolve({ ok: true, text: lines || '没有已保存的文档来源', sources: sources.map(source => ({
+						sourceId: source.sourceId, sourceRevision: source.sourceRevision, displayName: source.displayName,
+						parseState: source.parseState,
+						sections: (source.sections || []).map(section => ({ sectionId: section.sectionId, location: section.location ?? null, kind: section.kind || '' })),
+						unread: (source.unread || []).map(item => ({ location: item.location ?? null, reason: item.reason || '' })),
+					})) });
 				}
 				if (args.action === 'search') {
 					const query = String(args.query || '').toLowerCase();
@@ -1608,18 +1704,26 @@ function apply(ctx) {
 					const hits = [];
 					for (const source of sources) for (const section of source.sections || []) {
 						const index = String(section.text || '').toLowerCase().indexOf(query);
-						if (index >= 0) hits.push({ sourceId: source.sourceId, sourceRevision: source.sourceRevision, sectionId: section.sectionId, location: section.location, snippet: String(section.text).slice(Math.max(0, index - 60), index + 140) });
+            if (index >= 0) hits.push({ sourceId: source.sourceId, sourceRevision: source.sourceRevision, sectionId: section.sectionId, location: section.location ?? null, offset: Math.max(0, index - 60), snippet: String(section.text).slice(Math.max(0, index - 60), index + 140) });
 					}
 					const shown = hits.slice(0, 20);
-					for (const hit of shown) recordMaterialRead(scope.store, scope.session.id, { materialId: 'project:' + hit.sourceId + '@' + hit.sourceRevision + ':' + hit.sectionId, bytes: Buffer.byteLength(hit.snippet, 'utf8') });
-					return Promise.resolve({ ok: true, text: shown.length ? shown.map(hit => hit.sourceId + ' ' + hit.sectionId + '：' + hit.snippet).join('\n') : '没有命中：' + args.query, hits: shown });
+          for (const hit of shown) {
+            recordMaterialRead(scope.store, scope.session.id, { materialId: 'project:' + hit.sourceId + '@' + hit.sourceRevision + ':' + hit.sectionId, bytes: Buffer.byteLength(hit.snippet, 'utf8'), offset: hit.offset });
+            recordProjectDocumentRead(scope.store, scope.session.id, scope.run.runId, { ...hit, cursor: hit.offset, text: hit.snippet, controlRev: scope.run.controlRev });
+          }
+					return Promise.resolve({ ok: true, text: shown.length ? shown.map(hit => hit.sourceId + ' ' + hit.sourceRevision + ' ' + hit.sectionId + '：' + hit.snippet).join('\n') : '没有命中：' + args.query, hits: shown });
 				}
 				if (args.action === 'read') {
 					const source = sources.find(item => item.sourceId === args.sourceId && (!args.sourceRevision || item.sourceRevision === args.sourceRevision));
 					if (!source) throw new Error('未找到该来源：' + args.sourceId);
 					const result = readDocumentSection({ sections: source.sections || [] }, String(args.sectionId || ''), { cursor: args.cursor, limit: args.limit });
-					recordMaterialRead(scope.store, scope.session.id, { materialId: 'project:' + source.sourceId + '@' + source.sourceRevision + ':' + result.sectionId, bytes: Buffer.byteLength(result.text, 'utf8'), offset: result.location?.from ?? 0 });
-					return Promise.resolve({ ok: true, text: result.text, sourceId: source.sourceId, sourceRevision: source.sourceRevision, sectionId: result.sectionId, location: result.location, nextCursor: result.nextCursor, more: result.more });
+          recordMaterialRead(scope.store, scope.session.id, { materialId: 'project:' + source.sourceId + '@' + source.sourceRevision + ':' + result.sectionId, bytes: Buffer.byteLength(result.text, 'utf8'), offset: Math.max(0, Number(args.cursor) || 0) });
+          recordProjectDocumentRead(scope.store, scope.session.id, scope.run.runId, { sourceId: source.sourceId, sourceRevision: source.sourceRevision, sectionId: result.sectionId, cursor: args.cursor, text: result.text, controlRev: scope.run.controlRev });
+					const range = '[' + (Math.max(0, Number(args.cursor) || 0)) + ',' + (Math.max(0, Number(args.cursor) || 0) + result.text.length) + ')';
+					const text = '来源：' + (source.displayName || source.sourceId) + ' · 修订：' + source.sourceRevision + ' · 段落：' + result.sectionId
+						+ ' · 范围：' + range + ' · 后续：' + (result.more ? '有，nextCursor=' + result.nextCursor : '无')
+						+ '\n\n' + result.text;
+					return Promise.resolve({ ok: true, text, sourceId: source.sourceId, sourceRevision: source.sourceRevision, sectionId: result.sectionId, location: result.location ?? null, nextCursor: result.nextCursor, more: result.more });
 				}
 				throw new Error('未知的文档操作：' + args.action);
 			} catch (error) { return Promise.resolve({ ok: false, error: error.message }); }
@@ -1630,7 +1734,22 @@ function apply(ctx) {
 		description: '项目检查：定义、领取、查看、记录。',
 		parameters: {
 			action: { type: 'string', required: true, enum: ['define', 'next', 'detail', 'record'] },
-			document: { type: 'string' }, checkId: { type: 'string' },
+			checks: { type: 'array', description: 'define 时提供从文档整理的检查项。', items: { type: 'object', additionalProperties: false, properties: {
+        requirement: { type: 'string', required: true, description: '本项实际要检查什么。' },
+        sourceLocation: { type: 'string', description: '来源位置文本' },
+        sourceRefs: { type: 'array', description: '本次固定来源引用', items: { type: 'object', additionalProperties: false, properties: {
+          sourceId: { type: 'string', required: true }, sourceRevision: { type: 'string', required: true }, sectionId: { type: 'string', required: true },
+        } } },
+        checkId: { type: 'string' }, order: { type: 'integer' }, dependencies: { type: 'array', items: { type: 'string' } },
+      } } },
+      sectionDecisions: { type: 'array', description: '来源整理决定', items: { type: 'object', additionalProperties: false, properties: {
+        sourceId: { type: 'string', required: true }, sourceRevision: { type: 'string', required: true },
+        sectionId: { type: 'string', required: true, description: '来源段落 ID；无段落的来源用 #source。' },
+        decision: { type: 'string', required: true, enum: ['requirements', 'reference', 'unreadable'] },
+        rationale: { type: 'string', description: '参考/不可读依据' },
+        checkIds: { type: 'array', description: '关联本批 checkId', items: { type: 'string' } },
+      } } },
+      document: { type: 'string', description: '兼容旧 JSON；新调用用 checks' }, checkId: { type: 'string' },
 			verdict: { type: 'string', enum: ['not_found', 'issue', 'needs_check', 'blocked', 'not_applicable'] },
 			checkedContent: { type: 'string' }, gaps: { type: 'string' }
 		},
@@ -1639,15 +1758,31 @@ function apply(ctx) {
 			const scope = projectScopeOf(exec);
 			if (scope.error) return Promise.resolve({ ok: false, error: scope.error });
 			try {
+        if (['define', 'next', 'record'].includes(args.action) && !['preparing', 'running'].includes(scope.run.state))
+          throw new Error('项目已暂停，继续后再修改检查');
 				if (args.action === 'define') {
-					const doc = JSON.parse(String(args.document || '{}'));
-					const checks = defineProjectChecks(scope.store, scope.session.id, scope.run.runId, Array.isArray(doc.checks) ? doc.checks : []);
-					return Promise.resolve({ ok: true, text: '已定义 ' + checks.length + ' 项检查', checks: checks.map(check => ({ checkId: check.checkId, requirement: check.requirement, sourceLocation: check.sourceLocation })) });
+          let input = args.checks, decisions = args.sectionDecisions;
+          if (input === undefined && args.document) {
+            try { const legacy = JSON.parse(String(args.document)); input = legacy.checks; decisions = legacy.sectionDecisions; }
+            catch { throw new Error('define 需要 checks 数组，例如 [{"requirement":"检查内容","sourceLocation":"文档段落或表格行"}]'); }
+          }
+          if (!Array.isArray(input)) input = [];
+          if (!Array.isArray(decisions)) decisions = [];
+          if (input.some(check => typeof check?.requirement !== 'string' || !check.requirement.trim()))
+            throw new Error('checks 每项必须填写 requirement（检查内容）');
+          if (!input.length && !decisions.length)
+            throw new Error('define 需要 checks 或 sectionDecisions；纯参考资料也要保存明确的 reference 决定');
+					const checks = defineProjectChecks(scope.store, scope.session.id, scope.run.runId, input, decisions);
+          const latestRun = readProjectRun(scope.store, scope.session.id, scope.run.runId);
+					return Promise.resolve({ ok: true, text: (checks.length ? '已定义 ' + checks.length + ' 项检查：\n' + checks.map(check => check.checkId + ' ' + check.requirement).join('\n') : '未新增检查')
+            + (decisions.length ? '\n已整理 ' + decisions.length + ' 个来源区域。' : '') + (Object.keys(latestRun?.sectionDecisions || {}).length ? ' 本次累计 ' + Object.keys(latestRun.sectionDecisions).length + ' 个区域。' : ''),
+            checks: checks.map(check => ({ checkId: check.checkId, requirement: check.requirement, sourceLocation: check.sourceLocation, sourceRefs: check.sourceRefs })),
+            sectionDecisions: decisions.map(item => ({ sourceId: item.sourceId, sourceRevision: item.sourceRevision, sectionId: item.sectionId, decision: item.decision })) });
 				}
 				if (args.action === 'next') {
-					const check = projectExecutableChecks(scope.store, scope.session.id, scope.run.runId)[0];
+          const check = selectProjectCheck(scope.store, scope.session.id, scope.run.runId);
 					if (!check) return Promise.resolve({ ok: true, text: '没有可执行的未完成检查', check: null });
-					return Promise.resolve({ ok: true, text: '当前检查：' + check.requirement + '（' + (check.sourceLocation || '未记录来源') + '）', check: { checkId: check.checkId, requirement: check.requirement, sourceLocation: check.sourceLocation, dependencies: check.dependencies } });
+					return Promise.resolve({ ok: true, text: '当前检查：' + check.requirement + '（' + (check.sourceLocation || '未记录来源') + '）；checkId=' + check.checkId, check: { checkId: check.checkId, requirement: check.requirement, sourceLocation: check.sourceLocation, dependencies: check.dependencies } });
 				}
 				if (args.action === 'detail') {
 					const check = readProjectCheck(scope.store, scope.session.id, scope.run.runId, String(args.checkId || ''));
@@ -1710,7 +1845,7 @@ function apply(ctx) {
 			try {
 				const checkId = String(args.checkId || scope.run.currentCheckId || projectExecutableChecks(scope.store, scope.session.id, scope.run.runId)[0]?.checkId || '');
 				if (!checkId) throw new Error('请先用 project_check 选择当前检查');
-				const result = await executeProjectHttp(scope.store, scope.session.id, scope.run.runId, checkId, args);
+        const result = await executeProjectHttp(scope.store, scope.session.id, scope.run.runId, checkId, args, exec.signal);
 				return { ok: true, text: result.summary, ...result };
 			} catch (error) { return { ok: false, error: error.message }; }
 		}
@@ -1743,7 +1878,7 @@ function apply(ctx) {
 	}));
 	ctx.tools.register(defineTool({
 		name: 'redteam_checks',
-		description: '本会话渗透检查记录：批量保存或读取。未命中需有效请求、观察及执行证据；原因留本地，交付仅三列。',
+		description: '批量保存/读取本会话检查；未命中须有效请求与证据；交付仅三列。',
 		parameters: { records: { type: 'string', description: '省略读取；JSON数组，字段见README（status 只有 not-hit/not-applicable/blocked/not-tested）。' } },
 		output: {
 			schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },

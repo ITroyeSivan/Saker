@@ -3,7 +3,7 @@
 import http from 'node:http';
 import https from 'node:https';
 import { createHash, randomUUID } from 'node:crypto';
-import { readTaskPolicy, effectivePolicy, targetTrafficDenial, excludedPathDenial } from './task-policy.js';
+import { readTaskPolicy, effectivePolicy, targetTrafficDenial, excludedPathDenial, taskExecutionGuard } from './task-policy.js';
 import { resolveTaskIdentity, identityDenial, identityRequestHeaders } from './identity-binding.js';
 import { acquireTargetSlot } from './request-pacing.js';
 import { beginProjectAction, finishProjectAction, readProjectRun, readProjectCheck } from './project-store.js';
@@ -37,6 +37,7 @@ function dispatch(url, method, headers, body, timeoutMs, signal) {
       response.on('data', chunk => { bytes += chunk.length; if (bytes <= 65536) chunks.push(chunk); });
       response.on('end', () => resolve({
         outcome: 'response', status: response.statusCode,
+        headers: { ...response.headers },
         responseHead: 'HTTP/' + response.httpVersion + ' ' + response.statusCode + ' ' + (response.statusMessage || '') + '\r\n'
           + Object.entries(response.headers).map(([name, value]) => name + ': ' + (Array.isArray(value) ? value.join(', ') : value)).join('\r\n') + '\r\n\r\n',
         body: Buffer.concat(chunks), elapsedMs: Date.now() - startedAt, truncated: bytes > 65536,
@@ -79,7 +80,12 @@ export async function executeProjectHttp(store, sessionId, runId, checkId, input
   const identityHeaders = identityRequestHeaders({ headers }, identity);
   const outgoingHeaders = identityHeaders ? identityHeaders.headers : headers;
   const body = input.body === undefined || input.body === null ? '' : String(input.body);
-  const begun = beginProjectAction(store, sessionId, runId, checkId, { identityRef: authContext, controlRev: input.controlRev });
+  let begun;
+  const admission = taskExecutionGuard(store, sessionId, 'recorded-project-execution', Date.now(), {
+    args: { method, url: url.href },
+    onReserve: () => { begun = beginProjectAction(store, sessionId, runId, checkId, { identityRef: authContext, controlRev: input.controlRev }); },
+  });
+  if (admission) throw new Error(admission);
   const release = await acquireTargetSlot(sessionId, limits, signal);
   let result;
   try {
@@ -109,8 +115,21 @@ export async function executeProjectHttp(store, sessionId, runId, checkId, input
   };
   store.db.prepare('INSERT INTO execution_receipts (session_id,id,record) VALUES (?,?,?)').run(sessionId, record.id, JSON.stringify(record));
   await finishProjectAction(store, sessionId, runId, begun.action.actionId, { executionState: 'completed', requestRef: record.id });
+  const contentType = String(result.headers?.['content-type'] || '');
+  const textual = !contentType || /(?:text\/|json|xml|javascript|x-www-form-urlencoded|svg)/i.test(contentType);
+  const bodyText = textual ? result.body.toString('utf8') : '[二进制响应 ' + result.body.length + ' 字节]';
+  const bodyPreview = bodyText.slice(0, 2000);
+  const businessHeaders = ['content-type', 'location', 'content-language']
+    .filter(name => result.headers?.[name] !== undefined)
+    .map(name => name + ': ' + result.headers[name]);
   return {
     ok: true, actionId: begun.action.actionId, checkId, executionId: record.id,
-    status: record.status, summary: method + ' ' + url.href + ' → ' + record.status, evidenceRefs: [record.id],
+    status: record.status,
+    summary: method + ' ' + url.href + ' → ' + record.status
+      + (businessHeaders.length ? '\n' + businessHeaders.join('\n') : '')
+      + '\n响应正文' + (result.truncated ? '（前 65536 字节）' : '') + '：' + bodyPreview
+      + (bodyText.length > bodyPreview.length ? '\n…正文已截断，共捕获 ' + result.body.length + ' 字节' : '')
+      + '\nexecutionId=' + record.id,
+    evidenceRefs: [record.id],
   };
 }

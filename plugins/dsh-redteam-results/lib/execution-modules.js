@@ -9,15 +9,18 @@
 //   · 子任务沿用主任务的有效选择（taskModuleSelection 已做归属解析）。
 //   · 闸只读取/初始化选择，不删除历史回执、不清预算。
 import path from 'node:path';
+import os from 'node:os';
 import { moduleInitialization } from './content-catalog.js';
 import { taskModuleSelection } from './task-modules.js';
 import { TEST_CONTENT_KEYS } from './test-catalog.js';
 import { chatDefaults } from './chat-setup.js';
 import { readTaskPolicy, collectionModules } from './task-policy.js';
 
+const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
+
 /** 库文件位于 `<home>/redteam-results/results.db`，反推 home 供目录读取。 */
 export function storeHome(store) {
-  return store.dbPath === ':memory:' ? (process.env.DSH_HOME || '.') : path.dirname(path.dirname(store.dbPath));
+  return store.dbPath === ':memory:' ? DSH_HOME : path.dirname(path.dirname(store.dbPath));
 }
 
 /** 根任务的有效内容选择 + 目录配置（子任务沿用主任务）。 */

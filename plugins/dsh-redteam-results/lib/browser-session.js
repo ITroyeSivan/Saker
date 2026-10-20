@@ -3,8 +3,11 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
+const dshHome = () => process.env.DSH_HOME || DSH_HOME;
 
 /** 读取安全配置「工具」里 key 含 chrome 的条目路径（profile 的 cordis.patch.yml）。 */
 function cftFromProfileConfig(home) {
@@ -25,7 +28,7 @@ function cftFromProfileConfig(home) {
 }
 
 export function resolveCftExecutable(explicit) {
-  const home = process.env.DSH_HOME || path.join(process.env.USERPROFILE || process.env.HOME || '.', '.dsh');
+  const home = dshHome();
   const candidates = [
     explicit,
     process.env.SAKER_CFT_PATH,
@@ -110,7 +113,7 @@ export class BrowserSession {
 
   static async start(options = {}) {
     const executable = resolveCftExecutable(options.executablePath);
-    const home = process.env.DSH_HOME || path.join(process.env.USERPROFILE || process.env.HOME || '.', '.dsh');
+    const home = dshHome();
     const profileRoot = path.resolve(options.profileRoot || path.join(home, 'project-browser'));
     const profileDir = path.join(profileRoot, safeName(options.identity));
     fs.mkdirSync(profileDir, { recursive: true });
@@ -221,7 +224,7 @@ export class BrowserSession {
       return { found: true, files: (action.files || []).length };
     }
     if (type === 'download') {
-      const directory = path.resolve(String(action.directory || path.join(process.env.DSH_HOME || '.', 'downloads')));
+      const directory = path.resolve(String(action.directory || path.join(dshHome(), 'downloads')));
       fs.mkdirSync(directory, { recursive: true });
       await this.client.call('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: directory });
       return { directory };

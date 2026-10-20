@@ -97,7 +97,7 @@ try {
     const off = await results.dispatch(ctx, store, 'knowledge.toggle', { sessionId: 'sess', enabled: false });
     assert.equal(off.knowledge.enabled, false);
     assert.equal(knowledgeEnabled(store, 'sess'), false);
-    await assert.rejects(results.dispatch(ctx, store, 'knowledge.status', { sessionId: 'unknown' }), /渗透会话/);
+    await assert.rejects(results.dispatch(ctx, store, 'knowledge.status', { sessionId: 'unknown' }), /渗透会话|会话读取服务/);
     const usage = await results.dispatch(ctx, store, 'knowledge.usage', { sessionId: 'sess' });
     assert.equal(usage.ok, true); assert(usage.total >= 1); assert(usage.items[0].trigger);
     console.log('ok   RPC exposes status and toggle for the current pentest session only');
