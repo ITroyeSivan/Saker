@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import { startBrowserSession, resolveCftExecutable } from '../plugins/dsh-redteam-results/lib/browser-session.js';
+import { BrowserSession, startBrowserSession, resolveCftExecutable } from '../plugins/dsh-redteam-results/lib/browser-session.js';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-browser-session-'));
 process.env.DSH_HOME = home;
@@ -33,11 +33,42 @@ const server = http.createServer((request, response) => {
     response.end(JSON.stringify({ ok: true, marker: 'SAKER_PROJECT_DATA' }));
     return;
   }
+  if (request.url === '/redirect') {
+    response.writeHead(302, { location: outsideOrigin + '/outside-redirect' });
+    response.end();
+    return;
+  }
+  if (request.url === '/cross') {
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    response.end('<!doctype html><title>cross</title><body>allowed page'
+      + '<iframe src="' + outsideOrigin + '/outside-frame"></iframe>'
+      + '<script>fetch(' + JSON.stringify(outsideOrigin + '/outside-xhr') + ').catch(function(){})</script></body>');
+    return;
+  }
+  if (request.url === '/popup') {
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    response.end('<!doctype html><title>popup</title><body>allowed popup host'
+      + '<script>window.open(' + JSON.stringify(outsideOrigin + '/outside-popup') + ',\'_blank\')</script></body>');
+    return;
+  }
+  if (request.url === '/secret') {
+    response.writeHead(200, { 'content-type': 'application/json', 'set-cookie': 'audit_cookie=SYNTHETIC_SET_COOKIE; HttpOnly' });
+    response.end(JSON.stringify({ password: 'SYNTHETIC_PASSWORD', access_token: 'SYNTHETIC_TOKEN', business: 'VISIBLE_BUSINESS_VALUE' }));
+    return;
+  }
   response.writeHead(404, { 'content-type': 'text/plain' });
   response.end('not found');
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const origin = 'http://127.0.0.1:' + server.address().port;
+let outsideRequests = 0;
+const outside = http.createServer((request, response) => {
+  outsideRequests++;
+  response.writeHead(200, { 'content-type': 'text/plain' });
+  response.end('OUTSIDE');
+});
+await new Promise(resolve => outside.listen(0, '127.0.0.1', resolve));
+const outsideOrigin = 'http://127.0.0.1:' + outside.address().port;
 
 try {
   if (!cft) {
@@ -99,6 +130,69 @@ try {
       const resolved = resolveCftExecutable();
       assert.equal(path.resolve(resolved).toLowerCase(), path.resolve(cft).toLowerCase());
     });
+
+    await test('真实 CfT 在请求发出前阻断跨站跳转、iframe 与 XHR', async () => {
+      const allowed = new Set([new URL(origin).origin]);
+      const session = await startBrowserSession({
+        executablePath: cft, identity: 'guard', profileRoot: path.join(home, 'profiles'),
+        requestGuard: ({ url }) => {
+          let parsed; try { parsed = new URL(url); } catch { return { denial: 'invalid-url' }; }
+          return allowed.has(parsed.origin) ? { policy: { requestRatePerMinute: 600, requestConcurrency: 2 } } : { denial: 'outside-origin' };
+        },
+        pacingSessionId: 'browser-guard-test',
+      });
+      try {
+        outsideRequests = 0;
+        await assert.rejects(() => session.open(origin + '/redirect'), /策略阻断|outside-origin/);
+        assert.equal(outsideRequests, 0, '非法跳转必须在到达目标前被阻断');
+        await assert.rejects(() => session.open(origin + '/cross'), /策略阻断|outside-origin/);
+        assert.equal(outsideRequests, 0, 'iframe/XHR 非法请求必须在到达目标前被阻断');
+        await session.open(origin + '/popup').catch(() => {});
+        await new Promise(resolve => setTimeout(resolve, 300));
+        assert.equal(outsideRequests, 0, '新窗口请求也必须在到达目标前被阻断');
+        const allowedPage = await session.open(origin + '/api/data');
+        assert(allowedPage.text.includes('SAKER_PROJECT_DATA'));
+      } finally { await session.close(); }
+    });
+
+    await test('浏览器请求列表与详情遮蔽 Cookie、Set-Cookie 和 JSON 凭据', async () => {
+      const session = await startBrowserSession({
+        executablePath: cft, identity: 'redact', profileRoot: path.join(home, 'profiles'),
+        requestGuard: ({ url }) => new URL(url).origin === origin ? { policy: { requestRatePerMinute: 600, requestConcurrency: 2 } } : { denial: 'outside-origin' },
+        pacingSessionId: 'browser-redact-test',
+      });
+      try {
+        await session.open(origin + '/secret');
+        const record = session.listRequests().find(item => item.url.endsWith('/secret'));
+        assert(record);
+        assert(!JSON.stringify(record).includes('SYNTHETIC_SET_COOKIE'));
+        const detail = await session.requestDetail(record.requestId);
+        assert(!JSON.stringify(detail).includes('SYNTHETIC_PASSWORD'));
+        assert(!JSON.stringify(detail).includes('SYNTHETIC_TOKEN'));
+        assert(detail.responseBody.includes('VISIBLE_BUSINESS_VALUE'), '非秘密业务正文仍应可分析');
+      } finally { await session.close(); }
+    });
+
+    await test('确定性浏览器记录遮蔽 Set-Cookie 并保留正文不可得原因', async () => {
+      const browser = new BrowserSession({
+        child: { exitCode: null },
+        client: { call: async () => { throw new Error('body evicted'); } },
+      });
+      browser.requestOrder = ['r1'];
+      browser.requests.set('r1', {
+        requestId: 'r1', url: origin + '/secret?token=SYNTHETIC_URL_TOKEN', method: 'GET',
+        headers: { Cookie: 'SYNTHETIC_REQUEST_COOKIE' }, postData: '',
+        responseHeaders: { 'Set-Cookie': 'SYNTHETIC_RESPONSE_COOKIE' }, status: 200,
+      });
+      const listed = browser.listRequests();
+      assert.equal(listed[0].responseHeaders['Set-Cookie'], '[已遮蔽]');
+      assert(!JSON.stringify(listed).includes('SYNTHETIC_RESPONSE_COOKIE'));
+      assert(!JSON.stringify(listed).includes('SYNTHETIC_URL_TOKEN'));
+      const detail = await browser.requestDetail('r1');
+      assert.equal(detail.headers.Cookie, '[已遮蔽]');
+      assert.equal(detail.responseHeaders['Set-Cookie'], '[已遮蔽]');
+      assert.equal(detail.bodyUnavailable, 'body evicted');
+    });
   }
 
   await test('未配置 CfT 时明确报错，不自动改用个人 Chrome', async () => {
@@ -113,6 +207,8 @@ try {
   });
 } finally {
   await new Promise(resolve => server.close(resolve));
+  outside.closeAllConnections?.();
+  await new Promise(resolve => outside.close(resolve));
   fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 });
 }
 

@@ -32,9 +32,9 @@ import { verifyEffect, readEffectVerification } from './effect-verifications.js'
 import { readOobConfig, issueCallbackHost, fetchOobRecords, recordInteraction, readInteractionRecord, interactionSummary } from './server-side-access.js';
 import { runBrowserExecution, recordBrowserReceipt, readBrowserReceipt } from './browser-execution.js';
 import { runEffectJob, readEffectJob } from './effect-jobs.js';
-import { startTaskPolicy, updateTaskProgress, taskPolicyStatus, readTaskPolicy, taskExecutionGuard, taskPrompt, taskPromptStable, taskOverview, chooseTaskMode, pauseTaskPolicy, resumeTaskPolicy, archiveTaskRound, takeTaskContinuation, finishTaskOnTurnEnd, checkpointTask, setTaskInteraction, setTaskWorkers, setTaskExplain, setTaskActionLimits, updateTaskFromChat, targetTrafficDenial, effectivePolicy, confirmTaskCheckpoint } from './task-policy.js';
+import { startTaskPolicy, updateTaskProgress, taskPolicyStatus, readTaskPolicy, taskExecutionGuard, taskPrompt, taskPromptStable, taskOverview, chooseTaskMode, pauseTaskPolicy, resumeTaskPolicy, archiveTaskRound, takeTaskContinuation, finishTaskOnTurnEnd, checkpointTask, setTaskInteraction, setTaskWorkers, setTaskExplain, setTaskActionLimits, updateTaskFromChat, targetTrafficDenial, excludedPathDenial, effectivePolicy, confirmTaskCheckpoint } from './task-policy.js';
 import { projectContinuation, projectTurnDecision, markProjectContinuation, pauseProjectRun, resumeProjectRun, projectExecutableChecks, selectProjectCheck, startProjectTask, setProjectRunState, completeProjectRun } from './project-runtime.js';
-import { activeProjectRun, readProjectRun, listProjectRuns, listProjectChecks, listProjectSources, listProjectActions, defineProjectChecks, recordProjectCheck, readProjectCheck, upsertProjectSource, beginProjectAction, finishProjectAction } from './project-store.js';
+import { activeProjectRun, readProjectRun, listProjectRuns, listProjectChecks, listProjectSources, listProjectActions, defineProjectChecks, recordProjectCheck, readProjectCheck, upsertProjectSource, beginProjectAction, finishProjectAction, reconcileProjectAction } from './project-store.js';
 import { zipProjectDelivery, projectCounts, projectCheckView } from './project-delivery.js';
 import { startBrowserSession } from './browser-session.js';
 import { executeProjectHttp } from './project-execution.js';
@@ -57,6 +57,7 @@ import { rootModuleSelection } from './execution-modules.js';
 import { listKnowledgeUsage, recordKnowledgeUsage } from './knowledge-usage.js';
 import { createPurposeTasks } from './purpose-tasks.js';
 import { breakdownFromEvents, maskedRecord, diagnosticsDelta } from './request-diagnostics.js';
+import { redactText, redactValue } from './redaction.js';
 import { recordMaterialRead, recordMaterialView, materialReadKey } from './material-reads.js';
 import { captureTaskCost, taskCostOverview } from './task-cost.js';
 import { registerModelAdmission, recoverModelRuntime, modelBudgetOverview } from './model-budget.js';
@@ -880,6 +881,10 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
       if (!check) return { ok: false, error: '未找到该检查' };
       return { ok: true, run, check, actions: listProjectActions(st, sessionId, run.runId).filter(action => (check.actionRefs || []).includes(action.actionId)) };
     }
+    if (endpoint === 'project.action-reconcile') {
+      const action = reconcileProjectAction(st, sessionId, run.runId, String(p.actionId || ''), p);
+      return { ok: true, action };
+    }
     if (endpoint === 'project.define-checks') {
       const checks = defineProjectChecks(st, sessionId, run.runId, Array.isArray(p.checks) ? p.checks : []);
       return { ok: true, checks, counts: projectCounts(listProjectChecks(st, sessionId, run.runId)) };
@@ -1423,9 +1428,9 @@ function apply(ctx) {
         if (args.action === 'detail') {
           // 按 ID 前缀读宿主回执：execution-* 是 HTTP 回执，interaction-* 是回连记录，browser-* 是浏览器执行。
           const id = String(args.id || '');
-          if (id.startsWith('interaction-')) return { ok: true, ...readInteractionRecord(store, readId, id) };
-          if (id.startsWith('browser-')) return { ok: true, ...readBrowserReceipt(store, readId, id) };
-          return { ok: true, ...readExecutionReceipt(store, readId, args.id) };
+          if (id.startsWith('interaction-')) return { ok: true, ...redactValue(readInteractionRecord(store, readId, id)) };
+          if (id.startsWith('browser-')) return { ok: true, ...redactValue(readBrowserReceipt(store, readId, id)) };
+          return { ok: true, ...redactValue(readExecutionReceipt(store, readId, args.id)) };
         }
         if (args.action === 'run-effect') return { ok: true, ...await runEffectJob(store, session.id, { ...JSON.parse(args.document), callId: exec.callId }, exec.signal) };
         if (args.action === 'job-detail') return { ok: true, ...readEffectJob(store, readId, args.id) };
@@ -1689,6 +1694,29 @@ function apply(ctx) {
 		if (!run) return { error: '当前没有活动的项目运行' };
 		return { session, policy, run, store };
 	};
+	const projectBrowserGuardOf = scope => async ({ url, method }) => {
+		const currentRun = readProjectRun(scope.store, scope.session.id, scope.run.runId);
+		if (!currentRun || currentRun.runId !== scope.run.runId || currentRun.state !== 'running')
+			return { denial: '项目已暂停或停止，浏览器请求不能继续派发' };
+		const currentPolicy = readTaskPolicy(scope.store, scope.session.id);
+		if (currentPolicy?.scenario !== 'project') return { denial: '当前会话已不是按文档测试场景' };
+		const limits = effectivePolicy(scope.store, currentPolicy);
+		let parsed;
+		try { parsed = new URL(String(url || '')); } catch { return { denial: '浏览器请求地址无效' }; }
+		const denial = targetTrafficDenial(limits, { method })
+			|| excludedPathDenial(limits, { url: parsed.href });
+		if (denial) return { denial };
+		const origins = new Set();
+		if (limits.target) {
+			try { origins.add(new URL(limits.target).origin); } catch { /* 无效目标由其他闸拒绝 */ }
+		}
+		for (const asset of readTaskContext(scope.store, scope.session.id)?.assets || []) {
+			if (asset?.inScope !== true || asset?.reachable !== true) continue;
+			try { origins.add(new URL(asset.url).origin); } catch { /* 忽略无效资产 */ }
+		}
+		if (!origins.has(parsed.origin)) return { denial: '浏览器请求不在本次授权站点或明确关联资产内' };
+		return { policy: limits };
+	};
 	ctx.tools.register(defineTool({
 		name: 'project_document',
 		description: '项目文档：列出、搜索或分段读取。',
@@ -1883,7 +1911,14 @@ function apply(ctx) {
 					if (browser) { await browser.close(); projectBrowsers.delete(scope.session.id); }
 					return { ok: true, text: '浏览器会话已关闭' };
 				}
-				if (!browser) { browser = await startBrowserSession({ identity: scope.session.id }); projectBrowsers.set(scope.session.id, browser); }
+				if (!browser) {
+					browser = await startBrowserSession({
+						identity: scope.session.id,
+						requestGuard: projectBrowserGuardOf(scope),
+						pacingSessionId: scope.session.id,
+					});
+					projectBrowsers.set(scope.session.id, browser);
+				}
 				try {
 					let result;
 					if (action === 'open') result = await browser.open(String(args.url || ''));
@@ -1894,23 +1929,26 @@ function apply(ctx) {
 					else throw new Error('未知的浏览器操作：' + action);
 					if (action === 'open') {
 						await finishProjectAction(scope.store, scope.session.id, scope.run.runId, begun?.action?.actionId, { executionState: 'completed', pageRef: result.url });
-						return { ok: true, text: JSON.stringify({ title: result.title, url: result.url, executionId: begun?.action?.actionId || null }), page: result, actionId: begun?.action?.actionId || null };
+						const page = redactValue(result);
+						return { ok: true, text: JSON.stringify({ title: page.title, url: page.url, executionId: begun?.action?.actionId || null }), page, actionId: begun?.action?.actionId || null };
 					}
 					if (action === 'act') {
 						await finishProjectAction(scope.store, scope.session.id, scope.run.runId, begun?.action?.actionId, { executionState: 'completed' });
-						return { ok: true, text: JSON.stringify(result), result, actionId: begun?.action?.actionId || null };
+						const safeResult = redactValue(result);
+						return { ok: true, text: JSON.stringify(safeResult), result: safeResult, actionId: begun?.action?.actionId || null };
 					}
-					return { ok: true, text: action === 'request-detail' ? String(result.responseBody || '').slice(0, 2000) : JSON.stringify(result), [action === 'request-detail' ? 'request' : action === 'observe' ? 'page' : 'requests']: result };
+					const safeResult = redactValue(result);
+					return { ok: true, text: action === 'request-detail' ? String(safeResult.responseBody || '').slice(0, 2000) : JSON.stringify(safeResult), [action === 'request-detail' ? 'request' : action === 'observe' ? 'page' : 'requests']: safeResult };
 				} catch (error) {
 					if (begun) {
 						const sideEffectUnknown = action === 'act' && ['click', 'type', 'select', 'upload', 'dialog'].includes(String(args.actType || ''));
 						await finishProjectAction(scope.store, scope.session.id, scope.run.runId, begun.action.actionId, {
-							executionState: sideEffectUnknown ? 'unknown' : 'failed', error: error.message, sideEffectUnknown,
+							executionState: sideEffectUnknown ? 'unknown' : 'failed', error: redactText(error.message), sideEffectUnknown,
 						});
 					}
 					throw error;
 				}
-			} catch (error) { return { ok: false, error: error.message }; }
+				} catch (error) { return { ok: false, error: redactText(error.message) }; }
 		}
 	}));
 	ctx.tools.register(defineTool({
@@ -1930,7 +1968,7 @@ function apply(ctx) {
 				if (!checkId) throw new Error('请先用 project_check 选择当前检查');
         const result = await executeProjectHttp(scope.store, scope.session.id, scope.run.runId, checkId, args, exec.signal);
 				return { ok: true, text: result.summary, ...result };
-			} catch (error) { return { ok: false, error: error.message }; }
+			} catch (error) { return { ok: false, error: redactText(error.message) }; }
 		}
 	}));
 	//#endregion

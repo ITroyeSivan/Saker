@@ -1,13 +1,10 @@
 import { outcomeSummary, renderFindingDelivery, renderReproduction } from './delivery.js';
 import { renderCheckedTsv } from './checked.js';
+import { redactText } from './redaction.js';
 
 // Remove common credential fields in shareable evidence. Originals remain local.
 export function redactCredentials(value) {
-  return String(value ?? '')
-    .replace(/^(\s*(?:authorization|proxy-authorization|cookie|set-cookie|x-api-key)\s*:).*$/gim, '$1 [REDACTED: supply your test identity]')
-    .replace(/([?&](?:password|passwd|token|access_token|api_key|secret|session)\s*=)[^\s&#]*/gi, '$1[REDACTED]')
-    .replace(/("(?:password|passwd|token|access_token|api_key|secret|cookie)"\s*:\s*")[^"\r\n]*(")/gi, '$1[REDACTED]$2')
-    .replace(/((?:^|[&\n])(?:password|passwd|token|access_token|api_key|secret)\s*=)[^&\r\n]*/gi, '$1[REDACTED]');
+  return redactText(value);
 }
 export function assertNoLiteralCredentials(method) {
   if (method.kind !== 'script') return;

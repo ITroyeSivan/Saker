@@ -478,9 +478,43 @@ export function finishProjectAction(store, sessionId, runId, actionId, patch = {
       attachmentRef: patch.attachmentRef !== undefined ? optionalText(patch.attachmentRef, 1000) : action.attachmentRef,
       error: patch.error === undefined ? action.error : (patch.error ? optionalText(JSON.stringify(patch.error), 2000) : null),
       sideEffectUnknown: patch.sideEffectUnknown === true || action.sideEffectUnknown === true,
+      receivedBytes: patch.receivedBytes !== undefined ? Math.max(0, Number(patch.receivedBytes) || 0) : (action.receivedBytes || 0),
+      retainedBytes: patch.retainedBytes !== undefined ? Math.max(0, Number(patch.retainedBytes) || 0) : (action.retainedBytes || 0),
+      bodyUnavailable: patch.bodyUnavailable === true || action.bodyUnavailable === true,
     };
     store.db.prepare('UPDATE project_actions SET state=?,record=?,updated_at=? WHERE session_id=? AND run_id=? AND action_id=?')
       .run(next.executionState, JSON.stringify(next), next.endedAt, sessionId, runId, actionId);
+    return next;
+  });
+}
+
+export const PROJECT_ACTION_RECONCILIATIONS = ['occurred', 'not_occurred', 'still_unknown'];
+
+export function reconcileProjectAction(store, sessionId, runId, actionId, input = {}) {
+  return taskTransaction(store, () => {
+    const action = readProjectAction(store, sessionId, runId, actionId);
+    if (!action) throw new Error('project action not found');
+    const outcome = String(input.outcome || '');
+    if (!PROJECT_ACTION_RECONCILIATIONS.includes(outcome)) throw new Error('核对结果只能是 occurred、not_occurred 或 still_unknown');
+    const reason = text(input.reason, '核对理由', 2000);
+    const evidenceRefs = uniqueStrings(input.evidenceRefs);
+    for (const ref of evidenceRefs) {
+      const row = store.db.prepare('SELECT id FROM execution_receipts WHERE session_id=? AND id=?').get(sessionId, ref);
+      if (!row) throw new Error('核对回执不存在或不属于当前会话：' + ref);
+    }
+    const stillUnknown = outcome === 'still_unknown';
+    const next = {
+      ...action,
+      executionState: stillUnknown ? 'unknown' : 'completed',
+      sideEffectUnknown: stillUnknown,
+      reconciliation: {
+        outcome, reason, evidenceRefs,
+        at: nowIso(),
+      },
+      updatedAt: nowIso(),
+    };
+    store.db.prepare('UPDATE project_actions SET state=?,record=?,updated_at=? WHERE session_id=? AND run_id=? AND action_id=?')
+      .run(next.executionState, JSON.stringify(next), next.updatedAt, sessionId, runId, actionId);
     return next;
   });
 }

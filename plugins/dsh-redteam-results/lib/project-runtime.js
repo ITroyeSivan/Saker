@@ -270,6 +270,11 @@ export function resumeProjectRun(store, sessionId, runId, expectedControlRev) {
 export function completeProjectRun(store, sessionId, runId) {
   const run = readProjectRun(store, sessionId, runId);
   if (!run) throw new Error('project run not found');
+  const actions = listProjectActions(store, sessionId, runId);
+  if (actions.some(action => ['queued', 'dispatched'].includes(action.executionState)))
+    throw new Error('还有未收尾的项目动作，不能标记本次运行完成');
+  if (actions.some(action => action.sideEffectUnknown === true))
+    throw new Error('存在结果未知的写入动作，请先核对业务状态再完成');
   const sourceProgress = projectSourceProgress(store, sessionId, runId);
   if (sourceProgress.pending > 0) throw new Error('还有未整理的来源区域，不能标记本次运行完成');
   const checks = listProjectChecks(store, sessionId, runId);

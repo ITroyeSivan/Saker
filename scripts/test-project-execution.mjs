@@ -7,11 +7,12 @@ import path from 'node:path';
 import http from 'node:http';
 import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
 import { startTaskPolicy, readTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy.js';
-import { createProjectRun, transitionProjectRun, defineProjectChecks, listProjectActions, readProjectCheck, readProjectRun, beginProjectAction, markProjectActionDispatched } from '../plugins/dsh-redteam-results/lib/project-store.js';
+import { createProjectRun, transitionProjectRun, defineProjectChecks, listProjectActions, readProjectCheck, readProjectRun, beginProjectAction, markProjectActionDispatched, finishProjectAction, reconcileProjectAction } from '../plugins/dsh-redteam-results/lib/project-store.js';
 import { executeProjectHttp } from '../plugins/dsh-redteam-results/lib/project-execution.js';
 import { readExecutionReceipt } from '../plugins/dsh-redteam-results/lib/execution-receipts.js';
 import { saveAccount } from '../plugins/dsh-redteam-results/lib/accounts.js';
 import { acquireTargetSlot } from '../plugins/dsh-redteam-results/lib/request-pacing.js';
+import { resumeProjectRun } from '../plugins/dsh-redteam-results/lib/project-runtime.js';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-project-execution-'));
 process.env.DSH_HOME = home;
@@ -26,6 +27,23 @@ const server = http.createServer((request, response) => {
   request.on('end', () => {
     seen.push({ method: request.method, url: request.url, headers: request.headers });
     if (request.url === '/slow') return;
+    if (request.url === '/aborted') {
+      response.writeHead(200, { 'content-type': 'text/plain', 'content-length': '100000' });
+      response.write('partial-response');
+      setTimeout(() => response.destroy(), 20);
+      return;
+    }
+    if (request.url === '/truncate') {
+      response.writeHead(200, { 'content-type': 'text/plain', 'content-length': '65550' });
+      response.write(Buffer.alloc(65530, 'A'));
+      response.end(Buffer.alloc(20, 'B'));
+      return;
+    }
+    if (request.url === '/secret') {
+      response.writeHead(200, { 'content-type': 'application/json', 'set-cookie': 'audit_cookie=SYNTHETIC_COOKIE; HttpOnly' });
+      response.end(JSON.stringify({ password: 'SYNTHETIC_PASSWORD', access_token: 'SYNTHETIC_TOKEN', business: 'VISIBLE_BUSINESS_VALUE' }));
+      return;
+    }
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(JSON.stringify({ ok: true, marker: 'SAKER_PROJECT_HTTP' }));
   });
@@ -173,6 +191,61 @@ try {
     assert.equal(actions[0].sideEffectUnknown, true);
   });
 
+  await test('响应中途断开在期限内收尾并保留未知副作用', async () => {
+    const { run, check } = await prepare('pe-aborted');
+    const started = Date.now();
+    const outcome = await Promise.race([
+      executeProjectHttp(store, 'pe-aborted', run.runId, check.checkId, {
+        method: 'POST', url: origin + '/aborted', body: 'name=1', timeoutMs: 200,
+      }).then(() => 'resolved', error => 'rejected:' + error.message),
+      new Promise(resolve => setTimeout(() => resolve('unsettled'), 1000)),
+    ]);
+    assert.match(outcome, /^rejected:.*(?:中止|关闭|aborted|error)/i);
+    assert(Date.now() - started < 1200, '响应断线不能永久悬挂');
+    const action = listProjectActions(store, 'pe-aborted', run.runId)[0];
+    assert.equal(action.executionState, 'unknown');
+    assert.equal(action.sideEffectUnknown, true);
+    assert(action.receivedBytes >= 'partial-response'.length);
+    assert(action.retainedBytes >= 'partial-response'.length);
+    assert.equal(action.bodyUnavailable, true);
+  });
+
+  await test('跨 64KiB 截断线保留可用前缀并记录实际接收字节', async () => {
+    const { run, check } = await prepare('pe-truncate');
+    const result = await executeProjectHttp(store, 'pe-truncate', run.runId, check.checkId, {
+      method: 'GET', url: origin + '/truncate',
+    });
+    assert.equal(result.ok, true, result.error);
+    assert.match(result.summary, /实际接收 65550 字节，保留 65536 字节/);
+    const receipt = readExecutionReceipt(store, 'pe-truncate', result.executionId);
+    assert.equal(receipt.responseBytes, 65550);
+    assert.equal(receipt.capturedBytes, 65536);
+    assert.equal(receipt.complete, false);
+    assert.equal(Buffer.from(receipt.responseBodyBase64, 'base64').length, 65536);
+  });
+
+  await test('未知写入核对后可继续，仍未知时不能恢复', async () => {
+    const { run, check } = await prepare('pe-reconcile');
+    const begun = beginProjectAction(store, 'pe-reconcile', run.runId, check.checkId, {});
+    finishProjectAction(store, 'pe-reconcile', run.runId, begun.action.actionId, {
+      executionState: 'unknown', sideEffectUnknown: true, error: '响应断线',
+    });
+    const paused = transitionProjectRun(store, 'pe-reconcile', run.runId, 'paused', run.controlRev, { blocker: { code: 'unknown-side-effect' } });
+    assert.throws(() => resumeProjectRun(store, 'pe-reconcile', run.runId, paused.controlRev), /未知的写入动作/);
+    const stillUnknown = reconcileProjectAction(store, 'pe-reconcile', run.runId, begun.action.actionId, {
+      outcome: 'still_unknown', reason: '只读核对仍未取得明确业务结果',
+    });
+    assert.equal(stillUnknown.sideEffectUnknown, true);
+    assert.throws(() => resumeProjectRun(store, 'pe-reconcile', run.runId, paused.controlRev), /未知的写入动作/);
+    const occurred = reconcileProjectAction(store, 'pe-reconcile', run.runId, begun.action.actionId, {
+      outcome: 'occurred', reason: '通过独立只读列表确认目标数据已经改变',
+    });
+    assert.equal(occurred.sideEffectUnknown, false);
+    assert.equal(occurred.executionState, 'completed');
+    assert.equal(occurred.reconciliation.outcome, 'occurred');
+    assert.equal(resumeProjectRun(store, 'pe-reconcile', run.runId, paused.controlRev).state, 'preparing');
+  });
+
   await test('有效账号秘密只在派发时套用，回执不写秘密', async () => {
     const { run, check } = await prepare('pe-identity');
     saveAccount(store, 'pe-identity', { name: 'alice', status: 'valid', secret: 'session=SAKER_SECRET' });
@@ -184,6 +257,18 @@ try {
     assert(seen.at(-1).headers.cookie.includes('SAKER_SECRET'), '秘密必须到达目标');
     const receipt = readExecutionReceipt(store, 'pe-identity', result.executionId);
     assert(!receipt.request.includes('SAKER_SECRET'), '回执原文不能写秘密');
+  });
+
+  await test('项目工具摘要与响应头遮蔽合成凭据并保留业务正文', async () => {
+    const { run, check } = await prepare('pe-redact');
+    const result = await executeProjectHttp(store, 'pe-redact', run.runId, check.checkId, {
+      method: 'GET', url: origin + '/secret',
+    });
+    assert.equal(result.ok, true, result.error);
+    assert(!result.summary.includes('SYNTHETIC_PASSWORD'));
+    assert(!result.summary.includes('SYNTHETIC_TOKEN'));
+    assert(!JSON.stringify(result.responseHeaders).includes('SYNTHETIC_COOKIE'));
+    assert(result.summary.includes('VISIBLE_BUSINESS_VALUE'), '合法业务正文仍需可分析');
   });
 } finally {
   server.closeAllConnections?.();

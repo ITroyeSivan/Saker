@@ -4,16 +4,12 @@
 //
 // 只做只读计算：读会话 surface 与最近一次 request/header，不访问目标、不调用模型。
 
+import { redactText } from './redaction.js';
+
 const B = value => Buffer.byteLength(typeof value === 'string' ? value : JSON.stringify(value ?? ''), 'utf8');
 
 /** 敏感字段遮蔽：请求原文、Cookie、令牌、私钥与常见密钥赋值都不回显。 */
-export function maskSensitive(text) {
-  return String(text ?? '')
-    .replace(/^(authorization|proxy-authorization|cookie|set-cookie):[^\r\n]*/gim, line => line.split(':')[0] + ': [已遮蔽]')
-    .replace(/(["']?(?:password|passwd|secret|client_secret|api[_-]?key|access[_-]?token|refresh[_-]?token)["']?\s*[:=]\s*)(["']?)([^"'\r\n,}\s]+)\2/gi,
-      (_m, head, quote) => head + quote + '[已遮蔽]' + quote)
-    .replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/gi, '[已遮蔽:私钥]');
-}
+export const maskSensitive = redactText;
 
 /** 把一段消息内容取成可计量的文本（字符串或块数组都行）。
  * 宿主 system/message 的正文在 data.message，user/message 的正文在 data.content；

@@ -22,6 +22,16 @@ const variants = [
     '旧控制版本的排队动作在暂停恢复后不派发，新版本动作仍可执行', 'plugins/dsh-redteam-results/lib/project-store.js'],
   ['stale-queued-identity', 'if (input.identityRef !== undefined', 'if (false',
     '排队动作的身份引用变化后不能派发', 'plugins/dsh-redteam-results/lib/project-store.js'],
+  ['response-aborted-settlement',
+    "      incoming.once('aborted', () => finishReject('response-aborted', '响应在完整结束前被中止', { requestsWritten: true, responseStarted: true }));\n"
+      + "      incoming.once('error', error => finishReject('response-error', error.code || error.message || '响应流错误', { requestsWritten: true, responseStarted: true }));\n"
+      + "      incoming.once('close', () => {\n"
+      + "        if (!incoming.complete) finishReject('response-closed', '响应流在完整结束前关闭', { requestsWritten: true, responseStarted: true });\n"
+      + "      });",
+    '',
+    '响应中途断开在期限内收尾并保留未知副作用'],
+  ['summary-secret-redaction', "const bodyText = textual ? redactText(result.body.toString('utf8'))", "const bodyText = textual ? result.body.toString('utf8')",
+    '项目工具摘要与响应头遮蔽合成凭据并保留业务正文'],
 ];
 
 const sourceHash = () => createHash('sha256').update([file, storeFile].map(relative => fs.readFileSync(path.join(root, relative))).join('\n')).digest('hex');

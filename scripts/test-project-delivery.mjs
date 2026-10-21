@@ -10,7 +10,7 @@ import { createProjectRun, transitionProjectRun, defineProjectChecks, recordProj
 import { buildProjectDeliveryFiles, zipProjectDelivery, projectCounts } from '../plugins/dsh-redteam-results/lib/project-delivery.js';
 import { dispatch } from '../plugins/dsh-redteam-results/lib/index.js';
 import { writeTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy-record.js';
-import { registerVerifiedProjectFinding } from './lib/project-test-fixtures.mjs';
+import { recordObservedProjectCheck, registerVerifiedProjectFinding } from './lib/project-test-fixtures.mjs';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-project-delivery-'));
 process.env.DSH_HOME = home;
@@ -140,6 +140,23 @@ try {
     assert.equal(JSON.parse(archived.record).used.toolCalls, 9, '旧用量留在旧轮次，不被擦除');
     const historical = await dispatch(ctx, store, 'project.status', { sessionId: 'pd-start', runId: runningAgain.runId });
     assert.equal(historical.run.runId, runningAgain.runId, '明确指定历史运行时不能返回另一个活动运行');
+  });
+
+  await test('项目导出遮蔽合成凭据并保留业务内容', async () => {
+    const sid = 'pd-redact';
+    startTaskPolicy(store, sid, { scenario: 'project', question: '导出脱敏', budget: { minutes: 10 } });
+    const created = createProjectRun(store, sid, { question: '导出脱敏' });
+    const run = transitionProjectRun(store, sid, created.runId, 'running', created.controlRev);
+    const [check] = defineProjectChecks(store, sid, run.runId, [{ checkId: 'redact', requirement: '检查合成凭据展示' }]);
+    recordObservedProjectCheck(store, sid, run.runId, check.checkId, {
+      executionState: 'ended', verdict: 'not_found',
+      checkedContent: 'password=SYNTHETIC_PASSWORD access_token=SYNTHETIC_TOKEN business=VISIBLE_BUSINESS_VALUE',
+    });
+    const files = buildProjectDeliveryFiles(store, sid, run.runId).files;
+    const combined = Object.values(files).join('\n');
+    assert(!combined.includes('SYNTHETIC_PASSWORD'));
+    assert(!combined.includes('SYNTHETIC_TOKEN'));
+    assert(combined.includes('VISIBLE_BUSINESS_VALUE'));
   });
 } finally {
   store.close();

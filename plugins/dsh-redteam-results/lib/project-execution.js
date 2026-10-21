@@ -7,6 +7,7 @@ import { readTaskPolicy, effectivePolicy, targetTrafficDenial, excludedPathDenia
 import { resolveTaskIdentity, identityDenial, identityRequestHeaders } from './identity-binding.js';
 import { acquireTargetSlot } from './request-pacing.js';
 import { beginProjectAction, markProjectActionDispatched, finishProjectAction, readProjectRun, readProjectCheck } from './project-store.js';
+import { redactHeaders, redactText } from './redaction.js';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
 
@@ -56,26 +57,67 @@ function dispatch(url, method, headers, body, timeoutMs, signal) {
   return new Promise((resolve, reject) => {
     const transport = url.protocol === 'https:' ? https : http;
     const startedAt = Date.now();
-    const request = transport.request({
-      protocol: url.protocol, hostname: url.hostname, port: url.port || undefined,
-      path: url.pathname + url.search, method, headers, timeout: timeoutMs,
-    }, response => {
-      const chunks = [];
-      let bytes = 0;
-      response.on('data', chunk => { bytes += chunk.length; if (bytes <= 65536) chunks.push(chunk); });
-      response.on('end', () => resolve({
-        outcome: 'response', status: response.statusCode,
-        headers: { ...response.headers },
-        responseHead: 'HTTP/' + response.httpVersion + ' ' + response.statusCode + ' ' + (response.statusMessage || '') + '\r\n'
-          + Object.entries(response.headers).map(([name, value]) => name + ': ' + (Array.isArray(value) ? value.join(', ') : value)).join('\r\n') + '\r\n\r\n',
-        body: Buffer.concat(chunks), elapsedMs: Date.now() - startedAt, truncated: bytes > 65536,
+    const chunks = [];
+    let receivedBytes = 0;
+    let retainedBytes = 0;
+    let settled = false;
+    let responseStarted = false;
+    let requestsWritten = false;
+    let response = null;
+    let request = null;
+    const cleanup = () => signal?.removeEventListener('abort', onAbort);
+    const settle = callback => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback();
+    };
+    const finishResolve = value => settle(() => resolve(value));
+    const finishReject = (code, message, extra = {}) => settle(() => {
+      try { response?.destroy(); } catch { /* 已结束 */ }
+      try { request?.destroy(); } catch { /* 已结束 */ }
+      reject(Object.assign(new Error(redactText(message)), {
+        code, receivedBytes, retainedBytes, requestsWritten, responseStarted, ...extra,
       }));
     });
-    const onAbort = () => request.destroy(new Error('项目动作已取消'));
+    const onAbort = () => finishReject('cancelled', '项目动作已取消', { requestsWritten, responseStarted });
+    request = transport.request({
+      protocol: url.protocol, hostname: url.hostname, port: url.port || undefined,
+      path: url.pathname + url.search, method, headers, timeout: timeoutMs,
+    }, incoming => {
+      responseStarted = true;
+      response = incoming;
+      incoming.on('data', chunk => {
+        receivedBytes += chunk.length;
+        const remaining = Math.max(0, 65536 - retainedBytes);
+        if (remaining > 0) {
+          const part = chunk.subarray(0, remaining);
+          chunks.push(part);
+          retainedBytes += part.length;
+        }
+      });
+      incoming.once('end', () => finishResolve({
+        outcome: 'response', status: incoming.statusCode,
+        headers: { ...incoming.headers },
+        responseHead: 'HTTP/' + incoming.httpVersion + ' ' + incoming.statusCode + ' ' + (incoming.statusMessage || '') + '\r\n'
+          + Object.entries(incoming.headers).map(([name, value]) => name + ': ' + (Array.isArray(value) ? value.join(', ') : value)).join('\r\n') + '\r\n\r\n',
+        body: Buffer.concat(chunks), elapsedMs: Date.now() - startedAt,
+        receivedBytes, retainedBytes, truncated: receivedBytes > retainedBytes,
+      }));
+      incoming.once('aborted', () => finishReject('response-aborted', '响应在完整结束前被中止', { requestsWritten: true, responseStarted: true }));
+      incoming.once('error', error => finishReject('response-error', error.code || error.message || '响应流错误', { requestsWritten: true, responseStarted: true }));
+      incoming.once('close', () => {
+        if (!incoming.complete) finishReject('response-closed', '响应流在完整结束前关闭', { requestsWritten: true, responseStarted: true });
+      });
+    });
     if (signal) { if (signal.aborted) { onAbort(); return; } signal.addEventListener('abort', onAbort, { once: true }); }
-    request.once('close', () => signal?.removeEventListener('abort', onAbort));
-    request.on('timeout', () => request.destroy(new Error('项目请求超时')));
-    request.on('error', reject);
+    request.once('finish', () => { requestsWritten = true; });
+    request.once('close', () => {
+      if (!responseStarted && !settled) finishReject('request-closed', '请求连接在收到响应前关闭', { requestsWritten });
+    });
+    request.on('timeout', () => finishReject('timeout', '项目请求超时', { requestsWritten, responseStarted }));
+    request.on('error', error => finishReject(responseStarted ? 'response-error' : 'request-error',
+      error.code || error.message || '项目请求失败', { requestsWritten, responseStarted }));
     if (body) request.write(body);
     request.end();
   });
@@ -160,9 +202,11 @@ export async function executeProjectHttp(store, sessionId, runId, checkId, input
   } catch (error) {
     const sideEffectUnknown = dispatched && !['GET', 'HEAD', 'OPTIONS'].includes(method);
     await finishProjectAction(store, sessionId, runId, begun.action.actionId, {
-      executionState: sideEffectUnknown ? 'unknown' : 'failed', error: String(error?.message || error), sideEffectUnknown,
+      executionState: sideEffectUnknown ? 'unknown' : 'failed', error: redactText(error?.message || error), sideEffectUnknown,
+      receivedBytes: Number(error?.receivedBytes) || 0, retainedBytes: Number(error?.retainedBytes) || 0,
+      bodyUnavailable: error?.responseStarted === true,
     });
-    throw error;
+    throw Object.assign(new Error(redactText(error?.message || error)), { code: error?.code });
   } finally {
     release();
   }
@@ -175,28 +219,35 @@ export async function executeProjectHttp(store, sessionId, runId, checkId, input
     request: requestWire, requestSha256: digest(requestWire),
     responseHead: result.responseHead, responseBodyBase64: result.body.toString('base64'),
     responseSha256: digest(Buffer.concat([Buffer.from(result.responseHead), result.body])),
-    status: result.status, outcome: result.outcome, capturedBytes: result.body.length, responseBytes: result.body.length,
+    status: result.status, outcome: result.outcome, capturedBytes: result.retainedBytes, responseBytes: result.receivedBytes,
+    responseTruncated: result.truncated === true, bodyUnavailable: false,
     complete: !result.truncated, startedAt: begun.action.startedAt, completedAt: new Date().toISOString(),
     elapsedMs: result.elapsedMs, requestAttempts: 1,
     requestBasis: digest(JSON.stringify(['project', runId, checkId, requestWire])),
   };
   store.db.prepare('INSERT INTO execution_receipts (session_id,id,record) VALUES (?,?,?)').run(sessionId, record.id, JSON.stringify(record));
-  await finishProjectAction(store, sessionId, runId, begun.action.actionId, { executionState: 'completed', requestRef: record.id });
+  await finishProjectAction(store, sessionId, runId, begun.action.actionId, {
+    executionState: 'completed', requestRef: record.id,
+    receivedBytes: record.responseBytes, retainedBytes: record.capturedBytes,
+  });
   const contentType = String(result.headers?.['content-type'] || '');
   const textual = !contentType || /(?:text\/|json|xml|javascript|x-www-form-urlencoded|svg)/i.test(contentType);
-  const bodyText = textual ? result.body.toString('utf8') : '[二进制响应 ' + result.body.length + ' 字节]';
+  const bodyText = textual ? redactText(result.body.toString('utf8')) : '[二进制响应 ' + result.retainedBytes + ' 字节]';
   const bodyPreview = bodyText.slice(0, 2000);
   const businessHeaders = ['content-type', 'location', 'content-language']
     .filter(name => result.headers?.[name] !== undefined)
-    .map(name => name + ': ' + result.headers[name]);
+    .map(name => name + ': ' + redactText(Array.isArray(result.headers[name]) ? result.headers[name].join(', ') : result.headers[name]));
+  const responseHeaders = redactHeaders(result.headers);
   return {
     ok: true, actionId: begun.action.actionId, checkId, executionId: record.id,
     status: record.status,
     summary: method + ' ' + url.href + ' → ' + record.status
       + (businessHeaders.length ? '\n' + businessHeaders.join('\n') : '')
-      + '\n响应正文' + (result.truncated ? '（前 65536 字节）' : '') + '：' + bodyPreview
-      + (bodyText.length > bodyPreview.length ? '\n…正文已截断，共捕获 ' + result.body.length + ' 字节' : '')
+      + '\n响应正文' + (result.truncated ? '（保留前 ' + result.retainedBytes + ' 字节）' : '') + '：' + bodyPreview
+      + (bodyText.length > bodyPreview.length || result.truncated
+        ? '\n…正文已截断，实际接收 ' + result.receivedBytes + ' 字节，保留 ' + result.retainedBytes + ' 字节' : '')
       + '\nexecutionId=' + record.id,
     evidenceRefs: [record.id],
+    responseHeaders,
   };
 }

@@ -4,6 +4,8 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { acquireTargetSlot } from './request-pacing.js';
+import { redactHeaders, redactText } from './redaction.js';
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
@@ -109,6 +111,9 @@ export class BrowserSession {
     this.requests = new Map();
     this.requestOrder = [];
     this.override = null;
+    this.policyDenials = [];
+    this.pacingReleases = new Map();
+    this.guardAbort = new AbortController();
   }
 
   static async start(options = {}) {
@@ -129,10 +134,17 @@ export class BrowserSession {
     await client.call('Page.enable').catch(() => {});
     await client.call('Runtime.enable').catch(() => {});
     await client.call('Network.enable').catch(() => {});
+    await client.call('Network.setBypassServiceWorker', { bypass: true }).catch(() => {});
     const versionInfo = await client.call('Browser.getVersion').catch(() => null);
     const version = String(versionInfo?.product || '');
-    const session = new BrowserSession({ child, base, target, client, executable, version, profileDir, identity: safeName(options.identity) });
+    const session = new BrowserSession({
+      child, base, target, client, executable, version, profileDir,
+      identity: safeName(options.identity),
+      requestGuard: options.requestGuard,
+      pacingSessionId: options.pacingSessionId,
+    });
     session.watchNetwork();
+    await session.watchPolicy();
     return session;
   }
 
@@ -154,19 +166,94 @@ export class BrowserSession {
       record.mimeType = params.response?.mimeType || '';
       record.fromCache = params.response?.fromDiskCache === true || params.response?.fromServiceWorker === true;
     });
+    this.client.on('Network.responseReceivedExtraInfo', params => {
+      const record = this.requests.get(params.requestId);
+      if (!record) return;
+      record.responseHeaders = { ...(record.responseHeaders || {}), ...(params.headers || {}) };
+      if (params.statusCode) record.status = params.statusCode;
+    });
+    const releasePaced = params => {
+      const key = String(params.networkId || params.requestId || '');
+      const release = this.pacingReleases.get(key);
+      if (release) { release(); this.pacingReleases.delete(key); }
+    };
+    this.client.on('Network.loadingFinished', releasePaced);
+    this.client.on('Network.loadingFailed', releasePaced);
+  }
+
+  recordPolicyDenial(params, denial, phase) {
+    const denialRecord = {
+      url: redactText(params.request?.url || ''),
+      method: String(params.request?.method || '').toUpperCase(),
+      resourceType: String(params.resourceType || ''),
+      reason: redactText(denial),
+      phase,
+      at: new Date().toISOString(),
+    };
+    this.policyDenials.push(denialRecord);
+    if (this.policyDenials.length > 500) this.policyDenials.splice(0, this.policyDenials.length - 500);
+    return denialRecord;
+  }
+
+  async watchPolicy() {
+    this.client.on('Fetch.requestPaused', async params => {
+      let release = null;
+      const key = String(params.networkId || params.requestId || '');
+      try {
+        const rawUrl = String(params.request?.url || '');
+        let parsed;
+        try { parsed = new URL(rawUrl); } catch { parsed = null; }
+        if (parsed && !['http:', 'https:'].includes(parsed.protocol)) {
+          await this.client.call('Fetch.continueRequest', { requestId: params.requestId });
+          return;
+        }
+        const method = String(params.request?.method || 'GET').toUpperCase();
+        let decision = null;
+        if (typeof this.requestGuard === 'function') {
+          decision = await this.requestGuard({
+            url: rawUrl, method, resourceType: String(params.resourceType || ''),
+            requestId: key, frameId: params.frameId || '',
+          });
+        }
+        const denial = typeof decision === 'string' ? decision : decision?.denial;
+        if (denial) {
+          this.recordPolicyDenial(params, denial, 'before-dispatch');
+          await this.client.call('Fetch.failRequest', { requestId: params.requestId, errorReason: 'BlockedByClient' });
+          return;
+        }
+        if (this.pacingSessionId && decision?.policy) {
+          release = await acquireTargetSlot(this.pacingSessionId, decision.policy, this.guardAbort.signal);
+          if (key) this.pacingReleases.set(key, release);
+        }
+        await this.client.call('Fetch.continueRequest', { requestId: params.requestId });
+      } catch (error) {
+        try { release?.(); } catch { /* 已释放 */ }
+        if (key) this.pacingReleases.delete(key);
+        this.recordPolicyDenial(params, redactText(error?.message || error), 'guard-error');
+        try { await this.client.call('Fetch.failRequest', { requestId: params.requestId, errorReason: 'BlockedByClient' }); } catch { /* 已结束 */ }
+      }
+    });
+    await this.client.call('Fetch.enable', {
+      patterns: [{ urlPattern: '*', requestStage: 'Request' }],
+      handleAuthRequests: false,
+    });
   }
 
   async open(url) {
     this.assertOpen();
     const parsed = new URL(url);
     if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('浏览器只接受 HTTP(S) URL');
+    const denialStart = this.policyDenials.length;
     const loaded = new Promise(resolve => {
       const off = this.client.on('Page.loadEventFired', () => { off(); resolve(true); });
       setTimeout(() => { off(); resolve(false); }, 15000);
     });
-    await this.client.call('Page.navigate', { url });
+    const navigation = await this.client.call('Page.navigate', { url });
     await loaded;
     await sleep(250);
+    const denied = this.policyDenials.slice(denialStart);
+    if (denied.length) throw new Error('浏览器请求在到达目标前被策略阻断：' + denied[0].reason);
+    if (navigation?.errorText) throw new Error('浏览器导航失败：' + redactText(navigation.errorText));
     return this.observe();
   }
 
@@ -195,12 +282,16 @@ export class BrowserSession {
     this.assertOpen();
     const type = String(action.type || '');
     if (type === 'navigate') return this.open(action.url);
+    const denialStart = this.policyDenials.length;
     if (type === 'click') {
       const result = await this.client.call('Runtime.evaluate', {
         expression: '(function(){var e=document.querySelector(' + JSON.stringify(String(action.selector || '')) + ');if(!e)return {found:false};e.click();return {found:true,tag:e.tagName}})()',
         returnByValue: true,
       });
-      return result.result?.value || { found: false };
+      await sleep(250);
+      const denied = this.policyDenials.slice(denialStart);
+      if (denied.length) throw new Error('浏览器动作触发的请求被策略阻断：' + denied[0].reason);
+      return result.result?.value || { found: false, state: 'failed', error: 'element-not-found' };
     }
     if (type === 'type') {
       const result = await this.client.call('Runtime.evaluate', {
@@ -239,8 +330,12 @@ export class BrowserSession {
   listRequests({ limit = 100 } = {}) {
     return this.requestOrder.slice(-limit).map(id => {
       const record = this.requests.get(id);
-      const { postData, headers, ...summary } = record;
-      return { ...summary, hasPostData: !!postData, headerCount: Object.keys(headers || {}).length };
+      const { postData, headers, responseHeaders, ...summary } = record;
+      return {
+        ...summary, url: redactText(summary.url),
+        responseHeaders: redactHeaders(responseHeaders),
+        hasPostData: !!postData, headerCount: Object.keys(headers || {}).length,
+      };
     });
   }
 
@@ -249,9 +344,21 @@ export class BrowserSession {
     const record = this.requests.get(String(requestId));
     if (!record) throw new Error('未找到该请求记录：' + requestId);
     let body = '';
+    let bodyUnavailable = '';
     try { body = (await this.client.call('Network.getResponseBody', { requestId: String(requestId) })).body || ''; }
-    catch { body = ''; }
-    return { ...record, responseBody: body.slice(0, 20000), responseBodyTruncated: body.length > 20000 };
+    catch (error) { bodyUnavailable = redactText(error?.message || error) || 'response-body-unavailable'; }
+    const safe = {
+      ...record,
+      url: redactText(record.url),
+      headers: redactHeaders(record.headers),
+      responseHeaders: redactHeaders(record.responseHeaders),
+      postData: redactText(record.postData),
+      responseBody: redactText(body).slice(0, 20000),
+      responseBodyTruncated: body.length > 20000,
+      capturedBytes: body.length,
+      ...(bodyUnavailable ? { bodyUnavailable } : {}),
+    };
+    return safe;
   }
 
   /** 只对明确匹配的请求做修改；动作结束或关闭时解除拦截。 */
@@ -287,6 +394,9 @@ export class BrowserSession {
   async close() {
     if (this.closed) return;
     this.closed = true;
+    try { this.guardAbort?.abort(new Error('浏览器会话已关闭')); } catch { /* 已关闭 */ }
+    for (const release of this.pacingReleases.values()) { try { release(); } catch { /* 已释放 */ } }
+    this.pacingReleases.clear();
     try { await this.clearRequestOverride(); } catch { /* 忽略 */ }
     try { this.client.close(); } catch { /* 已关闭 */ }
     try { this.child.kill(); } catch { /* 已退出 */ }
