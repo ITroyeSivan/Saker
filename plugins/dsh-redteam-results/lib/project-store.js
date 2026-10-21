@@ -48,6 +48,32 @@ const parse = (row, label) => {
 };
 const conflict = message => Object.assign(new Error(message), { code: 'project-state-conflict' });
 const uniqueStrings = values => [...new Set((Array.isArray(values) ? values : []).map(value => String(value || '').trim()).filter(Boolean))];
+const batchFingerprint = (checks, sectionDecisions) => createHash('sha256')
+  .update(JSON.stringify({ checks, sectionDecisions })).digest('hex');
+
+function validateDependencyGraph(checks) {
+  const byId = new Map(checks.map(check => [check.checkId, check]));
+  for (const check of checks) {
+    const seen = new Set();
+    const visit = id => {
+      if (seen.has(id)) throw new Error('检查依赖存在循环：' + id);
+      seen.add(id);
+      const current = byId.get(id);
+      if (!current) throw new Error('检查依赖不存在：' + id);
+      for (const dependency of current.dependencies || []) visit(dependency);
+    };
+    for (const dependency of check.dependencies || []) {
+      if (dependency === check.checkId) throw new Error('检查不能依赖自身：' + check.checkId);
+      if (!byId.has(dependency)) throw new Error('检查依赖不存在：' + dependency);
+      visit(dependency);
+    }
+    for (const fact of check.requiresFacts || []) {
+      const providers = (check.dependencies || []).map(id => byId.get(id)).filter(Boolean);
+      if (!providers.some(provider => (provider.provides || []).includes(fact)))
+        throw new Error('检查 ' + check.checkId + ' 需要前项事实「' + fact + '」，但依赖项没有声明提供该事实');
+    }
+  }
+}
 
 function usableProjectObservation(store, sessionId, runId, action) {
   if (!action || action.executionState !== 'completed') return false;
@@ -209,12 +235,21 @@ export function listProjectChecks(store, sessionId, runId) {
  * 定义本批检查要求和来源整理决定。checks 与 sectionDecisions 同事务提交；
  * 任一条来源、范围或关联无效时整批不落库。
  */
-export function defineProjectChecks(store, sessionId, runId, checks = [], sectionDecisions = []) {
+export function defineProjectChecks(store, sessionId, runId, checks = [], sectionDecisions = [], options = {}) {
   return taskTransaction(store, () => {
     const run = readProjectRun(store, sessionId, runId);
     if (!run) throw new Error('project run not found');
     if (!Array.isArray(checks) || !Array.isArray(sectionDecisions)) throw new Error('checks 和 sectionDecisions 必须是数组');
     if (!checks.length && !sectionDecisions.length) throw new Error('没有可保存的检查或来源整理决定');
+    const fingerprint = batchFingerprint(checks, sectionDecisions);
+    const batchId = String(options.batchId || 'auto-' + fingerprint).trim();
+    if (!batchId || batchId.length > 200) throw new Error('define batchId 无效');
+    const previousBatch = run.defineBatches?.[batchId];
+    if (previousBatch) {
+      if (previousBatch.fingerprint !== fingerprint) throw conflict('同一检查批次的内容已变化，请使用新的 batchId 建立修订');
+      const existingIds = new Set(previousBatch.checkIds || []);
+      return listProjectChecks(store, sessionId, runId).filter(check => existingIds.has(check.checkId));
+    }
     const existingCount = listProjectChecks(store, sessionId, runId).length;
     const snapshot = new Set((run.sourceSnapshot || []).map(item => JSON.stringify([
       String(item.sourceId || ''), String(item.sourceRevision || ''),
@@ -251,13 +286,16 @@ export function defineProjectChecks(store, sessionId, runId, checks = [], sectio
         sourceLocation: optionalText(item?.sourceLocation, 1000),
         sourceRefs,
         requirement, order: Number.isSafeInteger(item?.order) ? item.order : existingCount + index,
-        dependencies: Array.isArray(item?.dependencies) ? item.dependencies.map(value => String(value)) : [],
+        dependencies: uniqueStrings(item?.dependencies),
+        provides: uniqueStrings(item?.provides),
+        requiresFacts: uniqueStrings(item?.requiresFacts),
         executionState: 'pending', verdict: '', checkedContent: '', gaps: '',
         findingRefs: [], actionRefs: [], createdAt: nowIso(), updatedAt: nowIso(),
       };
       if (out.some(check => check.checkId === checkId)) throw new Error('同批次 checkId 重复：' + checkId);
       out.push(record);
     }
+    validateDependencyGraph([...listProjectChecks(store, sessionId, runId), ...out]);
     const byId = new Map(out.map(check => [check.checkId, check]));
     const decisions = { ...(run.sectionDecisions || {}) };
     for (const input of sectionDecisions) {
@@ -302,10 +340,14 @@ export function defineProjectChecks(store, sessionId, runId, checks = [], sectio
       store.db.prepare('INSERT INTO project_checks(session_id,run_id,check_id,check_revision,record,updated_at) VALUES(?,?,?,?,?,?)')
         .run(sessionId, runId, record.checkId, record.checkRevision, JSON.stringify(record), record.updatedAt);
     }
-    if (sectionDecisions.length) {
+    if (sectionDecisions.length || out.length) {
+      const defineBatches = {
+        ...(run.defineBatches || {}),
+        [batchId]: { fingerprint, checkIds: out.map(check => check.checkId), decisionCount: sectionDecisions.length, at: nowIso() },
+      };
       const nextRun = {
-        ...run, sectionDecisions: decisions,
-        progressRevision: (run.progressRevision || 0) + 1,
+        ...run, sectionDecisions: decisions, defineBatches,
+        progressRevision: sectionDecisions.length ? (run.progressRevision || 0) + 1 : run.progressRevision || 0,
         updatedAt: nowIso(),
       };
       store.db.prepare('UPDATE project_runs SET record=?,updated_at=? WHERE session_id=? AND run_id=?')

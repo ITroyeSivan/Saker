@@ -1,7 +1,10 @@
 // W06：项目结果导出。只读取已保存的检查、来源和引用，不访问目标；
 // 表格内容按文本导出，不生成可执行公式。
 import { zipDelivery, redactCredentials } from './bundle.js';
-import { listProjectChecks, listProjectSources, readProjectRun } from './project-store.js';
+import { listProjectChecks, listProjectActions, readProjectRun, readProjectSource } from './project-store.js';
+import { getFinding } from './store.js';
+import { readExecutionReceipt } from './execution-receipts.js';
+import { redactText, redactValue } from './redaction.js';
 
 const RESULT_LABELS = {
   not_found: '未发现问题', issue: '发现问题', needs_check: '需进一步确认',
@@ -51,7 +54,13 @@ export function buildProjectDeliveryFiles(store, sessionId, runId) {
   const run = readProjectRun(store, sessionId, runId);
   if (!run) throw new Error('project run not found');
   const checks = listProjectChecks(store, sessionId, runId);
-  const sources = listProjectSources(store, sessionId);
+  const actions = listProjectActions(store, sessionId, runId);
+  const missing = [];
+  const sources = (run.sourceSnapshot || []).map(snapshot => {
+    const source = readProjectSource(store, sessionId, snapshot.sourceId, snapshot.sourceRevision);
+    if (!source) missing.push({ kind: 'source', id: snapshot.sourceId, revision: snapshot.sourceRevision, reason: '运行快照中的来源缺失' });
+    return source;
+  }).filter(Boolean);
   const counts = projectCounts(checks);
   const rows = checks.map(projectCheckView).map(check => ({
     requirement: check.requirement,
@@ -61,6 +70,48 @@ export function buildProjectDeliveryFiles(store, sessionId, runId) {
     actionRefs: check.actionRefs || [],
     findingRefs: check.findingRefs || [],
   }));
+  const evidenceFiles = {};
+  for (const action of actions) {
+    const evidence = { action: redactValue(action), receipt: null };
+    if (action.requestRef) {
+      try {
+        const receipt = readExecutionReceipt(store, sessionId, action.requestRef);
+        const body = Buffer.from(receipt.responseBodyBase64 || '', 'base64');
+        evidence.receipt = redactValue({
+          ...receipt,
+          responseBodyBase64: undefined,
+          responseBodyText: redactText(body.toString('utf8')).slice(0, 65536),
+          capturedBytes: body.length,
+        });
+      } catch (error) {
+        evidence.receiptMissing = redactText(error.message);
+        missing.push({ kind: 'execution-receipt', id: action.requestRef, reason: error.message });
+      }
+    }
+    evidenceFiles['delivery/evidence/actions/' + action.actionId + '.json'] = JSON.stringify(evidence, null, 2) + '\n';
+  }
+  const findingFiles = {};
+  for (const findingId of [...new Set(checks.flatMap(check => check.findingRefs || []))]) {
+    const finding = getFinding(store, sessionId, findingId);
+    if (!finding) {
+      missing.push({ kind: 'finding', id: findingId, reason: '检查引用的 finding 缺失' });
+      continue;
+    }
+    findingFiles['delivery/evidence/findings/' + findingId + '.json'] = JSON.stringify(redactValue(finding), null, 2) + '\n';
+  }
+  const sourceFiles = {};
+  for (const source of sources) {
+    const name = String(source.sourceId + '-' + source.sourceRevision).replace(/[^A-Za-z0-9._-]/g, '_');
+    sourceFiles['delivery/sources/' + name + '.md'] = redactCredentials([
+      '# ' + (source.displayName || source.sourceId), '',
+      '- sourceId：' + source.sourceId,
+      '- sourceRevision：' + source.sourceRevision,
+      '- parseState：' + source.parseState,
+      '',
+      ...(source.sections || []).map(section => '## ' + section.sectionId + (section.location ? ' ' + JSON.stringify(section.location) : '') + '\n\n' + String(section.text || '')),
+      ...(source.unread || []).map(item => '## 未读区域\n\n' + JSON.stringify(item)),
+    ].join('\n') + '\n');
+  }
   const report = [
     '# 按文档测试结果', '',
     '- 运行：' + run.runId,
@@ -76,13 +127,25 @@ export function buildProjectDeliveryFiles(store, sessionId, runId) {
   const sourceList = sources.length
     ? sources.map(source => '- ' + (source.displayName || source.sourceId) + '（' + source.sourceRevision + '，' + source.parseState + '）').join('\n')
     : '没有已保存的来源。';
+  const manifest = {
+    runId: run.runId, state: run.state, sourceSnapshot: run.sourceSnapshot || [],
+    files: ['delivery/project-report.md', 'delivery/project-checks.tsv', 'delivery/project-sources.md',
+      ...Object.keys(evidenceFiles), ...Object.keys(findingFiles), ...Object.keys(sourceFiles),
+      ...(missing.length ? ['delivery/missing.md'] : [])],
+    missing,
+  };
   return {
     files: {
       'delivery/project-report.md': redactCredentials(report),
       'delivery/project-checks.tsv': redactCredentials(tsv),
       'delivery/project-sources.md': redactCredentials('# 测试文档来源\n\n' + sourceList + '\n'),
+      ...sourceFiles,
+      ...evidenceFiles,
+      ...findingFiles,
+      'delivery/manifest.json': JSON.stringify(manifest, null, 2) + '\n',
+      ...(missing.length ? { 'delivery/missing.md': '# 缺失材料\n\n' + missing.map(item => '- ' + item.kind + ' ' + item.id + '：' + redactText(item.reason)).join('\n') + '\n' } : {}),
     },
-    counts, run,
+    counts, run, missing,
   };
 }
 

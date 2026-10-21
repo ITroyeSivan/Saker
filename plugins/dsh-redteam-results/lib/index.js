@@ -1814,8 +1814,12 @@ function apply(ctx) {
         sourceRefs: { type: 'array', description: '本次固定来源引用', items: { type: 'object', additionalProperties: false, properties: {
           sourceId: { type: 'string', required: true }, sourceRevision: { type: 'string', required: true }, sectionId: { type: 'string', required: true },
         } } },
-        checkId: { type: 'string' }, order: { type: 'integer' }, dependencies: { type: 'array', items: { type: 'string' } },
+        checkId: { type: 'string' }, order: { type: 'integer' },
+        dependencies: { type: 'array', items: { type: 'string' } },
+        provides: { type: 'array', description: '本检查可向前项提供的事实名', items: { type: 'string' } },
+        requiresFacts: { type: 'array', description: '要求依赖项实际提供的事实名', items: { type: 'string' } },
       } } },
+      batchId: { type: 'string', description: '稳定批次幂等键；响应丢失后重试应复用相同值' },
       sectionDecisions: { type: 'array', description: '来源整理决定', items: { type: 'object', additionalProperties: false, properties: {
         sourceId: { type: 'string', required: true }, sourceRevision: { type: 'string', required: true },
         sectionId: { type: 'string', required: true, description: '来源段落 ID；无段落的来源用 #source。' },
@@ -1852,9 +1856,9 @@ function apply(ctx) {
             throw new Error('checks 每项必须填写 requirement（检查内容）');
           if (!input.length && !decisions.length)
             throw new Error('define 需要 checks 或 sectionDecisions；纯参考资料也要保存明确的 reference 决定');
-					const checks = defineProjectChecks(scope.store, scope.session.id, scope.run.runId, input, decisions);
+					const checks = defineProjectChecks(scope.store, scope.session.id, scope.run.runId, input, decisions, { batchId: args.batchId });
           const latestRun = readProjectRun(scope.store, scope.session.id, scope.run.runId);
-					return Promise.resolve({ ok: true, text: (checks.length ? '已定义 ' + checks.length + ' 项检查：\n' + checks.map(check => check.checkId + ' ' + check.requirement).join('\n') : '未新增检查')
+					return Promise.resolve({ ok: true, ...(args.batchId ? { batchId: String(args.batchId) } : {}), text: (checks.length ? '已定义 ' + checks.length + ' 项检查：\n' + checks.map(check => check.checkId + ' ' + check.requirement).join('\n') : '未新增检查')
             + (decisions.length ? '\n已整理 ' + decisions.length + ' 个来源区域。' : '') + (Object.keys(latestRun?.sectionDecisions || {}).length ? ' 本次累计 ' + Object.keys(latestRun.sectionDecisions).length + ' 个区域。' : ''),
             checks: checks.map(check => ({ checkId: check.checkId, requirement: check.requirement, sourceLocation: check.sourceLocation, sourceRefs: check.sourceRefs })),
             sectionDecisions: decisions.map(item => ({ sourceId: item.sourceId, sourceRevision: item.sourceRevision, sectionId: item.sectionId, decision: item.decision })) });

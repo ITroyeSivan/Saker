@@ -1,6 +1,7 @@
 // W03：本地 docx/xlsx/文本读取、真实位置、分段与未解析警告。
 import './test-home-isolation.mjs';
 import assert from 'node:assert/strict';
+import { deflateRawSync } from 'node:zlib';
 import { parseDocumentBuffer, readDocumentUrl, readDocumentSection } from '../plugins/dsh-redteam-results/lib/project-documents.js';
 
 let failed = 0;
@@ -15,23 +16,26 @@ function crc32(buffer) {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-function makeZip(entries) {
+function makeZip(entries, { deflate = false, skipCrc = false } = {}) {
   const locals = [], centrals = [];
   let offset = 0;
   for (const [name, content] of entries) {
-    const data = Buffer.from(content, 'utf8');
+    const original = Buffer.isBuffer(content) ? content : Buffer.from(String(content), 'utf8');
+    const data = deflate ? deflateRawSync(original) : original;
     const nameBuffer = Buffer.from(name, 'utf8');
-    const crc = crc32(data);
+    const crc = skipCrc ? 0 : crc32(original);
+    const method = deflate ? 8 : 0;
     const local = Buffer.alloc(30);
     local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0, 6);
-    local.writeUInt16LE(0, 8); local.writeUInt16LE(0, 10); local.writeUInt16LE(0, 12);
-    local.writeUInt32LE(crc, 14); local.writeUInt32LE(data.length, 18); local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(method, 8);
+    local.writeUInt16LE(0, 10); local.writeUInt16LE(0, 12);
+    local.writeUInt32LE(crc, 14); local.writeUInt32LE(data.length, 18); local.writeUInt32LE(original.length, 22);
     local.writeUInt16LE(nameBuffer.length, 26); local.writeUInt16LE(0, 28);
     locals.push(local, nameBuffer, data);
     const central = Buffer.alloc(46);
     central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(20, 4); central.writeUInt16LE(20, 6);
-    central.writeUInt16LE(0, 8); central.writeUInt16LE(0, 10); central.writeUInt16LE(0, 12); central.writeUInt16LE(0, 14);
-    central.writeUInt32LE(crc, 16); central.writeUInt32LE(data.length, 20); central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(0, 8); central.writeUInt16LE(method, 10); central.writeUInt16LE(0, 12); central.writeUInt16LE(0, 14);
+    central.writeUInt32LE(crc, 16); central.writeUInt32LE(data.length, 20); central.writeUInt32LE(original.length, 24);
     central.writeUInt16LE(nameBuffer.length, 28); central.writeUInt16LE(0, 30); central.writeUInt16LE(0, 32);
     central.writeUInt16LE(0, 34); central.writeUInt16LE(0, 36); central.writeUInt32LE(0, 38); central.writeUInt32LE(offset, 42);
     centrals.push(central, nameBuffer);
@@ -58,10 +62,11 @@ const docx = makeZip([['word/document.xml', `<?xml version="1.0"?>
 </w:body></w:document>`]]);
 
 const xlsx = makeZip([
-  ['xl/workbook.xml', `<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="测试要求" sheetId="1" r:id="rId1"/><sheet name="隐藏表" sheetId="2" state="hidden" r:id="rId2"/></sheets></workbook>`],
-  ['xl/_rels/workbook.xml.rels', `<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Target="worksheets/sheet2.xml"/></Relationships>`],
+  ['xl/workbook.xml', `<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet r:id="rId1" name="测试要求" sheetId="1"/><sheet r:id="rId2" sheetId="2" name="隐藏表" state="hidden"/></sheets></workbook>`],
+  ['xl/_rels/workbook.xml.rels', `<Relationships><Relationship Target="worksheets/sheet1.xml" Id="rId1"/><Relationship Id="rId2" Target="worksheets/sheet2.xml"/></Relationships>`],
   ['xl/sharedStrings.xml', `<sst><si><t>员工资料</t></si><si><t>审批</t></si></sst>`],
-  ['xl/worksheets/sheet1.xml', `<worksheet><cols><col min="2" max="2" hidden="1"/></cols><sheetData>
+  ['xl/charts/chart1.xml', `<chartSpace/>`],
+  ['xl/worksheets/sheet1.xml', `<worksheet><autoFilter ref="A1:B2"/><cols><col min="2" max="2" hidden="1"/></cols><sheetData>
 <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>
 <row r="2" hidden="1"><c r="A2" t="inlineStr"><is><t>隐藏行内容</t></is></c></row>
 <row r="3"><c r="A3"><f>SUM(A1:A2)</f></c></row>
@@ -95,6 +100,8 @@ test('XLSX 工作表、隐藏表、隐藏行、隐藏列、合并区域与公式
   assert(parsed.sections.some(item => item.kind === 'worksheet-note' && /隐藏/.test(item.text) && /隐藏表/.test(item.text)));
   assert(parsed.sections.some(item => item.kind === 'worksheet-note' && /隐藏列：2/.test(item.text)));
   assert(parsed.sections.some(item => item.kind === 'worksheet-note' && /合并区域：A1:B1/.test(item.text)));
+  assert(parsed.sections.some(item => item.kind === 'worksheet-note' && /自动筛选/.test(item.text)));
+  assert(parsed.unread.some(item => item.location.kind === 'xlsx-object'));
   const row1 = parsed.sections.find(item => item.sectionId === 'sheet-1-row-1');
   assert(row1.text.includes('员工资料') && row1.text.includes('审批'));
   const hiddenRow = parsed.sections.find(item => item.sectionId === 'sheet-1-row-2');
@@ -116,7 +123,19 @@ test('文本按行范围分段，长内容可继续读取且不一次返回全�
   assert.equal(first.more, true);
   const second = readDocumentSection(parsed, parsed.sections[0].sectionId, { cursor: first.nextCursor, limit: 30 });
   assert.notEqual(second.text, first.text);
+  const clamped = readDocumentSection({ sections: [{ sectionId: 'long', text: 'x'.repeat(10000) }] }, 'long', { cursor: 0, limit: 999999 });
+  assert.equal(clamped.text.length, 8000, '单次读取必须硬限制 8000 字符');
   assert.throws(() => readDocumentSection(parsed, 'missing-section'), /未找到该文档段落/);
+});
+
+test('ZIP 条目数、解压大小和无压缩超限都在解析前受控失败', () => {
+  const tooMany = Array.from({ length: 5001 }, (_, index) => ['f' + index + '.xml', 'x']);
+  assert.throws(() => parseDocumentBuffer(makeZip(tooMany), { displayName: 'many.docx' }), /5000|条目数/);
+  const bomb = Buffer.alloc(16 * 1024 * 1024 + 1, 'A');
+  assert.throws(() => parseDocumentBuffer(makeZip([['word/document.xml', bomb]], { deflate: true, skipCrc: true }), { displayName: 'bomb.docx' }),
+    /16MiB|output|buffer|larger|上限/i);
+  const oversizedInput = Buffer.alloc(20 * 1024 * 1024 + 1, 0x41);
+  assert.throws(() => parseDocumentBuffer(oversizedInput, { displayName: 'large.txt' }), /20MiB|上限/);
 });
 
 test('坏文件与旧格式给出具体错误，不返回空内容成功', () => {

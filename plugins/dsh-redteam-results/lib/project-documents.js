@@ -5,6 +5,14 @@ import path from 'node:path';
 import { inflateRawSync } from 'node:zlib';
 
 const XML_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+const DOCUMENT_LIMITS = Object.freeze({
+  maxInputBytes: 20 * 1024 * 1024,
+  maxEntries: 5000,
+  maxEntryBytes: 16 * 1024 * 1024,
+  maxTotalBytes: 64 * 1024 * 1024,
+  maxReadChars: 8000,
+  parseDeadlineMs: 15000,
+});
 const decodeXml = value => String(value).replace(/&(amp|lt|gt|quot|apos|#\d+|#x[0-9a-f]+);/gi, (match, entity) => {
   if (entity[0] === '#') {
     const code = entity[1].toLowerCase() === 'x' ? parseInt(entity.slice(2), 16) : parseInt(entity.slice(1), 10);
@@ -16,6 +24,8 @@ const stripTags = value => decodeXml(String(value).replace(/<[^>]*>/g, ''));
 
 /** 读取 ZIP/OOXML 中央目录；首版不支持 ZIP64。 */
 function readZipEntries(buffer) {
+  if (buffer.length > DOCUMENT_LIMITS.maxInputBytes) throw new Error('文档超过 20MiB 输入上限');
+  const deadline = Date.now() + DOCUMENT_LIMITS.parseDeadlineMs;
   let eocd = -1;
   const floor = Math.max(0, buffer.length - 65558);
   for (let i = buffer.length - 22; i >= floor; i--) {
@@ -23,11 +33,14 @@ function readZipEntries(buffer) {
   }
   if (eocd < 0) throw new Error('不是有效的 ZIP/OOXML 文件：找不到中央目录');
   const count = buffer.readUInt16LE(eocd + 10);
+  if (count > DOCUMENT_LIMITS.maxEntries) throw new Error('ZIP 条目数超过 5000 上限');
   const centralOffset = buffer.readUInt32LE(eocd + 16);
   if (centralOffset >= buffer.length) throw new Error('ZIP 中央目录位置越界');
   const entries = new Map();
+  let totalBytes = 0;
   let offset = centralOffset;
   for (let i = 0; i < count; i++) {
+    if (Date.now() > deadline) throw new Error('文档解析超过 15 秒上限');
     if (offset + 46 > buffer.length || buffer.readUInt32LE(offset) !== 0x02014b50) throw new Error('ZIP 中央目录损坏');
     const method = buffer.readUInt16LE(offset + 10);
     const compressedSize = buffer.readUInt32LE(offset + 20);
@@ -42,13 +55,23 @@ function readZipEntries(buffer) {
     const dataStart = localOffset + 30 + localNameLength + localExtraLength;
     const raw = buffer.subarray(dataStart, dataStart + compressedSize);
     if (raw.length !== compressedSize) throw new Error('ZIP 条目数据不完整：' + name);
-    entries.set(name, method === 0 ? Buffer.from(raw) : method === 8 ? inflateRawSync(raw) : (() => { throw new Error('ZIP 使用了不支持的压缩方式：' + method); })());
+    const maxOutput = Math.min(DOCUMENT_LIMITS.maxEntryBytes, DOCUMENT_LIMITS.maxTotalBytes - totalBytes);
+    let data;
+    if (method === 0) data = Buffer.from(raw);
+    else if (method === 8) data = inflateRawSync(raw, { maxOutputLength: Math.max(1, maxOutput + 1) });
+    else throw new Error('ZIP 使用了不支持的压缩方式：' + method);
+    if (data.length > DOCUMENT_LIMITS.maxEntryBytes) throw new Error('ZIP 条目解压后超过 16MiB 上限：' + name);
+    totalBytes += data.length;
+    if (totalBytes > DOCUMENT_LIMITS.maxTotalBytes) throw new Error('ZIP 解压总量超过 64MiB 上限');
+    entries.set(name, data);
     offset += 46 + nameLength + extraLength + commentLength;
   }
   return entries;
 }
 
 const cellText = xml => [...xml.matchAll(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g)].map(match => stripTags(match[1])).join('');
+const attrsOf = source => Object.fromEntries([...String(source || '').matchAll(/([A-Za-z_][\w:.-]*)="([^"]*)"/g)]
+  .map(match => [match[1], decodeXml(match[2])]));
 
 function parseDocx(entries) {
   const xml = entries.get('word/document.xml')?.toString('utf8');
@@ -97,17 +120,23 @@ function parseXlsx(entries) {
   const workbook = entries.get('xl/workbook.xml')?.toString('utf8');
   if (!workbook) throw new Error('XLSX 缺少 xl/workbook.xml，无法读取工作表');
   const relsXml = entries.get('xl/_rels/workbook.xml.rels')?.toString('utf8') ?? '';
-  const rels = new Map([...relsXml.matchAll(/<Relationship\b[^>]*Id="([^"]+)"[^>]*Target="([^"]+)"/g)].map(match => [match[1], match[2]]));
+  const rels = new Map([...relsXml.matchAll(/<Relationship\b([^>]*)\/?>/g)]
+    .map(match => attrsOf(match[1])).filter(attrs => attrs.Id && attrs.Target)
+    .map(attrs => [attrs.Id, attrs.Target]));
   const shared = sharedStrings(entries);
   const sheets = [...workbook.matchAll(/<sheet\b([^>]*)\/?>/g)].map(match => {
-    const attrs = match[1];
+    const attrs = attrsOf(match[1]);
     return {
-      name: decodeXml(/name="([^"]*)"/.exec(attrs)?.[1] ?? ''),
-      state: /state="veryHidden"/.test(attrs) ? 'veryHidden' : /state="hidden"/.test(attrs) ? 'hidden' : 'visible',
-      target: rels.get(/r:id="([^"]+)"/.exec(attrs)?.[1] ?? '') ?? '',
+      name: attrs.name ?? '',
+      state: attrs.state === 'veryHidden' ? 'veryHidden' : attrs.state === 'hidden' ? 'hidden' : 'visible',
+      target: rels.get(attrs['r:id'] || attrs.id || '') ?? '',
     };
   });
   const sections = [], unread = [];
+  for (const name of entries.keys()) {
+    if (/^xl\/(?:charts|drawings|diagrams)\//.test(name))
+      unread.push({ location: { kind: 'xlsx-object', part: name }, reason: '图表或图形对象未解析，请在 Office 中查看该对象' });
+  }
   sheets.forEach((sheet, sheetIndex) => {
     const key = 'xl/' + String(sheet.target).replace(/^\/+/, '').replace(/^xl\//, '');
     const xml = entries.get(key)?.toString('utf8');
@@ -123,6 +152,8 @@ function parseXlsx(entries) {
     const merges = [...xml.matchAll(/<mergeCell\b[^>]*ref="([^"]+)"/g)].map(match => match[1]);
     if (merges.length)
       sections.push({ sectionId: 'sheet-' + (sheetIndex + 1) + '-merges', location: { kind: 'worksheet', sheet: sheet.name }, kind: 'worksheet-note', text: '合并区域：' + merges.join(', ') });
+    if (/<autoFilter\b/.test(xml))
+      sections.push({ sectionId: 'sheet-' + (sheetIndex + 1) + '-filter', location: { kind: 'worksheet', sheet: sheet.name }, kind: 'worksheet-note', text: '工作表含自动筛选；未执行筛选计算，仅展示已存单元格和筛选区域' });
     const rows = [...xml.matchAll(/<row\b([^>]*)>([\s\S]*?)<\/row>/g)];
     rows.forEach((row, rowIndex) => {
       const rowNumber = Number(/r="(\d+)"/.exec(row[1])?.[1] || rowIndex + 1);
@@ -163,6 +194,7 @@ function parseText(buffer) {
 
 export function parseDocumentBuffer(buffer, { displayName = '' } = {}) {
   if (!Buffer.isBuffer(buffer)) throw new Error('文档内容必须是 Buffer');
+  if (buffer.length > DOCUMENT_LIMITS.maxInputBytes) throw new Error('文档超过 20MiB 输入上限');
   const name = String(displayName || '').toLowerCase();
   if (buffer.length >= 4 && buffer.readUInt32LE(0) === 0x04034b50) {
     const entries = readZipEntries(buffer);
@@ -196,6 +228,8 @@ export function readDocumentSection(parsed, sectionId, { cursor = 0, limit = 400
   const text = String(section.text || '');
   const start = Math.max(0, Number(cursor) || 0);
   if (start > text.length) throw new Error('文档读取位置超出段落范围：' + start + ' > ' + text.length);
-  const end = Math.min(text.length, start + Math.max(1, Number(limit) || 4000));
+  const requested = Number(limit);
+  const size = Math.max(1, Math.min(DOCUMENT_LIMITS.maxReadChars, Number.isFinite(requested) && requested > 0 ? requested : 4000));
+  const end = Math.min(text.length, start + size);
   return { sectionId, location: section.location, text: text.slice(start, end), nextCursor: end < text.length ? end : null, more: end < text.length };
 }

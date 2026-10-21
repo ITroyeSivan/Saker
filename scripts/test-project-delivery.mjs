@@ -39,8 +39,16 @@ function prepare(sid) {
   recordProjectCheck(store, sid, run.runId, checks[0].checkId, { executionState: 'ended', verdict: 'issue', checkedContent: '员工 B 读取到员工 A 的电话', findingRefs: [finding.id] });
   recordProjectCheck(store, sid, run.runId, checks[1].checkId, { executionState: 'ended', verdict: 'blocked', gaps: '缺少审批人账号' });
   recordProjectCheck(store, sid, run.runId, checks[2].checkId, { executionState: 'ended', verdict: 'not_found', checkedContent: '=SUM(A1:A2) 计算结果与页面一致', gaps: '只检查了只读路径' });
-  upsertProjectSource(store, sid, { sourceId: 'doc-1', sourceRevision: 'rev-1', displayName: '测试要求.xlsx', kind: 'xlsx', parseState: 'ready', sections: [{ sectionId: 'sheet-1-row-1' }] });
-  return { run: running, checks: listProjectChecks(store, sid, run.runId) };
+  const source = upsertProjectSource(store, sid, {
+    sourceId: 'doc-1', sourceRevision: 'rev-1', displayName: '测试要求.xlsx', kind: 'xlsx', parseState: 'ready',
+    sections: [{ sectionId: 'sheet-1-row-1', text: '员工只能查看自己的资料' }],
+  });
+  const frozen = {
+    ...running,
+    sourceSnapshot: [{ sourceId: source.sourceId, sourceRevision: source.sourceRevision, displayName: source.displayName }],
+  };
+  store.db.prepare('UPDATE project_runs SET record=? WHERE session_id=? AND run_id=?').run(JSON.stringify(frozen), sid, run.runId);
+  return { run: frozen, checks: listProjectChecks(store, sid, run.runId) };
 }
 
 try {
@@ -157,6 +165,26 @@ try {
     assert(!combined.includes('SYNTHETIC_PASSWORD'));
     assert(!combined.includes('SYNTHETIC_TOKEN'));
     assert(combined.includes('VISIBLE_BUSINESS_VALUE'));
+  });
+
+  await test('历史导出严格使用所选运行快照并带离线动作材料', async () => {
+    const { run } = prepare('pd-snapshot');
+    const [extra] = defineProjectChecks(store, 'pd-snapshot', run.runId, [{ checkId: 'snapshot-action', requirement: '快照动作证据' }]);
+    recordObservedProjectCheck(store, 'pd-snapshot', run.runId, extra.checkId, {
+      executionState: 'ended', verdict: 'not_found', checkedContent: '动作实际返回合成响应',
+    }, { body: 'SAKER_SNAPSHOT_EVIDENCE' });
+    upsertProjectSource(store, 'pd-snapshot', {
+      sourceId: 'doc-1', sourceRevision: 'rev-2', displayName: '新版本要求.xlsx', kind: 'xlsx', parseState: 'ready',
+      sections: [{ sectionId: 'sheet-1-row-1', text: '不应进入旧运行导出' }],
+    });
+    const bundle = buildProjectDeliveryFiles(store, 'pd-snapshot', run.runId);
+    assert(!bundle.files['delivery/project-sources.md'].includes('新版本要求.xlsx'));
+    assert(bundle.files['delivery/sources/doc-1-rev-1.md'].includes('员工只能查看自己的资料'));
+    const actionFiles = Object.keys(bundle.files).filter(file => file.startsWith('delivery/evidence/actions/'));
+    assert(actionFiles.length >= 1, JSON.stringify(Object.keys(bundle.files)));
+    assert(actionFiles.some(file => bundle.files[file].includes('SAKER_SNAPSHOT_EVIDENCE')));
+    const manifest = JSON.parse(bundle.files['delivery/manifest.json']);
+    assert.equal(manifest.sourceSnapshot[0].sourceRevision, 'rev-1');
   });
 } finally {
   store.close();

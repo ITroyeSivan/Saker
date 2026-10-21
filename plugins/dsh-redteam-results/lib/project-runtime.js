@@ -91,10 +91,17 @@ export function selectProjectCheck(store, sessionId, runId) {
 
 function blockedByDependency(check, checks) {
   if (!Array.isArray(check.dependencies) || !check.dependencies.length) return false;
+  const dependencies = [];
   for (const dependencyId of check.dependencies) {
     const dependency = checks.find(item => item.checkId === dependencyId);
     if (!dependency) return true;
     if (dependency.verdict === 'blocked' || OPEN_STATES.has(dependency.executionState)) return true;
+    dependencies.push(dependency);
+  }
+  for (const requiredFact of check.requiresFacts || []) {
+    if (!dependencies.some(dependency => dependency.executionState === 'ended'
+      && dependency.verdict !== 'blocked' && dependency.verdict !== 'needs_check'
+      && (dependency.provides || []).includes(requiredFact))) return true;
   }
   return false;
 }

@@ -17,6 +17,10 @@ const variants = [
     '项目运行状态转移受词表和 controlRev 约束'],
   ['single-action', "    const inflight = store.db.prepare(\"SELECT action_id FROM project_actions WHERE session_id=? AND run_id=? AND state IN ('queued','dispatched') LIMIT 1\")\n      .get(sessionId, runId);\n    if (inflight) throw conflict('同一项目运行同时只能有一个派发中的动作');", '',
     '同一运行同时最多一个派发中的动作'],
+  ['define-batch-idempotency', '    if (previousBatch) {', '    if (false) {',
+    'define batch 重试幂等，内容冲突、循环依赖和缺失事实被拒绝'],
+  ['dependency-fact', '      if (!providers.some(provider => (provider.provides || []).includes(fact)))', '      if (false)',
+    'define batch 重试幂等，内容冲突、循环依赖和缺失事实被拒绝'],
 ];
 
 const before = createHash('sha256').update(fs.readFileSync(path.join(root, file))).digest('hex');
@@ -30,9 +34,11 @@ for (const [name, from, to, expected] of variants) {
       if (fs.existsSync(source)) fs.cpSync(source, path.join(fixture, 'plugins', plugin, 'lib'), { recursive: true });
     }
     fs.copyFileSync(path.join(root, 'package.json'), path.join(fixture, 'package.json'));
-    fs.mkdirSync(path.join(fixture, 'scripts'), { recursive: true });
+    fs.mkdirSync(path.join(fixture, 'scripts', 'lib'), { recursive: true });
     for (const script of [runner, 'test-stub-register.mjs', 'test-stub-loader.mjs', 'test-home-isolation.mjs'])
       fs.copyFileSync(path.join(root, 'scripts', script), path.join(fixture, 'scripts', script));
+    fs.copyFileSync(path.join(root, 'scripts/lib/project-test-fixtures.mjs'),
+      path.join(fixture, 'scripts/lib/project-test-fixtures.mjs'));
     const target = path.join(fixture, file);
     const content = fs.readFileSync(target, 'utf8').replaceAll('\r\n', '\n');
     assert.equal(content.split(from).length - 1, 1, name + ' mutation anchor');

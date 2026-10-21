@@ -17,6 +17,14 @@ const variants = [
     'XLSX 工作表、隐藏表、隐藏行、隐藏列、合并区域与公式无结果都显式列出'],
   ['formula-result', 'formulaNoResult: formula !== undefined && rawValue === undefined', 'formulaNoResult: false',
     'XLSX 工作表、隐藏表、隐藏行、隐藏列、合并区域与公式无结果都显式列出'],
+  ['read-limit', 'Math.min(DOCUMENT_LIMITS.maxReadChars', 'Math.max(DOCUMENT_LIMITS.maxReadChars',
+    '文本按行范围分段，长内容可继续读取且不一次返回全文'],
+  ['zip-entry-limit', 'if (count > DOCUMENT_LIMITS.maxEntries) throw new Error(\'ZIP 条目数超过 5000 上限\');', '',
+    'ZIP 条目数、解压大小和无压缩超限都在解析前受控失败'],
+  ['zip-attribute-order',
+    "  const rels = new Map([...relsXml.matchAll(/<Relationship\\b([^>]*)\\/?>/g)]\n    .map(match => attrsOf(match[1])).filter(attrs => attrs.Id && attrs.Target)\n    .map(attrs => [attrs.Id, attrs.Target]));",
+    "  const rels = new Map([...relsXml.matchAll(/<Relationship\\b[^>]*Id=\"([^\"]+)\"[^>]*Target=\"([^\"]+)\"/g)].map(match => [match[1], match[2]]));",
+    'XLSX 工作表、隐藏表、隐藏行、隐藏列、合并区域与公式无结果都显式列出'],
 ];
 
 const before = createHash('sha256').update(fs.readFileSync(path.join(root, file))).digest('hex');
@@ -30,7 +38,7 @@ for (const [name, from, to, expected] of variants) {
       if (fs.existsSync(source)) fs.cpSync(source, path.join(fixture, 'plugins', plugin, 'lib'), { recursive: true });
     }
     fs.copyFileSync(path.join(root, 'package.json'), path.join(fixture, 'package.json'));
-    fs.mkdirSync(path.join(fixture, 'scripts'), { recursive: true });
+    fs.mkdirSync(path.join(fixture, 'scripts', 'lib'), { recursive: true });
     for (const script of [runner, 'test-stub-register.mjs', 'test-stub-loader.mjs', 'test-home-isolation.mjs'])
       fs.copyFileSync(path.join(root, 'scripts', script), path.join(fixture, 'scripts', script));
     const target = path.join(fixture, file);

@@ -14,6 +14,7 @@ import {
   upsertProjectSource, listProjectSources, readProjectSource,
 } from '../plugins/dsh-redteam-results/lib/project-store.js';
 import { recordObservedProjectCheck, registerVerifiedProjectFinding } from './lib/project-test-fixtures.mjs';
+import { projectExecutableChecks } from '../plugins/dsh-redteam-results/lib/project-runtime.js';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-project-store-'));
 process.env.DSH_HOME = home;
@@ -162,6 +163,42 @@ test('A17 来源修订各自留档，旧结果不被新修订覆盖', () => {
     assert.equal(saved.checkedContent, '按旧要求检查通过', '新修订不能覆盖旧结果');
     assert.equal(saved.sourceLocation, '表1 第2行', '旧来源位置必须保留');
   } finally { revisionStore.close(); }
+});
+
+test('define batch 重试幂等，内容冲突、循环依赖和缺失事实被拒绝', () => {
+  const store = openStore(':memory:');
+  try {
+    const run = createProjectRun(store, 's-idempotent');
+    transitionProjectRun(store, 's-idempotent', run.runId, 'running', run.controlRev);
+    const input = [
+      { checkId: 'provider', requirement: '提供审批对象', provides: ['approval-object'] },
+      { checkId: 'consumer', requirement: '使用审批对象', dependencies: ['provider'], requiresFacts: ['approval-object'] },
+      { checkId: 'independent', requirement: '独立检查' },
+    ];
+    const first = defineProjectChecks(store, 's-idempotent', run.runId, input, [], { batchId: 'batch-stable' });
+    const retry = defineProjectChecks(store, 's-idempotent', run.runId, input, [], { batchId: 'batch-stable' });
+    assert.equal(first.length, 3);
+    assert.deepEqual(retry.map(check => check.checkId), first.map(check => check.checkId));
+    assert.equal(listProjectChecks(store, 's-idempotent', run.runId).length, 3);
+    assert.throws(() => defineProjectChecks(store, 's-idempotent', run.runId, [
+      { checkId: 'provider', requirement: '同键但内容已改', provides: ['approval-object'] },
+    ], [], { batchId: 'batch-stable' }), /内容已变化/);
+    assert.throws(() => defineProjectChecks(store, 's-idempotent', run.runId, [
+      { checkId: 'cycle-a', requirement: '环 A', dependencies: ['cycle-b'] },
+      { checkId: 'cycle-b', requirement: '环 B', dependencies: ['cycle-a'] },
+    ], [], { batchId: 'batch-cycle' }), /循环/);
+    assert.throws(() => defineProjectChecks(store, 's-idempotent', run.runId, [
+      { checkId: 'missing-fact', requirement: '缺少事实', dependencies: ['provider'], requiresFacts: ['not-provided'] },
+    ], [], { batchId: 'batch-missing-fact' }), /没有声明提供/);
+    const before = projectExecutableChecks(store, 's-idempotent', run.runId).map(check => check.checkId);
+    assert(!before.includes('consumer'));
+    assert(before.includes('independent'));
+    recordObservedProjectCheck(store, 's-idempotent', run.runId, 'provider', {
+      executionState: 'ended', verdict: 'not_found', checkedContent: '对象和身份已实际核对',
+    });
+    const after = projectExecutableChecks(store, 's-idempotent', run.runId).map(check => check.checkId);
+    assert(after.includes('consumer'), 'requiresFacts 只有前项实际结束并提供事实后放行');
+  } finally { store.close(); }
 });
 
 console.log(failed ? failed + ' failed' : 'all passed');

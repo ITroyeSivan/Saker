@@ -33,6 +33,9 @@ const variants = [
   ['historical-selection', 'const run = requestedRunId ? readProjectRun(st, sessionId, requestedRunId)\n        : activeProjectRun(st, sessionId) || listProjectRuns(st, sessionId, { limit: 1 })[0] || null;',
     'const run = activeProjectRun(st, sessionId) || (requestedRunId ? readProjectRun(st, sessionId, requestedRunId) : listProjectRuns(st, sessionId, { limit: 1 })[0]) || null;',
     'project.start 幂等，pause / resume / stop 状态一致', 'plugins/dsh-redteam-results/lib/index.js'],
+  ['snapshot-sources', "  const sources = (run.sourceSnapshot || []).map(snapshot => {\n    const source = readProjectSource(store, sessionId, snapshot.sourceId, snapshot.sourceRevision);\n    if (!source) missing.push({ kind: 'source', id: snapshot.sourceId, revision: snapshot.sourceRevision, reason: '运行快照中的来源缺失' });\n    return source;\n  }).filter(Boolean);",
+    "  const sources = store.db.prepare('SELECT record FROM project_sources WHERE session_id=?').all(sessionId).map(row => JSON.parse(row.record));",
+    '历史导出严格使用所选运行快照并带离线动作材料'],
 ];
 
 const hashes = new Map([...new Set(variants.map(variant => variant[4] || file))].map(source => [source, createHash('sha256').update(fs.readFileSync(path.join(root, source))).digest('hex')]));
@@ -46,9 +49,11 @@ for (const [name, from, to, expected, sourceFile = file] of variants) {
       if (fs.existsSync(source)) fs.cpSync(source, path.join(fixture, 'plugins', plugin, 'lib'), { recursive: true });
     }
     fs.copyFileSync(path.join(root, 'package.json'), path.join(fixture, 'package.json'));
-    fs.mkdirSync(path.join(fixture, 'scripts'), { recursive: true });
+    fs.mkdirSync(path.join(fixture, 'scripts', 'lib'), { recursive: true });
     for (const script of [runner, 'test-stub-register.mjs', 'test-stub-loader.mjs', 'test-home-isolation.mjs'])
       fs.copyFileSync(path.join(root, 'scripts', script), path.join(fixture, 'scripts', script));
+    fs.copyFileSync(path.join(root, 'scripts/lib/project-test-fixtures.mjs'),
+      path.join(fixture, 'scripts/lib/project-test-fixtures.mjs'));
     const target = path.join(fixture, sourceFile);
     const content = fs.readFileSync(target, 'utf8').replaceAll('\r\n', '\n');
     assert.equal(content.split(from).length - 1, 1, name + ' mutation anchor');
