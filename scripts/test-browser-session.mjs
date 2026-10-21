@@ -56,6 +56,36 @@ const server = http.createServer((request, response) => {
     response.end(JSON.stringify({ password: 'SYNTHETIC_PASSWORD', access_token: 'SYNTHETIC_TOKEN', business: 'VISIBLE_BUSINESS_VALUE' }));
     return;
   }
+  if (request.url === '/dialog') {
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    response.end('<!doctype html><title>dialog</title><body><script>alert("SAKER_DIALOG")</script></body>');
+    return;
+  }
+  if (request.url === '/upload') {
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    response.end('<!doctype html><title>upload</title><body><input id="file" type="file"></body>');
+    return;
+  }
+  if (request.url === '/download') {
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    response.end('<!doctype html><title>download</title><body><a id="get" href="/download.bin">download</a></body>');
+    return;
+  }
+  if (request.url === '/download.bin') {
+    response.writeHead(200, { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment; filename="proof.bin"' });
+    response.end(Buffer.from('SAKER_DOWNLOAD_CONTENT'));
+    return;
+  }
+  if (request.url === '/many') {
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    response.end('<!doctype html><title>many</title><body><script>Promise.all(Array.from({length:110},function(_,i){return fetch("/bulk/"+i).catch(function(){})}))</script></body>');
+    return;
+  }
+  if (request.url.startsWith('/bulk/')) {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ index: request.url }));
+    return;
+  }
   response.writeHead(404, { 'content-type': 'text/plain' });
   response.end('not found');
 });
@@ -110,7 +140,12 @@ try {
 
     await test('关闭后会话拒绝继续动作', async () => {
       const session = await startBrowserSession({ executablePath: cft, identity: 'carol', profileRoot: path.join(home, 'profiles') });
+      let pendingError = null;
+      const pending = session.client.call('Runtime.evaluate', { expression: 'new Promise(function(){})', awaitPromise: true })
+        .catch(error => { pendingError = error; });
       await session.close();
+      await pending;
+      assert.match(String(pendingError?.message), /关闭|超时|CDP/);
       assert.equal(session.closed, true);
       await assert.rejects(() => session.open(origin + '/'), /已关闭/);
     });
@@ -192,6 +227,57 @@ try {
       assert.equal(detail.headers.Cookie, '[已遮蔽]');
       assert.equal(detail.responseHeaders['Set-Cookie'], '[已遮蔽]');
       assert.equal(detail.bodyUnavailable, 'body evicted');
+    });
+
+    await test('浏览器二进制正文保留 base64 标志和捕获字节', async () => {
+      const browser = new BrowserSession({
+        child: { exitCode: null },
+        client: { call: async () => ({ body: 'AAECAwQ=', base64Encoded: true }) },
+      });
+      browser.requests.set('r2', { requestId: 'r2', url: origin + '/binary', status: 200, headers: {}, responseHeaders: {} });
+      const detail = await browser.requestDetail('r2');
+      assert.equal(detail.binary, true);
+      assert.equal(detail.responseBodyEncoding, 'base64');
+      assert.equal(detail.responseBodyBase64, 'AAECAwQ=');
+      assert.equal(detail.capturedBytes, 8);
+    });
+
+    await test('真实 CfT 失败元素、弹窗、上传、下载和请求分页可核对', async () => {
+      const session = await startBrowserSession({ executablePath: cft, identity: 'files', profileRoot: path.join(home, 'profiles') });
+      try {
+        await session.open(origin + '/');
+        const missing = await session.act({ type: 'click', selector: '#missing' });
+        assert.equal(missing.state, 'failed');
+        assert.equal(missing.error, 'element-not-found');
+
+        const dialog = await session.open(origin + '/dialog');
+        assert.equal(dialog.dialog.message, 'SAKER_DIALOG');
+        const handled = await session.act({ type: 'dialog', accept: true });
+        assert.equal(handled.handled, true);
+
+        const uploadFile = path.join(home, 'upload-proof.txt');
+        fs.writeFileSync(uploadFile, 'SAKER_UPLOAD_CONTENT');
+        await session.open(origin + '/upload');
+        const uploaded = await session.act({ type: 'upload', selector: '#file', files: [uploadFile] });
+        assert.equal(uploaded.state, 'completed');
+        assert.equal(uploaded.verifiedFiles[0], uploadFile);
+
+        const directory = path.join(home, 'downloads');
+        await session.open(origin + '/download');
+        const downloaded = await session.act({ type: 'download', selector: '#get', directory });
+        assert.equal(downloaded.completed, true, JSON.stringify(downloaded));
+        assert(fs.existsSync(downloaded.file), JSON.stringify(downloaded));
+        assert.equal(fs.readFileSync(downloaded.file, 'utf8'), 'SAKER_DOWNLOAD_CONTENT');
+
+        await session.open(origin + '/many');
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const first = session.listRequestsPage({ cursor: 0, limit: 40 });
+        const second = session.listRequestsPage({ cursor: first.nextCursor, limit: 40 });
+        assert(first.total > 100, '请求总数应超过旧实现的最后 100 条窗口');
+        assert(first.nextCursor !== null);
+        assert(second.entries.length > 0);
+        assert(!second.entries.some(item => first.entries.some(prior => prior.requestId === item.requestId)), '分页不能重复同一请求');
+      } finally { await session.close(); }
     });
   }
 

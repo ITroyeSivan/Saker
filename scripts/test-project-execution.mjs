@@ -13,6 +13,7 @@ import { readExecutionReceipt } from '../plugins/dsh-redteam-results/lib/executi
 import { saveAccount } from '../plugins/dsh-redteam-results/lib/accounts.js';
 import { acquireTargetSlot } from '../plugins/dsh-redteam-results/lib/request-pacing.js';
 import { resumeProjectRun } from '../plugins/dsh-redteam-results/lib/project-runtime.js';
+import { saveTaskContext } from '../plugins/dsh-redteam-results/lib/task-context.js';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-project-execution-'));
 process.env.DSH_HOME = home;
@@ -50,6 +51,14 @@ const server = http.createServer((request, response) => {
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const origin = 'http://127.0.0.1:' + server.address().port;
+let apiRequest = null;
+const api = http.createServer((request, response) => {
+  apiRequest = { method: request.method, url: request.url, headers: request.headers };
+  response.writeHead(200, { 'content-type': 'application/json' });
+  response.end(JSON.stringify({ marker: 'SAKER_ASSOCIATED_API' }));
+});
+await new Promise(resolve => api.listen(0, '127.0.0.1', resolve));
+const apiOrigin = 'http://127.0.0.1:' + api.address().port;
 
 async function prepare(sid, options = {}) {
   startTaskPolicy(store, sid, {
@@ -95,6 +104,30 @@ try {
     await assert.rejects(() => executeProjectHttp(store, 'pe-scope', run.runId, check.checkId, {
       method: 'GET', url: 'http://127.0.0.1:1/outside',
     }), /outside the current task site/);
+  });
+
+  await test('明确关联 API 可通过，身份只在显式绑定后套用', async () => {
+    const sid = 'pe-associated';
+    const { run, check } = await prepare(sid);
+    saveTaskContext(store, sid, {
+      assets: [
+        { id: 'primary', url: origin, inScope: true, reachable: true },
+        { id: 'api', url: apiOrigin, inScope: true, reachable: true, authContext: 'alice' },
+      ], requests: [], checks: [],
+    });
+    saveAccount(store, sid, { name: 'alice', status: 'valid', secret: 'session=ASSOCIATED_SECRET' });
+    apiRequest = null;
+    await assert.rejects(() => executeProjectHttp(store, sid, run.runId, check.checkId, {
+      method: 'GET', url: apiOrigin + '/api/orders', authContext: 'bob',
+    }), /identity.*not explicitly bound/i);
+    assert.equal(apiRequest, null, '未绑定的身份不能到达关联 API');
+    const result = await executeProjectHttp(store, sid, run.runId, check.checkId, {
+      method: 'GET', url: apiOrigin + '/api/orders', authContext: 'alice',
+    });
+    assert.equal(result.ok, true, result.error);
+    assert.equal(apiRequest.url, '/api/orders');
+    assert(apiRequest.headers.cookie.includes('ASSOCIATED_SECRET'));
+    assert(result.summary.includes('SAKER_ASSOCIATED_API'));
   });
 
   await test('已取消的信号不会派发请求', async () => {
@@ -273,6 +306,8 @@ try {
 } finally {
   server.closeAllConnections?.();
   await new Promise(resolve => server.close(resolve));
+  api.closeAllConnections?.();
+  await new Promise(resolve => api.close(resolve));
   store.close();
   fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 });
 }

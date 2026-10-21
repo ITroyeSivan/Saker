@@ -8,6 +8,7 @@ import { resolveTaskIdentity, identityDenial, identityRequestHeaders } from './i
 import { acquireTargetSlot } from './request-pacing.js';
 import { beginProjectAction, markProjectActionDispatched, finishProjectAction, readProjectRun, readProjectCheck } from './project-store.js';
 import { redactHeaders, redactText } from './redaction.js';
+import { readTaskContext } from './task-context.js';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
 
@@ -19,12 +20,31 @@ function parseTarget(input) {
   return url;
 }
 
-function targetScopeDenial(limits, url) {
-  if (!limits.target) return undefined;
-  let allowed;
-  try { allowed = new URL(limits.target).origin; } catch { allowed = ''; }
-  if (allowed && allowed !== url.origin) return 'request is outside the current task site';
-  return undefined;
+function projectScopeOrigins(store, sessionId, limits) {
+  const origins = new Set();
+  if (limits.target) try { origins.add(new URL(limits.target).origin); } catch { /* 无效目标由其他闸拒绝 */ }
+  for (const asset of readTaskContext(store, sessionId)?.assets || []) {
+    if (asset?.inScope !== true || asset?.reachable !== true) continue;
+    try { origins.add(new URL(asset.url).origin); } catch { /* 忽略无效资产 */ }
+  }
+  return origins;
+}
+
+function targetScopeDenial(store, sessionId, limits, url) {
+  const origins = projectScopeOrigins(store, sessionId, limits);
+  return origins.size && !origins.has(url.origin) ? 'request is outside the current task site or explicitly allowed associated assets' : undefined;
+}
+
+function associatedIdentityDenial(store, sessionId, limits, url, authContext) {
+  if (!authContext) return undefined;
+  let primary = '';
+  try { primary = new URL(limits.target).origin; } catch { primary = ''; }
+  if (primary && url.origin === primary) return undefined;
+  const asset = (readTaskContext(store, sessionId)?.assets || []).find(item => {
+    try { return item.inScope === true && item.reachable === true && new URL(item.url).origin === url.origin; } catch { return false; }
+  });
+  const bound = String(asset?.authContext || asset?.identityRef || '');
+  return bound && bound === authContext ? undefined : 'associated API identity is not explicitly bound to this authContext';
 }
 
 const identityRevision = identity => digest(JSON.stringify([
@@ -136,9 +156,11 @@ export async function executeProjectHttp(store, sessionId, runId, checkId, input
   const url = parseTarget(input);
   const method = String(input.method || 'GET').toUpperCase();
   const denial = targetTrafficDenial(limits, { method }) || excludedPathDenial(limits, { url: url.href })
-    || targetScopeDenial(limits, url);
+    || targetScopeDenial(store, sessionId, limits, url);
   if (denial) throw new Error(denial);
   const authContext = String(input.authContext || '');
+  const associatedDenial = associatedIdentityDenial(store, sessionId, limits, url, authContext);
+  if (associatedDenial) throw new Error(associatedDenial);
   const identity = resolveTaskIdentity(store, sessionId, authContext);
   const identityReason = identityDenial(identity);
   if (identityReason) throw new Error(identityReason);
@@ -178,11 +200,13 @@ export async function executeProjectHttp(store, sessionId, runId, checkId, input
     const currentLimits = effectivePolicy(store, currentPolicy);
     const lateDenial = targetTrafficDenial(currentLimits, { method }) || excludedPathDenial(currentLimits, { url: url.href });
     if (lateDenial) throw new Error(lateDenial);
-    const currentScopeDenial = targetScopeDenial(currentLimits, url);
+    const currentScopeDenial = targetScopeDenial(store, sessionId, currentLimits, url);
     if (currentScopeDenial) throw new Error(currentScopeDenial);
     const currentIdentity = resolveTaskIdentity(store, sessionId, authContext);
     const currentIdentityReason = identityDenial(currentIdentity);
     if (currentIdentityReason) throw new Error(currentIdentityReason);
+    const currentAssociatedDenial = associatedIdentityDenial(store, sessionId, currentLimits, url, authContext);
+    if (currentAssociatedDenial) throw new Error(currentAssociatedDenial);
     const currentIdentityHeaders = identityRequestHeaders({ headers }, currentIdentity);
     dispatchHeaders = currentIdentityHeaders ? currentIdentityHeaders.headers : headers;
     const currentFingerprint = requestFingerprint(currentLimits, method, url, authContext, currentIdentity, body);

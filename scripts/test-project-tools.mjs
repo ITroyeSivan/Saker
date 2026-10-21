@@ -18,6 +18,16 @@ let failed = 0;
 const test = async (name, work) => { try { await work(); console.log('ok   ' + name); } catch (error) { failed++; console.log('FAIL ' + name + ': ' + (error.stack || error.message)); } };
 
 const server = http.createServer((request, response) => {
+  if (request.url === '/download-page') {
+    response.writeHead(200, { 'content-type': 'text/html' });
+    response.end('<a id="download" href="/download.bin">download</a>');
+    return;
+  }
+  if (request.url === '/download.bin') {
+    response.writeHead(200, { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment; filename="tool-proof.bin"' });
+    response.end('SAKER_TOOL_DOWNLOAD');
+    return;
+  }
   response.writeHead(200, { 'content-type': 'application/json' });
   response.end(JSON.stringify({ ok: true, marker: 'SAKER_PROJECT_TOOL' }));
 });
@@ -137,6 +147,7 @@ try {
     const definition = tools.get('project_check');
     assert.equal(definition.parameters.checks?.type, 'array');
     assert.equal(definition.parameters.checks.items.properties.requirement.required, true);
+    assert.equal(tools.get('saker_browser').parameters.identityRef?.type, 'string', '浏览器身份引用必须进入真实 schema');
     for (const args of [{ action: 'define' }, { action: 'define', document: '{}' }, { action: 'define', checks: [] }, { action: 'define', checks: [{}] }]) {
       const result = await invoke(sid, 'project_check', args);
       assert.equal(result.ok, false, JSON.stringify(args));
@@ -431,6 +442,23 @@ try {
       const observed = await tool.execute({ action: 'observe' }, exec('pt-browser'));
       assert.equal(observed.ok, true, observed.error);
       assert.equal(readTaskPolicy(store, 'pt-browser').used.toolCalls, 1, '观察不额外扣目标额度');
+      const browserCheck = listProjectChecks(store, 'pt-browser', run.runId)[0];
+      const missing = await tool.execute({
+        action: 'act', actType: 'click', selector: '#missing', checkId: browserCheck.checkId,
+      }, exec('pt-browser'));
+      assert.equal(missing.ok, false);
+      assert.match(missing.error, /element-not-found|找不到|failed/i);
+      assert.equal(listProjectActions(store, 'pt-browser', run.runId).at(-1).executionState, 'failed');
+      await tool.execute({ action: 'open', url: origin + '/download-page', checkId: browserCheck.checkId }, exec('pt-browser'));
+      const downloaded = await tool.execute({
+        action: 'act', actType: 'download', selector: '#download', checkId: browserCheck.checkId,
+        directory: path.join(home, 'tool-downloads'),
+      }, exec('pt-browser'));
+      assert.equal(downloaded.ok, true, downloaded.error);
+      assert.equal(downloaded.result.completed, true, JSON.stringify(downloaded.result));
+      assert(downloaded.result.attachmentRef.startsWith('project-attachment-'));
+      const material = store.db.prepare('SELECT record FROM business_materials WHERE session_id=? AND id=?').get('pt-browser', downloaded.result.attachmentRef);
+      assert(material);
       await dispatch(ctx, store, 'project.pause', { sessionId: 'pt-browser', runId: run.runId });
       const pausedOpen = await tool.execute({ action: 'open', url: origin + '/paused' }, exec('pt-browser'));
       assert.equal(pausedOpen.ok, false);

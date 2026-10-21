@@ -17,6 +17,10 @@ const variants = [
     '真实 CfT 在请求发出前阻断跨站跳转、iframe 与 XHR'],
   ['browser-response-header-redaction', 'responseHeaders: redactHeaders(responseHeaders)', 'responseHeaders',
     '确定性浏览器记录遮蔽 Set-Cookie 并保留正文不可得原因'],
+  ['browser-missing-element-state',
+    "      const denied = this.policyDenials.slice(denialStart);\n      if (denied.length) throw new Error('浏览器动作触发的请求被策略阻断：' + denied[0].reason);\n      const value = result.result?.value || { found: false };\n      return value.found === false ? { ...value, state: 'failed', error: 'element-not-found' } : { ...value, state: 'completed' };",
+    "      const denied = this.policyDenials.slice(denialStart);\n      if (denied.length) throw new Error('浏览器动作触发的请求被策略阻断：' + denied[0].reason);\n      const value = result.result?.value || { found: false };\n      return value;",
+    '真实 CfT 失败元素、弹窗、上传、下载和请求分页可核对'],
 ];
 const sourceHash = () => createHash('sha256').update(sourceFiles.map(relative => fs.readFileSync(path.join(root, relative))).join('\n')).digest('hex');
 const before = sourceHash();

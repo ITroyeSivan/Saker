@@ -1896,7 +1896,8 @@ function apply(ctx) {
 			actType: { type: 'string', enum: ['click', 'type', 'select', 'navigate', 'upload', 'download', 'dialog'] },
 			text: { type: 'string' }, value: { type: 'string' },
 			files: { type: 'array', items: { type: 'string' } },
-			requestId: { type: 'string' }, screenshot: { type: 'boolean' }
+			requestId: { type: 'string' }, screenshot: { type: 'boolean' }, identityRef: { type: 'string' },
+			cursor: { type: 'integer' }, limit: { type: 'integer' }, directory: { type: 'string' }
 		},
 		output: { schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } }, render: (_args, value) => [{ type: 'text', text: value.ok ? value.text : value.error }] },
 		async execute(args, exec) {
@@ -1921,13 +1922,19 @@ function apply(ctx) {
 					if (denied) throw new Error(denied);
 				}
 				let browser = projectBrowsers.get(scope.session.id);
+				const identityRef = String(args.identityRef || '').trim();
+				if (browser && browser.identityRef !== identityRef) {
+					await browser.close();
+					projectBrowsers.delete(scope.session.id);
+					browser = null;
+				}
 				if (action === 'close') {
 					if (browser) { await browser.close(); projectBrowsers.delete(scope.session.id); }
 					return { ok: true, text: '浏览器会话已关闭' };
 				}
 				if (!browser) {
 					browser = await startBrowserSession({
-						identity: scope.session.id,
+						identity: scope.session.id, identityRef,
 						requestGuard: projectBrowserGuardOf(scope),
 						pacingSessionId: scope.session.id,
 					});
@@ -1936,9 +1943,9 @@ function apply(ctx) {
 				try {
 					let result;
 					if (action === 'open') result = await browser.open(String(args.url || ''));
-					else if (action === 'act') result = await browser.act({ type: args.actType, url: args.url, selector: args.selector, text: args.text, value: args.value, files: args.files });
+					else if (action === 'act') result = await browser.act({ type: args.actType, url: args.url, selector: args.selector, text: args.text, value: args.value, files: args.files, directory: args.directory });
 					else if (action === 'observe') result = await browser.observe({ selector: args.selector, screenshot: args.screenshot === true });
-					else if (action === 'requests') result = browser.listRequests();
+					else if (action === 'requests') result = browser.listRequestsPage({ cursor: args.cursor, limit: args.limit });
 					else if (action === 'request-detail') result = await browser.requestDetail(String(args.requestId || ''));
 					else throw new Error('未知的浏览器操作：' + action);
 					if (action === 'open') {
@@ -1947,9 +1954,39 @@ function apply(ctx) {
 						return { ok: true, text: JSON.stringify({ title: page.title, url: page.url, executionId: begun?.action?.actionId || null }), page, actionId: begun?.action?.actionId || null };
 					}
 					if (action === 'act') {
-						await finishProjectAction(scope.store, scope.session.id, scope.run.runId, begun?.action?.actionId, { executionState: 'completed' });
+						if (result.state === 'failed') {
+							await finishProjectAction(scope.store, scope.session.id, scope.run.runId, begun?.action?.actionId, {
+								executionState: 'failed', error: result.error || 'browser-action-failed',
+							});
+							return { ok: false, error: result.error || '浏览器动作失败', result, actionId: begun?.action?.actionId || null };
+						}
+						let attachmentRef = '';
+						if (result.completed === true && result.file) {
+							try {
+								const bytes = fs.readFileSync(result.file);
+								const digest = crypto.createHash('sha256').update(bytes).digest('hex');
+								attachmentRef = 'project-attachment-' + digest;
+								const material = {
+									id: attachmentRef, kind: 'download', displayName: result.filename || path.basename(result.file),
+									digest, bytes: bytes.length, originalBase64: bytes.toString('base64'),
+									relativeRef: 'materials/' + attachmentRef, indexedAt: new Date().toISOString(),
+								};
+								scope.store.db.prepare('INSERT INTO business_materials(session_id,id,source_url,digest,record) VALUES(?,?,?,?,?) '
+									+ 'ON CONFLICT(session_id,id) DO UPDATE SET record=excluded.record,digest=excluded.digest')
+									.run(scope.session.id, attachmentRef, 'https://project-attachment.invalid/' + digest,
+										digest, JSON.stringify(material));
+								result = { ...result, attachmentRef };
+							} catch (error) {
+								result = { ...result, state: 'failed', completed: false, error: 'download-file-unreadable: ' + redactText(error.message) };
+							}
+						}
+						await finishProjectAction(scope.store, scope.session.id, scope.run.runId, begun?.action?.actionId, {
+							executionState: result.state === 'failed' ? 'failed' : 'completed',
+							error: result.state === 'failed' ? result.error : undefined,
+							attachmentRef,
+						});
 						const safeResult = redactValue(result);
-						return { ok: true, text: JSON.stringify(safeResult), result: safeResult, actionId: begun?.action?.actionId || null };
+						return { ok: result.state !== 'failed', text: JSON.stringify(safeResult), ...(result.state === 'failed' ? { error: result.error } : {}), result: safeResult, actionId: begun?.action?.actionId || null };
 					}
 					const safeResult = redactValue(result);
 					return { ok: true, text: action === 'request-detail' ? String(safeResult.responseBody || '').slice(0, 2000) : JSON.stringify(safeResult), [action === 'request-detail' ? 'request' : action === 'observe' ? 'page' : 'requests']: safeResult };
