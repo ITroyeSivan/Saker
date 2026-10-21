@@ -180,6 +180,7 @@ export function upsertProjectSource(store, sessionId, input = {}) {
       displayName: optionalText(input.displayName, 300),
       summary: optionalText(input.summary, 2000),
       snapshotRef: optionalText(input.snapshotRef, 1000),
+      snapshotMaterialId: optionalText(input.snapshotMaterialId, 300),
       parseState: ['ready', 'partial', 'unreadable', 'pending'].includes(input.parseState) ? input.parseState : 'pending',
       sections: Array.isArray(input.sections) ? input.sections : (existing?.sections || []),
       unread: Array.isArray(input.unread) ? input.unread : (existing?.unread || []),

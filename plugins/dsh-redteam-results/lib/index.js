@@ -67,7 +67,7 @@ import { runComparisonJob, readComparisonJob, comparisonFindingInput } from './c
 import { recordImpactReview } from './impact-reviews.js';
 import { PROOF_KINDS, parseReproduction, renderReproduction, renderFindingDelivery } from './delivery.js';
 import { registerTaskPrompt } from './task-prompt.js';
-import { writeTaskPolicy, listTaskEvents } from './task-policy-record.js';
+import { writeTaskPolicy, listTaskEvents, taskTransaction } from './task-policy-record.js';
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { sessionWorkingDirectory, ensureWorkingDirectory } from 'dsh-saker/working-directory';
 import { saveChecks, readChecks, compactChecks, renderCheckedTsv } from './checked.js';
@@ -824,6 +824,7 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
         sourceRevision: source.sourceRevision,
         displayName: source.displayName || '',
         snapshotRef: source.snapshotRef || '',
+        snapshotMaterialId: source.snapshotMaterialId || '',
       }));
       const run = startProjectTask(st, sessionId, { ...p, sourceSnapshot });
       if (p.autoStart !== false) {
@@ -1042,6 +1043,7 @@ function importProjectSource(store, sessionId, input = {}) {
   if (!buffer.length) throw new Error('文档内容为空');
   if (buffer.length > 20 * 1024 * 1024) throw new Error('单个项目文档不能超过 20MB');
   const digest = crypto.createHash('sha256').update(buffer).digest('hex');
+  const snapshotMaterialId = 'project-source-' + digest;
   const parsed = parseDocumentBuffer(buffer, { displayName });
   const existingSources = listProjectSources(store, sessionId)
     .filter(source => source.displayName === displayName)
@@ -1053,25 +1055,37 @@ function importProjectSource(store, sessionId, input = {}) {
     const match = /^r(\d+)$/.exec(String(source.sourceRevision || ''));
     return Math.max(max, match ? Number(match[1]) : 0);
   }, 0) + 1);
-  const source = upsertProjectSource(store, sessionId, {
-    sourceId,
-    sourceRevision,
-    displayName,
-    kind: parsed.kind || 'text',
-    parseState: (parsed.unread || []).length ? 'partial' : (parsed.parseState || 'ready'),
-    snapshotRef: digest,
-    sections: parsed.sections || [],
-    unread: parsed.unread || [],
+  return taskTransaction(store, () => {
+    const source = upsertProjectSource(store, sessionId, {
+      sourceId,
+      sourceRevision,
+      displayName,
+      kind: parsed.kind || 'text',
+      parseState: (parsed.unread || []).length ? 'partial' : (parsed.parseState || 'ready'),
+      snapshotRef: digest,
+      snapshotMaterialId,
+      sections: parsed.sections || [],
+      unread: parsed.unread || [],
+    });
+    const material = {
+      id: snapshotMaterialId, kind: 'project-source', sourceId, sourceRevision,
+      displayName, digest, bytes: buffer.length, originalBase64: buffer.toString('base64'),
+      indexedAt: new Date().toISOString(),
+    };
+    store.db.prepare('INSERT INTO business_materials(session_id,id,source_url,digest,record) VALUES(?,?,?,?,?) '
+      + 'ON CONFLICT(session_id,id) DO UPDATE SET record=excluded.record,digest=excluded.digest')
+      .run(sessionId, snapshotMaterialId, 'https://project-source.invalid/' + digest, digest, JSON.stringify(material));
+    return {
+      source: {
+        sourceId: source.sourceId, sourceRevision: source.sourceRevision,
+        displayName: source.displayName, kind: source.kind, parseState: source.parseState,
+        snapshotMaterialId,
+      },
+      sections: (source.sections || []).length,
+      unread: (source.unread || []).length,
+      parseState: source.parseState,
+    };
   });
-  return {
-    source: {
-      sourceId: source.sourceId, sourceRevision: source.sourceRevision,
-      displayName: source.displayName, kind: source.kind, parseState: source.parseState,
-    },
-    sections: (source.sections || []).length,
-    unread: (source.unread || []).length,
-    parseState: source.parseState,
-  };
 }
 
 function apply(ctx) {

@@ -170,6 +170,11 @@ try {
     assert.equal(imported.ok, true, imported.error);
     assert.equal(imported.source.parseState, 'ready');
     assert.equal(imported.sections, 1);
+    const sourceMaterial = store.db.prepare('SELECT record FROM business_materials WHERE session_id=? ORDER BY rowid DESC LIMIT 1').get(sid);
+    assert(sourceMaterial);
+    const sourceMaterialRecord = JSON.parse(sourceMaterial.record);
+    assert.equal(sourceMaterialRecord.kind, 'project-source');
+    assert(Buffer.from(sourceMaterialRecord.originalBase64, 'base64').toString().includes(content), '项目来源原文必须随任务保存');
     const started = await dispatch(ctx, store, 'project.start', {
       sessionId: sid, policy: { question: '按文档测试', target: origin, budget: { minutes: 30 } },
     });
