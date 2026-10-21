@@ -13,6 +13,7 @@ import {
 } from '../plugins/dsh-redteam-results/lib/project-store.js';
 import { projectContinuation, markProjectContinuation, resumeProjectRun } from '../plugins/dsh-redteam-results/lib/project-runtime.js';
 import { executeProjectHttp } from '../plugins/dsh-redteam-results/lib/project-execution.js';
+import { recordObservedProjectCheck } from './lib/project-test-fixtures.mjs';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-project-lifecycle-'));
 process.env.DSH_HOME = home;
@@ -43,7 +44,7 @@ try {
     const first = projectContinuation(store, 'pl-multi');
     assert(first && first.text.includes('检查一'));
     markProjectContinuation(store, 'pl-multi', first.runId, first.fingerprint, first.attempts);
-    recordProjectCheck(store, 'pl-multi', run.runId, checks[0].checkId, { executionState: 'ended', verdict: 'not_found', checkedContent: '已检查正常' });
+    recordObservedProjectCheck(store, 'pl-multi', run.runId, checks[0].checkId, { executionState: 'ended', verdict: 'not_found', checkedContent: '已检查正常' });
     const second = projectContinuation(store, 'pl-multi');
     assert(second, '完成一项后必须继续下一项');
     assert.equal(second.attempts, 0, '新进度应重置无进展计数');

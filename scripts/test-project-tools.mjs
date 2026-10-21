@@ -5,9 +5,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import { openStore, registerFinding } from '../plugins/dsh-redteam-results/lib/store.js';
+import { openStore, registerFinding, updateFinding } from '../plugins/dsh-redteam-results/lib/store.js';
 import { startTaskPolicy, taskPolicyStatus, readTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy.js';
-import { createProjectRun, transitionProjectRun, defineProjectChecks, upsertProjectSource, readProjectRun, listProjectChecks, listProjectActions } from '../plugins/dsh-redteam-results/lib/project-store.js';
+import { createProjectRun, transitionProjectRun, defineProjectChecks, upsertProjectSource, readProjectRun, listProjectChecks, listProjectActions, recordProjectCheck } from '../plugins/dsh-redteam-results/lib/project-store.js';
 import { projectTurnDecision, completeProjectRun } from '../plugins/dsh-redteam-results/lib/project-runtime.js';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-project-tools-'));
@@ -68,6 +68,18 @@ function prepareProject(sid) {
     sections: [{ sectionId: 'p1', location: { kind: 'paragraph', index: 1 }, kind: 'paragraph', text: '员工只能查看自己的资料，普通员工不能审批。' }],
   });
   return { run: running, check };
+}
+
+function verifiedFinding(sid, title) {
+  const finding = registerFinding(store, sid, 'pentest', {
+    title, severity: 'medium', target: origin, evidenceLevel: 'confirmed',
+    evidence: 'SYNTHETIC_PROJECT_EVIDENCE', impact: 'SYNTHETIC_PROJECT_IMPACT',
+  });
+  return updateFinding(store, sid, 'pentest', finding.id, {
+    status: 'verified', secondRating: 'medium',
+    secondRatingNote: '独立复核已重新读取本地合成对象，并通过另一条受控观测通道核对证据引用；观察到的对象、权限和响应标记相互一致，结论可以追溯并重复执行。',
+    verifyNote: '独立复核完成',
+  });
 }
 
 try {
@@ -183,6 +195,10 @@ try {
     assert(defined.text.includes('本次累计 1 个区域'));
     const next = await invoke(sid, 'project_check', { action: 'next' });
     assert.equal(next.check.checkId, 'source-check-1');
+    const observed = await invoke(sid, 'project_request', {
+      method: 'GET', url: origin + '/approval', checkId: 'source-check-1',
+    });
+    assert.equal(observed.ok, true, observed.error);
     const recorded = await invoke(sid, 'project_check', {
       action: 'record', checkId: 'source-check-1', verdict: 'not_found', checkedContent: '普通员工审批入口返回无权限',
     });
@@ -306,7 +322,7 @@ try {
     const next = await tool.execute({ action: 'next' }, exec('pt-check'));
     assert.equal(next.ok, true, next.error);
     assert.equal(next.check.checkId, check.checkId);
-    const finding = registerFinding(store, 'pt-check', 'pentest', { title: '项目证据关联样本', severity: 'medium', target: origin });
+    const finding = verifiedFinding('pt-check', '项目证据关联样本');
     const invalid = await tool.execute({ action: 'record', checkId: check.checkId, verdict: 'issue', checkedContent: '无引用样本', findingRefs: ['missing'] }, exec('pt-check'));
     assert.equal(invalid.ok, false);
     const recorded = await tool.execute({ action: 'record', checkId: check.checkId, verdict: 'issue', checkedContent: '员工 B 读到员工 A 的电话', findingRefs: [finding.id] }, exec('pt-check'));
@@ -315,6 +331,65 @@ try {
     const detail = await tool.execute({ action: 'detail', checkId: check.checkId }, exec('pt-check'));
     assert.equal(detail.ok, true, detail.error);
     assert.equal(detail.check.checkedContent, '员工 B 读到员工 A 的电话');
+  });
+
+  await test('完整结论必须引用本次动作、复用观测或已复核 finding', async () => {
+    const sid = 'pt-check-evidence';
+    const { run, check } = prepareProject(sid);
+    const tool = tools.get('project_check');
+    await tool.execute({ action: 'next' }, exec(sid));
+    const emptyNegative = await tool.execute({
+      action: 'record', checkId: check.checkId, verdict: 'not_found', checkedContent: '尚未执行任何动作',
+    }, exec(sid));
+    assert.equal(emptyNegative.ok, false, '空动作不能保存完整 not_found');
+
+    const observed = await tools.get('project_request').execute({
+      method: 'GET', url: origin + '/evidence', checkId: check.checkId,
+    }, exec(sid));
+    assert.equal(observed.ok, true, observed.error);
+    const directNegative = await tool.execute({
+      action: 'record', checkId: check.checkId, verdict: 'not_found', checkedContent: '受控接口实际返回 200 和标记',
+    }, exec(sid));
+    assert.equal(directNegative.ok, true, directNegative.error);
+    const actionId = listProjectActions(store, sid, run.runId)[0].actionId;
+
+    const [second] = defineProjectChecks(store, sid, run.runId, [{ checkId: 'reuse-check', requirement: '复用同一观测判断另一条要求' }]);
+    const next = await tool.execute({ action: 'next' }, exec(sid));
+    assert.equal(next.check.checkId, second.checkId);
+    const missingReuse = await tool.execute({
+      action: 'record', checkId: second.checkId, verdict: 'not_found', checkedContent: '只说复用但没有引用',
+    }, exec(sid));
+    assert.equal(missingReuse.ok, false, '模型文字不能代替具体复用引用');
+    const reused = await tool.execute({
+      action: 'record', checkId: second.checkId, verdict: 'not_found', checkedContent: '同一页面内容覆盖第二条要求',
+      reusedObservations: [{ actionId, reason: '同一受控页面的实际响应同时包含第二条要求所需标记' }],
+    }, exec(sid));
+    assert.equal(reused.ok, true, reused.error);
+
+    const [third] = defineProjectChecks(store, sid, run.runId, [{ checkId: 'issue-check', requirement: '确认受控问题' }]);
+    await tool.execute({ action: 'next' }, exec(sid));
+    const emptyIssue = await tool.execute({
+      action: 'record', checkId: third.checkId, verdict: 'issue', checkedContent: '没有 finding 引用',
+    }, exec(sid));
+    assert.equal(emptyIssue.ok, false);
+    const pending = registerFinding(store, sid, 'pentest', { title: '尚未复核', severity: 'medium', target: origin });
+    const pendingIssue = await tool.execute({
+      action: 'record', checkId: third.checkId, verdict: 'issue', checkedContent: '引用尚未复核问题', findingRefs: [pending.id],
+    }, exec(sid));
+    assert.equal(pendingIssue.ok, false, '未复核 finding 不能支撑完整 issue');
+    const verified = verifiedFinding(sid, '已复核项目问题');
+    const issue = await tool.execute({
+      action: 'record', checkId: third.checkId, verdict: 'issue', checkedContent: '已复核对象存在越权读取',
+      findingRefs: [verified.id],
+    }, exec(sid));
+    assert.equal(issue.ok, true, issue.error);
+
+    const paused = prepareProject('pt-store-paused');
+    transitionProjectRun(store, 'pt-store-paused', paused.run.runId, 'paused', paused.run.controlRev, { blocker: { code: 'needs-user' } });
+    assert.throws(() => recordProjectCheck(store, 'pt-store-paused', paused.run.runId, paused.check.checkId, {
+      executionState: 'ended', verdict: 'not_found', checkedContent: '暂停后的迟到结论',
+      controlRev: paused.run.controlRev + 1,
+    }), /暂停|状态已变化/);
   });
 
   await test('project_request 自动绑定当前检查并保存回执', async () => {

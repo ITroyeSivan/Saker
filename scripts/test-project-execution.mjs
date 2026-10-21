@@ -7,10 +7,11 @@ import path from 'node:path';
 import http from 'node:http';
 import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
 import { startTaskPolicy, readTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy.js';
-import { createProjectRun, transitionProjectRun, defineProjectChecks, listProjectActions, readProjectCheck } from '../plugins/dsh-redteam-results/lib/project-store.js';
+import { createProjectRun, transitionProjectRun, defineProjectChecks, listProjectActions, readProjectCheck, readProjectRun, beginProjectAction, markProjectActionDispatched } from '../plugins/dsh-redteam-results/lib/project-store.js';
 import { executeProjectHttp } from '../plugins/dsh-redteam-results/lib/project-execution.js';
 import { readExecutionReceipt } from '../plugins/dsh-redteam-results/lib/execution-receipts.js';
 import { saveAccount } from '../plugins/dsh-redteam-results/lib/accounts.js';
+import { acquireTargetSlot } from '../plugins/dsh-redteam-results/lib/request-pacing.js';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-project-execution-'));
 process.env.DSH_HOME = home;
@@ -113,6 +114,54 @@ try {
     assert.equal(readTaskPolicy(store, 'pe-queued-cancel').used.toolCalls, 1, '排队取消不扣派发额度');
   });
 
+  await test('旧控制版本的排队动作在暂停恢复后不派发，新版本动作仍可执行', async () => {
+    const sid = 'pe-stale-control';
+    startTaskPolicy(store, sid, {
+      scenario: 'project', question: '旧队列控制版本', target: origin,
+      requestConcurrency: 1, budget: { minutes: 10 },
+    });
+    const created = createProjectRun(store, sid, { question: '旧队列控制版本' });
+    const run = transitionProjectRun(store, sid, created.runId, 'running', created.controlRev);
+    const [check] = defineProjectChecks(store, sid, run.runId, [{ requirement: '旧队列检查' }]);
+    const release = await acquireTargetSlot(sid, { requestConcurrency: 1 });
+    const before = seen.length;
+    const usedBefore = readTaskPolicy(store, sid).used.toolCalls;
+    const pending = executeProjectHttp(store, sid, run.runId, check.checkId, {
+      method: 'GET', url: origin + '/stale-control',
+    });
+    for (let index = 0; index < 50; index++) {
+      if (listProjectActions(store, sid, run.runId).some(action => action.executionState === 'queued')) break;
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    const paused = transitionProjectRun(store, sid, run.runId, 'paused', run.controlRev, { blocker: { code: 'needs-user' } });
+    const preparing = transitionProjectRun(store, sid, run.runId, 'preparing', paused.controlRev);
+    const resumed = transitionProjectRun(store, sid, run.runId, 'running', preparing.controlRev);
+    release();
+    await assert.rejects(() => pending, /状态已变化|不可派发/);
+    const stale = listProjectActions(store, sid, run.runId)[0];
+    assert.equal(stale.executionState, 'failed');
+    assert.equal(stale.controlRev, run.controlRev, '旧动作不能改写为恢复后的新控制版本');
+    assert.equal(seen.length, before, '旧队列在版本变化后不能到达目标');
+    assert.equal(readTaskPolicy(store, sid).used.toolCalls, usedBefore, '旧队列拒绝不能扣派发额度');
+    const fresh = await executeProjectHttp(store, sid, run.runId, check.checkId, {
+      method: 'GET', url: origin + '/fresh-control', controlRev: resumed.controlRev,
+    });
+    assert.equal(fresh.ok, true, fresh.error);
+    assert.equal(seen.length, before + 1, '新控制版本可以建立并派出新动作');
+  });
+
+  await test('排队动作的身份引用变化后不能派发', async () => {
+    const sid = 'pe-stale-identity';
+    const { run, check } = await prepare(sid);
+    const begun = beginProjectAction(store, sid, run.runId, check.checkId, {
+      executionState: 'queued', identityRef: 'alice', controlRev: run.controlRev,
+    });
+    assert.throws(() => markProjectActionDispatched(store, sid, run.runId, begun.action.actionId, {
+      identityRef: 'bob', controlRev: run.controlRev,
+    }), /身份|identity/);
+    assert.equal(readProjectActionState(sid, run.runId, begun.action.actionId), 'queued');
+  });
+
   await test('写方法超时保留 sideEffectUnknown，不伪装未执行', async () => {
     const { run, check } = await prepare('pe-unknown');
     await assert.rejects(() => executeProjectHttp(store, 'pe-unknown', run.runId, check.checkId, {
@@ -141,6 +190,11 @@ try {
   await new Promise(resolve => server.close(resolve));
   store.close();
   fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 });
+}
+
+function readProjectActionState(sid, runId, actionId) {
+  return store.db.prepare('SELECT state FROM project_actions WHERE session_id=? AND run_id=? AND action_id=?')
+    .get(sid, runId, actionId)?.state;
 }
 
 console.log(failed ? failed + ' failed' : 'all passed');

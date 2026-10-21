@@ -3,6 +3,7 @@
 // 文档解析、浏览器执行和连续推进分别放在各自模块，不堆进本文件。
 import { createHash, randomUUID } from 'node:crypto';
 import { taskTransaction, taskEvent } from './task-policy-record.js';
+import { getFinding } from './store.js';
 
 export const PROJECT_RUN_STATES = ['preparing', 'running', 'waiting', 'paused', 'completed', 'cancelled', 'failed'];
 export const PROJECT_ACTIVE_STATES = ['preparing', 'running', 'waiting', 'paused'];
@@ -46,6 +47,59 @@ const parse = (row, label) => {
   }
 };
 const conflict = message => Object.assign(new Error(message), { code: 'project-state-conflict' });
+const uniqueStrings = values => [...new Set((Array.isArray(values) ? values : []).map(value => String(value || '').trim()).filter(Boolean))];
+
+function usableProjectObservation(store, sessionId, runId, action) {
+  if (!action || action.executionState !== 'completed') return false;
+  if (action.pageRef) return true;
+  if (!action.requestRef) return false;
+  const row = store.db.prepare('SELECT record FROM execution_receipts WHERE session_id=? AND id=?')
+    .get(sessionId, String(action.requestRef));
+  if (!row) return false;
+  try {
+    const receipt = JSON.parse(row.record);
+    return receipt.projectRunId === runId && receipt.projectCheckId === action.checkId
+      && receipt.actionId === action.actionId;
+  } catch {
+    return false;
+  }
+}
+
+function reviewedFinding(store, sessionId, findingId) {
+  const finding = getFinding(store, sessionId, findingId);
+  if (!finding) return false;
+  return finding.status === 'verified' && !!finding.verifiedAt
+    && ['impact', 'confirmed'].includes(finding.evidenceLevel)
+    && !!finding.secondRating && String(finding.secondRatingNote || '').trim().length >= 40;
+}
+
+export function projectCheckEvidenceProblems(store, sessionId, runId, check) {
+  if (!check || check.executionState !== 'ended') return ['check-not-ended'];
+  if (!PROJECT_VERDICTS.includes(check.verdict)) return ['verdict-missing'];
+  if (!String(check.checkedContent || '').trim() && !String(check.gaps || '').trim()) return ['checked-content-missing'];
+  const problems = [];
+  const actions = listProjectActions(store, sessionId, runId);
+  if (check.verdict === 'not_found' && !String(check.gaps || '').trim()) {
+    const direct = uniqueStrings(check.actionRefs)
+      .map(actionId => actions.find(action => action.actionId === actionId && action.checkId === check.checkId))
+      .filter(action => usableProjectObservation(store, sessionId, runId, action));
+    const reused = Array.isArray(check.reusedObservations)
+      ? check.reusedObservations.map(item => {
+        const action = actions.find(candidate => candidate.actionId === String(item?.actionId || ''));
+        return action && String(item?.reason || '').trim() && usableProjectObservation(store, sessionId, runId, action) ? action : null;
+      }).filter(Boolean)
+      : [];
+    if (!direct.length && !reused.length) problems.push('usable-observation-missing');
+  }
+  if (check.verdict === 'issue') {
+    const refs = uniqueStrings(check.findingRefs);
+    if (!refs.length) problems.push('finding-reference-missing');
+    else if (refs.some(findingId => !reviewedFinding(store, sessionId, findingId))) problems.push('reviewed-finding-required');
+  }
+  if (['blocked', 'needs_check'].includes(check.verdict) && !String(check.gaps || '').trim())
+    problems.push('gap-reason-missing');
+  return problems;
+}
 
 export function readProjectRun(store, sessionId, runId) {
   const row = store.db.prepare('SELECT record FROM project_runs WHERE session_id=? AND run_id=?').get(sessionId, String(runId || ''));
@@ -262,22 +316,67 @@ export function defineProjectChecks(store, sessionId, runId, checks = [], sectio
 
 export function recordProjectCheck(store, sessionId, runId, checkId, patch = {}) {
   return taskTransaction(store, () => {
+    const run = readProjectRun(store, sessionId, runId);
+    if (!run) throw new Error('project run not found');
+    if (patch.controlRev !== undefined && run.controlRev !== patch.controlRev)
+      throw conflict('项目运行状态已变化，请刷新后重试');
     const check = readProjectCheck(store, sessionId, runId, checkId);
     if (!check) throw new Error('project check not found');
+    if (patch.checkRevision !== undefined && check.checkRevision !== patch.checkRevision)
+      throw conflict('项目检查已变化，请重新读取后记录');
     if (patch.verdict !== undefined && patch.verdict !== '' && !PROJECT_VERDICTS.includes(patch.verdict))
       throw new Error('invalid project verdict: ' + patch.verdict);
     if (patch.executionState !== undefined && !PROJECT_CHECK_STATES.includes(patch.executionState))
       throw new Error('invalid project check state: ' + patch.executionState);
+    const actions = listProjectActions(store, sessionId, runId);
+    const actionRefs = patch.actionRefs === undefined ? uniqueStrings(check.actionRefs) : uniqueStrings(patch.actionRefs);
+    for (const actionId of actionRefs) {
+      const action = actions.find(item => item.actionId === actionId);
+      if (!action || action.checkId !== checkId) throw new Error('project action 不属于当前检查：' + actionId);
+    }
+    const reusedObservations = patch.reusedObservations === undefined
+      ? (Array.isArray(check.reusedObservations) ? check.reusedObservations : [])
+      : (Array.isArray(patch.reusedObservations) ? patch.reusedObservations : []).map(item => ({
+        actionId: String(item?.actionId || '').trim(),
+        reason: optionalText(item?.reason, 1000),
+      }));
+    for (const item of reusedObservations) {
+      if (!item.actionId || !item.reason) throw new Error('复用观测必须包含 actionId 和具体理由');
+      const action = actions.find(candidate => candidate.actionId === item.actionId);
+      if (!action) throw new Error('复用观测不存在或不属于当前运行：' + item.actionId);
+      if (!usableProjectObservation(store, sessionId, runId, action))
+        throw new Error('复用的动作没有可用实际观察：' + item.actionId);
+    }
+    const findingRefs = patch.findingRefs === undefined ? uniqueStrings(check.findingRefs) : uniqueStrings(patch.findingRefs);
+    for (const findingId of findingRefs) {
+      if (!getFinding(store, sessionId, findingId)) throw new Error('未找到关联 finding：' + findingId);
+    }
     const next = {
       ...check,
       executionState: patch.executionState ?? check.executionState,
       verdict: patch.verdict ?? check.verdict,
       checkedContent: patch.checkedContent !== undefined ? optionalText(patch.checkedContent) : check.checkedContent,
       gaps: patch.gaps !== undefined ? optionalText(patch.gaps) : check.gaps,
-      findingRefs: Array.isArray(patch.findingRefs) ? patch.findingRefs : check.findingRefs,
-      actionRefs: Array.isArray(patch.actionRefs) ? patch.actionRefs : check.actionRefs,
+      findingRefs,
+      actionRefs,
+      reusedObservations,
       updatedAt: nowIso(),
     };
+    const materialBefore = JSON.stringify([
+      check.verdict, check.checkedContent, check.gaps, check.findingRefs || [], check.actionRefs || [],
+      check.reusedObservations || [],
+    ]);
+    const materialAfter = JSON.stringify([
+      next.verdict, next.checkedContent, next.gaps, next.findingRefs, next.actionRefs, next.reusedObservations,
+    ]);
+    next.checkRevision = materialBefore === materialAfter
+      ? check.checkRevision
+      : (Number(check.checkRevision) || 1) + 1;
+    if (next.executionState === 'ended') {
+      if (run.state !== 'running') throw conflict('项目已暂停或停止，不能写入本轮结束结论');
+      const problems = projectCheckEvidenceProblems(store, sessionId, runId, next);
+      if (problems.length) throw new Error('项目检查缺少有效执行事实：' + problems.join('、'));
+    }
     store.db.prepare('UPDATE project_checks SET record=?,updated_at=? WHERE session_id=? AND run_id=? AND check_id=?')
       .run(JSON.stringify(next), next.updatedAt, sessionId, runId, checkId);
     return next;
@@ -312,7 +411,13 @@ export function beginProjectAction(store, sessionId, runId, checkId, input = {})
     const executionState = input.executionState === 'queued' ? 'queued' : 'dispatched';
     const record = {
       sessionId, runId, checkId, actionId, controlRev: run.controlRev,
+      policyRev: input.policyRevision !== undefined ? input.policyRevision : run.policyRev,
+      checkRevision: check.checkRevision,
       executionState, identityRef: optionalText(input.identityRef, 300),
+      identityRevision: optionalText(input.identityRevision, 200),
+      scopeFingerprint: optionalText(input.scopeFingerprint, 200),
+      method: optionalText(input.method, 20).toUpperCase(),
+      targetUrl: optionalText(input.targetUrl, 2000),
       startedAt: nowIso(), endedAt: '', pageRef: '', requestRef: '', attachmentRef: '',
       error: null, sideEffectUnknown: false,
     };
@@ -336,11 +441,21 @@ export function markProjectActionDispatched(store, sessionId, runId, actionId, i
     if (action.executionState !== 'queued') throw conflict('项目动作已不在排队阶段');
     const run = readProjectRun(store, sessionId, runId);
     if (!run || run.state !== 'running') throw conflict('项目运行当前不可派发新动作');
-    if (input.controlRev !== undefined && run.controlRev !== input.controlRev)
+    if (action.controlRev !== run.controlRev || (input.controlRev !== undefined && input.controlRev !== action.controlRev))
       throw conflict('项目运行状态已变化，请刷新后重试');
+    if (input.policyRevision !== undefined && action.policyRev !== input.policyRevision)
+      throw conflict('项目请求限制已变化，请重新建立动作');
+    if (input.scopeFingerprint !== undefined && action.scopeFingerprint !== input.scopeFingerprint)
+      throw conflict('项目范围、身份或请求条件已变化，请重新建立动作');
+    if (input.identityRef !== undefined && String(input.identityRef || '') !== String(action.identityRef || ''))
+      throw conflict('项目身份引用已变化，请重新建立动作');
+    if (input.identityRevision !== undefined && String(input.identityRevision || '') !== String(action.identityRevision || ''))
+      throw conflict('项目身份凭据已变化，请重新建立动作');
+    const check = readProjectCheck(store, sessionId, runId, action.checkId);
+    if (!check || check.checkRevision !== action.checkRevision)
+      throw conflict('项目检查已变化，请重新建立动作');
     const next = {
-      ...action, executionState: 'dispatched', controlRev: run.controlRev,
-      identityRef: input.identityRef !== undefined ? optionalText(input.identityRef, 300) : action.identityRef,
+      ...action, executionState: 'dispatched',
       dispatchedAt: nowIso(),
     };
     store.db.prepare('UPDATE project_actions SET state=?,record=?,updated_at=? WHERE session_id=? AND run_id=? AND action_id=?')

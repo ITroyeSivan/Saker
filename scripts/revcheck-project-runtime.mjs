@@ -31,6 +31,8 @@ const variants = [
     '迟到的接续标记不能修改已停止运行'],
   ['duplicate-document-range', 'if (length(merged) <= length(previous)) return false;', 'if (false) return false;',
     '真实文档工具读取新范围计进展，重读和搜索同片段不清零', progressFile, 'test-project-knowledge.mjs'],
+  ['legacy-empty-negative-complete', '    if (evidenceProblems.length) {\n      return {\n        action: \'waiting\', run,', '    if (false) {\n      return {\n        action: \'waiting\', run,',
+    '完成判断独立拒绝历史遗留的无动作完整阴性'],
 ];
 
 const sourceHash = () => createHash('sha256').update([file, progressFile].map(relative => fs.readFileSync(path.join(root, relative))).join('\n')).digest('hex');

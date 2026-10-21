@@ -13,6 +13,7 @@ import {
   beginProjectAction, finishProjectAction, listProjectActions,
   upsertProjectSource, listProjectSources, readProjectSource,
 } from '../plugins/dsh-redteam-results/lib/project-store.js';
+import { recordObservedProjectCheck, registerVerifiedProjectFinding } from './lib/project-test-fixtures.mjs';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-project-store-'));
 process.env.DSH_HOME = home;
@@ -84,8 +85,9 @@ test('检查记录未执行时不要求 endpoint、身份或方法版本；判�
     assert.equal(checks[0].executionState, 'pending');
     assert.equal(checks[0].verdict, '');
     assert.equal(checks[0].requirement, '员工只能查看自己的资料');
+    const finding = registerVerifiedProjectFinding(store, 's-check');
     const recorded = recordProjectCheck(store, 's-check', run.runId, checks[0].checkId, {
-      executionState: 'ended', verdict: 'issue', checkedContent: '员工 B 读取到员工 A 的电话', findingRefs: ['pentest-1'],
+      executionState: 'ended', verdict: 'issue', checkedContent: '员工 B 读取到员工 A 的电话', findingRefs: [finding.id],
     });
     assert.equal(recorded.verdict, 'issue');
     assert.equal(recorded.checkedContent, '员工 B 读取到员工 A 的电话');
@@ -148,7 +150,9 @@ test('A17 来源修订各自留档，旧结果不被新修订覆盖', () => {
     transitionProjectRun(revisionStore, 's-rev', run.runId, 'running', run.controlRev);
     const [check] = defineProjectChecks(revisionStore, 's-rev', run.runId, [{ requirement: '检查权限', sourceLocation: '表1 第2行' }]);
     upsertProjectSource(revisionStore, 's-rev', { sourceId: 'doc', sourceRevision: 'rev-1', displayName: '旧要求.docx', parseState: 'ready', sections: [{ sectionId: 'p1', text: '旧要求' }] });
-    recordProjectCheck(revisionStore, 's-rev', run.runId, check.checkId, { executionState: 'ended', verdict: 'not_found', checkedContent: '按旧要求检查通过' });
+    recordObservedProjectCheck(revisionStore, 's-rev', run.runId, check.checkId, {
+      executionState: 'ended', verdict: 'not_found', checkedContent: '按旧要求检查通过',
+    });
     upsertProjectSource(revisionStore, 's-rev', { sourceId: 'doc', sourceRevision: 'rev-2', displayName: '新要求.docx', parseState: 'ready', sections: [{ sectionId: 'p1', text: '新要求' }] });
     const revisions = listProjectSources(revisionStore, 's-rev').filter(source => source.sourceId === 'doc');
     assert.equal(revisions.length, 2, '同一来源的两个修订各自留档');

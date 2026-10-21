@@ -4,7 +4,7 @@ import { taskTransaction, writeTaskPolicy } from './task-policy-record.js';
 import { readTaskPolicy, taskPolicyStatus, startTaskPolicy, hasUnreleasedWorker } from './task-policy.js';
 import {
   activeProjectRun, readProjectRun, listProjectChecks, listProjectActions,
-  transitionProjectRun,
+  transitionProjectRun, projectCheckEvidenceProblems,
   createProjectRun,
 } from './project-store.js';
 import { projectProgressFingerprint, projectSourceProgress } from './project-progress.js';
@@ -219,6 +219,14 @@ export function projectTurnDecision(store, sessionId) {
     return { action: 'waiting', run, blocker: { code: 'no-requirements', reason: '没有找到可执行的测试要求，请补充说明要检查什么' } };
   }
   if (checks.every(check => check.executionState === 'ended')) {
+    const evidenceProblems = checks.flatMap(check => projectCheckEvidenceProblems(store, sessionId, run.runId, check)
+      .map(problem => check.checkId + ':' + problem));
+    if (evidenceProblems.length) {
+      return {
+        action: 'waiting', run,
+        blocker: { code: 'evidence-required', reason: '检查结论缺少有效动作、复用观测或已复核 finding：' + evidenceProblems.join('；') },
+      };
+    }
     return { action: 'completed', run, summary: { ended: checks.length, blocked, partial } };
   }
   return { action: 'waiting', run, blocker: { code: 'waiting-conditions', reason: '还有未完成的检查，请补充条件后继续' } };
@@ -268,6 +276,10 @@ export function completeProjectRun(store, sessionId, runId) {
   if (!checks.length) throw new Error('没有检查项，不能标记本次运行完成');
   const remaining = checks.filter(check => OPEN_STATES.has(check.executionState));
   if (remaining.length) throw new Error('还有未结束的检查，不能标记本次运行完成');
+  const evidenceProblems = checks.flatMap(check => projectCheckEvidenceProblems(store, sessionId, runId, check)
+    .map(problem => check.checkId + ':' + problem));
+  if (evidenceProblems.length)
+    throw new Error('检查缺少有效动作、复用观测或已复核 finding，不能标记本次运行完成：' + evidenceProblems.join('；'));
   return setProjectRunState(store, sessionId, runId, 'completed', run.controlRev, {
     completedSummary: {
       ended: checks.filter(check => check.executionState === 'ended').length,

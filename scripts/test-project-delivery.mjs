@@ -10,6 +10,7 @@ import { createProjectRun, transitionProjectRun, defineProjectChecks, recordProj
 import { buildProjectDeliveryFiles, zipProjectDelivery, projectCounts } from '../plugins/dsh-redteam-results/lib/project-delivery.js';
 import { dispatch } from '../plugins/dsh-redteam-results/lib/index.js';
 import { writeTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy-record.js';
+import { registerVerifiedProjectFinding } from './lib/project-test-fixtures.mjs';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-project-delivery-'));
 process.env.DSH_HOME = home;
@@ -34,7 +35,8 @@ function prepare(sid) {
     { requirement: '公式列检查', sourceLocation: '工作表1 第3行' },
     { requirement: '尚未开始的项目', sourceLocation: '第5段' },
   ]);
-  recordProjectCheck(store, sid, run.runId, checks[0].checkId, { executionState: 'ended', verdict: 'issue', checkedContent: '员工 B 读取到员工 A 的电话' });
+  const finding = registerVerifiedProjectFinding(store, sid);
+  recordProjectCheck(store, sid, run.runId, checks[0].checkId, { executionState: 'ended', verdict: 'issue', checkedContent: '员工 B 读取到员工 A 的电话', findingRefs: [finding.id] });
   recordProjectCheck(store, sid, run.runId, checks[1].checkId, { executionState: 'ended', verdict: 'blocked', gaps: '缺少审批人账号' });
   recordProjectCheck(store, sid, run.runId, checks[2].checkId, { executionState: 'ended', verdict: 'not_found', checkedContent: '=SUM(A1:A2) 计算结果与页面一致', gaps: '只检查了只读路径' });
   upsertProjectSource(store, sid, { sourceId: 'doc-1', sourceRevision: 'rev-1', displayName: '测试要求.xlsx', kind: 'xlsx', parseState: 'ready', sections: [{ sectionId: 'sheet-1-row-1' }] });

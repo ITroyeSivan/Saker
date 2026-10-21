@@ -26,6 +26,26 @@ function targetScopeDenial(limits, url) {
   return undefined;
 }
 
+const identityRevision = identity => digest(JSON.stringify([
+  String(identity?.name || ''),
+  String(identity?.status || ''),
+  String(identity?.secret || ''),
+]));
+
+function requestFingerprint(limits, method, url, authContext, identity, body) {
+  return digest(JSON.stringify({
+    target: String(limits?.target || ''),
+    allowTargetNetwork: limits?.allowTargetNetwork !== false,
+    readOnly: limits?.readOnly === true,
+    excludedPaths: [...(limits?.excludedPaths || [])].map(String).sort(),
+    requestRatePerMinute: limits?.requestRatePerMinute ?? null,
+    requestConcurrency: limits?.requestConcurrency ?? null,
+    method, url: url.href, authContext: String(authContext || ''),
+    identityRevision: identityRevision(identity),
+    bodySha256: digest(String(body || '')),
+  }));
+}
+
 function wireRequest(method, url, headers, body) {
   const lines = [method + ' ' + (url.pathname + url.search || '/') + ' HTTP/1.1', 'Host: ' + url.host];
   for (const [name, value] of Object.entries(headers || {})) lines.push(name + ': ' + value);
@@ -85,8 +105,12 @@ export async function executeProjectHttp(store, sessionId, runId, checkId, input
   const outgoingHeaders = identityHeaders ? identityHeaders.headers : headers;
   const body = input.body === undefined || input.body === null ? '' : String(input.body);
   let dispatchHeaders = outgoingHeaders;
+  const initialFingerprint = requestFingerprint(limits, method, url, authContext, identity, body);
   const begun = beginProjectAction(store, sessionId, runId, checkId, {
-    identityRef: authContext, controlRev: input.controlRev, executionState: 'queued',
+    identityRef: authContext, identityRevision: identityRevision(identity),
+    controlRev: input.controlRev, policyRevision: policy.policyRev,
+    scopeFingerprint: initialFingerprint, method, targetUrl: url.href,
+    executionState: 'queued',
   });
   let release;
   try {
@@ -119,11 +143,14 @@ export async function executeProjectHttp(store, sessionId, runId, checkId, input
     if (currentIdentityReason) throw new Error(currentIdentityReason);
     const currentIdentityHeaders = identityRequestHeaders({ headers }, currentIdentity);
     dispatchHeaders = currentIdentityHeaders ? currentIdentityHeaders.headers : headers;
+    const currentFingerprint = requestFingerprint(currentLimits, method, url, authContext, currentIdentity, body);
     const admission = taskExecutionGuard(store, sessionId, 'recorded-project-execution', Date.now(), {
       args: { method, url: url.href },
       onReserve: () => {
         markProjectActionDispatched(store, sessionId, runId, begun.action.actionId, {
-          identityRef: authContext, controlRev: currentRun.controlRev,
+          identityRef: authContext, identityRevision: identityRevision(currentIdentity),
+          controlRev: currentRun.controlRev, policyRevision: currentPolicy.policyRev,
+          scopeFingerprint: currentFingerprint,
         });
         dispatched = true;
       },

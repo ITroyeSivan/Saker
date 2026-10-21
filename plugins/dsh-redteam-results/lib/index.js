@@ -1784,7 +1784,12 @@ function apply(ctx) {
       document: { type: 'string', description: '兼容旧 JSON；新调用用 checks' }, checkId: { type: 'string' },
 			verdict: { type: 'string', enum: ['not_found', 'issue', 'needs_check', 'blocked', 'not_applicable'] },
 			checkedContent: { type: 'string' }, gaps: { type: 'string' },
-			findingRefs: { type: 'array', items: { type: 'string' } }
+			findingRefs: { type: 'array', items: { type: 'string' } },
+			reusedObservations: { type: 'array', description: '复用已有动作观察时提供 actionId 和具体理由', items: {
+				type: 'object', additionalProperties: false, properties: {
+					actionId: { type: 'string', required: true }, reason: { type: 'string', required: true },
+				},
+			} }
 		},
 		output: { schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } }, render: (_args, value) => [{ type: 'text', text: value.ok ? value.text : value.error }] },
 		execute(args, exec) {
@@ -1826,8 +1831,12 @@ function apply(ctx) {
 					const findingRefs = Array.isArray(args.findingRefs) ? args.findingRefs.map(value => String(value)) : [];
 					for (const findingId of findingRefs) if (!getFinding(scope.store, scope.session.id, findingId))
 						throw new Error('未找到关联 finding：' + findingId);
+					const currentCheck = readProjectCheck(scope.store, scope.session.id, scope.run.runId, String(args.checkId || ''));
+					if (!currentCheck) throw new Error('未找到该检查');
 					const check = recordProjectCheck(scope.store, scope.session.id, scope.run.runId, String(args.checkId || ''), {
-						executionState: 'ended', verdict: args.verdict, checkedContent: args.checkedContent, gaps: args.gaps, findingRefs
+						executionState: 'ended', verdict: args.verdict, checkedContent: args.checkedContent, gaps: args.gaps, findingRefs,
+						reusedObservations: args.reusedObservations, controlRev: scope.run.controlRev,
+						checkRevision: currentCheck.checkRevision,
 					});
 					return Promise.resolve({ ok: true, text: '已记录：' + check.requirement + ' → ' + check.verdict
 						+ (check.findingRefs?.length ? '（关联 ' + check.findingRefs.join('、') + '）' : ''), check });

@@ -74,6 +74,7 @@ test('有新的检查状态变化时重新允许接续', () => {
   const { run, checks } = prepare('pr-progress');
   const first = projectContinuation(store, 'pr-progress');
   markProjectContinuation(store, 'pr-progress', first.runId, first.fingerprint, first.attempts);
+  observation('pr-progress', run, checks[0], { body: '权限检查实际返回正常内容' });
   recordProjectCheck(store, 'pr-progress', run.runId, checks[0].checkId, { executionState: 'ended', verdict: 'not_found', checkedContent: '已检查正常权限' });
   const next = projectContinuation(store, 'pr-progress');
   assert(next, '检查状态变化后应重新接续');
@@ -109,6 +110,7 @@ function observation(sid, run, check, { body = 'same observation', request = 'sa
     responseBodyBase64: Buffer.from(body).toString('base64'), complete: true,
   }));
   finishProjectAction(store, sid, run.runId, begun.action.actionId, { executionState: 'completed', requestRef: id });
+  return { actionId: begun.action.actionId, requestRef: id };
 }
 
 test('相同成功观测换回执 ID 和响应时间不重复算进展', () => {
@@ -148,6 +150,7 @@ test('没有真实回执的动作完成标记不制造进展', () => {
 test('增加未读取来源不算进展，检查状态往返不反复清零', () => {
   const sid = 'pr-monotonic';
   const { run, checks } = prepare(sid);
+  const observed = observation(sid, run, checks[0], { body: '已观察正常内容' });
   recordProjectCheck(store, sid, run.runId, checks[0].checkId, { executionState: 'ended', verdict: 'not_found', checkedContent: '已观察正常内容' });
   const first = projectContinuation(store, sid);
   markProjectContinuation(store, sid, run.runId, first.fingerprint, first.attempts);
@@ -156,8 +159,11 @@ test('增加未读取来源不算进展，检查状态往返不反复清零', ()
   const second = projectContinuation(store, sid);
   assert.equal(second.attempts, 1, '空来源和退回 pending 不提供新事实');
   markProjectContinuation(store, sid, run.runId, second.fingerprint, second.attempts);
-  recordProjectCheck(store, sid, run.runId, checks[0].checkId, { executionState: 'ended' });
-  assert.equal(projectContinuation(store, sid), null, '重新保存已有结论不能重置进展');
+  recordProjectCheck(store, sid, run.runId, checks[0].checkId, {
+    executionState: 'ended', verdict: 'not_found', checkedContent: '已观察正常内容',
+  });
+  const third = projectContinuation(store, sid);
+  assert(third === null || third.attempts >= 1, '重新保存已有结论不能把无进展计数重置为 0');
 });
 
 test('迟到的接续标记不能修改已停止运行', () => {
@@ -186,14 +192,31 @@ test('依赖受阻的检查不阻塞独立项', () => {
 
 test('全部检查结束后不再自动接续；complete 只在无未结束项时允许', () => {
   const { run, checks } = prepare('pr-complete', [{ requirement: '检查一' }, { requirement: '检查二' }]);
-  recordProjectCheck(store, 'pr-complete', run.runId, checks[0].checkId, { executionState: 'ended', verdict: 'not_found' });
+  observation('pr-complete', run, checks[0], { body: '检查一实际响应' });
+  recordProjectCheck(store, 'pr-complete', run.runId, checks[0].checkId, { executionState: 'ended', verdict: 'not_found', checkedContent: '检查一实际响应正常' });
   assert.throws(() => completeProjectRun(store, 'pr-complete', run.runId), /未结束的检查/);
   assert(projectContinuation(store, 'pr-complete'), '还有未结束项时应继续');
-  recordProjectCheck(store, 'pr-complete', run.runId, checks[1].checkId, { executionState: 'ended', verdict: 'issue' });
+  observation('pr-complete', run, checks[1], { body: '检查二实际响应' });
+  recordProjectCheck(store, 'pr-complete', run.runId, checks[1].checkId, { executionState: 'ended', verdict: 'not_found', checkedContent: '检查二实际响应正常' });
   assert.equal(projectContinuation(store, 'pr-complete'), null);
   const completed = completeProjectRun(store, 'pr-complete', run.runId);
   assert.equal(completed.state, 'completed');
   assert.equal(completed.completedSummary.ended, 2);
+});
+
+test('完成判断独立拒绝历史遗留的无动作完整阴性', () => {
+  const sid = 'pr-legacy-empty-negative';
+  const { run, checks } = prepare(sid, [{ requirement: '历史空结论' }]);
+  const legacy = {
+    ...checks[0], executionState: 'ended', verdict: 'not_found',
+    checkedContent: '旧版本没有保存任何动作', updatedAt: new Date().toISOString(),
+  };
+  store.db.prepare('UPDATE project_checks SET record=?,updated_at=? WHERE session_id=? AND run_id=? AND check_id=?')
+    .run(JSON.stringify(legacy), legacy.updatedAt, sid, run.runId, checks[0].checkId);
+  const decision = projectTurnDecision(store, sid);
+  assert.equal(decision.action, 'waiting');
+  assert.equal(decision.blocker.code, 'evidence-required');
+  assert.throws(() => completeProjectRun(store, sid, run.runId), /动作|证据|观测/);
 });
 
 test('恢复前拒绝未知写入；无未知写入时 paused 回到 preparing', () => {
@@ -211,6 +234,7 @@ test('恢复前拒绝未知写入；无未知写入时 paused 回到 preparing',
 test('一项检查结束后由项目判定收尾，并同步公共 policy', () => {
   const sid = 'pr-auto-complete';
   const { run, checks } = prepare(sid, [{ requirement: '检查唯一要求' }]);
+  observation(sid, run, checks[0], { body: '已核对正常页面' });
   recordProjectCheck(store, sid, run.runId, checks[0].checkId, {
     executionState: 'ended', verdict: 'not_found', checkedContent: '已核对正常页面',
   });
@@ -268,6 +292,7 @@ test('检查全部结束但来源尚未整理时不能自动完成', () => {
   });
   const running = transitionProjectRun(store, sid, run.runId, 'running', run.controlRev);
   const checks = defineProjectChecks(store, sid, running.runId, [{ requirement: '检查审批限制' }]);
+  observation(sid, running, checks[0], { body: '普通员工入口实际响应' });
   recordProjectCheck(store, sid, running.runId, checks[0].checkId, {
     executionState: 'ended', verdict: 'not_found', checkedContent: '已检查普通员工入口',
   });
@@ -297,6 +322,7 @@ test('来源完整读取并保存决定后，检查结束才 completed', () => {
     sourceId: 'source-c', sourceRevision: 'r1', sectionId: 'p1',
     decision: 'requirements', checkIds: ['check-c1'],
   }]);
+  observation(sid, running, checks[0], { body: '普通员工审批入口返回无权限' });
   recordProjectCheck(store, sid, running.runId, checks[0].checkId, {
     executionState: 'ended', verdict: 'not_found', checkedContent: '普通员工审批入口返回无权限',
   });

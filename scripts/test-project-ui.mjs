@@ -8,6 +8,7 @@ import { runInNewContext } from 'node:vm';
 import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
 import { startTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy.js';
 import { createProjectRun, transitionProjectRun, defineProjectChecks, recordProjectCheck, upsertProjectSource } from '../plugins/dsh-redteam-results/lib/project-store.js';
+import { registerVerifiedProjectFinding } from './lib/project-test-fixtures.mjs';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-project-ui-'));
 process.env.DSH_HOME = home;
@@ -35,7 +36,8 @@ function prepareProject(sid) {
     { requirement: '普通员工不能审批', sourceLocation: '表1 第3行' },
     { requirement: '文件下载权限', sourceLocation: '表1 第4行' },
   ]);
-  recordProjectCheck(store, sid, run.runId, checks[0].checkId, { executionState: 'ended', verdict: 'issue', checkedContent: '员工 B 读取到员工 A 的电话' });
+  const finding = registerVerifiedProjectFinding(store, sid);
+  recordProjectCheck(store, sid, run.runId, checks[0].checkId, { executionState: 'ended', verdict: 'issue', checkedContent: '员工 B 读取到员工 A 的电话', findingRefs: [finding.id] });
   recordProjectCheck(store, sid, run.runId, checks[1].checkId, { executionState: 'ended', verdict: 'blocked', gaps: '缺少审批人账号' });
   recordProjectCheck(store, sid, run.runId, checks[2].checkId, { executionState: 'ended', verdict: 'not_found', checkedContent: '已检查自己的文件', gaps: '尚缺另一位员工的文件' });
   upsertProjectSource(store, sid, { sourceId: 'doc-1', sourceRevision: 'rev-1', displayName: '测试要求.xlsx', kind: 'xlsx', parseState: 'ready', sections: [] });

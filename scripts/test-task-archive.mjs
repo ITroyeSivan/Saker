@@ -7,8 +7,9 @@ import { openStore, registerFinding } from '../plugins/dsh-redteam-results/lib/s
 import { startTaskPolicy, readTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy.js';
 import { saveTaskContext } from '../plugins/dsh-redteam-results/lib/task-context.js';
 import { recordKnowledgeUsage } from '../plugins/dsh-redteam-results/lib/knowledge-usage.js';
-import { createProjectRun, transitionProjectRun, defineProjectChecks, recordProjectCheck, upsertProjectSource, beginProjectAction, finishProjectAction } from '../plugins/dsh-redteam-results/lib/project-store.js';
+import { createProjectRun, transitionProjectRun, defineProjectChecks, upsertProjectSource } from '../plugins/dsh-redteam-results/lib/project-store.js';
 import { exportTaskArchive, verifyTaskArchive, importTaskArchive, TASK_ARCHIVE_SCHEMA } from '../plugins/dsh-redteam-results/lib/task-archive.js';
+import { recordObservedProjectCheck } from './lib/project-test-fixtures.mjs';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-task-archive-'));
 process.env.DSH_HOME = home;
@@ -79,9 +80,9 @@ try {
     });
     const running = transitionProjectRun(store, 'project-src', run.runId, 'running', run.controlRev);
     const [check] = defineProjectChecks(store, 'project-src', run.runId, [{ checkId: 'check-1', requirement: '检查接口' }]);
-    const begun = beginProjectAction(store, 'project-src', run.runId, check.checkId, { executionState: 'queued' });
-    finishProjectAction(store, 'project-src', run.runId, begun.action.actionId, { executionState: 'failed', error: '归档样本' });
-    recordProjectCheck(store, 'project-src', run.runId, check.checkId, { executionState: 'ended', verdict: 'not_found', checkedContent: '未发现问题' });
+    recordObservedProjectCheck(store, 'project-src', run.runId, check.checkId, {
+      executionState: 'ended', verdict: 'not_found', checkedContent: '未发现问题',
+    });
     const archive = exportTaskArchive(store, 'project-src');
     for (const table of ['project_runs', 'project_sources', 'project_checks', 'project_actions']) assert(archive.manifest.sections[table] >= 1, table);
     const restored = importTaskArchive(store, archive, { sessionId: 'restored-project' });

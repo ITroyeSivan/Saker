@@ -10,6 +10,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const tmp = path.resolve(root, '../_ref/tmp');
 const runner = 'test-project-execution.mjs';
 const file = 'plugins/dsh-redteam-results/lib/project-execution.js';
+const storeFile = 'plugins/dsh-redteam-results/lib/project-store.js';
 const variants = [
   ['limit-denial', "  const denial = targetTrafficDenial(limits, { method }) || excludedPathDenial(limits, { url: url.href })\n    || targetScopeDenial(limits, url);\n  if (denial) throw new Error(denial);", '',
     '只读任务拒绝写方法'],
@@ -17,10 +18,15 @@ const variants = [
     '范围外 URL 被拒绝'],
   ['unknown-write', "    const sideEffectUnknown = dispatched && !['GET', 'HEAD', 'OPTIONS'].includes(method);", '    const sideEffectUnknown = false;',
     '写方法超时保留 sideEffectUnknown'],
+  ['stale-control-version', 'if (action.controlRev !== run.controlRev || (input.controlRev !== undefined && input.controlRev !== action.controlRev))', 'if (false)',
+    '旧控制版本的排队动作在暂停恢复后不派发，新版本动作仍可执行', 'plugins/dsh-redteam-results/lib/project-store.js'],
+  ['stale-queued-identity', 'if (input.identityRef !== undefined', 'if (false',
+    '排队动作的身份引用变化后不能派发', 'plugins/dsh-redteam-results/lib/project-store.js'],
 ];
 
-const before = createHash('sha256').update(fs.readFileSync(path.join(root, file))).digest('hex');
-for (const [name, from, to, expected] of variants) {
+const sourceHash = () => createHash('sha256').update([file, storeFile].map(relative => fs.readFileSync(path.join(root, relative))).join('\n')).digest('hex');
+const before = sourceHash();
+for (const [name, from, to, expected, variantFile = file] of variants) {
   const fixture = fs.mkdtempSync(path.join(tmp, 'saker-project-execution-reverse-'));
   assert(path.resolve(fixture).startsWith(tmp + path.sep));
   try {
@@ -33,7 +39,7 @@ for (const [name, from, to, expected] of variants) {
     fs.mkdirSync(path.join(fixture, 'scripts'), { recursive: true });
     for (const script of [runner, 'test-stub-register.mjs', 'test-stub-loader.mjs', 'test-home-isolation.mjs'])
       fs.copyFileSync(path.join(root, 'scripts', script), path.join(fixture, 'scripts', script));
-    const target = path.join(fixture, file);
+    const target = path.join(fixture, variantFile);
     const content = fs.readFileSync(target, 'utf8').replaceAll('\r\n', '\n');
     assert.equal(content.split(from).length - 1, 1, name + ' mutation anchor');
     fs.writeFileSync(target, content.replace(from, to));
@@ -47,5 +53,5 @@ for (const [name, from, to, expected] of variants) {
     fs.rmSync(fixture, { recursive: true, force: true });
   }
 }
-assert.equal(createHash('sha256').update(fs.readFileSync(path.join(root, file))).digest('hex'), before, 'production source changed');
+assert.equal(sourceHash(), before, 'production source changed');
 console.log('ok reverse verification preserves the production source file');
