@@ -34,7 +34,7 @@ import { runBrowserExecution, recordBrowserReceipt, readBrowserReceipt } from '.
 import { runEffectJob, readEffectJob } from './effect-jobs.js';
 import { startTaskPolicy, updateTaskProgress, taskPolicyStatus, readTaskPolicy, taskExecutionGuard, taskPrompt, taskPromptStable, taskOverview, chooseTaskMode, pauseTaskPolicy, resumeTaskPolicy, archiveTaskRound, takeTaskContinuation, finishTaskOnTurnEnd, checkpointTask, setTaskInteraction, setTaskWorkers, setTaskExplain, setTaskActionLimits, updateTaskFromChat, targetTrafficDenial, excludedPathDenial, effectivePolicy, confirmTaskCheckpoint } from './task-policy.js';
 import { projectContinuation, projectTurnDecision, markProjectContinuation, pauseProjectRun, resumeProjectRun, projectExecutableChecks, selectProjectCheck, startProjectTask, setProjectRunState, completeProjectRun } from './project-runtime.js';
-import { activeProjectRun, readProjectRun, listProjectRuns, listProjectChecks, listProjectSources, listProjectActions, defineProjectChecks, recordProjectCheck, readProjectCheck, upsertProjectSource, beginProjectAction, finishProjectAction, reconcileProjectAction } from './project-store.js';
+import { activeProjectRun, readProjectRun, listProjectRuns, listProjectChecks, listProjectSources, readProjectSource, listProjectActions, defineProjectChecks, recordProjectCheck, readProjectCheck, upsertProjectSource, beginProjectAction, finishProjectAction, reconcileProjectAction } from './project-store.js';
 import { zipProjectDelivery, projectCounts, projectCheckView } from './project-delivery.js';
 import { startBrowserSession } from './browser-session.js';
 import { executeProjectHttp } from './project-execution.js';
@@ -555,7 +555,8 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
       localTools: { used: policy?.used?.localToolCalls ?? 0 },
       modelBudget: modelBudgetOverview(st, sessionId),
       refused: modelBudgetOverview(st, sessionId)?.blocked ?? null,
-      cost: { modelCalls: cost.modelCalls, toolCalls: cost.toolCalls, unknownUsageCalls: cost.unknownUsageCalls,
+      cost: { modelCalls: cost.modelCalls, attemptCalls: cost.attemptCalls, auxiliaryCalls: cost.auxiliaryCalls,
+        toolCalls: cost.toolCalls, unknownUsageCalls: cost.unknownUsageCalls,
         totalTokens: cost.totalTokens, inputTokens: cost.inputTokens, outputTokens: cost.outputTokens, cacheReadTokens: cost.cacheReadTokens,
         elapsedModelMs: cost.elapsedModelMs, unavailableSessions: cost.unavailableSessions,
         sessions: cost.sessions.map(row => ({ sessionId: row.sessionId, role: row.role, available: row.available, modelCalls: row.modelCalls,
@@ -799,13 +800,19 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
         : activeProjectRun(st, sessionId) || listProjectRuns(st, sessionId, { limit: 1 })[0] || null;
       if (requestedRunId && !run) return { ok: false, error: '未找到该项目运行' };
       const checks = run ? listProjectChecks(st, sessionId, run.runId) : [];
-      const sources = listProjectSources(st, sessionId).map(source => ({
+      const sources = (run?.sourceSnapshot || []).map(snapshot => readProjectSource(st, sessionId, snapshot.sourceId, snapshot.sourceRevision))
+        .filter(Boolean).map(source => ({
         sourceId: source.sourceId, sourceRevision: source.sourceRevision,
         displayName: source.displayName || '', kind: source.kind || 'text',
         parseState: source.parseState, sectionCount: (source.sections || []).length,
         unreadCount: (source.unread || []).length,
       }));
-      return { ok: true, configured: !!run, run, checks: checks.map(projectCheckView), sources, counts: projectCounts(checks) };
+      return {
+        ok: true, configured: !!run, run, checks: checks.map(projectCheckView), sources, counts: projectCounts(checks),
+        runs: listProjectRuns(st, sessionId, { limit: 50 }).map(item => ({
+          runId: item.runId, state: item.state, updatedAt: item.updatedAt, question: item.question || '',
+        })),
+      };
     }
     if (endpoint === 'project.import') {
       const existingPolicy = readTaskPolicy(st, sessionId);

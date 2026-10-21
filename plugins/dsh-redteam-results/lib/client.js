@@ -2628,6 +2628,7 @@ function ChatSetup(props) {
       cooperation==='confirm-step'?React.createElement('label',{className:'dsh-chat-full-prompt'},'补充你的思路（可选）',React.createElement('textarea',{'aria-label':'补充你的思路',rows:2,maxLength:2000,value:decisionNote[0],placeholder:'补充观察事实、业务疑问或下一步方向',onChange:function(event){decisionNote[1](event.target.value);}})):null,
       React.createElement('button',{type:'button',disabled:busy[0]||current.agentRunning||current.reason!=='interaction_confirmation_required',onClick:function(){return run('task.continue',{note:decisionNote[0]});}},current.agentRunning?'正在收尾，请稍候':cooperation==='confirm-step'?'按当前思路继续':'确认并继续'),
       React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){return run('task.cancel');}},'停止本轮'),React.createElement('small',null,'改变协作或汇报设置不会解除当前等待；原截止时间仍有效。')):null,
+    current&&current.configured&&current.policy&&current.policy.scenario==='project'?React.createElement(ProjectChatStatus,{sessionId:props.sessionId,status:current}):null,
     policy&&!policy.awaitingConfirmation?React.createElement('div',{className:'dsh-chat-task-status',role:'status'},React.createElement('span',null,taskStatusLabel(current,policy)),(current.active||0)>0?React.createElement('span',null,'子代理 '+current.active+'/'+workers):null,
       // 当前动作来自真实执行回执（v6 第 5.1 节）：只在运行中显示，没运行时不给状态栏堆零指标。
       policy&&!current.stopped&&current.currentAction?React.createElement('span',{className:'dsh-chat-action'},current.currentAction):null,
@@ -2829,6 +2830,7 @@ function installChatSetupStyles() {
     '.dsh-task-brief{display:flex;flex-wrap:wrap;gap:4px 16px;margin:4px 0 4px;font-size:12px;color:var(--dsw-alias-label-secondary,#666)}.dsh-task-brief span{overflow-wrap:anywhere}.dsh-task-gaps{margin:4px 0 4px;font-size:12px}.dsh-task-gaps p{margin:4px 0 0;color:var(--dsw-alias-label-secondary,#666);overflow-wrap:anywhere}.dsh-task-entries{margin:4px 0 4px;font-size:12px}.dsh-task-entries p{margin:4px 0 0;color:var(--dsw-alias-label-secondary,#666);overflow-wrap:anywhere}',
     '.dsh-task-panel .dsh-task-recent-row{margin:0;padding:8px 0;border:0;border-top:1px solid var(--dsw-alias-border-l1,#e7e8eb);border-radius:0}.dsh-task-recent-row>summary{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;cursor:pointer;list-style:none}.dsh-task-recent-row>summary::-webkit-details-marker{display:none}.dsh-task-recent-row>summary:focus-visible{outline:2px solid var(--dsw-alias-border-focus,#587cf6);outline-offset:3px}.dsh-task-finding-title{font-weight:600}.dsh-task-finding-title:before{content:"›";display:inline-block;margin-right:8px;color:var(--dsw-alias-label-secondary,#888)}.dsh-task-recent-row[open] .dsh-task-finding-title:before{transform:rotate(90deg)}.dsh-task-finding-target,.dsh-task-finding-note{grid-column:1/-1;color:var(--dsw-alias-label-secondary,#666);overflow-wrap:anywhere}.dsh-task-finding-note{color:var(--dsw-alias-label-primary,inherit)}.dsh-task-recent-row[open]>summary{margin-bottom:8px}.dsh-task-summary{padding-top:0px;border-bottom:0}',
     '.dsh-task-field{display:grid;grid-template-columns:118px minmax(0,600px);align-items:center;gap:8px;margin:8px 0}.dsh-task-field input,.dsh-task-field select{box-sizing:border-box;max-width:100%;min-width:0;font:inherit;color:inherit;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;background:var(--dsw-alias-bg-base,transparent);padding:5px 7px}.dsh-task-field input[type=number]{width:76px}.dsh-task-field select{width:fit-content}.dsh-task-mode-options{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}',
+    '.dsh-chat-project-status{margin:6px 0;padding:6px 0;border-top:1px solid var(--dsw-alias-border-l1,#e3e5e8);border-bottom:1px solid var(--dsw-alias-border-l1,#e3e5e8);font-size:12px}.dsh-chat-project-status-row{display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap}.dsh-chat-project-status-row strong{font-variant-numeric:tabular-nums}.dsh-chat-project-status-row .dsh-chat-project-current{color:var(--dsw-alias-label-secondary,#666);overflow-wrap:anywhere}.dsh-chat-project-table{margin-top:8px}.dsh-chat-project-table .dsh-task-project-table{min-width:720px;table-layout:fixed}.dsh-chat-project-table th:nth-child(1),.dsh-chat-project-table td:nth-child(1){width:35%}.dsh-chat-project-table th:nth-child(2),.dsh-chat-project-table td:nth-child(2){width:15%}.dsh-chat-project-table th:nth-child(3),.dsh-chat-project-table td:nth-child(3){width:50%}',
     '@media(max-width:600px){.dsh-task-workspace{padding:8px 12px}.dsh-task-file-head{align-items:flex-start;flex-wrap:wrap}.dsh-task-metrics{gap:4px 12px}.dsh-task-field{grid-template-columns:1fr;gap:4px}}'
   ].join('');
   // v6 第 5.7 节共享组件层：控件尺寸改由 shared/ui-kit/ui-kit.css 提供
@@ -2885,6 +2887,33 @@ function ProjectPanel(props) {
       React.createElement('details',null,React.createElement('summary',null,'文档来源（'+sources.length+'）'),
         sources.length?sources.map(function(source){return React.createElement('p',{key:source.sourceId+'@'+source.sourceRevision},(source.displayName||source.sourceId)+' · '+source.sourceRevision+' · '+source.parseState);}):React.createElement('p',null,'没有已保存的来源。'))));
 }
+function ProjectChatStatus(props) {
+  var data=useState(null), error=useState(''), busy=useState(false), open=useState(false), selectedRun=useState('');
+  var runLabels={preparing:'正在准备',running:'正在测试',waiting:'等待补充条件',paused:'已暂停',completed:'本次测试已结束',cancelled:'已停止',failed:'运行失败'};
+  function load(runId){return api('project.status',{sessionId:props.sessionId,runId:runId||selectedRun[0]||undefined}).then(function(value){if(!value.ok)throw Error(value.error||'读取项目状态失败');error[1]('');data[1](value);if(!selectedRun[0]&&value.run)selectedRun[1](value.run.runId);}).catch(function(e){error[1](e.message);});}
+  useEffect(function(){load();},[props.sessionId,props.status&&props.status.run?props.status.run.controlRev:'']);
+  function act(endpoint){busy[1](true);error[1]('');var current=data[0];return api(endpoint,{sessionId:props.sessionId,runId:current&&current.run?current.run.runId:undefined,expectedControlRev:current&&current.run?current.run.controlRev:undefined}).then(function(value){if(!value.ok)throw Error(value.error||'操作失败');return load(value.run&&value.run.runId);}).catch(function(e){error[1](e.message);}).finally(function(){busy[1](false);});}
+  function exportResult(){var current=data[0];return api('project.export',{sessionId:props.sessionId,runId:current&&current.run?current.run.runId:undefined}).then(function(value){if(!value.ok)throw Error(value.error||'导出失败');downloadArchive(value.filename,value.archive);}).catch(function(e){error[1](e.message);});}
+  var status=data[0], run=status&&status.run, checks=(status&&status.checks)||[], counts=(status&&status.counts)||{}, runs=(status&&status.runs)||[];
+  if(!status||!status.configured||!run)return null;
+  var currentCheck=checks.find(function(check){return check.executionState!=='ended';});
+  return React.createElement('section',{'aria-label':'项目当前状态',className:'dsh-chat-project-status'},
+    React.createElement('div',{className:'dsh-chat-project-status-row'},React.createElement('strong',null,runLabels[run.state]||'状态未知'),
+      React.createElement('span',null,'已检查 '+(counts.checked||0)+'/'+(counts.total||0)),
+      React.createElement('span',null,'发现问题 '+(counts.issue||0)),
+      counts.blocked?React.createElement('span',null,'缺少条件 '+counts.blocked):null,
+      currentCheck?React.createElement('span',{className:'dsh-chat-project-current'},'当前：'+currentCheck.requirement):React.createElement('span',{className:'dsh-chat-project-current'},'当前没有待执行检查'),
+      React.createElement(Btn,{disabled:busy[0],onClick:function(){open[1](!open[0]);}},'查看检查表'),
+      run.state==='running'||run.state==='preparing'?React.createElement(Btn,{disabled:busy[0],onClick:function(){return act('project.pause');}},'暂停'):null,
+      run.state==='paused'||run.state==='waiting'?React.createElement(Btn,{disabled:busy[0],onClick:function(){return act('project.resume');}},'继续'):null,
+      React.createElement(Btn,{disabled:busy[0],onClick:exportResult},'导出结果')),
+    runs.length>1?React.createElement('label',{className:'dsh-chat-project-current'},'历史运行 ',
+      React.createElement('select',{'aria-label':'项目历史运行',value:selectedRun[0],disabled:busy[0],onChange:function(event){selectedRun[1](event.target.value);load(event.target.value);}},
+        runs.map(function(item){return React.createElement('option',{key:item.runId,value:item.runId},(runLabels[item.state]||item.state)+' · '+new Date(item.updatedAt).toLocaleString());}))):null,
+    error[0]?React.createElement('div',{role:'alert'},error[0]):null,
+    open[0]?React.createElement('div',{className:'dsh-chat-project-table'},
+      checks.length?React.createElement('table',{className:'dsh-task-project-table'},React.createElement('thead',null,React.createElement('tr',null,React.createElement('th',null,'文档要求'),React.createElement('th',null,'结果'),React.createElement('th',null,'实际做了什么／缺什么'))),React.createElement('tbody',null,checks.map(function(check){return React.createElement('tr',{key:check.checkId},React.createElement('td',null,check.requirement),React.createElement('td',null,check.displayResult||'未得出结论'),React.createElement('td',null,check.displayNotes||''));}))):React.createElement('p',null,'还没有整理出的检查项。')):null);
+}
 function TaskPanel(props) {
   var status=useState(null), error=useState(''), busy=useState(false);
   var projectMode=props.scenario==='project';
@@ -2914,7 +2943,7 @@ function TaskPanel(props) {
   var taskQuestion=current?.policy?.question;
   if(taskQuestion==='有限观察已有目标，向用户建议具体研究问题')taskQuestion='';
   function input(label,state,type){return React.createElement('label',{className:'dsh-task-field'},React.createElement('span',null,label),React.createElement('input',{'aria-label':label,type:type||'text',value:state[0],onChange:function(e){state[1](e.target.value);},style:{width:type==='number'?76:'100%'}}));}
-  if(current&&current.configured&&current.policy&&current.policy.scenario==='project')return React.createElement(ProjectPanel,{sessionId:props.sessionId,status:current,onFindings:props.onFindings});
+  if(current&&current.configured&&current.policy&&current.policy.scenario==='project')return React.createElement('div',{className:'dsh-task-project-settings'},React.createElement('p',null,'项目目标和来源已固定。检查结果、历史和导出入口在对话上方的项目状态行。'));
   return React.createElement('section',{'aria-label':'本轮测试任务',className:'dsh-task-panel'},
     React.createElement('div',{className:'dsh-task-heading'},React.createElement('h3',null,current&&current.configured?(current.stopped?'测试已停止':'正在测试'):'新建测试'),React.createElement(Btn,{disabled:busy[0],onClick:load},'刷新状态')),error[0]?React.createElement('div',{role:'alert'},error[0]):null,
     current&&current.configured?React.createElement('div',null,
@@ -2949,6 +2978,7 @@ function TaskPanel(props) {
       React.createElement('p',null,'从开始测试经过 '+Math.floor((current.elapsedSeconds||0)/60)+' 分 '+((current.elapsedSeconds||0)%60)+' 秒（含停止后的时间）。'),
       current.roundCost?React.createElement('p',null,'本轮会话生成记录 '+current.roundCost.modelCalls+'（含准入被拒绝的回合） · 工具调用 '+current.roundCost.toolCalls+' · 会话 token '+(current.roundCost.totalTokens===null?'未取得':current.roundCost.totalTokens)+'（含缓存读取 '+(current.roundCost.cacheReadTokens===null?'未知':current.roundCost.cacheReadTokens)+'）'):null,
       current.modelBudget?React.createElement('p',null,'已登记模型调用 '+current.modelBudget.chargedCalls+'/'+(current.modelBudget.limits.modelCalls??'未设上限')+'（含重试、压缩和标题）；已观测原生发送 '+current.modelBudget.wireAttempts+' 次，未观测 '+current.modelBudget.unobservedCalls+' 次。已取得 token '+current.modelBudget.knownTokens+'，未知 '+current.modelBudget.unknownCalls+'，尚未结算 '+current.modelBudget.unresolvedCalls+'。'+(current.modelBudget.limits.tokens!==null?'严格 token 上限 '+current.modelBudget.limits.tokens+'；预留 '+current.modelBudget.heldTokens+'。':'')):null,
+      current.roundCost?React.createElement('p',null,'用量口径：会话事件调用 '+current.roundCost.modelCalls+'（其中尝试 '+current.roundCost.attemptCalls+'、辅助 '+(current.roundCost.auxiliaryCalls===null?'未分类':current.roundCost.auxiliaryCalls)+'），准入记账 '+(current.modelBudget?current.modelBudget.chargedCalls:'未取得')+'；未知用量 '+(current.roundCost.unknownUsageCalls||0)+'，缓存读取 '+(current.roundCost.cacheReadTokens===null?'未取得':current.roundCost.cacheReadTokens)+'。两组口径不互相补齐，差额保留为未解释记录。'):null,
       current.modelBudget&&current.modelBudget.calls.length?React.createElement('details',{'aria-label':'模型发送明细'},
         React.createElement('summary',null,'模型发送明细（最近 '+current.modelBudget.calls.length+' 次）'),
         React.createElement('p',null,'只覆盖原生 fetch 的 Messages、Chat Completions 和 Responses；SDK 私有传输不会在这里冒充已观测发送。'),
