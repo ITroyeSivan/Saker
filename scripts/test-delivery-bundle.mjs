@@ -50,7 +50,7 @@ try {
     const text = Object.values(buildDeliveryFiles([row], []).files).join('\n');
     for (const secret of ['query-secret', 'cookie-secret', 'auth-secret', 'body-secret', 'response-secret']) assert(!text.includes(secret));
     assert(row.requestPkt.includes('cookie-secret'));
-    assert(redactCredentials('password=form-secret&x=1').includes('password=[REDACTED]'));
+    assert(redactCredentials('password=form-secret&x=1').includes('password=[已遮蔽]'));
   });
   await test('literal credential scripts are refused while environment inputs remain intact', () => {
     for (const code of ['token = "literal-secret"', 'headers = {"Cookie": "sid=literal-secret"}', 'curl -H "Cookie: sid=literal-secret" https://fixture.test/', 'curl https://u:p@fixture.test/']) {
