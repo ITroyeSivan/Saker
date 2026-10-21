@@ -60,18 +60,25 @@ export function cftVersion(executable) {
 function waitForDevtoolsUrl(child, timeoutMs) {
   return new Promise((resolve, reject) => {
     let buffer = '';
-    const timer = setTimeout(() => reject(new Error('Chrome for Testing 启动超时（未拿到 DevTools 地址）')), timeoutMs);
+    const finish = (error, url) => {
+      clearTimeout(timer);
+      child.stderr.off('data', onData); child.off('exit', onExit); child.off('error', onError);
+      if (error) reject(error); else resolve(url);
+    };
+    const timer = setTimeout(() => finish(new Error('Chrome for Testing 启动超时（未拿到 DevTools 地址）')), timeoutMs);
     const onData = chunk => {
       buffer += chunk.toString();
       const match = /ws:\/\/[^\s]+/.exec(buffer);
-      if (match) { clearTimeout(timer); child.stderr.off('data', onData); resolve(match[0]); }
+      if (match) finish(null, match[0]);
     };
+    const onExit = code => finish(new Error('Chrome for Testing 提前退出（code=' + code + '）'));
+    const onError = error => finish(new Error('Chrome for Testing 未能启动：' + error.message));
     child.stderr.on('data', onData);
-    child.once('exit', code => { clearTimeout(timer); reject(new Error('Chrome for Testing 提前退出（code=' + code + '）')); });
+    child.once('exit', onExit); child.once('error', onError);
   });
 }
 
-async function connectCdp(wsUrl) {
+export async function connectCdp(wsUrl) {
   const socket = new WebSocket(wsUrl);
   let serial = 0;
   const pending = new Map();
@@ -92,29 +99,39 @@ async function connectCdp(wsUrl) {
       message.error ? entry.reject(new Error(JSON.stringify(message.error))) : entry.resolve(message.result);
       return;
     }
-    if (message.method) for (const handler of listeners.get(message.method) || []) handler(message.params || {});
+    if (message.method) for (const handler of listeners.get((message.sessionId || '') + ':' + message.method) || []) handler(message.params || {});
   };
   socket.onclose = () => rejectPending(new Error('浏览器 CDP 连接已关闭'));
   socket.onerror = event => rejectPending(new Error('浏览器 CDP 连接错误' + (event?.message ? '：' + event.message : '')));
   await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; });
   socket.onerror = event => rejectPending(new Error('浏览器 CDP 连接错误' + (event?.message ? '：' + event.message : '')));
-  return {
+  const clientFor = (sessionId = '') => ({
     call: (method, params = {}) => new Promise((resolve, reject) => {
       const id = ++serial;
       const timer = setTimeout(() => {
         pending.delete(id);
         reject(new Error('浏览器 CDP 调用超时：' + method));
       }, 15000);
-      pending.set(id, { resolve, reject, timer });
-      socket.send(JSON.stringify({ id, method, params }));
+      pending.set(id, { resolve, reject, timer, sessionId });
+      try { socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); }
+      catch (error) { clearTimeout(timer); pending.delete(id); reject(error); }
     }),
     on: (method, handler) => {
-      if (!listeners.has(method)) listeners.set(method, []);
-      listeners.get(method).push(handler);
-      return () => listeners.set(method, (listeners.get(method) || []).filter(item => item !== handler));
+      const key = sessionId + ':' + method;
+      if (!listeners.has(key)) listeners.set(key, []);
+      listeners.get(key).push(handler);
+      return () => listeners.set(key, (listeners.get(key) || []).filter(item => item !== handler));
     },
-    close: () => { try { socket.close(); } catch { /* 已关闭 */ } },
-  };
+    session: id => clientFor(id),
+    close: () => {
+      if (!sessionId) { rejectPending(new Error('浏览器 CDP 连接已关闭')); try { socket.close(); } catch { /* 已关闭 */ } return; }
+      for (const key of listeners.keys()) if (key.startsWith(sessionId + ':')) listeners.delete(key);
+      for (const [id, entry] of pending) if (entry.sessionId === sessionId) {
+        clearTimeout(entry.timer); pending.delete(id); entry.reject(new Error('浏览器子页面已关闭'));
+      }
+    },
+  });
+  return clientFor();
 }
 
 const safeName = value => String(value || 'default').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 60) || 'default';
@@ -132,6 +149,7 @@ export class BrowserSession {
     this.downloads = new Map();
     this.pendingDialog = null;
     this.requestIndexLimit = 5000;
+    this.relatedTargets = new Map();
   }
 
   static async start(options = {}) {
@@ -148,18 +166,20 @@ export class BrowserSession {
       '--disable-extensions', '--remote-debugging-port=0', '--user-data-dir=' + profileDir,
       '--disable-background-networking', 'about:blank',
     ], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+    let client, session;
+    try {
     const wsUrl = await waitForDevtoolsUrl(child, options.timeoutMs || 20000);
     const base = wsUrl.replace(/^ws:/, 'http:').replace(/\/devtools\/browser\/.*$/, '');
     const target = await (await fetch(base + '/json/new?about:blank', { method: 'PUT' })).json();
-    const client = await connectCdp(target.webSocketDebuggerUrl);
-    await client.call('Page.enable').catch(() => {});
-    await client.call('Runtime.enable').catch(() => {});
-    await client.call('Network.enable').catch(() => {});
-    await client.call('Network.setBypassServiceWorker', { bypass: true }).catch(() => {});
+    client = await connectCdp(target.webSocketDebuggerUrl);
+    await client.call('Page.enable');
+    await client.call('Runtime.enable');
+    await client.call('Network.enable');
+    await client.call('Network.setBypassServiceWorker', { bypass: true });
     const versionInfo = await client.call('Browser.getVersion').catch(() => null);
     const version = String(versionInfo?.product || '');
     const identityRef = String(options.identityRef || '').trim();
-    const session = new BrowserSession({
+    session = new BrowserSession({
       child, base, target, client, executable, version, profileDir,
       identity: safeName(options.identity),
       identityRef,
@@ -167,18 +187,72 @@ export class BrowserSession {
       pacingSessionId: options.pacingSessionId,
     });
     session.watchNetwork();
-    await session.watchPolicy();
+    try {
+      await session.watchPolicy();
+      await session.watchRelatedTargets(await connectCdp(wsUrl));
+    } catch (error) { await session.close(); throw error; }
     return session;
+    } catch (error) {
+      if (session) await session.close();
+      else { try { client?.close(); } catch {} try { child.kill(); } catch {} }
+      throw error;
+    }
+  }
+
+  async watchRelatedTargets(client, control = client, secondary = false) {
+    this.targetClient = client;
+    this.targetControl = control;
+    this.secondaryTarget = secondary;
+    client.on('Target.attachedToTarget', async ({ sessionId, targetInfo }) => {
+      const childClient = client.session(sessionId);
+      if (targetInfo.targetId === (this.target?.id || this.target?.targetId)) {
+        await childClient.call('Runtime.runIfWaitingForDebugger').catch(() => {});
+        return;
+      }
+      const child = new BrowserSession({ child: this.child, client: childClient, target: targetInfo,
+        requestGuard: this.requestGuard, pacingSessionId: this.pacingSessionId });
+      child.policyDenials = this.policyDenials;
+      this.relatedTargets.set(targetInfo.targetId, child);
+      try {
+        child.watchNetwork();
+        await child.watchPolicy();
+        await child.watchRelatedTargets(childClient, control, true);
+        // Popup renderer agents can wait for Runtime's debugger-start release.
+        // Fetch must be active first; do not await Network before releasing it.
+        await Promise.all([
+          childClient.call('Network.enable'),
+          childClient.call('Network.setBypassServiceWorker', { bypass: true }),
+          childClient.call('Runtime.runIfWaitingForDebugger'),
+        ]);
+      } catch (error) {
+        this.recordPolicyDenial({ request: { url: targetInfo.url } }, '子页面无法启用请求守卫：' + error.message, 'target-setup');
+        // A target that cannot be guarded must never be resumed.
+        await control.call('Target.closeTarget', { targetId: targetInfo.targetId }).catch(() => {});
+        await child.close();
+      }
+    });
+    client.on('Target.detachedFromTarget', ({ targetId }) => {
+      const child = this.relatedTargets.get(targetId);
+      if (child) { this.relatedTargets.delete(targetId); void child.close(); }
+    });
+    await client.call('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true,
+      filter: [{ type: 'page' }, { type: 'iframe' }, { type: 'worker' }, { type: 'shared_worker' }, { type: 'service_worker' }, { exclude: true }] });
   }
 
   watchNetwork() {
     this.client.on('Network.requestWillBeSent', params => {
       const id = params.requestId;
+      const previous = this.requests.get(id);
+      const redirects = previous?.redirects || [];
+      if (params.redirectResponse) {
+        redirects.push({ url: redactText(params.redirectResponse.url || previous?.url || ''), status: params.redirectResponse.status });
+      }
       if (!this.requests.has(id)) this.requestOrder.push(id);
       this.requests.set(id, {
         requestId: id, url: params.request?.url || '', method: params.request?.method || '',
         headers: params.request?.headers || {}, postData: params.request?.postData || '',
         status: null, responseHeaders: {}, mimeType: '', fromCache: false, at: new Date().toISOString(),
+        redirects: redirects.slice(-20),
       });
       while (this.requestOrder.length > this.requestIndexLimit) {
         const expired = this.requestOrder.shift();
@@ -245,6 +319,10 @@ export class BrowserSession {
       let release = null;
       const key = String(params.networkId || params.requestId || '');
       try {
+        // Fetch may pause the next hop BEFORE Network announces its redirect.
+        // A Network id is reused by redirect hops, never concurrent requests.
+        const previousHop = this.pacingReleases.get(key);
+        if (previousHop) { previousHop(); this.pacingReleases.delete(key); }
         const rawUrl = String(params.request?.url || '');
         let parsed;
         try { parsed = new URL(rawUrl); } catch { parsed = null; }
@@ -270,7 +348,23 @@ export class BrowserSession {
           release = await acquireTargetSlot(this.pacingSessionId, decision.policy, this.guardAbort.signal);
           if (key) this.pacingReleases.set(key, release);
         }
-        await this.client.call('Fetch.continueRequest', { requestId: params.requestId });
+        this.guardAbort.signal.throwIfAborted();
+        if (typeof this.requestGuard === 'function') {
+          const current = await this.requestGuard({
+            url: rawUrl, method, resourceType: String(params.resourceType || ''),
+            requestId: key, frameId: params.frameId || '',
+          });
+          const lateDenial = typeof current === 'string' ? current : current?.denial;
+          if (lateDenial || (decision?.revision !== undefined && current?.revision !== decision.revision))
+            throw new Error(lateDenial || '浏览器排队期间任务限制或身份已变化');
+        }
+        const outgoing = { requestId: params.requestId };
+        const override = this.override;
+        if (override && new RegExp('^' + override.urlPattern.split('*').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$').test(rawUrl)) {
+          outgoing.headers = Object.entries({ ...(params.request?.headers || {}), ...override.headers }).map(([name, value]) => ({ name, value: String(value) }));
+          if (override.postData !== undefined) outgoing.postData = Buffer.from(String(override.postData)).toString('base64');
+        }
+        await this.client.call('Fetch.continueRequest', outgoing);
       } catch (error) {
         try { release?.(); } catch { /* 已释放 */ }
         if (key) this.pacingReleases.delete(key);
@@ -319,6 +413,8 @@ export class BrowserSession {
       expression: '(function(){return {title:document.title,url:location.href,text:(document.body?document.body.innerText:"").slice(0,4000)}})()',
       returnByValue: true,
     });
+    if (info.exceptionDetails || typeof info.result?.value?.url !== 'string')
+      throw new Error('浏览器未能取得页面观察，请重新读取页面');
     const out = { ...(info.result?.value || {}), observedAt: new Date().toISOString() };
     if (selector) {
       const element = await this.client.call('Runtime.evaluate', {
@@ -354,7 +450,7 @@ export class BrowserSession {
     }
     if (type === 'type') {
       const result = await this.client.call('Runtime.evaluate', {
-        expression: '(function(){var e=document.querySelector(' + JSON.stringify(String(action.selector || '')) + ');if(!e)return {found:false};e.focus();e.value=' + JSON.stringify(String(action.text ?? '')) + ';e.dispatchEvent(new Event("input",{bubbles:true}));e.dispatchEvent(new Event("change",{bubbles:true}));return {found:true,value:e.value}})()',
+        expression: '(function(){var e=document.querySelector(' + JSON.stringify(String(action.selector || '')) + ');if(!e)return {found:false};e.focus();var p=e.tagName==="TEXTAREA"?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;var setter=Object.getOwnPropertyDescriptor(p,"value").set;setter.call(e,' + JSON.stringify(String(action.text ?? '')) + ');e.dispatchEvent(new Event("input",{bubbles:true}));e.dispatchEvent(new Event("change",{bubbles:true}));return {found:true,value:e.value}})()',
         returnByValue: true,
       });
       const value = result.result?.value || { found: false };
@@ -467,25 +563,13 @@ export class BrowserSession {
   /** 只对明确匹配的请求做修改；动作结束或关闭时解除拦截。 */
   async setRequestOverride({ urlPattern = '*', headers = {}, postData } = {}) {
     this.assertOpen();
-    await this.clearRequestOverride();
-    this.override = { urlPattern, headers, postData };
-    await this.client.call('Fetch.enable', { patterns: [{ urlPattern, requestStage: 'Request' }] });
-    this.client.on('Fetch.requestPaused', async params => {
-      try {
-        const request = { requestId: params.requestId, headers: { ...(params.request?.headers || {}), ...headers } };
-        if (postData !== undefined) request.postData = String(postData);
-        await this.client.call('Fetch.continueRequest', request);
-      } catch {
-        try { await this.client.call('Fetch.failRequest', { requestId: params.requestId, errorReason: 'Aborted' }); } catch { /* 已结束 */ }
-      }
-    });
+    this.override = { urlPattern: String(urlPattern), headers, postData };
     return { active: true, urlPattern };
   }
 
   async clearRequestOverride() {
     if (!this.override) return { active: false };
     this.override = null;
-    try { await this.client.call('Fetch.disable'); } catch { /* 未启用 */ }
     return { active: false };
   }
 
@@ -500,8 +584,12 @@ export class BrowserSession {
     try { this.guardAbort?.abort(new Error('浏览器会话已关闭')); } catch { /* 已关闭 */ }
     for (const release of this.pacingReleases.values()) { try { release(); } catch { /* 已释放 */ } }
     this.pacingReleases.clear();
+    for (const child of this.relatedTargets.values()) await child.close();
+    this.relatedTargets.clear();
     try { await this.clearRequestOverride(); } catch { /* 忽略 */ }
     try { this.client.close(); } catch { /* 已关闭 */ }
+    if (this.secondaryTarget) return;
+    try { this.targetClient?.close(); } catch { /* 已关闭 */ }
     try { this.child.kill(); } catch { /* 已退出 */ }
     await sleep(200);
   }

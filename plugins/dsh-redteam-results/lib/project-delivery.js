@@ -73,6 +73,18 @@ export function buildProjectDeliveryFiles(store, sessionId, runId) {
   const evidenceFiles = {};
   for (const action of actions) {
     const evidence = { action: redactValue(action), receipt: null };
+    if (action.pageRef) {
+      try {
+        const row = store.db.prepare('SELECT record FROM business_materials WHERE session_id=? AND id=?').get(sessionId, action.pageRef);
+        if (!row) throw new Error('浏览器观察正文缺失');
+        const material = JSON.parse(row.record);
+        if (material.source !== 'host-project-browser-observation' || material.projectRunId !== runId || material.actionId !== action.actionId)
+          throw new Error('浏览器观察归属不一致');
+        evidence.browserObservation = redactValue({ ...material, originalBase64: undefined });
+      } catch (error) {
+        missing.push({ kind: 'browser-observation', id: action.pageRef, reason: error.message });
+      }
+    }
     if (action.requestRef) {
       try {
         const receipt = readExecutionReceipt(store, sessionId, action.requestRef);

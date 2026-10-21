@@ -1920,11 +1920,32 @@ function MaterialsEntry(props) {
   var fallbackOpen = useState(false), text = useState(''), name = useState('');
   var busy = useState(false), notice = useState(''), error = useState('');
   var summary = useState(null);
+  var panelPosition = useState(null);
   var fileRef = useRef(null), dirRef = useRef(null), root = useRef(null), trigger = useRef(null);
   // 面板由 ChatSetup 统一管（四入口互斥）；单独挂载时退回本地状态。
   var open = [props.open === undefined ? fallbackOpen[0] : props.open,
     function (next) { if (props.onOpenChange) props.onOpenChange(next); else fallbackOpen[1](next); }];
   function closeEntry() { open[1](false); if (trigger.current && trigger.current.focus) trigger.current.focus(); }
+  useEffect(function () {
+    if (!open[0] || typeof window === 'undefined') return;
+    function place() {
+      if (!trigger.current || !trigger.current.getBoundingClientRect) return;
+      var rect = trigger.current.getBoundingClientRect();
+      var width = Math.max(0, Math.min(420, window.innerWidth - 32));
+      var above = Math.max(0, rect.top - 24), below = Math.max(0, window.innerHeight - rect.bottom - 24);
+      var position = { position: 'fixed', width: width + 'px', left: Math.max(16, Math.min(rect.right - width, window.innerWidth - width - 16)) + 'px', right: 'auto' };
+      if (Math.max(above, below) < 180) {
+        position.top = '16px'; position.bottom = 'auto'; position.maxHeight = Math.max(80, window.innerHeight - 32) + 'px';
+      } else if (above >= below) {
+        position.bottom = (window.innerHeight - rect.top + 8) + 'px'; position.top = 'auto'; position.maxHeight = Math.min(540, above) + 'px';
+      } else {
+        position.top = (rect.bottom + 8) + 'px'; position.bottom = 'auto'; position.maxHeight = Math.min(540, below) + 'px';
+      }
+      panelPosition[1](position);
+    }
+    place(); window.addEventListener('resize', place);
+    return function () { window.removeEventListener('resize', place); };
+  }, [open[0]]);
   // Esc / 点面板外都能关，焦点回到入口按钮（v6 第 10.5 节 UI09/UI12）。
   useEffect(function () {
     if (!open[0]) return;
@@ -2050,20 +2071,20 @@ function MaterialsEntry(props) {
     React.createElement('button', { ref: trigger, type: 'button', className: 'dsh-chat-toolbar-button', 'aria-expanded': open[0],
       title: projectMode ? '导入本次项目的测试文档。程序只做本地解析，不立刻调用模型。' : '把本次网站的请求、代码或文件交给 AI 分析。保存原文并添加引用；不立刻发送或访问网站。',
       onClick: function () { open[1](!open[0]); } }, projectMode ? '添加测试文档' : '添加测试资料'),
-    open[0] ? React.createElement('div', { className: 'dsh-materials-import' },
-      React.createElement('div', { className: 'dsh-chat-panel-head' }, React.createElement('strong', null, '添加测试资料'),
-        React.createElement('button', { type: 'button', 'aria-label': '关闭添加测试资料', onClick: closeEntry }, '关闭')),
+    open[0] ? React.createElement('div', { className: 'dsh-materials-import', style: panelPosition[0] },
+      React.createElement('div', { className: 'dsh-chat-panel-head' }, React.createElement('strong', null, projectMode ? '添加测试文档' : '添加测试资料'),
+        React.createElement('button', { type: 'button', 'aria-label': projectMode ? '关闭添加测试文档' : '关闭添加测试资料', onClick: closeEntry }, '关闭')),
       React.createElement('p', null, projectMode
         ? '导入本次测试要求：Word、Excel 或文本。程序只在本地解析，不立刻调用模型，也不访问网站。'
         : '原始 HTTP、HAR、curl 文本、JS、源码或扫描导出都可以。保存原文并建立引用；不立刻发送，也不访问网站。'),
       React.createElement('div', { className: 'dsh-materials-import-actions' },
         React.createElement('button', { type: 'button', disabled: busy[0], onClick: function () { if (fileRef.current) fileRef.current.click(); } }, '选择文件'),
-        React.createElement('button', { type: 'button', disabled: busy[0], onClick: function () { if (dirRef.current) dirRef.current.click(); } }, '选择代码文件夹'),
+        projectMode ? null : React.createElement('button', { type: 'button', disabled: busy[0], onClick: function () { if (dirRef.current) dirRef.current.click(); } }, '选择代码文件夹'),
         React.createElement('input', { ref: fileRef, type: 'file', multiple: true, accept: projectMode ? '.docx,.xlsx,.txt,.md,.json' : undefined, style: { display: 'none' }, onChange: pickFiles }),
         React.createElement('input', { ref: dirRef, type: 'file', webkitdirectory: '', multiple: true, style: { display: 'none' }, onChange: pickFiles })),
-      React.createElement('label', { className: 'dsh-materials-import-paste' }, '粘贴请求、响应或代码',
-        React.createElement('textarea', { 'aria-label': '粘贴测试资料', rows: 5, maxLength: 200000, value: text[0],
-          placeholder: '例如：GET /api/orders HTTP/1.1 或 HAR JSON 片段', onChange: function (event) { text[1](event.target.value); } })),
+      React.createElement('label', { className: 'dsh-materials-import-paste' }, projectMode ? '粘贴环境说明或测试要求' : '粘贴请求、响应或代码',
+        React.createElement('textarea', { 'aria-label': projectMode ? '粘贴测试文档' : '粘贴测试资料', rows: 5, maxLength: 200000, value: text[0],
+          placeholder: projectMode ? '填写项目地址、测试账号说明，以及需要检查的功能与要求。' : '例如：GET /api/orders HTTP/1.1 或 HAR JSON 片段', onChange: function (event) { text[1](event.target.value); } })),
       React.createElement('label', { className: 'dsh-materials-import-name' }, '名称（可选）',
         React.createElement('input', { 'aria-label': '测试资料名称', value: name[0], onChange: function (event) { name[1](event.target.value); } })),
       React.createElement('button', { type: 'button', className: 'is-primary', disabled: busy[0], onClick: save }, busy[0] ? '正在保存…' : projectMode ? '导入到本次测试' : '保存到本任务资料'),

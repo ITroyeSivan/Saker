@@ -130,6 +130,16 @@ export function projectProgressFingerprint(store, sessionId, runId) {
         check.checkedContent, check.gaps, [...(check.findingRefs || [])].sort()]));
     }
     for (const action of listProjectActions(store, sessionId, runId)) {
+      if (action.executionState === 'completed' && !action.sideEffectUnknown && action.pageRef && action.controlRev === run.controlRev) {
+        const row = store.db.prepare('SELECT record FROM business_materials WHERE session_id=? AND id=?').get(sessionId, action.pageRef);
+        try {
+          const observation = row && JSON.parse(row.record);
+          if (observation?.source === 'host-project-browser-observation' && observation.projectRunId === runId
+            && observation.actionId === action.actionId && observation.page && !observation.page.dialog)
+            seen.add(hash(['browser-observation', action.checkId, action.identityRef, observation.page.url,
+              observation.page.title, observation.page.text, observation.page.element]));
+        } catch { /* Invalid observations provide no progress. */ }
+      }
       if (action.executionState !== 'completed' || action.sideEffectUnknown || !action.requestRef
         || action.controlRev !== run.controlRev) continue;
       const row = store.db.prepare('SELECT record FROM execution_receipts WHERE session_id=? AND id=?')

@@ -34,11 +34,12 @@ import { runBrowserExecution, recordBrowserReceipt, readBrowserReceipt } from '.
 import { runEffectJob, readEffectJob } from './effect-jobs.js';
 import { startTaskPolicy, updateTaskProgress, taskPolicyStatus, readTaskPolicy, taskExecutionGuard, taskPrompt, taskPromptStable, taskOverview, chooseTaskMode, pauseTaskPolicy, resumeTaskPolicy, archiveTaskRound, takeTaskContinuation, finishTaskOnTurnEnd, checkpointTask, setTaskInteraction, setTaskWorkers, setTaskExplain, setTaskActionLimits, updateTaskFromChat, targetTrafficDenial, excludedPathDenial, effectivePolicy, confirmTaskCheckpoint } from './task-policy.js';
 import { projectContinuation, projectTurnDecision, markProjectContinuation, pauseProjectRun, resumeProjectRun, projectExecutableChecks, selectProjectCheck, startProjectTask, setProjectRunState, completeProjectRun } from './project-runtime.js';
-import { activeProjectRun, readProjectRun, listProjectRuns, listProjectChecks, listProjectSources, readProjectSource, listProjectActions, defineProjectChecks, recordProjectCheck, readProjectCheck, upsertProjectSource, beginProjectAction, finishProjectAction, reconcileProjectAction } from './project-store.js';
+import { activeProjectRun, readProjectRun, listProjectRuns, listProjectChecks, listProjectSources, readProjectSource, listProjectActions, defineProjectChecks, recordProjectCheck, readProjectCheck, upsertProjectSource, beginProjectAction, finishProjectAction, reconcileProjectAction, saveProjectBrowserObservation } from './project-store.js';
 import { zipProjectDelivery, projectCounts, projectCheckView } from './project-delivery.js';
 import { startBrowserSession } from './browser-session.js';
 import { executeProjectHttp } from './project-execution.js';
-import { parseDocumentBuffer, readDocumentSection } from './project-documents.js';
+import { readDocumentSection } from './project-documents.js';
+import { parseDocumentIsolated } from './project-document-parser.js';
 import { recordProjectDocumentRead } from './project-progress.js';
 import { taskStartInput, taskProgressInput } from './task-inputs.js';
 import { chatDefaults, saveChatDefaults, promptDraft, promptTemplates } from './chat-setup.js';
@@ -818,7 +819,7 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
       const existingPolicy = readTaskPolicy(st, sessionId);
       if (existingPolicy && existingPolicy.scenario !== 'project') throw new Error('当前会话已有安全测试任务，请新建会话后添加项目文档');
       if (activeProjectRun(st, sessionId)) throw new Error('本次运行已开始，来源快照已固定；请在下一轮重新添加文档');
-      const imported = importProjectSource(st, sessionId, p);
+      const imported = await importProjectSource(st, sessionId, p);
       return { ok: true, ...imported };
     }
     if (endpoint === 'project.start') {
@@ -1041,7 +1042,7 @@ function wakeWorkersForMaterial(ctx, store, sessionId, materialId) {
   return woken;
 }
 
-function importProjectSource(store, sessionId, input = {}) {
+async function importProjectSource(store, sessionId, input = {}) {
   const displayName = String(input.name || input.displayName || '未命名文档').trim().slice(0, 300) || '未命名文档';
   const base64 = String(input.base64 || '').trim();
   const plainText = typeof input.text === 'string' ? input.text : '';
@@ -1051,7 +1052,11 @@ function importProjectSource(store, sessionId, input = {}) {
   if (buffer.length > 20 * 1024 * 1024) throw new Error('单个项目文档不能超过 20MB');
   const digest = crypto.createHash('sha256').update(buffer).digest('hex');
   const snapshotMaterialId = 'project-source-' + digest;
-  const parsed = parseDocumentBuffer(buffer, { displayName });
+  const parsed = await parseDocumentIsolated(buffer, { displayName });
+  // Parsing yields to other RPCs. Recheck before saving a now-fixed run snapshot.
+  if (activeProjectRun(store, sessionId)) throw new Error('文档读取期间任务已开始，请在下一轮重新添加文档');
+  const currentPolicy = readTaskPolicy(store, sessionId);
+  if (currentPolicy && currentPolicy.scenario !== 'project') throw new Error('当前会话已有安全测试任务，请新建会话后添加项目文档');
   const existingSources = listProjectSources(store, sessionId)
     .filter(source => source.displayName === displayName)
     .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
@@ -1736,7 +1741,9 @@ function apply(ctx) {
 			try { origins.add(new URL(asset.url).origin); } catch { /* 忽略无效资产 */ }
 		}
 		if (!origins.has(parsed.origin)) return { denial: '浏览器请求不在本次授权站点或明确关联资产内' };
-		return { policy: limits };
+        return { policy: limits, revision: crypto.createHash('sha256').update(JSON.stringify([
+          currentRun.runId, currentRun.controlRev, currentPolicy.policyRev, limits,
+        ])).digest('hex') };
 	};
 	ctx.tools.register(defineTool({
 		name: 'project_document',
@@ -1908,16 +1915,17 @@ function apply(ctx) {
 			text: { type: 'string' }, value: { type: 'string' },
 			files: { type: 'array', items: { type: 'string' } },
 			requestId: { type: 'string' }, screenshot: { type: 'boolean' }, identityRef: { type: 'string' },
+			accept: { type: 'boolean' }, promptText: { type: 'string' },
 			cursor: { type: 'integer' }, limit: { type: 'integer' }, directory: { type: 'string' }
 		},
 		output: { schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } }, render: (_args, value) => [{ type: 'text', text: value.ok ? value.text : value.error }] },
 		async execute(args, exec) {
 			const scope = projectScopeOf(exec);
 			if (scope.error) return { ok: false, error: scope.error };
+			let begun;
 			try {
 				const action = String(args.action || '');
 				const targetAction = ['open', 'act'].includes(action);
-				let begun;
 				if (targetAction) {
 					if (scope.run.state !== 'running') throw new Error('项目运行当前不可派发浏览器动作');
 					if (exec.signal?.aborted) throw new Error('项目动作已取消');
@@ -1933,7 +1941,7 @@ function apply(ctx) {
 					if (denied) throw new Error(denied);
 				}
 				let browser = projectBrowsers.get(scope.session.id);
-				const identityRef = String(args.identityRef || '').trim();
+				const identityRef = String(args.identityRef ?? browser?.identityRef ?? '').trim();
 				if (browser && browser.identityRef !== identityRef) {
 					await browser.close();
 					projectBrowsers.delete(scope.session.id);
@@ -1944,6 +1952,7 @@ function apply(ctx) {
 					return { ok: true, text: '浏览器会话已关闭' };
 				}
 				if (!browser) {
+					if (!targetAction) throw new Error('请先打开浏览器页面，再读取已有观察或请求');
 					browser = await startBrowserSession({
 						identity: scope.session.id, identityRef,
 						requestGuard: projectBrowserGuardOf(scope),
@@ -1954,15 +1963,15 @@ function apply(ctx) {
 				try {
 					let result;
 					if (action === 'open') result = await browser.open(String(args.url || ''));
-					else if (action === 'act') result = await browser.act({ type: args.actType, url: args.url, selector: args.selector, text: args.text, value: args.value, files: args.files, directory: args.directory });
+					else if (action === 'act') result = await browser.act({ type: args.actType, url: args.url, selector: args.selector, text: args.text, value: args.value, files: args.files, directory: args.directory, accept: args.accept, promptText: args.promptText });
 					else if (action === 'observe') result = await browser.observe({ selector: args.selector, screenshot: args.screenshot === true });
 					else if (action === 'requests') result = browser.listRequestsPage({ cursor: args.cursor, limit: args.limit });
 					else if (action === 'request-detail') result = await browser.requestDetail(String(args.requestId || ''));
 					else throw new Error('未知的浏览器操作：' + action);
 					if (action === 'open') {
-						await finishProjectAction(scope.store, scope.session.id, scope.run.runId, begun?.action?.actionId, { executionState: 'completed', pageRef: result.url });
+						const observationRef = saveProjectBrowserObservation(scope.store, scope.session.id, scope.run.runId, begun.action.actionId, result);
 						const page = redactValue(result);
-						return { ok: true, text: JSON.stringify({ title: page.title, url: page.url, executionId: begun?.action?.actionId || null }), page, actionId: begun?.action?.actionId || null };
+						return { ok: true, text: JSON.stringify({ title: page.title, url: page.url, executionId: begun.action.actionId, observationRef }), page, actionId: begun.action.actionId, observationRef };
 					}
 					if (action === 'act') {
 						if (result.state === 'failed') {
@@ -1999,6 +2008,15 @@ function apply(ctx) {
 						const safeResult = redactValue(result);
 						return { ok: result.state !== 'failed', text: JSON.stringify(safeResult), ...(result.state === 'failed' ? { error: result.error } : {}), result: safeResult, actionId: begun?.action?.actionId || null };
 					}
+					if (action === 'observe' && scope.run.state === 'running') {
+						const checkId = String(args.checkId || scope.run.currentCheckId || '');
+						if (checkId) {
+							begun = beginProjectAction(scope.store, scope.session.id, scope.run.runId, checkId, { controlRev: scope.run.controlRev, identityRef });
+							const observationRef = saveProjectBrowserObservation(scope.store, scope.session.id, scope.run.runId, begun.action.actionId, result);
+							const page = redactValue(result);
+							return { ok: true, text: JSON.stringify(page), page, actionId: begun.action.actionId, observationRef };
+						}
+					}
 					const safeResult = redactValue(result);
 					return { ok: true, text: action === 'request-detail' ? String(safeResult.responseBody || '').slice(0, 2000) : JSON.stringify(safeResult), [action === 'request-detail' ? 'request' : action === 'observe' ? 'page' : 'requests']: safeResult };
 				} catch (error) {
@@ -2010,7 +2028,14 @@ function apply(ctx) {
 					}
 					throw error;
 				}
-				} catch (error) { return { ok: false, error: redactText(error.message) }; }
+				} catch (error) {
+					if (begun) {
+						const pending = listProjectActions(scope.store, scope.session.id, scope.run.runId).find(item => item.actionId === begun.action.actionId);
+						if (['queued', 'dispatched'].includes(pending?.executionState))
+							finishProjectAction(scope.store, scope.session.id, scope.run.runId, begun.action.actionId, { executionState: 'failed', error: redactText(error.message) });
+					}
+					return { ok: false, error: redactText(error.message) };
+				}
 		}
 	}));
 	ctx.tools.register(defineTool({

@@ -4,6 +4,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { taskTransaction, taskEvent } from './task-policy-record.js';
 import { getFinding } from './store.js';
+import { redactValue } from './redaction.js';
 
 export const PROJECT_RUN_STATES = ['preparing', 'running', 'waiting', 'paused', 'completed', 'cancelled', 'failed'];
 export const PROJECT_ACTIVE_STATES = ['preparing', 'running', 'waiting', 'paused'];
@@ -61,6 +62,7 @@ function validateDependencyGraph(checks) {
       const current = byId.get(id);
       if (!current) throw new Error('检查依赖不存在：' + id);
       for (const dependency of current.dependencies || []) visit(dependency);
+      seen.delete(id);
     };
     for (const dependency of check.dependencies || []) {
       if (dependency === check.checkId) throw new Error('检查不能依赖自身：' + check.checkId);
@@ -76,8 +78,18 @@ function validateDependencyGraph(checks) {
 }
 
 function usableProjectObservation(store, sessionId, runId, action) {
-  if (!action || action.executionState !== 'completed') return false;
-  if (action.pageRef) return true;
+  if (!action || action.executionState !== 'completed' || action.sideEffectUnknown || action.bodyUnavailable) return false;
+  if (action.pageRef) {
+    const row = store.db.prepare('SELECT record FROM business_materials WHERE session_id=? AND id=?').get(sessionId, action.pageRef);
+    if (!row) return false;
+    try {
+      const observation = JSON.parse(row.record);
+      return observation.source === 'host-project-browser-observation' && observation.projectRunId === runId
+        && observation.projectCheckId === action.checkId && observation.actionId === action.actionId
+        && typeof observation.page?.text === 'string' && /^https?:\/\//.test(observation.page.url)
+        && Number.isFinite(Date.parse(observation.page.observedAt)) && !observation.page.dialog;
+    } catch { return false; }
+  }
   if (!action.requestRef) return false;
   const row = store.db.prepare('SELECT record FROM execution_receipts WHERE session_id=? AND id=?')
     .get(sessionId, String(action.requestRef));
@@ -85,10 +97,34 @@ function usableProjectObservation(store, sessionId, runId, action) {
   try {
     const receipt = JSON.parse(row.record);
     return receipt.projectRunId === runId && receipt.projectCheckId === action.checkId
-      && receipt.actionId === action.actionId;
+      && receipt.actionId === action.actionId && receipt.outcome === 'response'
+      && receipt.complete === true && !receipt.bodyUnavailable
+      && typeof receipt.responseBodyBase64 === 'string';
   } catch {
     return false;
   }
+}
+
+export function saveProjectBrowserObservation(store, sessionId, runId, actionId, page) {
+  return taskTransaction(store, () => {
+    const action = readProjectAction(store, sessionId, runId, actionId);
+    if (!action) throw new Error('project action not found');
+    const safePage = redactValue(page);
+    const id = 'project-observation-' + randomUUID();
+    const observation = {
+      id, kind: 'project-observation', source: 'host-project-browser-observation',
+      projectRunId: runId, projectCheckId: action.checkId, actionId,
+      controlRev: action.controlRev, page: safePage,
+    };
+    const original = Buffer.from(JSON.stringify(observation));
+    const digest = createHash('sha256').update(original).digest('hex');
+    const material = { ...observation, displayName: '浏览器观察', originalBase64: original.toString('base64'),
+      bytes: original.length, digest, relativeRef: 'materials/' + id };
+    store.db.prepare('INSERT INTO business_materials(session_id,id,source_url,digest,record) VALUES(?,?,?,?,?)')
+      .run(sessionId, id, String(safePage.url || ''), digest, JSON.stringify(material));
+    finishProjectAction(store, sessionId, runId, actionId, { executionState: 'completed', pageRef: id });
+    return id;
+  });
 }
 
 function reviewedFinding(store, sessionId, findingId) {
