@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { registerFinding, updateFinding } from '../../plugins/dsh-redteam-results/lib/store.js';
-import { beginProjectAction, finishProjectAction, recordProjectCheck } from '../../plugins/dsh-redteam-results/lib/project-store.js';
+import { beginProjectAction, finishProjectAction, recordProjectCheck, activeProjectRun, listProjectChecks } from '../../plugins/dsh-redteam-results/lib/project-store.js';
 
 export function observeProjectCheck(store, sessionId, runId, checkId, input = {}) {
   const begun = beginProjectAction(store, sessionId, runId, checkId, {
@@ -40,6 +40,9 @@ export function recordObservedProjectCheck(store, sessionId, runId, checkId, pat
 }
 
 export function registerVerifiedProjectFinding(store, sessionId, input = {}) {
+  const run = activeProjectRun(store, sessionId);
+  const check = run && listProjectChecks(store, sessionId, run.runId).find(item => item.checkId === input.checkId || (!input.checkId && item.executionState !== 'ended'));
+  const observation = check && observeProjectCheck(store, sessionId, run.runId, check.checkId, { body: 'SYNTHETIC_PROJECT_FINDING_OBSERVATION' });
   const finding = registerFinding(store, sessionId, 'pentest', {
     title: input.title || '项目复核 finding',
     severity: input.severity || 'medium',
@@ -47,6 +50,7 @@ export function registerVerifiedProjectFinding(store, sessionId, input = {}) {
     evidenceLevel: 'confirmed',
     evidence: 'SYNTHETIC_PROJECT_EVIDENCE',
     impact: 'SYNTHETIC_PROJECT_IMPACT',
+    evidenceRefs: observation ? [{ kind: 'request', id: observation.executionId }] : [],
   });
   return updateFinding(store, sessionId, 'pentest', finding.id, {
     status: 'verified',

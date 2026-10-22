@@ -82,7 +82,7 @@ export function exportTaskArchive(store, sessionId, { now = Date.now() } = {}) {
         secretsExcluded: true, restoredState: 'unconfirmed',
         tables: Object.keys(sections), sections: counts, digests, columns,
         files: attachments.files, missingFiles: attachments.missingFiles,
-        note: '完整备份含必要原文；账号密钥不在此文件，恢复后需重新绑定。',
+        note: '完整备份含导入原文，原文可能带凭据；单独保存的账号秘密不导出，恢复后需重新绑定。',
       },
       sections,
     };
@@ -141,13 +141,32 @@ export function verifyTaskArchive(archive) {
 
   if (Array.isArray(manifest.files)) {
     const ids = new Set();
+    const materials = new Map();
+    for (const row of Array.isArray(sections?.business_materials) ? sections.business_materials : []) {
+      try { materials.set(row.id, { row, record: JSON.parse(row.record) }); } catch { /* 检查时报告缺失 */ }
+    }
     for (const file of manifest.files) {
       if (!file || typeof file.id !== 'string' || !file.id || typeof file.digest !== 'string'
         || !Number.isInteger(file.bytes) || file.bytes < 0 || typeof file.relativeRef !== 'string')
         problems.push('files 条目结构无效');
       else if (ids.has(file.id)) problems.push('files 条目重复：' + file.id);
-      else ids.add(file.id);
+      else {
+        ids.add(file.id);
+        const material = materials.get(file.id);
+        try {
+          if (!material || typeof material.record.originalBase64 !== 'string') throw new Error('缺少附件正文');
+          const { row, record } = material;
+          const bytes = Buffer.from(record.originalBase64, 'base64');
+          if (bytes.toString('base64') !== record.originalBase64 || sha(bytes) !== file.digest
+            || row.digest !== file.digest || record.digest !== file.digest || bytes.length !== file.bytes || record.bytes !== file.bytes)
+            throw new Error('附件摘要或长度不一致');
+          if (file.relativeRef !== record.relativeRef || file.relativeRef !== 'materials/' + file.id
+            || /[\\\u0000-\u001f:]/.test(file.relativeRef) || file.relativeRef.split('/').some(part => !part || part === '.' || part === '..'))
+            throw new Error('附件引用无效');
+        } catch (error) { problems.push('files ' + file.id + '：' + error.message); }
+      }
     }
+    for (const [id, { record }] of materials) if (record.originalBase64 && !ids.has(id)) problems.push('files 遗漏附件：' + id);
   }
   return { ok: problems.length === 0, problems };
 }

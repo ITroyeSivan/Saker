@@ -112,7 +112,7 @@ try {
   });
 
   await test('project.start 幂等，pause / resume / stop 状态一致', async () => {
-    const started = await dispatch(ctx, store, 'project.start', { sessionId: 'pd-start', policy: { question: '按文档测试', budget: { minutes: 30 } } });
+    const started = await dispatch(ctx, store, 'project.start', { sessionId: 'pd-start', policy: { question: '按文档测试', allowTargetNetwork: false, budget: { minutes: 30 } } });
     assert.equal(started.ok, true);
     assert.equal(started.existing, false);
     const again = await dispatch(ctx, store, 'project.start', { sessionId: 'pd-start', policy: { question: '另一个窗口再次开始' } });
@@ -132,7 +132,7 @@ try {
     const stoppedStatus = await dispatch(ctx, store, 'project.status', { sessionId: 'pd-start' });
     assert.equal(stoppedStatus.configured, true, '停止后页面仍可查看已保存的项目');
     assert.equal(stoppedStatus.run.runId, runningAgain.runId);
-    const restarted = await dispatch(ctx, store, 'project.start', { sessionId: 'pd-start', policy: { question: '第二轮按文档测试', budget: { minutes: 30 } } });
+    const restarted = await dispatch(ctx, store, 'project.start', { sessionId: 'pd-start', policy: { question: '第二轮按文档测试', allowTargetNetwork: false, budget: { minutes: 30 } } });
     assert.equal(restarted.ok, true, restarted.error);
     assert.equal(restarted.existing, false, '结束后的再次开始必须建立新运行');
     assert.notEqual(restarted.run.runId, stopped.run.runId);

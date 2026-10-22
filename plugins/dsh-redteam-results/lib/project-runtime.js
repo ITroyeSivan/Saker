@@ -1,7 +1,7 @@
 // W05：项目连续推进。接续只在运行仍有效、存在可执行未完成项、没有在途动作或
 // 未知写入时发生；同一进度重复接续达到阈值后暂停，不再反复发“继续”。
 import { taskTransaction, writeTaskPolicy } from './task-policy-record.js';
-import { readTaskPolicy, taskPolicyStatus, startTaskPolicy, hasUnreleasedWorker } from './task-policy.js';
+import { readTaskPolicy, taskPolicyStatus, startTaskPolicy, hasUnreleasedWorker, setTaskActionLimits } from './task-policy.js';
 import {
   activeProjectRun, readProjectRun, listProjectChecks, listProjectActions,
   transitionProjectRun, projectCheckEvidenceProblems,
@@ -54,8 +54,9 @@ export function startProjectTask(store, sessionId, input = {}) {
     }
     const policy = startTaskPolicy(store, sessionId, { ...defaults, ...input.policy, scenario: 'project',
       budget: { ...defaults.budget, ...input.policy?.budget, workers: 0 } }, Math.max(Date.now(), (previous?.startedAt || 0) + 1));
+    if (previous?.allowedOrigins) setTaskActionLimits(store, sessionId, { allowedOrigins: previous.allowedOrigins }, 'desktop-user');
     const run = createProjectRun(store, sessionId, { policyRev: policy.policyRev, question: policy.question,
-      sourceSnapshot: input.sourceSnapshot });
+      sourceSnapshot: input.sourceSnapshot, runtimeId: input.runtimeId });
     syncProjectPolicy(store, sessionId, run);
     return run;
   });
@@ -66,6 +67,52 @@ export function setProjectRunState(store, sessionId, runId, state, expectedContr
     const run = transitionProjectRun(store, sessionId, runId, state, expectedControlRev, detail);
     syncProjectPolicy(store, sessionId, run);
     return run;
+  });
+}
+
+// Restore only facts owned by a stopped host. A live/permission-protected PID is
+// not proof of a stopped host; another host's active work must remain untouched.
+export function recoverInterruptedProjectRuns(store, { runtimeId = '', shutdown = false } = {}) {
+  return taskTransaction(store, () => {
+    const recovered = [];
+    const rows = store.db.prepare("SELECT record FROM project_runs WHERE state IN ('preparing','running','waiting','paused')").all();
+    for (const row of rows) {
+      const run = JSON.parse(row.record);
+      if (shutdown) {
+        if (!runtimeId || run.ownerRuntimeId !== runtimeId) continue;
+      } else if (Number.isSafeInteger(run.ownerPid) && run.ownerPid > 0) {
+        try { process.kill(run.ownerPid, 0); continue; }
+        catch (error) { if (error.code !== 'ESRCH') continue; }
+      }
+      const actions = listProjectActions(store, run.sessionId, run.runId);
+      const unfinished = actions.filter(action => ['queued', 'dispatched'].includes(action.executionState));
+      if (!['preparing', 'running'].includes(run.state) && !unfinished.length) continue;
+      const at = nowIso();
+      for (const action of unfinished) {
+        const dispatched = action.executionState === 'dispatched';
+        const unknown = dispatched && !['GET', 'HEAD', 'OPTIONS'].includes(action.method);
+        const next = { ...action, executionState: unknown ? 'unknown' : 'failed',
+          sideEffectUnknown: unknown || action.sideEffectUnknown === true,
+          bodyUnavailable: dispatched, endedAt: at, interruptedAt: at,
+          error: dispatched ? '宿主已中断，原动作未取得完整结果' : '宿主已中断，尚未派发的动作已取消' };
+        store.db.prepare('UPDATE project_actions SET state=?,record=?,updated_at=? WHERE session_id=? AND run_id=? AND action_id=?')
+          .run(next.executionState, JSON.stringify(next), at, run.sessionId, run.runId, action.actionId);
+      }
+      for (const check of listProjectChecks(store, run.sessionId, run.runId)) {
+        if (check.executionState !== 'running') continue;
+        store.db.prepare('UPDATE project_checks SET record=?,updated_at=? WHERE session_id=? AND run_id=? AND check_id=?')
+          .run(JSON.stringify({ ...check, executionState: 'paused', updatedAt: at }), at, run.sessionId, run.runId, check.checkId);
+      }
+      const next = { ...run, state: 'paused', controlRev: run.controlRev + 1,
+        ownerPid: null, ownerRuntimeId: '', interruptedAt: at, updatedAt: at,
+        blocker: { code: 'host-interrupted', reason: unfinished.some(action => action.executionState === 'dispatched')
+          ? '上次执行中断；请先核对未收尾的动作，再继续测试' : '上次执行中断；已保留进度，请确认环境后继续' } };
+      store.db.prepare('UPDATE project_runs SET state=?,control_rev=?,record=?,updated_at=? WHERE session_id=? AND run_id=?')
+        .run(next.state, next.controlRev, JSON.stringify(next), at, run.sessionId, run.runId);
+      syncProjectPolicy(store, run.sessionId, next);
+      recovered.push({ sessionId: run.sessionId, runId: run.runId });
+    }
+    return recovered;
   });
 }
 
@@ -256,15 +303,34 @@ export function pauseProjectRun(store, sessionId, runId, blocker, expectedContro
   return setProjectRunState(store, sessionId, runId, 'paused', expectedControlRev ?? run.controlRev, { blocker: blocker || null });
 }
 
+// A provider can reject generation before turn-stopping is emitted. Status reads
+// also synchronize terminal policy limits, so the project never stays "running".
+export function synchronizeStoppedProjectRun(store, sessionId) {
+  const policy = readTaskPolicy(store, sessionId);
+  if (policy?.scenario !== 'project') return null;
+  const run = activeProjectRun(store, sessionId);
+  if (!run || !['preparing', 'running'].includes(run.state)) return run;
+  const status = taskPolicyStatus(store, sessionId);
+  if (!status.stopped || status.reason === 'plan_complete') return run;
+  const reason = policy.modelBudgetBlock?.message || policy.blocker?.reason || ({
+    time_budget_exhausted: '本次时间已用完，进度已保留；继续测试请新建下一次测试。',
+    tool_budget_exhausted: '本次操作次数已用完，进度已保留；继续测试请新建下一次测试。',
+  }[status.reason]) || '本次执行已停止，进度已保留。';
+  return policy.cancelled
+    ? setProjectRunState(store, sessionId, run.runId, 'cancelled', run.controlRev)
+    : pauseProjectRun(store, sessionId, run.runId, { code: policy.modelBudgetBlock ? 'model-limit' : 'execution-stopped', reason }, run.controlRev);
+}
+
 /** 恢复前核对：仍在 paused/waiting 才回到 preparing，由执行端重新检查环境与剩余额度。 */
-export function resumeProjectRun(store, sessionId, runId, expectedControlRev) {
+export function resumeProjectRun(store, sessionId, runId, expectedControlRev, runtimeId = '') {
   const run = readProjectRun(store, sessionId, runId);
   if (!run) throw new Error('project run not found');
   if (!['paused', 'waiting'].includes(run.state)) throw new Error('只有暂停或等待中的项目运行可以恢复');
   const unknown = listProjectActions(store, sessionId, runId).filter(action => action.sideEffectUnknown === true);
   if (unknown.length) throw new Error('存在结果未知的写入动作，请先核对业务状态再恢复');
   return taskTransaction(store, () => {
-    const next = setProjectRunState(store, sessionId, runId, 'preparing', expectedControlRev ?? run.controlRev, { blocker: null });
+    const next = setProjectRunState(store, sessionId, runId, 'preparing', expectedControlRev ?? run.controlRev,
+      { blocker: null, ownerPid: process.pid, ownerRuntimeId: String(runtimeId) });
     const status = taskPolicyStatus(store, sessionId);
     if (status.stopped) throw new Error('当前条件尚不能继续：' + status.reason);
     // 明确的继续重新建立接续窗口，已有已读范围和观测仍保留，不重置额度。

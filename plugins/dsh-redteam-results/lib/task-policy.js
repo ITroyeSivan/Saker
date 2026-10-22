@@ -160,7 +160,8 @@ function authorizedOrigins(store, sessionId, policy) {
   const allowed = new Set();
   const addOrigin = value => { try { const url = new URL(value); if (['http:', 'https:'].includes(url.protocol)) allowed.add(url.origin); } catch { /* 不是 URL */ } };
   if (policy?.target) addOrigin(policy.target);
-  for (const asset of readTaskContext(store, sessionId)?.assets || []) if (asset?.inScope) addOrigin(asset.url);
+  if (policy?.scenario === 'project') for (const origin of policy.allowedOrigins || []) addOrigin(origin);
+  else for (const asset of readTaskContext(store, sessionId)?.assets || []) if (asset?.inScope) addOrigin(asset.url);
   return allowed;
 }
 /**
@@ -198,6 +199,12 @@ function siteOrigin(value) {
   const url = new URL(value);
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('invalid task target');
   return url.origin;
+}
+function normalizeAllowedOrigins(value) {
+  if (value === undefined || value === null || value === '') return [];
+  const rows = Array.isArray(value) ? value : String(value).split(/\r?\n/);
+  if (rows.length > 30) throw new Error('最多添加 30 个关联站点');
+  return [...new Set(rows.map(item => String(item).trim()).filter(Boolean).map(siteOrigin))];
 }
 /**
  * 排除的地址或路径（第 4.3/5.5 节）。条目按路径前缀匹配（带边界），也接受完整 URL。
@@ -346,6 +353,7 @@ export function chooseTaskMode(store, sessionId, mode, options) {
   const previous = chosenTaskOptions(store, sessionId);
   const interaction = normalizeInteraction(options?.interaction ?? previous?.interaction);
   const choice = { workflow: options?.workflow ?? (mode === 'regular' ? previous?.workflow : 'single') ?? 'single',
+    scenario: previous?.scenario || 'pentest',
     startMode: normalizeStartMode(options?.startMode ?? previous?.startMode),
     interaction,
     reporting: reportingFor({ interaction, reporting: options?.reporting ?? previous?.reporting }),
@@ -357,6 +365,7 @@ export function chooseTaskMode(store, sessionId, mode, options) {
     allowTargetNetwork: options?.allowTargetNetwork === undefined ? (previous?.allowTargetNetwork ?? true) : options.allowTargetNetwork !== false,
     readOnly: options?.readOnly === undefined ? (previous?.readOnly ?? false) : options.readOnly === true,
     excludedPaths: options?.excludedPaths === undefined ? normalizeExcludedPaths(previous?.excludedPaths) : normalizeExcludedPaths(options.excludedPaths),
+    allowedOrigins: normalizeAllowedOrigins(previous?.allowedOrigins),
     requestRatePerMinute: options?.requestRatePerMinute === undefined ? normalizeRequestRate(previous?.requestRatePerMinute) : normalizeRequestRate(options.requestRatePerMinute),
     requestConcurrency: options?.requestConcurrency === undefined ? normalizeRequestConcurrency(previous?.requestConcurrency) : normalizeRequestConcurrency(options.requestConcurrency),
     // v6 第 5.5 / 8.3 节：初始「自动」上限是 2（保守配置，不是性能结论）。
@@ -461,16 +470,17 @@ export function startTaskPolicy(store, sessionId, input, now = Date.now()) {
   if (parentSession && flow.kind !== 'single') throw new Error('子代理不能开启独立衔接流程');
   // 动作限制沿用桌面选择；子代理、基线复查与恢复任务都遵守主任务的同一份限制。
   const parentPolicy = parentSession ? readTaskPolicy(store, parentSession) : null;
+  const projectChoice = isProject ? chosenTaskOptions(store, sessionId) : null;
   const allowTargetNetwork = parentSession ? parentPolicy?.allowTargetNetwork !== false
-    : isProject ? input.allowTargetNetwork !== false : (choice?.allowTargetNetwork ?? true);
+    : isProject ? input.allowTargetNetwork !== false && projectChoice?.allowTargetNetwork !== false : (choice?.allowTargetNetwork ?? true);
   const readOnly = parentSession ? parentPolicy?.readOnly === true
-    : isProject ? input.readOnly === true : (choice?.readOnly ?? false);
+    : isProject ? input.readOnly === true || projectChoice?.readOnly === true : (choice?.readOnly ?? false);
   const excludedPaths = parentSession ? normalizeExcludedPaths(parentPolicy?.excludedPaths)
-    : isProject ? normalizeExcludedPaths(input.excludedPaths) : normalizeExcludedPaths(choice?.excludedPaths);
+    : isProject ? normalizeExcludedPaths([...normalizeExcludedPaths(input.excludedPaths), ...normalizeExcludedPaths(projectChoice?.excludedPaths)]) : normalizeExcludedPaths(choice?.excludedPaths);
   const requestRatePerMinute = parentSession ? normalizeRequestRate(parentPolicy?.requestRatePerMinute)
-    : isProject ? normalizeRequestRate(input.requestRatePerMinute) : normalizeRequestRate(choice?.requestRatePerMinute);
+    : isProject ? normalizeRequestRate(input.requestRatePerMinute ?? projectChoice?.requestRatePerMinute) : normalizeRequestRate(choice?.requestRatePerMinute);
   const requestConcurrency = parentSession ? normalizeRequestConcurrency(parentPolicy?.requestConcurrency)
-    : isProject ? normalizeRequestConcurrency(input.requestConcurrency) : normalizeRequestConcurrency(choice?.requestConcurrency);
+    : isProject ? normalizeRequestConcurrency(input.requestConcurrency ?? projectChoice?.requestConcurrency) : normalizeRequestConcurrency(choice?.requestConcurrency);
   let modules = {};
   if (!parentSession && !isProject) {
     const home = store.dbPath === ':memory:' ? DSH_HOME : path.dirname(path.dirname(store.dbPath));
@@ -480,7 +490,9 @@ export function startTaskPolicy(store, sessionId, input, now = Date.now()) {
   }
   return write(store, sessionId, { scenario, mode, flow, startMode, interaction, reporting, explain: explain === true, stop, question, target, workerLimit,
     workerModel: choice?.workerModel ?? null, reviewModel: choice?.reviewModel ?? null, reportModel: choice?.reportModel ?? null,
-    allowTargetNetwork, readOnly, excludedPaths, requestRatePerMinute, requestConcurrency, ...modules, ...(parentSession ? { parentSession } : {}),
+    allowTargetNetwork, readOnly, excludedPaths, requestRatePerMinute, requestConcurrency,
+    ...(isProject ? { allowedOrigins: normalizeAllowedOrigins(chosenTaskOptions(store, sessionId)?.allowedOrigins) } : {}),
+    ...modules, ...(parentSession ? { parentSession } : {}),
     ...(parentSession ? { parentRound: readTaskPolicy(store, parentSession)?.startedAt } : {}),
     ...(input.purposeTask === true ? { purposeTask: true } : {}),
     budget: { toolCalls, discoveryCalls, unmeteredToolCalls, deadline: minutes === null ? null : now + minutes * 60000, ...modelLimits },
@@ -552,6 +564,10 @@ export function setTaskActionLimits(store, sessionId, input, source) {
   if (policy?.parentSession) throw new Error('only a main task can change action limits');
   if (policy) {
     const next = { ...policy };
+    if (input?.allowedOrigins !== undefined) {
+      if (source !== 'desktop-user') throw new Error('关联站点只能由用户在测试设置中修改');
+      next.allowedOrigins = normalizeAllowedOrigins(input.allowedOrigins);
+    }
     if (input?.allowTargetNetwork !== undefined) next.allowTargetNetwork = input.allowTargetNetwork === true;
     if (input?.readOnly !== undefined) next.readOnly = input.readOnly === true;
     if (input?.excludedPaths !== undefined) next.excludedPaths = normalizeExcludedPaths(input.excludedPaths);
@@ -562,6 +578,7 @@ export function setTaskActionLimits(store, sessionId, input, source) {
   // 尚未开始：先记在任务选择里，开始时由 startTaskPolicy 落进策略（chooseTaskMode 会保留这两个字段）。
   const previous = chosenTaskOptions(store, sessionId) || {};
   const choice = { workflow: 'single', ...previous,
+    allowedOrigins: input?.allowedOrigins === undefined ? normalizeAllowedOrigins(previous.allowedOrigins) : normalizeAllowedOrigins(input.allowedOrigins),
     allowTargetNetwork: input?.allowTargetNetwork === undefined ? (previous.allowTargetNetwork ?? true) : input.allowTargetNetwork === true,
     readOnly: input?.readOnly === undefined ? (previous.readOnly ?? false) : input.readOnly === true,
     excludedPaths: input?.excludedPaths === undefined ? normalizeExcludedPaths(previous.excludedPaths) : normalizeExcludedPaths(input.excludedPaths),
@@ -829,6 +846,7 @@ function taskPromptBase(state, includeUsage = true, controlledInterface = false)
     return '按文档连续测试：先用 project_document list/read 读取用户提供的测试要求，用 project_check define/next 保存并领取检查、record 保存实际结果和缺口；继续独立项；'
       + '目标测试优先用 saker_browser 的受管 Chrome for Testing（CDP）；原始 HTTP 用 project_request，'
       + '不要用 shell curl 直接发目标请求——curl 不会自动带 Cookie/Origin/Referer/User-Agent 等浏览器请求头，容易误判结果；'
+      + (policy.projectRunId ? '当前运行=' + policy.projectRunId + '；历史检查编号不沿用，当前项用 project_check next 获取。' : '')
       + '本轮问题：' + (policy.question || '按用户文档') + '；站点：' + (policy.target || '按已给授权范围，不能自行扩大') + '；' + projectUsage
       + '停止规则=' + policy.stop + '。' + (includeUsage ? '' : '需要精确用量时调用 redteam_task action=status；宿主守卫按最新预算拦截。')
       + (state.stopped ? '目标操作已停止：' + state.reason + '。只整理证据与交付。' : '使用实际观察结果；没有执行到的项写清未完成，不能写成通过。')
@@ -954,6 +972,8 @@ export function taskExecutionGuard(store, sessionId, name, now = Date.now(), { o
       else if (state.policy.parentSession && workerReportedFinished(store, sessionId))
         reason = 'worker_reported_finished：子任务已报告结束；只能整理最终回复，不能继续目标操作。';
     else if (state.stopped) reason = '任务已停止：' + state.reason + '；仅继续证据整理与交付，不能重置预算或继续目标操作。';
+    else if (isProject && store.db.prepare("SELECT 1 FROM project_actions a JOIN project_runs r ON r.session_id=a.session_id AND r.run_id=a.run_id WHERE a.session_id=? AND r.state IN ('preparing','running','waiting','paused') AND json_extract(a.record,'$.sideEffectUnknown')=1 LIMIT 1").get(sessionId))
+      reason = 'project_write_outcome_unknown：原写入结果未知，请先核对原动作，不能继续目标操作。';
     else if (!isProject && state.policy.needsBaselineRecheck && !baselineRecheck) reason = 'baseline_recheck_required：用户已处理阻碍，先用redteam_execution run purpose=baseline复查已存正常GET/HEAD请求，不能直接重试探针。';
     else if (!isProject && !baselineRecheck && state.policy.parentSession && state.policy.mode === '0day' && !state.researchReady && name !== 'zday_pattern' && !hasResearch(store, sessionId)
       && readTaskPolicy(store, state.policy.parentSession).used.discoveryCalls >= readTaskPolicy(store, state.policy.parentSession).budget.discoveryCalls)

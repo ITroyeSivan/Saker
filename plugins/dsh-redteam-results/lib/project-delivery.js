@@ -4,6 +4,8 @@ import { zipDelivery, redactCredentials } from './bundle.js';
 import { listProjectChecks, listProjectActions, readProjectRun, readProjectSource } from './project-store.js';
 import { getFinding } from './store.js';
 import { readExecutionReceipt } from './execution-receipts.js';
+import { responseBodyText } from './response-body.js';
+import { createHash } from 'node:crypto';
 import { redactText, redactValue } from './redaction.js';
 
 const RESULT_LABELS = {
@@ -81,6 +83,11 @@ export function buildProjectDeliveryFiles(store, sessionId, runId) {
         if (material.source !== 'host-project-browser-observation' || material.projectRunId !== runId || material.actionId !== action.actionId)
           throw new Error('浏览器观察归属不一致');
         evidence.browserObservation = redactValue({ ...material, originalBase64: undefined });
+        if (material.page?.screenshotBase64) {
+          const file = 'delivery/evidence/screenshots/' + action.actionId + '.png';
+          evidenceFiles[file] = Buffer.from(material.page.screenshotBase64, 'base64');
+          evidence.browserObservation.page = { ...evidence.browserObservation.page, screenshotBase64: undefined, screenshotFile: file };
+        }
       } catch (error) {
         missing.push({ kind: 'browser-observation', id: action.pageRef, reason: error.message });
       }
@@ -92,13 +99,27 @@ export function buildProjectDeliveryFiles(store, sessionId, runId) {
         evidence.receipt = redactValue({
           ...receipt,
           responseBodyBase64: undefined,
-          responseBodyText: redactText(body.toString('utf8')).slice(0, 65536),
+          responseBodyText: redactText(responseBodyText(receipt).text),
           capturedBytes: body.length,
         });
       } catch (error) {
         evidence.receiptMissing = redactText(error.message);
         missing.push({ kind: 'execution-receipt', id: action.requestRef, reason: error.message });
       }
+    }
+    if (action.attachmentRef) {
+      try {
+        const row = store.db.prepare('SELECT record FROM business_materials WHERE session_id=? AND id=?').get(sessionId, action.attachmentRef);
+        if (!row) throw new Error('附件记录缺失');
+        const material = JSON.parse(row.record);
+        const bytes = Buffer.from(material.originalBase64 || '', 'base64');
+        if (!material.originalBase64 || bytes.length !== material.bytes || createHash('sha256').update(bytes).digest('hex') !== material.digest)
+          throw new Error('附件正文缺失或摘要、长度不一致');
+        const name = String(material.displayName || 'download.bin').replace(/[^A-Za-z0-9._-]/g, '_').slice(-100);
+        const file = 'delivery/evidence/attachments/' + action.actionId + '-' + name;
+        evidenceFiles[file] = bytes;
+        evidence.attachment = { id: action.attachmentRef, name: material.displayName, file, bytes: bytes.length, digest: material.digest };
+      } catch (error) { missing.push({ kind: 'attachment', id: action.attachmentRef, reason: error.message }); }
     }
     evidenceFiles['delivery/evidence/actions/' + action.actionId + '.json'] = JSON.stringify(evidence, null, 2) + '\n';
   }
@@ -134,6 +155,7 @@ export function buildProjectDeliveryFiles(store, sessionId, runId) {
     '', '## 说明', '',
     '本导出只整理已保存的检查结果和来源，不重新访问目标。缺少条件、需进一步确认和未开始的项没有写成通过。',
     '证据中的常见认证头与凭据字段已脱敏。',
+    '截图和下载保留原始内容，分享前请核对其中的业务数据。',
   ].join('\n') + '\n';
   const tsv = ['文档要求\t来源\t结果\t说明', ...rows.map(row => [row.requirement, row.source, row.result, row.note].map(tsvCell).join('\t'))].join('\n') + '\n';
   const sourceList = sources.length

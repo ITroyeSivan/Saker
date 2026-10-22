@@ -2,10 +2,11 @@ import './test-home-isolation.mjs';
 import assert from 'node:assert/strict';
 import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
 import { createProjectRun, defineProjectChecks, transitionProjectRun, beginProjectAction, finishProjectAction, recordProjectCheck, saveProjectBrowserObservation } from '../plugins/dsh-redteam-results/lib/project-store.js';
-import { BrowserSession } from '../plugins/dsh-redteam-results/lib/browser-session.js';
+import { BrowserSession, browserProfileName } from '../plugins/dsh-redteam-results/lib/browser-session.js';
+import { identityRequestHeaders } from '../plugins/dsh-redteam-results/lib/identity-binding.js';
 import { acquireTargetSlot } from '../plugins/dsh-redteam-results/lib/request-pacing.js';
 import { parseDocumentIsolated } from '../plugins/dsh-redteam-results/lib/project-document-parser.js';
-import { observeProjectCheck } from './lib/project-test-fixtures.mjs';
+import { observeProjectCheck, registerVerifiedProjectFinding } from './lib/project-test-fixtures.mjs';
 import { buildProjectDeliveryFiles } from '../plugins/dsh-redteam-results/lib/project-delivery.js';
 
 let failed = 0;
@@ -151,6 +152,63 @@ await test('a browser URL without a saved observation is not reusable evidence',
     assert(Object.values(delivery.files).some(text => String(text).includes('VISIBLE_ACCOUNT_OBSERVATION')), 'offline delivery omitted the actual page observation');
     assert.equal(delivery.missing.length, 0);
   } finally { store.close(); }
+});
+
+await test('a previously verified finding cannot close a new run without current evidence', () => {
+  const store = openStore(':memory:');
+  try {
+    const oldRun = createProjectRun(store, 'stale-finding');
+    const running = transitionProjectRun(store, 'stale-finding', oldRun.runId, 'running', oldRun.controlRev);
+    defineProjectChecks(store, 'stale-finding', oldRun.runId, [{ checkId: 'old', requirement: 'Old requirement' }]);
+    const oldFinding = registerVerifiedProjectFinding(store, 'stale-finding');
+    transitionProjectRun(store, 'stale-finding', oldRun.runId, 'cancelled', running.controlRev);
+    const current = createProjectRun(store, 'stale-finding');
+    transitionProjectRun(store, 'stale-finding', current.runId, 'running', current.controlRev);
+    defineProjectChecks(store, 'stale-finding', current.runId, [{ checkId: 'new', requirement: 'New requirement' }]);
+    assert.throws(() => recordProjectCheck(store, 'stale-finding', current.runId, 'new', {
+      executionState: 'ended', verdict: 'issue', checkedContent: 'Only an old finding was reused', findingRefs: [oldFinding.id],
+    }), /reviewed-finding-required/);
+    const currentFinding = registerVerifiedProjectFinding(store, 'stale-finding', { checkId: 'new' });
+    const ended = recordProjectCheck(store, 'stale-finding', current.runId, 'new', {
+      executionState: 'ended', verdict: 'issue', checkedContent: 'Current observation and review are available', findingRefs: [currentFinding.id],
+    });
+    assert.equal(ended.verdict, 'issue');
+  } finally { store.close(); }
+});
+
+await test('long and non-ASCII identities never share the same browser profile', () => {
+  const sid = 'session-12345678-1234-1234-1234-123456789abc';
+  assert.notEqual(browserProfileName(sid, 'administrator-tenant-east-alice'), browserProfileName(sid, 'administrator-tenant-east-bob'));
+  assert.notEqual(browserProfileName(sid, '员工甲'), browserProfileName(sid, '员工乙'));
+  assert.equal(browserProfileName(sid, '员工甲'), browserProfileName(sid, '员工甲'));
+});
+
+await test('explicit HTTP credentials are recognized regardless of header casing', () => {
+  const identity = { matched: true, status: 'valid', secret: 'Cookie: account=alice' };
+  assert.equal(identityRequestHeaders({ headers: { Cookie: 'account=bob' } }, identity), null);
+  assert.equal(identityRequestHeaders({ headers: { AUTHORIZATION: 'Bearer bob' } }, identity), null);
+  assert.equal(identityRequestHeaders({ headers: { 'X-Test': 'yes' } }, identity).headers.cookie, 'account=alice');
+});
+
+await test('trusted clicks return a pending dialog without waiting for the blocked input reply', async () => {
+  const { browser, handlers } = fakeBrowser();
+  browser.watchNetwork();
+  let releaseInput;
+  browser.client.call = async (method, params) => {
+    if (method === 'Runtime.evaluate') return { result: { value: { found: true, tag: 'BUTTON', x: 10, y: 10 } } };
+    if (method === 'Input.dispatchMouseEvent' && params.type === 'mouseReleased') {
+      for (const handler of handlers.get('Page.javascriptDialogOpening') || []) handler({ message: 'CLICK_PROMPT', type: 'prompt' });
+      return await new Promise(resolve => { releaseInput = resolve; });
+    }
+    return {};
+  };
+  const result = await Promise.race([browser.act({ type: 'click', selector: '#prompt' }), new Promise((_, reject) => setTimeout(() => reject(new Error('click deadlocked behind its dialog')), 1000))]);
+  assert.equal(result.state, 'waiting-dialog');
+  assert.equal(result.dialog.message, 'CLICK_PROMPT');
+  const observed = await browser.observe();
+  assert.equal(observed.dialog.message, 'CLICK_PROMPT', 'observing a modal must not evaluate the blocked renderer');
+  assert.equal((await browser.act({ type: 'dialog', accept: true, promptText: 'answer' })).handled, true);
+  releaseInput({});
 });
 
 console.log(failed ? failed + ' failed' : 'all passed');

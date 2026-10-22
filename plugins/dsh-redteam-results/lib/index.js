@@ -27,14 +27,16 @@ import { saveTaskContext, readTaskContext, readTaskRecord, taskContextView } fro
 import { stageMethodPackage, readMethodPackage, methodPackageState, recordMethodReview, activateMethodPackage, listMethodPackages, activeMethodPackage } from './method-packages.js';
 import { createResearch, observeResearch, assessResearch, closeResearch, researchDetail, researchIndex, researchGroups, researchNext, compactResearchResult } from './research.js';
 import { executeRecordedRequest, readExecutionReceipt, executionReceiptSummary } from './execution-receipts.js';
+import { responseBodyText } from './response-body.js';
+import { resolveTaskIdentity, identityDenial, taskIdentityRevision } from './identity-binding.js';
 import { recordRetest, listRetests, retestSummary, RETEST_VERDICTS, markVerifyStarted, clearVerifyStarted, listVerifyStarted } from './retest.js';
 import { verifyEffect, readEffectVerification } from './effect-verifications.js';
 import { readOobConfig, issueCallbackHost, fetchOobRecords, recordInteraction, readInteractionRecord, interactionSummary } from './server-side-access.js';
 import { runBrowserExecution, recordBrowserReceipt, readBrowserReceipt } from './browser-execution.js';
 import { runEffectJob, readEffectJob } from './effect-jobs.js';
 import { startTaskPolicy, updateTaskProgress, taskPolicyStatus, readTaskPolicy, taskExecutionGuard, taskPrompt, taskPromptStable, taskOverview, chooseTaskMode, pauseTaskPolicy, resumeTaskPolicy, archiveTaskRound, takeTaskContinuation, finishTaskOnTurnEnd, checkpointTask, setTaskInteraction, setTaskWorkers, setTaskExplain, setTaskActionLimits, updateTaskFromChat, targetTrafficDenial, excludedPathDenial, effectivePolicy, confirmTaskCheckpoint } from './task-policy.js';
-import { projectContinuation, projectTurnDecision, markProjectContinuation, pauseProjectRun, resumeProjectRun, projectExecutableChecks, selectProjectCheck, startProjectTask, setProjectRunState, completeProjectRun } from './project-runtime.js';
-import { activeProjectRun, readProjectRun, listProjectRuns, listProjectChecks, listProjectSources, readProjectSource, listProjectActions, defineProjectChecks, recordProjectCheck, readProjectCheck, upsertProjectSource, beginProjectAction, finishProjectAction, reconcileProjectAction, saveProjectBrowserObservation } from './project-store.js';
+import { projectContinuation, projectTurnDecision, markProjectContinuation, pauseProjectRun, resumeProjectRun, projectExecutableChecks, selectProjectCheck, startProjectTask, setProjectRunState, completeProjectRun, recoverInterruptedProjectRuns, synchronizeStoppedProjectRun } from './project-runtime.js';
+import { activeProjectRun, readProjectRun, listProjectRuns, listProjectChecks, listProjectSources, readProjectSource, listProjectActions, defineProjectChecks, recordProjectCheck, readProjectCheck, upsertProjectSource, beginProjectAction, finishProjectAction, reconcileProjectAction, saveProjectBrowserObservation, projectObservationRefs } from './project-store.js';
 import { zipProjectDelivery, projectCounts, projectCheckView } from './project-delivery.js';
 import { startBrowserSession } from './browser-session.js';
 import { executeProjectHttp } from './project-execution.js';
@@ -105,8 +107,26 @@ const MAX_BODY = 5 * 1024 * 1024;
 
 let store; // 进程级单句柄（DatabaseSync 同步 API，SQLite 自带串行化）
 function theStore() {
-	if (store === undefined) store = openStore(DB_PATH);
+	if (store === undefined) {
+		const opened = openStore(DB_PATH);
+		try { recoverInterruptedProjectRuns(opened); store = opened; }
+		catch (error) { opened.close(); throw error; }
+	}
 	return store;
+}
+
+function findingWithProjectEvidence(store, sessionId, input, previous) {
+  if (readTaskPolicy(store, sessionId)?.scenario !== 'project') return input;
+  const run = activeProjectRun(store, sessionId);
+  if (!run || run.state !== 'running' || !run.currentCheckId) return input;
+  const currentRefs = projectObservationRefs(store, sessionId, run.runId, run.currentCheckId);
+  if (!currentRefs.length) return input;
+  let refs = input.evidenceRefs === undefined ? (previous?.evidenceRefs || []) : input.evidenceRefs;
+  if (typeof refs === 'string') refs = JSON.parse(refs);
+  if (!Array.isArray(refs)) throw new Error('evidenceRefs 需要数组');
+  const merged = [...refs];
+  for (const ref of currentRefs) if (!merged.some(item => item.kind === ref.kind && item.id === ref.id)) merged.push(ref);
+  return { ...input, evidenceRefs: merged };
 }
 
 //#region 通道与工具共用的业务逻辑
@@ -450,6 +470,7 @@ export async function dispatch(ctx, st, endpoint, payload) {
       } catch { enabled = false; models = []; }
       return { ok: true, enabled, models };
     }
+    synchronizeStoppedProjectRun(st, sessionId);
     const state = taskPolicyStatus(st, sessionId), workers = siteWorkerView(st, sessionId);
     return { ok: true, ...state, active: workers.active, hostWorkerLimit: hostWorkerLimit(ctx), defaults: chatDefaults(st),
       attention: taskAttention(st, sessionId),
@@ -543,6 +564,7 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
   if (endpoint === 'usage.get') {
     const sessionId = String(p.sessionId || '');
     await readPentestSession(ctx, sessionId);
+    synchronizeStoppedProjectRun(st, sessionId);
     const overview = taskOverview(st, sessionId), cost = taskCostOverview(ctx, st, sessionId);
     const policy = overview.policy;
     return { ok: true, configured: overview.configured, elapsedSeconds: policy
@@ -608,6 +630,17 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
     }
     return { ok: true, selection, catalog: testContentCatalog(), keys: TEST_CONTENT_KEYS };
   }
+  if (endpoint === 'task.scenario') {
+    const sessionId = String(p.sessionId || '');
+    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    if (!session || session.header?.agentPreset !== 'pentest') throw new Error('请选择当前可用的渗透会话');
+    if (readTaskPolicy(st, sessionId)) throw new Error('任务已开始，不能切换场景');
+    if (!['pentest', 'project'].includes(p.scenario)) throw new Error('请选择安全测试或按文档测试');
+    const row = st.db.prepare('SELECT record FROM task_flow_choice WHERE session_id=?').get(sessionId);
+    const choice = { ...(row ? JSON.parse(row.record) : {}), scenario: p.scenario };
+    st.db.prepare('INSERT INTO task_flow_choice(session_id,record) VALUES(?,?) ON CONFLICT(session_id) DO UPDATE SET record=excluded.record').run(sessionId, JSON.stringify(choice));
+    return { ok: true, scenario: p.scenario };
+  }
   if (['task.status', 'task.choose', 'task.start', 'task.cancel', 'task.resume', 'task.cleanup', 'task.new-round', 'task.interaction', 'task.workers', 'task.explain', 'task.limits', 'task.continue'].includes(endpoint)) {
     const sessionId = String(p.sessionId || '');
     if (!sessionId) throw new Error('sessionId required');
@@ -632,7 +665,7 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
       }
       else if (endpoint === 'task.explain') setTaskExplain(st, sessionId, p.explain, 'desktop-user');
       else if (endpoint === 'task.limits') setTaskActionLimits(st, sessionId,
-        { allowTargetNetwork: p.allowTargetNetwork, readOnly: p.readOnly, excludedPaths: p.excludedPaths,
+        { allowTargetNetwork: p.allowTargetNetwork, readOnly: p.readOnly, excludedPaths: p.excludedPaths, allowedOrigins: p.allowedOrigins,
           requestRatePerMinute: p.requestRatePerMinute, requestConcurrency: p.requestConcurrency }, 'desktop-user');
       else if (endpoint === 'task.continue') {
         if (p.note !== undefined && (typeof p.note !== 'string' || p.note.length > 2000)) throw Error('补充思路应为2000字以内文本');
@@ -696,6 +729,7 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
     let workers = siteWorkerView(st, sessionId);
     const manager = workerManagers.get(ctx), agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
     if (manager && agent && workers.workers.length) workers = await manager.status(agent);
+    synchronizeStoppedProjectRun(st, sessionId);
     const overview = taskOverview(st, sessionId), cost = taskCostOverview(ctx, st, sessionId);
     return { ok: true, isPentest: session?.header?.agentPreset === 'pentest', hostWorkerLimit: hostWorkerLimit(ctx), ...overview, ...workers, cost,
       attention: taskAttention(st, sessionId),
@@ -797,6 +831,7 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
     if (!session || session.header?.agentPreset !== 'pentest') throw new Error('请选择当前可用的渗透会话');
     const requestedRunId = String(p.runId || '');
     if (endpoint === 'project.status') {
+      synchronizeStoppedProjectRun(st, sessionId);
       const run = requestedRunId ? readProjectRun(st, sessionId, requestedRunId)
         : activeProjectRun(st, sessionId) || listProjectRuns(st, sessionId, { limit: 1 })[0] || null;
       if (requestedRunId && !run) return { ok: false, error: '未找到该项目运行' };
@@ -810,6 +845,8 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
       }));
       return {
         ok: true, configured: !!run, run, checks: checks.map(projectCheckView), sources, counts: projectCounts(checks),
+        unknownActions: run ? listProjectActions(st, sessionId, run.runId).filter(action => action.sideEffectUnknown === true)
+          .map(action => ({ actionId: action.actionId, checkId: action.checkId, method: action.method || '', targetUrl: redactText(action.targetUrl || ''), error: redactText(action.error || ''), startedAt: action.startedAt })) : [],
         runs: listProjectRuns(st, sessionId, { limit: 50 }).map(item => ({
           runId: item.runId, state: item.state, updatedAt: item.updatedAt, question: item.question || '',
         })),
@@ -834,7 +871,20 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
         snapshotRef: source.snapshotRef || '',
         snapshotMaterialId: source.snapshotMaterialId || '',
       }));
-      const run = startProjectTask(st, sessionId, { ...p, sourceSnapshot });
+      const policy = { ...p.policy };
+      if (!policy.target) {
+        const origins = new Set();
+        for (const source of latestSources.values()) for (const section of source.sections || []) {
+          for (const match of String(section.text || '').matchAll(/https?:\/\/[^\s<>"'`，。；）)\]]+/gi)) {
+            try { const url = new URL(match[0].replace(/[.,;]+$/, '')); if (!url.username && !url.password) origins.add(url.origin); } catch { /* 不把无效地址当目标 */ }
+          }
+        }
+        if (origins.size === 1) policy.target = [...origins][0];
+        const choiceRow = st.db.prepare('SELECT record FROM task_flow_choice WHERE session_id=?').get(sessionId);
+        const allowNetwork = policy.allowTargetNetwork !== false && (!choiceRow || JSON.parse(choiceRow.record).allowTargetNetwork !== false);
+        if (!policy.target && allowNetwork) throw new Error('请在测试设置里指定本次测试网站；文档没有唯一的网站地址。只分析文档时，先关闭“允许访问网站”。');
+      }
+      const run = startProjectTask(st, sessionId, { ...p, policy, sourceSnapshot, runtimeId: modelAdmissions.get(ctx)?.runtimeId || '' });
       if (p.autoStart !== false) {
         const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
         if (typeof agent?.followup !== 'function' || agent.status === 'running') {
@@ -874,7 +924,7 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
     if (endpoint === 'project.resume') {
       const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
       if (typeof agent?.followup !== 'function' || agent.status === 'running') throw new Error('模型仍在收尾或不可用，请稍后继续');
-      const resumed = resumeProjectRun(st, sessionId, run.runId, p.expectedControlRev);
+      const resumed = resumeProjectRun(st, sessionId, run.runId, p.expectedControlRev, modelAdmissions.get(ctx)?.runtimeId || '');
       try {
         // 注入安全：由同源 Desktop RPC 恢复空闲代理，不在 Session.append 临界区内。
         await agent.followup({ id: `saker-project-resume-${resumed.runId}-${resumed.controlRev}`, role: 'user', source: { kind: 'user' },
@@ -891,6 +941,7 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
       return { ok: true, run, check, actions: listProjectActions(st, sessionId, run.runId).filter(action => (check.actionRefs || []).includes(action.actionId)) };
     }
     if (endpoint === 'project.action-reconcile') {
+      if (p.expectedControlRev !== run.controlRev) throw new Error('项目状态已变化，请刷新后重新核对');
       const action = reconcileProjectAction(st, sessionId, run.runId, String(p.actionId || ''), p);
       return { ok: true, action };
     }
@@ -1124,7 +1175,8 @@ function apply(ctx) {
           if (current?.state === decision.run.state && current.controlRev === decision.run.controlRev && !signal?.aborted
             && !taskPolicyStatus(store, session.id).stopped) {
             // 注入安全：turn-stopping 在 Session.append 临界区外派发；投递前重核本次控制版本。
-            agent.steer(continuation.text);
+            agent.steer({ id: 'saker-project-continue-' + crypto.randomUUID(), role: 'user', source: { kind: 'user' },
+              content: [{ type: 'text', text: continuation.text }] });
             markProjectContinuation(store, session.id, decision.run.runId, continuation.fingerprint, continuation.attempts, continuation.controlRev);
           }
           return;
@@ -1194,6 +1246,10 @@ function apply(ctx) {
 	// 对照 campaign-memory：它一直有这条 ctx.effect，其余插件此前都缺，
 	// 插件重载/HMR 会因此留下永不回收的句柄（实测同进程二次 openStore 会 EBUSY）。
   async function disposeTaskRuntime() {
+    if (store) for (const recovered of recoverInterruptedProjectRuns(store, { runtimeId: modelAdmission.runtimeId, shutdown: true })) {
+      const browser = projectBrowsers.get(recovered.sessionId);
+      if (browser) { await browser.close(); projectBrowsers.delete(recovered.sessionId); }
+    }
     await purposeTasks.dispose();
     await siteWorkers.dispose();
     workerManagers.delete(ctx);
@@ -1277,7 +1333,7 @@ function apply(ctx) {
           const saved = allFindings(theStore(), session.id, session.mode).find(row => row.reproduction === input.reproduction);
           if (saved) return { ok: true, id: saved.id, seq: saved.seq, title: saved.title, mode: saved.mode, severity: saved.severity, reused: true };
         }
-        const finding = registerFinding(theStore(), session.id, session.mode, input);
+        const finding = registerFinding(theStore(), session.id, session.mode, findingWithProjectEvidence(theStore(), session.id, input));
         return { ok: true, id: finding.id, seq: finding.seq, title: finding.title, mode: finding.mode, severity: finding.severity };
       } catch (error) { return { ok: false, id: '', error: error.message }; }
 		}
@@ -1364,7 +1420,7 @@ function apply(ctx) {
 						note: args.retestNote || args.verifyNote || '', executionId: args.retestExecutionId,
 						controlExecutionId: args.retestControlExecutionId });
 				}
-				finding = updateFinding(store, session.id, session.mode, args.id, args);
+				finding = updateFinding(store, session.id, session.mode, args.id, findingWithProjectEvidence(store, session.id, args, getFinding(store, session.id, args.id)));
 				if (finding === undefined) {
 					store.db.exec('ROLLBACK');
 					return Promise.resolve({ ok: false, error: "finding " + args.id + " 不存在（本会话 " + session.mode + " 页）" });
@@ -1456,7 +1512,8 @@ function apply(ctx) {
           const id = String(args.id || '');
           if (id.startsWith('interaction-')) return { ok: true, ...redactValue(readInteractionRecord(store, readId, id)) };
           if (id.startsWith('browser-')) return { ok: true, ...redactValue(readBrowserReceipt(store, readId, id)) };
-          return { ok: true, ...redactValue(readExecutionReceipt(store, readId, args.id)) };
+          const receipt = readExecutionReceipt(store, readId, args.id);
+          return { ok: true, ...redactValue({ ...receipt, responseBodyBase64: undefined, responseBodyText: responseBodyText(receipt).text }) };
         }
         if (args.action === 'run-effect') return { ok: true, ...await runEffectJob(store, session.id, { ...JSON.parse(args.document), callId: exec.callId }, exec.signal) };
         if (args.action === 'job-detail') return { ok: true, ...readEffectJob(store, readId, args.id) };
@@ -1720,13 +1777,18 @@ function apply(ctx) {
 		if (!run) return { error: '当前没有活动的项目运行' };
 		return { session, policy, run, store };
 	};
-	const projectBrowserGuardOf = scope => async ({ url, method }) => {
+	const projectBrowserGuardOf = (scope, identityRef) => async ({ url, method }) => {
 		const currentRun = readProjectRun(scope.store, scope.session.id, scope.run.runId);
 		if (!currentRun || currentRun.runId !== scope.run.runId || currentRun.state !== 'running')
 			return { denial: '项目已暂停或停止，浏览器请求不能继续派发' };
+		if (listProjectActions(scope.store, scope.session.id, scope.run.runId).some(action => action.sideEffectUnknown === true))
+			return { denial: '原写入结果未知，浏览器请求已暂停，需先核对原动作' };
 		const currentPolicy = readTaskPolicy(scope.store, scope.session.id);
 		if (currentPolicy?.scenario !== 'project') return { denial: '当前会话已不是按文档测试场景' };
 		const limits = effectivePolicy(scope.store, currentPolicy);
+		const identity = resolveTaskIdentity(scope.store, scope.session.id, identityRef);
+		const identityReason = identityDenial(identity);
+		if (identityReason) return { denial: identityReason };
 		let parsed;
 		try { parsed = new URL(String(url || '')); } catch { return { denial: '浏览器请求地址无效' }; }
 		const denial = targetTrafficDenial(limits, { method })
@@ -1736,13 +1798,10 @@ function apply(ctx) {
 		if (limits.target) {
 			try { origins.add(new URL(limits.target).origin); } catch { /* 无效目标由其他闸拒绝 */ }
 		}
-		for (const asset of readTaskContext(scope.store, scope.session.id)?.assets || []) {
-			if (asset?.inScope !== true || asset?.reachable !== true) continue;
-			try { origins.add(new URL(asset.url).origin); } catch { /* 忽略无效资产 */ }
-		}
+		for (const origin of limits.allowedOrigins || []) try { origins.add(new URL(origin).origin); } catch { /* 无效站点 */ }
 		if (!origins.has(parsed.origin)) return { denial: '浏览器请求不在本次授权站点或明确关联资产内' };
         return { policy: limits, revision: crypto.createHash('sha256').update(JSON.stringify([
-          currentRun.runId, currentRun.controlRev, currentPolicy.policyRev, limits,
+          currentRun.runId, currentRun.controlRev, currentPolicy.policyRev, limits, taskIdentityRevision(identity),
         ])).digest('hex') };
 	};
 	ctx.tools.register(defineTool({
@@ -1843,7 +1902,8 @@ function apply(ctx) {
       } } },
       document: { type: 'string', description: '兼容旧 JSON；新调用用 checks' }, checkId: { type: 'string' },
 			verdict: { type: 'string', enum: ['not_found', 'issue', 'needs_check', 'blocked', 'not_applicable'] },
-			checkedContent: { type: 'string' }, gaps: { type: 'string' },
+			checkedContent: { type: 'string', description: '实际检查、观察及其他说明。' },
+      gaps: { type: 'string', description: '仅写本项文档要求中未完成的部分或缺少条件；没有缺口时省略或空串。范围外提醒写 checkedContent，不写“无”。' },
 			findingRefs: { type: 'array', items: { type: 'string' } },
 			reusedObservations: { type: 'array', description: '复用已有动作观察时提供 actionId 和具体理由', items: {
 				type: 'object', additionalProperties: false, properties: {
@@ -1873,26 +1933,33 @@ function apply(ctx) {
 					const checks = defineProjectChecks(scope.store, scope.session.id, scope.run.runId, input, decisions, { batchId: args.batchId });
           const latestRun = readProjectRun(scope.store, scope.session.id, scope.run.runId);
 					return Promise.resolve({ ok: true, ...(args.batchId ? { batchId: String(args.batchId) } : {}), text: (checks.length ? '已定义 ' + checks.length + ' 项检查：\n' + checks.map(check => check.checkId + ' ' + check.requirement).join('\n') : '未新增检查')
-            + (decisions.length ? '\n已整理 ' + decisions.length + ' 个来源区域。' : '') + (Object.keys(latestRun?.sectionDecisions || {}).length ? ' 本次累计 ' + Object.keys(latestRun.sectionDecisions).length + ' 个区域。' : ''),
+            + (decisions.length ? '\n已整理 ' + decisions.length + ' 个来源区域。' : '') + (Object.keys(latestRun?.sectionDecisions || {}).length ? ' 本次累计 ' + Object.keys(latestRun.sectionDecisions).length + ' 个区域。' : '')
+            + (checks.length ? '\n用 project_check action=next 领取当前检查，再执行并记录结果。' : ''),
             checks: checks.map(check => ({ checkId: check.checkId, requirement: check.requirement, sourceLocation: check.sourceLocation, sourceRefs: check.sourceRefs })),
             sectionDecisions: decisions.map(item => ({ sourceId: item.sourceId, sourceRevision: item.sourceRevision, sectionId: item.sectionId, decision: item.decision })) });
 				}
 				if (args.action === 'next') {
           const check = selectProjectCheck(scope.store, scope.session.id, scope.run.runId);
 					if (!check) return Promise.resolve({ ok: true, text: '没有可执行的未完成检查', check: null });
-					return Promise.resolve({ ok: true, text: '当前检查：' + check.requirement + '（' + (check.sourceLocation || '未记录来源') + '）；checkId=' + check.checkId, check: { checkId: check.checkId, requirement: check.requirement, sourceLocation: check.sourceLocation, dependencies: check.dependencies } });
+          const actions = listProjectActions(scope.store, scope.session.id, scope.run.runId).filter(a => a.checkId === check.checkId).slice(-10)
+            .map(a => ({ actionId: a.actionId, state: a.executionState, method: a.method, targetUrl: redactText(a.targetUrl), requestRef: a.requestRef, pageRef: a.pageRef, reconciliation: a.reconciliation }));
+					return Promise.resolve({ ok: true, text: '当前检查：' + check.requirement + '（' + (check.sourceLocation || '未记录来源') + '）；checkId=' + check.checkId
+            + (actions.length ? '\n已保存的动作（先核对，已确认生效的写入不要重复提交）：' + JSON.stringify(actions) : ''), actions,
+            check: { checkId: check.checkId, requirement: check.requirement, sourceLocation: check.sourceLocation, dependencies: check.dependencies } });
 				}
 				if (args.action === 'detail') {
 					const check = readProjectCheck(scope.store, scope.session.id, scope.run.runId, String(args.checkId || ''));
-					if (!check) throw new Error('未找到该检查');
-					return Promise.resolve({ ok: true, text: JSON.stringify(check, null, 2), check });
+					if (!check) throw new Error('当前运行 ' + scope.run.runId + ' 没有该检查；用 project_check action=next 获取当前项，不沿用历史编号');
+          const actions = listProjectActions(scope.store, scope.session.id, scope.run.runId).filter(a => a.checkId === check.checkId).slice(-10)
+            .map(a => ({ actionId: a.actionId, state: a.executionState, method: a.method, targetUrl: redactText(a.targetUrl), requestRef: a.requestRef, pageRef: a.pageRef, reconciliation: a.reconciliation }));
+					return Promise.resolve({ ok: true, text: JSON.stringify({ check, actions }, null, 2), check, actions });
 				}
 				if (args.action === 'record') {
 					const findingRefs = Array.isArray(args.findingRefs) ? args.findingRefs.map(value => String(value)) : [];
 					for (const findingId of findingRefs) if (!getFinding(scope.store, scope.session.id, findingId))
 						throw new Error('未找到关联 finding：' + findingId);
 					const currentCheck = readProjectCheck(scope.store, scope.session.id, scope.run.runId, String(args.checkId || ''));
-					if (!currentCheck) throw new Error('未找到该检查');
+					if (!currentCheck) throw new Error('当前运行 ' + scope.run.runId + ' 没有该检查；用 project_check action=next 获取当前项，不沿用历史编号');
 					const check = recordProjectCheck(scope.store, scope.session.id, scope.run.runId, String(args.checkId || ''), {
 						executionState: 'ended', verdict: args.verdict, checkedContent: args.checkedContent, gaps: args.gaps, findingRefs,
 						reusedObservations: args.reusedObservations, controlRev: scope.run.controlRev,
@@ -1926,7 +1993,12 @@ function apply(ctx) {
 			try {
 				const action = String(args.action || '');
 				const targetAction = ['open', 'act'].includes(action);
+				let browser = projectBrowsers.get(scope.session.id);
+				const identityRef = String(args.identityRef ?? browser?.identityRef ?? '').trim();
 				if (targetAction) {
+					const identity = resolveTaskIdentity(scope.store, scope.session.id, identityRef);
+					const identityReason = identityDenial(identity);
+					if (identityReason) throw new Error(identityReason);
 					if (scope.run.state !== 'running') throw new Error('项目运行当前不可派发浏览器动作');
 					if (exec.signal?.aborted) throw new Error('项目动作已取消');
 					const checkId = String(args.checkId || scope.run.currentCheckId
@@ -1935,13 +2007,12 @@ function apply(ctx) {
 					const denied = taskExecutionGuard(scope.store, scope.session.id, 'recorded-project-execution', Date.now(), {
 						args: { url: args.url || '' },
 						onReserve: () => { begun = beginProjectAction(scope.store, scope.session.id, scope.run.runId, checkId, {
-							identityRef: String(args.identityRef || ''), controlRev: scope.run.controlRev,
+							identityRef, identityRevision: taskIdentityRevision(identity), controlRev: scope.run.controlRev,
+              scopeFingerprint: crypto.createHash('sha256').update(JSON.stringify([action, args.actType || '', args.url || '', args.selector || '', args.text || '', args.value || '', identityRef])).digest('hex'),
 						}); },
 					});
 					if (denied) throw new Error(denied);
 				}
-				let browser = projectBrowsers.get(scope.session.id);
-				const identityRef = String(args.identityRef ?? browser?.identityRef ?? '').trim();
 				if (browser && browser.identityRef !== identityRef) {
 					await browser.close();
 					projectBrowsers.delete(scope.session.id);
@@ -1955,7 +2026,7 @@ function apply(ctx) {
 					if (!targetAction) throw new Error('请先打开浏览器页面，再读取已有观察或请求');
 					browser = await startBrowserSession({
 						identity: scope.session.id, identityRef,
-						requestGuard: projectBrowserGuardOf(scope),
+						requestGuard: projectBrowserGuardOf(scope, identityRef),
 						pacingSessionId: scope.session.id,
 					});
 					projectBrowsers.set(scope.session.id, browser);
@@ -2011,7 +2082,7 @@ function apply(ctx) {
 					if (action === 'observe' && scope.run.state === 'running') {
 						const checkId = String(args.checkId || scope.run.currentCheckId || '');
 						if (checkId) {
-							begun = beginProjectAction(scope.store, scope.session.id, scope.run.runId, checkId, { controlRev: scope.run.controlRev, identityRef });
+							begun = beginProjectAction(scope.store, scope.session.id, scope.run.runId, checkId, { controlRev: scope.run.controlRev, identityRef, identityRevision: taskIdentityRevision(resolveTaskIdentity(scope.store, scope.session.id, identityRef)) });
 							const observationRef = saveProjectBrowserObservation(scope.store, scope.session.id, scope.run.runId, begun.action.actionId, result);
 							const page = redactValue(result);
 							return { ok: true, text: JSON.stringify(page), page, actionId: begun.action.actionId, observationRef };

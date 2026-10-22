@@ -5,6 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { taskTransaction, taskEvent } from './task-policy-record.js';
 import { getFinding } from './store.js';
 import { redactValue } from './redaction.js';
+import { resolveTaskIdentity, identityDenial, taskIdentityRevision } from './identity-binding.js';
 
 export const PROJECT_RUN_STATES = ['preparing', 'running', 'waiting', 'paused', 'completed', 'cancelled', 'failed'];
 export const PROJECT_ACTIVE_STATES = ['preparing', 'running', 'waiting', 'paused'];
@@ -77,8 +78,10 @@ function validateDependencyGraph(checks) {
   }
 }
 
-function usableProjectObservation(store, sessionId, runId, action) {
+function usableProjectObservation(store, sessionId, runId, action, { requireComplete = true } = {}) {
   if (!action || action.executionState !== 'completed' || action.sideEffectUnknown || action.bodyUnavailable) return false;
+  const identity = resolveTaskIdentity(store, sessionId, action.identityRef);
+  if (identityDenial(identity) || (action.identityRevision && taskIdentityRevision(identity) !== action.identityRevision)) return false;
   if (action.pageRef) {
     const row = store.db.prepare('SELECT record FROM business_materials WHERE session_id=? AND id=?').get(sessionId, action.pageRef);
     if (!row) return false;
@@ -98,7 +101,7 @@ function usableProjectObservation(store, sessionId, runId, action) {
     const receipt = JSON.parse(row.record);
     return receipt.projectRunId === runId && receipt.projectCheckId === action.checkId
       && receipt.actionId === action.actionId && receipt.outcome === 'response'
-      && receipt.complete === true && !receipt.bodyUnavailable
+      && (receipt.complete === true || (!requireComplete && receipt.capturedBytes > 0)) && !receipt.bodyUnavailable
       && typeof receipt.responseBodyBase64 === 'string';
   } catch {
     return false;
@@ -127,12 +130,24 @@ export function saveProjectBrowserObservation(store, sessionId, runId, actionId,
   });
 }
 
-function reviewedFinding(store, sessionId, findingId) {
+export function projectObservationRefs(store, sessionId, runId, check) {
+  if (typeof check === 'string') check = readProjectCheck(store, sessionId, runId, check);
+  if (!check) return [];
+  const direct = new Set(uniqueStrings(check.actionRefs));
+  const reused = new Set((check.reusedObservations || []).filter(item => String(item?.reason || '').trim()).map(item => item.actionId));
+  return listProjectActions(store, sessionId, runId)
+    .filter(action => ((action.checkId === check.checkId && direct.has(action.actionId)) || reused.has(action.actionId))
+      && usableProjectObservation(store, sessionId, runId, action, { requireComplete: false }))
+    .map(action => action.requestRef ? { kind: 'request', id: action.requestRef } : { kind: 'file', id: action.pageRef });
+}
+
+function reviewedFinding(store, sessionId, findingId, evidenceRefs) {
   const finding = getFinding(store, sessionId, findingId);
   if (!finding) return false;
   return finding.status === 'verified' && !!finding.verifiedAt
     && ['impact', 'confirmed'].includes(finding.evidenceLevel)
-    && !!finding.secondRating && String(finding.secondRatingNote || '').trim().length >= 40;
+    && !!finding.secondRating && String(finding.secondRatingNote || '').trim().length >= 40
+    && (finding.evidenceRefs || []).some(ref => evidenceRefs.some(current => current.kind === ref.kind && current.id === ref.id));
 }
 
 export function projectCheckEvidenceProblems(store, sessionId, runId, check) {
@@ -155,8 +170,9 @@ export function projectCheckEvidenceProblems(store, sessionId, runId, check) {
   }
   if (check.verdict === 'issue') {
     const refs = uniqueStrings(check.findingRefs);
+    const evidenceRefs = projectObservationRefs(store, sessionId, runId, check);
     if (!refs.length) problems.push('finding-reference-missing');
-    else if (refs.some(findingId => !reviewedFinding(store, sessionId, findingId))) problems.push('reviewed-finding-required');
+    else if (refs.some(findingId => !reviewedFinding(store, sessionId, findingId, evidenceRefs))) problems.push('reviewed-finding-required');
   }
   if (['blocked', 'needs_check'].includes(check.verdict) && !String(check.gaps || '').trim())
     problems.push('gap-reason-missing');
@@ -189,6 +205,7 @@ export function createProjectRun(store, sessionId, input = {}) {
     const runId = 'project-run-' + randomUUID();
     const run = {
       sessionId, runId, state: 'preparing', controlRev: 1,
+      ownerPid: process.pid, ownerRuntimeId: String(input.runtimeId || ''),
       policyRev: Number.isSafeInteger(input.policyRev) ? input.policyRev : null,
       question: optionalText(input.question, 600),
       sourceSnapshot: Array.isArray(input.sourceSnapshot) ? input.sourceSnapshot : [],
@@ -452,6 +469,7 @@ export function recordProjectCheck(store, sessionId, runId, checkId, patch = {})
       ? check.checkRevision
       : (Number(check.checkRevision) || 1) + 1;
     if (next.executionState === 'ended') {
+      if (run.state === 'preparing') throw conflict('尚未领取当前检查；请先用 project_check action=next，再执行并记录本次结果');
       if (run.state !== 'running') throw conflict('项目已暂停或停止，不能写入本轮结束结论');
       const problems = projectCheckEvidenceProblems(store, sessionId, runId, next);
       if (problems.length) throw new Error('项目检查缺少有效执行事实：' + problems.join('、'));
@@ -483,6 +501,11 @@ export function beginProjectAction(store, sessionId, runId, checkId, input = {})
       throw conflict('项目运行状态已变化，请刷新后重试');
     const check = readProjectCheck(store, sessionId, runId, checkId);
     if (!check) throw new Error('project check not found');
+    if (listProjectActions(store, sessionId, runId).some(action => action.sideEffectUnknown === true))
+      throw conflict('存在结果未知的写入动作，请先核对原动作，不能继续派发');
+    if (input.scopeFingerprint && listProjectActions(store, sessionId, runId).some(action => action.checkId === checkId
+      && action.reconciliation?.outcome === 'occurred' && action.scopeFingerprint === input.scopeFingerprint))
+      throw conflict('该检查的相同操作已人工确认生效，请读取已有结果，不要重复提交');
     const inflight = store.db.prepare("SELECT action_id FROM project_actions WHERE session_id=? AND run_id=? AND state IN ('queued','dispatched') LIMIT 1")
       .get(sessionId, runId);
     if (inflight) throw conflict('同一项目运行同时只能有一个派发中的动作');
@@ -573,6 +596,7 @@ export function reconcileProjectAction(store, sessionId, runId, actionId, input 
   return taskTransaction(store, () => {
     const action = readProjectAction(store, sessionId, runId, actionId);
     if (!action) throw new Error('project action not found');
+    if (action.sideEffectUnknown !== true) throw new Error('此动作不需要核对，请刷新状态');
     const outcome = String(input.outcome || '');
     if (!PROJECT_ACTION_RECONCILIATIONS.includes(outcome)) throw new Error('核对结果只能是 occurred、not_occurred 或 still_unknown');
     const reason = text(input.reason, '核对理由', 2000);

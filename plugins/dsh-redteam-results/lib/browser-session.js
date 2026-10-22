@@ -1,6 +1,7 @@
 // W04：受管 Chrome for Testing 长生命周期会话。只使用显式配置的 CfT，
 // 不自动回退到个人 Chrome；每个身份使用独立 profile，请求修改只在明确设置时启用。
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -136,6 +137,11 @@ export async function connectCdp(wsUrl) {
 
 const safeName = value => String(value || 'default').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 60) || 'default';
 
+export function browserProfileName(identity, identityRef) {
+  const key = JSON.stringify([String(identity || 'default'), String(identityRef || '')]);
+  return safeName(identity).slice(0, 20) + '-' + createHash('sha256').update(key).digest('hex').slice(0, 32);
+}
+
 export class BrowserSession {
   constructor(options) {
     Object.assign(this, options);
@@ -156,10 +162,7 @@ export class BrowserSession {
     const executable = resolveCftExecutable(options.executablePath);
     const home = dshHome();
     const profileRoot = path.resolve(options.profileRoot || path.join(home, 'project-browser'));
-    const profileIdentity = options.identityRef
-      ? String(options.identity || 'default') + '-' + String(options.identityRef)
-      : options.identity;
-    const profileDir = path.join(profileRoot, safeName(profileIdentity));
+    const profileDir = path.join(profileRoot, browserProfileName(options.identity, options.identityRef));
     fs.mkdirSync(profileDir, { recursive: true });
     const child = spawn(executable, [
       '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
@@ -409,6 +412,7 @@ export class BrowserSession {
 
   async observe({ selector = '', screenshot = false } = {}) {
     this.assertOpen();
+    if (this.pendingDialog) return { dialog: { ...this.pendingDialog }, observedAt: new Date().toISOString() };
     const info = await this.client.call('Runtime.evaluate', {
       expression: '(function(){return {title:document.title,url:location.href,text:(document.body?document.body.innerText:"").slice(0,4000)}})()',
       returnByValue: true,
@@ -430,6 +434,17 @@ export class BrowserSession {
     return out;
   }
 
+  async dispatchInput(params) {
+    let remove;
+    const dialog = new Promise(resolve => { remove = this.client.on('Page.javascriptDialogOpening', () => resolve({ dialog: true })); });
+    try {
+      // A trusted click can synchronously open a modal and hold the input reply.
+      // Return control so the next tool can accept/dismiss it, instead of waiting
+      // for the command timeout and incorrectly recording an unknown write.
+      return await Promise.race([this.client.call('Input.dispatchMouseEvent', params).then(() => ({})), dialog]);
+    } finally { remove?.(); }
+  }
+
   async act(action = {}) {
     this.assertOpen();
     const type = String(action.type || '');
@@ -439,14 +454,21 @@ export class BrowserSession {
     const denialStart = this.policyDenials.length;
     if (type === 'click') {
       const result = await this.client.call('Runtime.evaluate', {
-        expression: '(function(){var e=document.querySelector(' + JSON.stringify(String(action.selector || '')) + ');if(!e)return {found:false};e.click();return {found:true,tag:e.tagName}})()',
+        expression: '(function(){var e=document.querySelector(' + JSON.stringify(String(action.selector || '')) + ');if(!e)return {found:false};if(e.disabled)return {found:true,error:"element-disabled"};e.scrollIntoView({block:"center",inline:"center"});var r=e.getBoundingClientRect();if(r.width<1||r.height<1)return {found:true,error:"element-not-visible"};var x=Math.max(0,Math.min(innerWidth-1,r.x+r.width/2)),y=Math.max(0,Math.min(innerHeight-1,r.y+r.height/2));var hit=document.elementFromPoint(x,y);if(!hit||(!e.contains(hit)&&hit!==e))return {found:true,error:"element-covered"};return {found:true,tag:e.tagName,x:x,y:y}})()',
         returnByValue: true,
       });
+      if (result.exceptionDetails) throw new Error('浏览器未能定位可点击元素');
+      const value = result.result?.value || { found: false };
+      if (!value.found || value.error) return { ...value, state: 'failed', error: value.error || 'element-not-found' };
+      for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
+        const reply = await this.dispatchInput({ type, x: value.x, y: value.y, ...(type === 'mouseMoved' ? {} : { button: 'left', clickCount: 1 }) });
+        if (reply.dialog || this.pendingDialog) return { found: true, tag: value.tag, state: 'waiting-dialog', dialog: { ...this.pendingDialog } };
+      }
       await sleep(250);
       const denied = this.policyDenials.slice(denialStart);
       if (denied.length) throw new Error('浏览器动作触发的请求被策略阻断：' + denied[0].reason);
-      const value = result.result?.value || { found: false };
-      return value.found === false ? { ...value, state: 'failed', error: 'element-not-found' } : { ...value, state: 'completed' };
+      if (this.pendingDialog) return { found: true, tag: value.tag, state: 'waiting-dialog', dialog: { ...this.pendingDialog } };
+      return { found: true, tag: value.tag, state: 'completed' };
     }
     if (type === 'type') {
       const result = await this.client.call('Runtime.evaluate', {
@@ -483,7 +505,7 @@ export class BrowserSession {
       const before = new Set(this.downloads.keys());
       if (!action.selector) return { state: 'listening', directory, completed: false, note: '下载监听已建立；尚未发生下载，不能视为下载完成' };
       const clicked = await this.act({ type: 'click', selector: action.selector });
-      if (clicked.state === 'failed') return clicked;
+      if (clicked.state !== 'completed') return clicked;
       const deadline = Date.now() + 15000;
       while (Date.now() < deadline) {
         const completed = [...this.downloads.values()].find(item => !before.has(item.guid) && item.state === 'completed');

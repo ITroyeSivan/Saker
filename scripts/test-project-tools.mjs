@@ -9,6 +9,7 @@ import { openStore, registerFinding, updateFinding } from '../plugins/dsh-redtea
 import { startTaskPolicy, taskPolicyStatus, readTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy.js';
 import { createProjectRun, transitionProjectRun, defineProjectChecks, upsertProjectSource, readProjectRun, listProjectChecks, listProjectActions, recordProjectCheck } from '../plugins/dsh-redteam-results/lib/project-store.js';
 import { projectTurnDecision, completeProjectRun } from '../plugins/dsh-redteam-results/lib/project-runtime.js';
+import { registerVerifiedProjectFinding } from './lib/project-test-fixtures.mjs';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-project-tools-'));
 process.env.DSH_HOME = home;
@@ -81,15 +82,7 @@ function prepareProject(sid) {
 }
 
 function verifiedFinding(sid, title) {
-  const finding = registerFinding(store, sid, 'pentest', {
-    title, severity: 'medium', target: origin, evidenceLevel: 'confirmed',
-    evidence: 'SYNTHETIC_PROJECT_EVIDENCE', impact: 'SYNTHETIC_PROJECT_IMPACT',
-  });
-  return updateFinding(store, sid, 'pentest', finding.id, {
-    status: 'verified', secondRating: 'medium',
-    secondRatingNote: '独立复核已重新读取本地合成对象，并通过另一条受控观测通道核对证据引用；观察到的对象、权限和响应标记相互一致，结论可以追溯并重复执行。',
-    verifyNote: '独立复核完成',
-  });
+  return registerVerifiedProjectFinding(store, sid, { title, target: origin });
 }
 
 try {
@@ -101,6 +94,7 @@ try {
     const snapshot = contexts.find(context => context.name === 'saker-pentest-task-state').text(exec(sid));
     assert.match(snapshot, /按文档连续测试/);
     assert.match(snapshot, /project_document/);
+    assert(snapshot.includes(started.run.runId), '稳定提示标明当前运行，避免新轮沿用历史检查编号');
     assert(!snapshot.includes('状态无法读取'), snapshot);
     assert.equal(readTaskPolicy(store, sid).modules, undefined, '项目不能初始化 regular 模块');
     const listed = await invoke(sid, 'project_document', { action: 'list' });
@@ -109,6 +103,14 @@ try {
     assert.equal(read.ok, true, read.error);
     const defined = await invoke(sid, 'project_check', { action: 'define', checks: [{ requirement: '检查回环响应', sourceLocation: 'entry-doc r1 p1' }] });
     assert.equal(defined.ok, true, defined.error);
+    assert.match(defined.text, /action=next/);
+    const stale = await invoke(sid, 'project_check', { action: 'detail', checkId: 'old-run-check' });
+    assert.equal(stale.ok, false);
+    assert(stale.error.includes(started.run.runId));
+    assert.match(stale.error, /action=next/);
+    const premature = await invoke(sid, 'project_check', { action: 'record', checkId: defined.checks[0].checkId, verdict: 'blocked', gaps: '合成缺条件' });
+    assert.equal(premature.ok, false);
+    assert.match(premature.error, /尚未领取.*action=next/);
     const next = await invoke(sid, 'project_check', { action: 'next' });
     assert.equal(next.ok, true, next.error);
     assert(next.text.includes(next.check.checkId), '实际渲染文本必须带后续 record 需要的 checkId');
@@ -139,6 +141,30 @@ try {
     assert.match(browserDenied, /target_network_disabled/);
     assert.equal(readTaskPolicy(store, sid).used.toolCalls, 0);
     assert.throws(() => startTaskPolicy(store, 'pt-unknown-mode', { mode: 'project', question: '非项目字段不能伪装', budget: { toolCalls: 1 } }), /invalid task mode/);
+  });
+  await test('开始前在桌面保存的网络与请求限制进入真实项目策略', async () => {
+    const sid = 'pt-saved-limits';
+    await dispatch(ctx, store, 'task.limits', { sessionId: sid, allowTargetNetwork: false, readOnly: true, excludedPaths: '/private', requestRatePerMinute: 12, requestConcurrency: 1, allowedOrigins: ['https://api.example.test'] });
+    await dispatch(ctx, store, 'project.start', { sessionId: sid, autoStart: false, policy: { question: '只分析现有文档', target: origin } });
+    const policy = readTaskPolicy(store, sid);
+    assert.equal(policy.allowTargetNetwork, false);
+    assert.equal(policy.readOnly, true);
+    assert.deepEqual(policy.excludedPaths, ['/private']);
+    assert.equal(policy.requestRatePerMinute, 12);
+    assert.equal(policy.requestConcurrency, 1);
+    assert.deepEqual(policy.allowedOrigins, ['https://api.example.test']);
+    await invoke(sid, 'project_check', { action: 'define', checks: [{ requirement: '不发请求' }] });
+    await invoke(sid, 'project_check', { action: 'next' });
+    const result = await tools.get('project_request').execute({ method: 'GET', url: origin + '/never-send' }, exec(sid));
+    assert.equal(result.ok, false); assert.match(result.error, /target_network_disabled/);
+  });
+  await test('文档中只有一个网站时确定主目标，多个网站时要求用户指定', async () => {
+    await dispatch(ctx, store, 'project.import', { sessionId: 'pt-infer-target', name: '环境.md', text: '项目目标：`' + origin + '`，接口 ' + origin + '/api/items。无需登录。' });
+    await dispatch(ctx, store, 'project.start', { sessionId: 'pt-infer-target', autoStart: false, policy: { question: '按文档测试' } });
+    assert.equal(readTaskPolicy(store, 'pt-infer-target').target, origin);
+    await dispatch(ctx, store, 'project.import', { sessionId: 'pt-ambiguous-target', name: '环境.txt', text: '网站 ' + origin + ' 和 https://second.example.test' });
+    await assert.rejects(() => dispatch(ctx, store, 'project.start', { sessionId: 'pt-ambiguous-target', autoStart: false, policy: { question: '选择主目标' } }), /指定本次测试网站/);
+    assert.equal(readTaskPolicy(store, 'pt-ambiguous-target'), null, '范围不明确时不建立半个任务');
   });
 
   await test('项目工具定义展示结构化检查格式，错误输入不能假报定义成功', async () => {
@@ -231,7 +257,7 @@ try {
       sessionId: sid, name: '原子要求.txt', text: '检查普通员工不能审批。',
     });
     await dispatch(ctx, store, 'project.start', {
-      sessionId: sid, policy: { question: '按文档测试', budget: { minutes: 30 } }, autoStart: false,
+      sessionId: sid, policy: { question: '按文档测试', allowTargetNetwork: false, budget: { minutes: 30 } }, autoStart: false,
     });
     const read = await invoke(sid, 'project_document', {
       action: 'read', sourceId: imported.source.sourceId, sourceRevision: 'r1', sectionId: 'lines-1-1',
@@ -260,7 +286,7 @@ try {
     assert.equal(second.source.sourceRevision, 'r2');
     assert.equal(duplicate.source.sourceId, second.source.sourceId);
     assert.equal(duplicate.source.sourceRevision, 'r2', '相同内容重复导入不能制造新修订');
-    const started = await dispatch(ctx, store, 'project.start', { sessionId: sid, policy: { question: '按修订测试', budget: { minutes: 10 } }, autoStart: false });
+    const started = await dispatch(ctx, store, 'project.start', { sessionId: sid, policy: { question: '按修订测试', allowTargetNetwork: false, budget: { minutes: 10 } }, autoStart: false });
     assert.equal(started.run.sourceSnapshot.length, 1, '同一来源多个修订只把最新版放进本次快照');
     assert.equal(started.run.sourceSnapshot[0].sourceRevision, 'r2');
   });
@@ -300,6 +326,14 @@ try {
     assert(handlers?.length);
     for (let index = 0; index < 4; index++) for (const handler of handlers) await handler({ agent });
     assert.equal(steers.length, 2, '第三次无进展必须停止投递');
+    for (const message of steers) {
+      assert.equal(typeof message, 'object', '宿主 inbox 持久化要求消息对象，字符串会导致重启后历史损坏');
+      assert(message.id.startsWith('saker-project-continue-'));
+      assert.equal(message.role, 'user');
+      assert.equal(message.source.kind, 'user');
+      assert.match(message.content[0].text, /继续按文档测试/);
+      assert.deepEqual(JSON.parse(JSON.stringify(message)), message);
+    }
     assert.equal(readProjectRun(store, sid, run.runId).state, 'paused');
     assert.equal(taskPolicyStatus(store, sid).stopped, true);
     const recorded = await tools.get('project_check').execute({ action: 'record', checkId: check.checkId, verdict: 'not_found', checkedContent: '不应被写入' }, exec(sid));
@@ -416,6 +450,30 @@ try {
     assert.equal(result.ok, true, result.error);
     assert.equal(result.status, 200);
     assert(result.executionId.startsWith('execution-'));
+  });
+
+  await test('项目问题登记自动关联当前回执，复核后才能用于当前检查', async () => {
+    const sid = 'pt-finding-auto-evidence';
+    const { check } = prepareProject(sid);
+    await invoke(sid, 'project_check', { action: 'next' });
+    const observed = await invoke(sid, 'project_request', { url: origin + '/api/ok' });
+    assert(observed.ok, observed.error);
+    const registered = await invoke(sid, 'redteam_finding_register', {
+      title: '合成权限问题', summary: '本地受控样本', target: origin + '/api/ok', severity: 'medium', evidenceLevel: 'confirmed',
+      evidence: 'SAKER_PROJECT_TOOL', impact: '仅验证项目证据归属', fix: '这是合成用例',
+    });
+    assert(registered.ok, registered.error);
+    const row = store.get.get(sid, registered.id);
+    assert(JSON.parse(row.evidence_refs).some(ref => ref.id === observed.executionId));
+    const updated = await invoke(sid, 'redteam_finding_update', {
+      id: registered.id, status: 'verified', secondRating: 'medium',
+      secondRatingNote: '本地合成复核重新读取已保存的项目回执，核对当前运行、检查项、实际响应标记和对象说明，本测试仅证明证据归属机制，不证明真实业务漏洞。',
+    });
+    assert(updated.ok, updated.error);
+    const recorded = await invoke(sid, 'project_check', {
+      action: 'record', checkId: check.checkId, verdict: 'issue', findingRefs: [registered.id], checkedContent: '实际回执与已复核合成问题已关联',
+    });
+    assert(recorded.ok, recorded.error);
   });
 
   await test('非项目场景拒绝项目工具，不跨场景复用', async () => {

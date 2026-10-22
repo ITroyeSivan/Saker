@@ -5,9 +5,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
+import { gzipSync, deflateSync, brotliCompressSync } from 'node:zlib';
 import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
-import { startTaskPolicy, readTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy.js';
-import { createProjectRun, transitionProjectRun, defineProjectChecks, listProjectActions, readProjectCheck, readProjectRun, beginProjectAction, markProjectActionDispatched, finishProjectAction, reconcileProjectAction } from '../plugins/dsh-redteam-results/lib/project-store.js';
+import { startTaskPolicy, readTaskPolicy, setTaskActionLimits } from '../plugins/dsh-redteam-results/lib/task-policy.js';
+import { createProjectRun, transitionProjectRun, defineProjectChecks, listProjectActions, readProjectCheck, readProjectRun, beginProjectAction, markProjectActionDispatched, finishProjectAction, reconcileProjectAction, recordProjectCheck } from '../plugins/dsh-redteam-results/lib/project-store.js';
 import { executeProjectHttp } from '../plugins/dsh-redteam-results/lib/project-execution.js';
 import { readExecutionReceipt } from '../plugins/dsh-redteam-results/lib/execution-receipts.js';
 import { saveAccount } from '../plugins/dsh-redteam-results/lib/accounts.js';
@@ -27,6 +28,13 @@ const server = http.createServer((request, response) => {
   request.on('data', chunk => chunks.push(chunk));
   request.on('end', () => {
     seen.push({ method: request.method, url: request.url, headers: request.headers });
+    if (request.url.startsWith('/compressed/')) {
+      const encoding = request.url.split('/')[2];
+      const encode = { gzip: gzipSync, deflate: deflateSync, br: brotliCompressSync }[encoding];
+      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'content-encoding': encoding === 'invalid' ? 'gzip' : encoding });
+      response.end(encoding === 'invalid' ? Buffer.from('broken-gzip') : encode(Buffer.from(JSON.stringify({ business: 'COMPRESSED_BUSINESS', password: 'COMPRESSED_SECRET' }))));
+      return;
+    }
     if (request.url === '/slow') return;
     if (request.url === '/aborted') {
       response.writeHead(200, { 'content-type': 'text/plain', 'content-length': '100000' });
@@ -109,6 +117,7 @@ try {
   await test('明确关联 API 可通过，身份只在显式绑定后套用', async () => {
     const sid = 'pe-associated';
     const { run, check } = await prepare(sid);
+    setTaskActionLimits(store, sid, { allowedOrigins: [apiOrigin] }, 'desktop-user');
     saveTaskContext(store, sid, {
       assets: [
         { id: 'primary', url: origin, inScope: true, reachable: true },
@@ -302,6 +311,58 @@ try {
     assert(!result.summary.includes('SYNTHETIC_TOKEN'));
     assert(!JSON.stringify(result.responseHeaders).includes('SYNTHETIC_COOKIE'));
     assert(result.summary.includes('VISIBLE_BUSINESS_VALUE'), '合法业务正文仍需可分析');
+  });
+  await test('模型填写范围内资产不能自行扩大项目访问范围', async () => {
+    const sid = 'pe-scope-injection';
+    const { run, check } = await prepare(sid);
+    saveTaskContext(store, sid, { assets: [{ id: 'outside', url: apiOrigin, inScope: true, reachable: true }], requests: [], checks: [] });
+    apiRequest = null;
+    await assert.rejects(() => executeProjectHttp(store, sid, run.runId, check.checkId, { url: apiOrigin + '/not-authorized' }), /outside the current task site/);
+    assert.equal(apiRequest, null);
+    setTaskActionLimits(store, sid, { allowedOrigins: [apiOrigin] }, 'desktop-user');
+    assert.equal((await executeProjectHttp(store, sid, run.runId, check.checkId, { url: apiOrigin + '/now-authorized' })).ok, true);
+  });
+  await test('人工确认生效后相同写操作不重放，读取仍可执行', async () => {
+    const sid = 'pe-no-replay';
+    const { run, check } = await prepare(sid);
+    const input = { method: 'POST', url: origin + '/slow', body: 'record=one', timeoutMs: 100 };
+    await assert.rejects(() => executeProjectHttp(store, sid, run.runId, check.checkId, input), /超时/);
+    const original = listProjectActions(store, sid, run.runId)[0];
+    reconcileProjectAction(store, sid, run.runId, original.actionId, { outcome: 'occurred', reason: '通过业务记录确认已创建一次' });
+    const count = seen.length;
+    await assert.rejects(() => executeProjectHttp(store, sid, run.runId, check.checkId, input), /已人工确认生效/);
+    assert.equal(seen.length, count);
+    assert.equal((await executeProjectHttp(store, sid, run.runId, check.checkId, { url: origin + '/read-record' })).ok, true);
+  });
+  await test('账号凭据改变或失效后旧观测不能用于完整结论', async () => {
+    const sid = 'pe-identity-freshness';
+    const { run, check } = await prepare(sid);
+    const account = saveAccount(store, sid, { name: 'alice', status: 'valid', secret: 'Cookie: session=first' });
+    await executeProjectHttp(store, sid, run.runId, check.checkId, { url: origin + '/identity', authContext: 'alice' });
+    saveAccount(store, sid, { id: account.id, name: 'alice', status: 'expired' });
+    assert.throws(() => recordProjectCheck(store, sid, run.runId, check.checkId, { executionState: 'ended', verdict: 'not_found', checkedContent: 'Old response' }), /usable-observation-missing/);
+    saveAccount(store, sid, { id: account.id, name: 'alice', status: 'valid', secret: 'Cookie: session=second' });
+    assert.throws(() => recordProjectCheck(store, sid, run.runId, check.checkId, { executionState: 'ended', verdict: 'not_found', checkedContent: 'Old response' }), /usable-observation-missing/);
+    await executeProjectHttp(store, sid, run.runId, check.checkId, { url: origin + '/identity-current', authContext: 'alice' });
+    assert.equal(recordProjectCheck(store, sid, run.runId, check.checkId, { executionState: 'ended', verdict: 'not_found', checkedContent: 'Fresh response' }).verdict, 'not_found');
+  });
+  await test('压缩响应可读且解码错误不会成为完整结论证据', async () => {
+    for (const encoding of ['gzip', 'deflate', 'br', 'invalid']) {
+      const sid = 'pe-compressed-' + encoding;
+      const { run, check } = await prepare(sid);
+      const result = await executeProjectHttp(store, sid, run.runId, check.checkId, { url: origin + '/compressed/' + encoding });
+      const receipt = readExecutionReceipt(store, sid, result.executionId);
+      assert.equal(receipt.integrityValid, true, 'raw wire digest remains valid');
+      if (encoding === 'invalid') {
+        assert.match(result.summary, /不可读取/);
+        assert.equal(receipt.complete, false);
+        assert.equal(receipt.bodyUnavailable, true);
+      } else {
+        assert.match(result.summary, /COMPRESSED_BUSINESS/);
+        assert(!result.summary.includes('COMPRESSED_SECRET'));
+        assert.equal(receipt.complete, true);
+      }
+    }
   });
 } finally {
   server.closeAllConnections?.();

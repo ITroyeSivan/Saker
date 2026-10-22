@@ -95,6 +95,16 @@ function allValues(node) { if (node === null || node === undefined) return []; i
 const textOf = node => allValues(node).filter(item => typeof item === 'string').join(' ');
 
 try {
+  await test('未开始的项目方向在宿主读取和其他设置变更后保留', async () => {
+    await results.dispatch(ctx, store, 'task.scenario', { sessionId: 'ui-scenario', scenario: 'project' });
+    const first = await results.dispatch(ctx, store, 'chat.settings', { sessionId: 'ui-scenario' });
+    assert.equal(first.options.scenario, 'project');
+    await results.dispatch(ctx, store, 'task.choose', { sessionId: 'ui-scenario', mode: 'regular', workers: 0 });
+    const second = await results.dispatch(ctx, store, 'chat.settings', { sessionId: 'ui-scenario' });
+    assert.equal(second.options.scenario, 'project');
+    await results.dispatch(ctx, store, 'task.scenario', { sessionId: 'ui-scenario', scenario: 'pentest' });
+    assert.equal((await results.dispatch(ctx, store, 'chat.settings', { sessionId: 'ui-scenario' })).options.scenario, 'pentest');
+  });
   await test('项目面板显示统计、检查表与来源', async () => {
     prepareProject('ui-project');
     const ui = mount('ui-project');

@@ -4,6 +4,11 @@
 // 只有**有效**账号才把它另存的秘密套到“自己没带 Cookie/Authorization”的已存请求上，
 // 秘密本身永不写进回执、资料或模型输入。
 import { ACCOUNT_STATUSES } from './accounts.js';
+import { createHash } from 'node:crypto';
+
+export const taskIdentityRevision = identity => createHash('sha256').update(JSON.stringify([
+  String(identity?.name || ''), String(identity?.status || ''), String(identity?.secret || ''),
+])).digest('hex');
 
 /**
  * 按名称把请求身份关联到任务账号。
@@ -68,7 +73,7 @@ function secretHeader(secret) {
  */
 export function identityRequestHeaders(parsed, identity) {
   if (!parsed || !identity?.matched || identity.status !== 'valid') return null;
-  if (parsed.headers.cookie !== undefined || parsed.headers.authorization !== undefined) return null;
+  if (Object.keys(parsed.headers || {}).some(name => /^(cookie|authorization)$/i.test(name.trim()))) return null;
   const header = secretHeader(identity.secret);
   if (!header) return null;
   return { kind: header.kind, headers: { ...parsed.headers, [header.name]: header.value } };

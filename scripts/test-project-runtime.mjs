@@ -13,7 +13,7 @@ import {
   upsertProjectSource,
 } from '../plugins/dsh-redteam-results/lib/project-store.js';
 import { recordProjectDocumentRead } from '../plugins/dsh-redteam-results/lib/project-progress.js';
-import { projectContinuation, projectTurnDecision, markProjectContinuation, resumeProjectRun, completeProjectRun, projectExecutableChecks, setProjectRunState } from '../plugins/dsh-redteam-results/lib/project-runtime.js';
+import { projectContinuation, projectTurnDecision, markProjectContinuation, resumeProjectRun, completeProjectRun, projectExecutableChecks, setProjectRunState, synchronizeStoppedProjectRun } from '../plugins/dsh-redteam-results/lib/project-runtime.js';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-project-runtime-'));
 process.env.DSH_HOME = home;
@@ -381,6 +381,19 @@ test('模型提前标记 planComplete 不能绕过项目检查收尾', () => {
   assert.equal(readProjectRun(store, sid, run.runId).state, 'running');
 });
 
+test('模型准入失败未产生停止钩子时，项目仍能同步暂停且不重置额度', () => {
+  const sid = 'pr-native-limit';
+  const { run } = prepare(sid);
+  const policy = readTaskPolicy(store, sid);
+  writeTaskPolicy(store, sid, { ...policy, used: { ...policy.used, toolCalls: 5 }, modelBudgetBlock: { code: 'model_calls_exhausted', message: '模型调用次数已用完' } }, 'fixture-native-model-denial');
+  const paused = synchronizeStoppedProjectRun(store, sid);
+  assert.equal(paused.state, 'paused');
+  assert.equal(paused.controlRev, run.controlRev + 1);
+  assert.match(paused.blocker.reason, /模型调用次数/);
+  assert.equal(readTaskPolicy(store, sid).used.toolCalls, 5);
+  assert.equal(readTaskPolicy(store, sid).modelBudgetBlock.code, 'model_calls_exhausted');
+  assert.equal(synchronizeStoppedProjectRun(store, sid).controlRev, paused.controlRev, '轮询不重复改变控制版本');
+});
 store.close();
 fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 });
 console.log(failed ? failed + ' failed' : 'all passed');

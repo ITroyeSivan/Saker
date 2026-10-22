@@ -174,6 +174,22 @@ try {
     assert.equal(Buffer.from(material.originalBase64, 'base64').toString(), 'SAKER_ATTACHMENT_CONTENT');
     assert.equal(material.relativeRef, 'materials/download-proof');
   });
+  test('附件清单篡改、遗漏或不安全引用在写入前被拒绝', () => {
+    const archive = exportTaskArchive(store, 'restored-attachment');
+    const found = archive.manifest.files.find(item => item.id === 'download-proof');
+    assert(found);
+    const altered = structuredClone(archive);
+    altered.manifest.files.find(item => item.id === found.id).digest = '0'.repeat(64);
+    assert.equal(verifyTaskArchive(altered).ok, false);
+    const missing = structuredClone(archive);
+    missing.manifest.files = missing.manifest.files.filter(item => item.id !== found.id);
+    assert.equal(verifyTaskArchive(missing).ok, false);
+    const unsafe = structuredClone(archive);
+    unsafe.manifest.files.find(item => item.id === found.id).relativeRef = '../outside';
+    assert.equal(verifyTaskArchive(unsafe).ok, false);
+    assert.throws(() => importTaskArchive(store, altered, { sessionId: 'invalid-attachment' }), /归档校验失败/);
+    assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM task_policy WHERE session_id=?').get('invalid-attachment').n, 0);
+  });
   test('恢复时缺失附件有稳定引用并明确列出', () => {
     upsertProjectSource(store, 'src', {
       sourceId: 'source-missing', sourceRevision: 'r1', displayName: 'missing.docx',

@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { resolveCftExecutable } from './browser-session.js';
 
 export const BROWSER_RECEIPT_SCHEMA = `CREATE TABLE IF NOT EXISTS browser_receipts (
  session_id TEXT NOT NULL, id TEXT NOT NULL, record TEXT NOT NULL,
@@ -16,13 +17,9 @@ export const BROWSER_RECEIPT_SCHEMA = `CREATE TABLE IF NOT EXISTS browser_receip
 
 const PROBE_VARIABLE = 'window.__sakerProbe';
 
-/** 本机可用的浏览器：显式路径 > Chrome > Edge。找不到就明确报错，不假装执行过。 */
+/** 与项目浏览器统一使用独立的 Chrome for Testing。 */
 export function findBrowserExecutable(explicit) {
-  const candidates = [explicit, process.env.SAKER_BROWSER_PATH,
-    'C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
-    'C:/Program Files/Microsoft/Edge/Application/msedge.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].filter(Boolean);
-  for (const candidate of candidates) { try { if (fs.statSync(candidate).isFile()) return candidate; } catch { /* 继续找 */ } }
-  throw new Error('未找到可用浏览器：请安装 Chrome/Edge，或用 SAKER_BROWSER_PATH 指定可执行文件');
+  return resolveCftExecutable(explicit || process.env.SAKER_BROWSER_PATH);
 }
 
 function waitForDevtoolsUrl(child, timeoutMs) {

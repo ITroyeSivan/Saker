@@ -4,11 +4,12 @@ import http from 'node:http';
 import https from 'node:https';
 import { createHash, randomUUID } from 'node:crypto';
 import { readTaskPolicy, effectivePolicy, targetTrafficDenial, excludedPathDenial, taskExecutionGuard } from './task-policy.js';
-import { resolveTaskIdentity, identityDenial, identityRequestHeaders } from './identity-binding.js';
+import { resolveTaskIdentity, identityDenial, identityRequestHeaders, taskIdentityRevision as identityRevision } from './identity-binding.js';
 import { acquireTargetSlot } from './request-pacing.js';
 import { beginProjectAction, markProjectActionDispatched, finishProjectAction, readProjectRun, readProjectCheck } from './project-store.js';
 import { redactHeaders, redactText } from './redaction.js';
 import { readTaskContext } from './task-context.js';
+import { responseBodyText } from './response-body.js';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
 
@@ -23,16 +24,13 @@ function parseTarget(input) {
 function projectScopeOrigins(store, sessionId, limits) {
   const origins = new Set();
   if (limits.target) try { origins.add(new URL(limits.target).origin); } catch { /* 无效目标由其他闸拒绝 */ }
-  for (const asset of readTaskContext(store, sessionId)?.assets || []) {
-    if (asset?.inScope !== true || asset?.reachable !== true) continue;
-    try { origins.add(new URL(asset.url).origin); } catch { /* 忽略无效资产 */ }
-  }
+  for (const origin of limits.allowedOrigins || []) try { origins.add(new URL(origin).origin); } catch { /* 无效站点 */ }
   return origins;
 }
 
 function targetScopeDenial(store, sessionId, limits, url) {
   const origins = projectScopeOrigins(store, sessionId, limits);
-  return origins.size && !origins.has(url.origin) ? 'request is outside the current task site or explicitly allowed associated assets' : undefined;
+  return !origins.has(url.origin) ? 'request is outside the current task site or user-allowed associated sites' : undefined;
 }
 
 function associatedIdentityDenial(store, sessionId, limits, url, authContext) {
@@ -46,12 +44,6 @@ function associatedIdentityDenial(store, sessionId, limits, url, authContext) {
   const bound = String(asset?.authContext || asset?.identityRef || '');
   return bound && bound === authContext ? undefined : 'associated API identity is not explicitly bound to this authContext';
 }
-
-const identityRevision = identity => digest(JSON.stringify([
-  String(identity?.name || ''),
-  String(identity?.status || ''),
-  String(identity?.secret || ''),
-]));
 
 function requestFingerprint(limits, method, url, authContext, identity, body) {
   return digest(JSON.stringify({
@@ -249,14 +241,15 @@ export async function executeProjectHttp(store, sessionId, runId, checkId, input
     elapsedMs: result.elapsedMs, requestAttempts: 1,
     requestBasis: digest(JSON.stringify(['project', runId, checkId, requestWire])),
   };
+  const decoded = responseBodyText(record);
+  if (!decoded.available) { record.bodyUnavailable = true; record.complete = false; record.bodyReadError = decoded.text; }
   store.db.prepare('INSERT INTO execution_receipts (session_id,id,record) VALUES (?,?,?)').run(sessionId, record.id, JSON.stringify(record));
   await finishProjectAction(store, sessionId, runId, begun.action.actionId, {
     executionState: 'completed', requestRef: record.id,
     receivedBytes: record.responseBytes, retainedBytes: record.capturedBytes,
+    bodyUnavailable: record.bodyUnavailable,
   });
-  const contentType = String(result.headers?.['content-type'] || '');
-  const textual = !contentType || /(?:text\/|json|xml|javascript|x-www-form-urlencoded|svg)/i.test(contentType);
-  const bodyText = textual ? redactText(result.body.toString('utf8')) : '[二进制响应 ' + result.retainedBytes + ' 字节]';
+  const bodyText = redactText(decoded.text);
   const bodyPreview = bodyText.slice(0, 2000);
   const businessHeaders = ['content-type', 'location', 'content-language']
     .filter(name => result.headers?.[name] !== undefined)
