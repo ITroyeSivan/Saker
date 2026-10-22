@@ -88,8 +88,7 @@ export function createPurposeTasks(ctx, getStore) {
       activationState: 'starting', runnerPid: process.pid, modelOptions: childAgentOptions || null,
       allowTargetNetwork: purpose === 'report' ? false : state.policy.allowTargetNetwork !== false,
       allowedTools: ['run_code', 'read', 'glob', 'grep', 'redteam_context', 'redteam_checks',
-        'redteam_delivery', 'redteam_execution', 'redteam_research', 'knowledge_list', 'knowledge_search',
-        'knowledge_read', 'nday_catalog', 'nday_metrics', 'nday_policy_get'],
+        'redteam_delivery', 'redteam_execution', 'redteam_research'],
     }, 'purpose-task-starting', { childId, purpose });
     // Persisted ownership takes over the reservation without an asynchronous gap.
     releaseWorkerSlot(parentId, childId);

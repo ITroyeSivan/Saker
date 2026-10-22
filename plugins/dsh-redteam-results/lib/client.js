@@ -4,7 +4,7 @@ var module = { exports: {} }; var exports = module.exports;
 // 默认按 sessionId 隔离；只有历史页请求 scope=all。模式隔离由服务端双键强制。
 "use strict";
 /* SAKER-UI-KIT:BEGIN */
-var SAKER_UI_KIT_CSS = "/* 5.7 共享组件层：Button / Input / Select / Badge / DataTable / Drawer / InlineNotice / EmptyState\n   单一来源：shared/ui-kit/ui-kit.css（令牌见 shared/ui-kit/ui-kit.json）。\n   由 scripts/sync-ui-kit.mjs 注入到各产品插件；插件里的同类尺寸规则应删除，避免双写。 */\n.saker-ui-btn{height:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px}\n.saker-ui-input{height:36px;border-radius:6px}\n.saker-ui-select{height:32px;border-radius:6px}\n.saker-ui-table td{height:38px}\n.saker-ui-badge{border-radius:6px;font-size:12px;line-height:1.5}\n.saker-ui-drawer{border-radius:12px}\n.saker-ui-notice{border-radius:6px;font-size:13px;line-height:1.5}\n.saker-ui-empty{border-radius:6px;font-size:13px;line-height:1.5}\n/* 现有插件类别名：与 canonical 类共用同一套尺寸 */\n.dsh-chat-panel-head button,.dsh-chat-actions button,.dsh-chat-task-status button,.dsh-task-nav button,.dsh-task-actions button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-prompt-io button,.dsh-prompt-more,.dsh-prompt-scopes button,.dsh-prompt-modes button,.dsh-prompt-foot button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-tools button,.dsh-materials-types button,.dsh-materials-foot button,.dsh-materials-table td button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-new button,.dsh-materials-import-actions button,.dsh-execution-tools>button,.dsh-test-content-actions button,.dsh-rtr-btn{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-task-nav select,.dsh-materials-tools select,.dsh-rtr-select{height:32px}\n.dsh-prompt-saveas input,.dsh-prompt-list input[type=search],.dsh-prompt-field input{height:36px}\n.dsh-materials-tools input[type=search],.dsh-materials-import input,.dsh-task-field input,.dsh-rtr-search{height:36px}\n.dsh-materials-table td{height:38px}\n.dsh-chat-setup svg,.dsh-task-workspace svg{width:16px;height:16px}\n.dsh-hnt-btn,.dsh-hnt-tab{height:32px}\n.dsh-hnt-input{height:36px}\n.dsh-hnt-select{height:32px}\n.dsh-mcs-btn,.dsh-mcs-iconbtn,.dsh-mcs-toolscount--btn{height:32px}\n.dsh-mcs-field input,.dsh-mcs-pairrow input,.dsh-mcs-search{height:36px}\n.dsh-mcs-field select,.dsh-mcs-seg button{height:32px}\n.dsh-sp-chip.is-btn{height:32px}\n.dsh-mg-chip{height:32px}\n/* 内联 style 插件（knowledge-hub / sec-config / skill-browse）：根容器打 data-saker-ui，\n   控件尺寸由共享层统一给，插件自己的 helper 不再写 height。 */\n[data-saker-ui] button{height:32px}\n[data-saker-ui] input:not([type=checkbox]):not([type=radio]):not([type=file]){height:36px}";
+var SAKER_UI_KIT_CSS = "/* 5.7 共享组件层：Button / Input / Select / Badge / DataTable / Drawer / InlineNotice / EmptyState\n   单一来源：shared/ui-kit/ui-kit.css（令牌见 shared/ui-kit/ui-kit.json）。\n   由 scripts/sync-ui-kit.mjs 注入到各产品插件；插件里的同类尺寸规则应删除，避免双写。 */\n.saker-ui-btn{height:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px}\n.saker-ui-input{height:36px;border-radius:6px}\n.saker-ui-select{height:32px;border-radius:6px}\n.saker-ui-table td{height:38px}\n.saker-ui-badge{border-radius:6px;font-size:12px;line-height:1.5}\n.saker-ui-drawer{border-radius:12px}\n.saker-ui-notice{border-radius:6px;font-size:13px;line-height:1.5}\n.saker-ui-empty{border-radius:6px;font-size:13px;line-height:1.5}\n/* 现有插件类别名：与 canonical 类共用同一套尺寸 */\n.dsh-chat-panel-head button,.dsh-chat-actions button,.dsh-chat-task-status button,.dsh-task-nav button,.dsh-task-actions button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-prompt-io button,.dsh-prompt-more,.dsh-prompt-scopes button,.dsh-prompt-modes button,.dsh-prompt-foot button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-tools button,.dsh-materials-types button,.dsh-materials-foot button,.dsh-materials-table td button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-new button,.dsh-materials-import-actions button,.dsh-execution-tools>button,.dsh-test-content-actions button,.dsh-rtr-btn{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-task-nav select,.dsh-materials-tools select,.dsh-rtr-select{height:32px}\n.dsh-prompt-saveas input,.dsh-prompt-list input[type=search],.dsh-prompt-field input{height:36px}\n.dsh-materials-tools input[type=search],.dsh-materials-import input,.dsh-task-field input,.dsh-rtr-search{height:36px}\n.dsh-materials-table td{height:38px}\n.dsh-chat-setup svg,.dsh-task-workspace svg{width:16px;height:16px}\n.dsh-hnt-btn,.dsh-hnt-tab{height:32px}\n.dsh-hnt-input{height:36px}\n.dsh-hnt-select{height:32px}\n.dsh-mcs-btn,.dsh-mcs-iconbtn,.dsh-mcs-toolscount--btn{height:32px}\n.dsh-mcs-field input,.dsh-mcs-pairrow input,.dsh-mcs-search{height:36px}\n.dsh-mcs-field select,.dsh-mcs-seg button{height:32px}\n.dsh-sp-chip.is-btn{height:32px}\n.dsh-mg-chip{height:32px}\n/* 内联 style 插件（sec-config / skill-browse）：根容器打 data-saker-ui，\n   控件尺寸由共享层统一给，插件自己的 helper 不再写 height。 */\n[data-saker-ui] button{height:32px}\n[data-saker-ui] input:not([type=checkbox]):not([type=radio]):not([type=file]){height:36px}";
 /* SAKER-UI-KIT:END */
 var React = require("react");
 var useState = React.useState, useEffect = React.useEffect, useCallback = React.useCallback, useRef = React.useRef;
@@ -1599,13 +1599,10 @@ function InteractionControl(props) {
 }
 function FlowControls(props) {
   return React.createElement('div',null,
-    props.mode==='regular'?React.createElement('label',{className:'dsh-task-field'},React.createElement('span',null,'测试安排'),React.createElement('select',{'aria-label':'测试安排',value:props.workflow||'single',disabled:props.disabled,onChange:function(e){props.onChange({workflow:e.target.value});}},
-      React.createElement('option',{value:'single'},'只做当前模式'),React.createElement('option',{value:'regular-to-nday'},'收集后自动接 Nday'),React.createElement('option',{value:'regular-with-nday'},'常规与 Nday 同时进行'))):null,
     React.createElement('label',{className:'dsh-task-field'},React.createElement('span',null,'子代理上限'),React.createElement('input',{type:'number',min:0,max:16,step:1,'aria-label':'子代理上限',value:props.workers??2,disabled:props.disabled,onChange:function(e){var n=Number(e.target.value);if(e.target.value!==''&&Number.isInteger(n)&&n>=0&&n<=16)props.onChange({workers:n});}})),
     React.createElement('label',{className:'dsh-task-field'},React.createElement('span',null,'起步方式'),React.createElement('select',{'aria-label':'起步方式',value:props.startMode||'materials-first',disabled:props.disabled,onChange:function(e){props.onChange({startMode:e.target.value});}},Object.keys(START_MODE).map(function(value){return React.createElement('option',{key:value,value:value},START_MODE[value]);}))),
     React.createElement('p',{style:{fontSize:12}},START_MODE_HINT[props.startMode||'materials-first']),
-    React.createElement(InteractionControl,{interaction:props.interaction,disabled:props.disabled,onChange:function(value){return props.onChange({interaction:value});}}),
-    props.mode==='regular'&&props.workflow&&props.workflow!=='single'?React.createElement('p',null,'常规测试和 Nday 共用操作次数和停止时间。'):null);
+    React.createElement(InteractionControl,{interaction:props.interaction,disabled:props.disabled,onChange:function(value){return props.onChange({interaction:value});}}));
 }
 // 统一错误文案（v6 第 9.3 节）：接口错误含 code / 具体 message / 可恢复操作，
 // 这里把 message 与 hint 一起给用户看，别只丢一句「操作失败」。
@@ -1901,7 +1898,7 @@ function UsageRow(props) {
         return (row.role === 'main' ? '主任务' : '子任务 ' + String(row.sessionId).slice(0, 8)) + '：调用 ' + row.modelCalls + '，工具 ' + row.toolCalls + (row.totalTokens != null ? '，' + row.totalTokens + ' tokens' : '，用量未知');
       }).join('；')) : null,
       cost.unavailableSessions ? React.createElement('div', null, '有 ' + cost.unavailableSessions + ' 个会话的用量暂不可读') : null,
-      // 高级诊断「本次模型输入」：分项列出固定说明、工具定义、任务事实、知识、用户消息和历史。
+      // 高级诊断「本次模型输入」：分项列出固定说明、工具定义、任务事实、用户消息和历史。
       React.createElement('div', { className: 'dsh-usage-diagnostics', 'aria-label': '本次模型输入' },
         React.createElement('strong', null, '本次模型输入'),
         diag[0] ? React.createElement('div', { className: 'dsh-usage-diag-items' }, (diag[0].items || []).map(function (item) {
@@ -2101,50 +2098,6 @@ function MaterialsEntry(props) {
       notice[0] ? React.createElement('small', { role: 'status' }, notice[0]) : null,
       error[0] ? React.createElement('p', { role: 'alert' }, error[0]) : null) : null);
 }
-function TestContentSection(props) {
-  var data = useState(null), busy = useState(false), error = useState(''), notice = useState('');
-  function load() {
-    return api('test.content', { sessionId: props.sessionId })
-      .then(function (result) { if (!result.ok) throw Error(result.error || '读取测试内容失败'); data[1](result); error[1](''); if (props.onSelection) props.onSelection(result.selection.active); })
-      .catch(function (failure) { error[1](failure.message); });
-  }
-  useEffect(function () { load(); }, [props.sessionId]);
-  function save(active) {
-    var current = data[0]; if (!current) return Promise.resolve();
-    busy[1](true); error[1]( ''); notice[1]('');
-    return api('test.content', { sessionId: props.sessionId, action: 'save', active: active,
-      mode: current.selection.mode, rev: current.selection.rev, policyRev: current.selection.policyRev })
-      .then(function (result) { if (!result.ok) throw Error(result.error || '保存测试内容失败'); data[1]({ ...current, selection: result.selection }); if (props.onSelection) props.onSelection(result.selection.active); notice[1]('已保存'); })
-      .catch(function (failure) { error[1](failure.message); }).finally(function () { busy[1](false); });
-  }
-  var current = data[0];
-  if (!current) return null;
-  var active = new Set(current.selection.active || []);
-  var groups = current.catalog || [];
-  var allSelected = active.size === (current.keys || []).length;
-  return React.createElement('details', { className: 'dsh-test-content', open: false },
-    React.createElement('summary', null, '选择测试内容 · ' + (allSelected ? '全选（由 AI 选择相关项）' : '已选 ' + active.size + '/' + (current.keys || []).length)),
-    React.createElement('p', null, '全选=允许 AI 按当前问题挑选相关项，不等于逐项扫描。不选时只分析已添加内容，不再访问网站。'),
-    React.createElement('div', { className: 'dsh-test-content-actions' },
-      React.createElement('button', { type: 'button', disabled: busy[0], onClick: function () { return save([...current.keys]); } }, '全选'),
-      React.createElement('button', { type: 'button', disabled: busy[0], onClick: function () { return save([]); } }, '全不选')),
-    groups.map(function (group) {
-      return React.createElement('fieldset', { key: group.id },
-        React.createElement('legend', null, group.label),
-        group.items.map(function (item) {
-          return React.createElement('label', { key: item.id, title: item.purpose },
-            React.createElement('input', { type: 'checkbox', 'aria-label': item.label, checked: active.has(item.id), disabled: busy[0],
-              onChange: function (event) {
-                var next = new Set(active);
-                if (event.target.checked) next.add(item.id); else next.delete(item.id);
-                return save((current.keys || []).filter(key => next.has(key)));
-              } }), item.label);
-        }));
-    }),
-    active.size === 0 ? React.createElement('p', { role: 'status' }, '只分析已添加内容，不再访问网站。') : null,
-    notice[0] ? React.createElement('small', null, notice[0]) : null,
-    error[0] ? React.createElement('p', { role: 'alert' }, error[0]) : null);
-}
 // 停止状态（v6 第 5.2 节）：点击停止后先显示“正在停止…”，收到代理退出依据后才显示“已停止”。
 // 给助手选择模型（v6 第 5.5 节）：可选模型来自宿主自己的授权偏好；未配置时给出配置入口，不悄悄换模型。
 function WorkerModelSection(props) {
@@ -2256,149 +2209,6 @@ function taskStatusLabel(current, policy) {
   if (policy && policy.cancelled === true && current.agentRunning) return '正在停止…';
   return '已停止';
 }
-function KnowledgeEntry(props) {
-  var data = useState(null), fallbackOpen = useState(false), busy = useState(false), error = useState('');
-  var usage = useState(null), usageOpen = useState(false);
-  var notice = useState('');
-  var request = useRef(0), retry = useRef(null), trigger = useRef(null), root = useRef(null), popPos = useState(null);
-  // 面板由 ChatSetup 统一管（四入口互斥）；单独挂载时退回本地状态。
-  var open = [props.open === undefined ? fallbackOpen[0] : props.open,
-    function (next) { if (props.onOpenChange) props.onOpenChange(next); else fallbackOpen[1](next); }];
-  function closeEntry() { open[1](false); if (trigger.current && trigger.current.focus) trigger.current.focus(); }
-  // Esc / 点面板外都能关，焦点回到入口按钮（v6 第 10.5 节 UI09/UI12）。
-  useEffect(function () {
-    if (!open[0]) return;
-    if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') return;
-    function onDown(event) { var el = root.current; if (el && el.contains && el.contains(event.target)) return; closeEntry(); }
-    function onKey(event) { if (event.key === 'Escape') { event.stopPropagation(); closeEntry(); } }
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return function () { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
-  }, [open[0]]);
-  function load(attempt) {
-    attempt = attempt || 0;
-    var revision = ++request.current;
-    return api('knowledge.status', { sessionId: props.sessionId })
-      .then(function (result) { if (!result.ok) throw Error(result.error || '读取知识库开关失败'); if (revision !== request.current) return; data[1](result.knowledge); error[1](''); })
-      .catch(function (failure) {
-        if (revision !== request.current) return;
-        // 会话可能还没在宿主注册好（dock 先挂载、会话随后才恢复），这类读取失败是
-        // 暂时的。短重试几次，别把“请选择当前可用的渗透会话”永久留在浮层里。
-        if (!data[0] && attempt < 4) { retry.current = setTimeout(function () { load(attempt + 1); }, 600 * (attempt + 1)); return; }
-        error[1](failure.message);
-      });
-  }
-  useEffect(function () {
-    request.current++; data[1](null); error[1]('');
-    if (retry.current) { clearTimeout(retry.current); retry.current = null; }
-    if (!props.sessionId) return;
-    load(0);
-    return function () { request.current++; if (retry.current) clearTimeout(retry.current); };
-  }, [props.sessionId]);
-  // 窄窗里浮层不能越出视口：打开时按触发器位置算一次，横向夹进 [16, 视口宽-16]，
-  // 纵向贴在触发器上方；窗口尺寸变化时重算。（原先 right:0 在窄窗会把左半边推到屏外。）
-  useEffect(function () {
-    if (!open[0]) { popPos[1](null); return; }
-    function place() {
-      var el = trigger.current;
-      var viewport = typeof window === 'undefined' ? 320 : window.innerWidth;
-      var fallbackWidth = Math.min(320, Math.max(200, viewport - 32));
-      // 量不到触发器（宿主未挂载/无 DOM）时也要给一个贴边默认值，不能退回 right:0 越界。
-      if (!el || typeof window === 'undefined' || typeof el.getBoundingClientRect !== 'function') {
-        popPos[1]({ position: 'fixed', left: '16px', right: 'auto', width: fallbackWidth + 'px', bottom: '96px' });
-        return;
-      }
-      var rect = el.getBoundingClientRect();
-      var width = Math.min(320, Math.max(200, window.innerWidth - 32));
-      var maxLeft = Math.max(16, window.innerWidth - 16 - width);
-      var left = Math.min(Math.max(16, rect.right - width), maxLeft);
-      popPos[1]({ position: 'fixed', left: left + 'px', right: 'auto', width: width + 'px',
-        bottom: Math.max(12, window.innerHeight - rect.top + 6) + 'px' });
-    }
-    place();
-    if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
-    window.addEventListener('resize', place);
-    return function () { window.removeEventListener('resize', place); };
-  }, [open[0]]);
-  function toggle() {
-    if (!data[0]) return; busy[1](true); error[1]('');
-    return api('knowledge.toggle', { sessionId: props.sessionId, enabled: !data[0].enabled })
-      .then(function (result) { if (!result.ok) throw Error(result.error || '保存知识库开关失败'); data[1](result.knowledge); })
-      .catch(function (failure) { error[1](failure.message); }).finally(function () { busy[1](false); });
-  }
-  function loadUsage() {
-    var next = !usageOpen[0]; usageOpen[1](next); error[1]('');
-    if (!next) return Promise.resolve();
-    return api('knowledge.usage', { sessionId: props.sessionId, page: 1, pageSize: 50 })
-      .then(function (result) { if (!result.ok) throw Error(result.error || '读取已用条目失败'); usage[1](result); })
-      .catch(function (failure) { error[1](failure.message); });
-  }
-  // 「管理知识库」不复制宿主页面：直接打开宿主自己的「设置 → 知识库」。
-  // 宿主设置不是插件插槽，也没有对外的打开 API，只能按可读文字点击它的菜单项。
-  function openHostKnowledge() {
-    if (typeof document === 'undefined') return;
-    var pick = function (text, prefix) {
-      var els = [...document.querySelectorAll('button,[role=menuitem],[role=tab],a')]
-        .filter(function (el) { var s = (el.textContent || '').trim(); return prefix ? s.indexOf(text) === 0 : s === text; });
-      // 宿主的底栏触发按钮用指针事件，取最后一个（底栏那个），并用完整事件序列。
-      return els[els.length - 1] || null;
-    };
-    // 宿主控件监听 pointer/mouse 序列；只调 el.click() 不会打开它的菜单。
-    var press = function (el) {
-      if (!el) return;
-      try { el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); } catch { /* 旧内核无 PointerEvent */ }
-      el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-      try { el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })); } catch { /* 同上 */ }
-      el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-      el.click();
-    };
-    notice[1]('');
-    press(pick('更多', true));
-    setTimeout(function () {
-      press(pick('设置', true));
-      setTimeout(function () {
-        var knowledge = pick('知识库');
-        if (knowledge) { press(knowledge); open[1](false); }
-        else notice[1]('请在「设置」里选择「知识库」查看来源与索引。');
-      }, 700);
-    }, 500);
-  }
-  var on = data[0] ? data[0].enabled : null;
-  return React.createElement('div', { className: 'dsh-knowledge', ref: root },
-    React.createElement('button', { ref: trigger, type: 'button', className: 'dsh-chat-toolbar-button', 'aria-expanded': open[0], title: '查阅通用漏洞说明、版本条件和产品公告。本任务开启/关闭相关知识读取；不加载整库。', onClick: function () { var next = !open[0]; open[1](next); if (next && props.sessionId) { error[1](''); load(0); } } }, '知识库：' + (on === null ? '…' : on ? '开启' : '关闭')),
-    open[0] ? React.createElement('div', { className: 'dsh-knowledge-pop', style: popPos[0] || undefined },
-      React.createElement('div', { className: 'dsh-chat-panel-head' }, React.createElement('strong', null, '知识库'), React.createElement('button', { type: 'button', 'aria-label': '关闭知识库面板', onClick: closeEntry }, '关闭')),
-      React.createElement('label', null, React.createElement('input', { type: 'checkbox', 'aria-label': '本任务使用知识库', checked: !!on, disabled: busy[0] || on === null, onChange: toggle }), '本任务使用知识库'),
-      React.createElement('p', null, '查阅通用漏洞说明、版本条件和产品公告，只读取与当前问题相关的内容，不加载整库。'),
-      // 适配器能力如实说明（v6 第 5.6 节）：缺自动匹配时写明「本版本由 AI 主动查询」，开关语义不变。
-      data[0] && data[0].autoMatch === false
-        ? React.createElement('small', { className: 'dsh-knowledge-capability' }, '本版本由 AI 主动查询知识；不会自动补充相关条目。')
-        : null,
-      React.createElement('small', null, '关闭后停止本任务新的自动补充与知识工具读取；历史引用与已经发送给模型的内容保留。'),
-      // 对话只放「本次查阅了 N 条漏洞资料」链接，且只在条目确实送入模型后显示（v6 第 6.3 节）。
-      React.createElement('button', { type: 'button', 'aria-expanded': usageOpen[0], onClick: loadUsage },
-        usageOpen[0] ? '收起已用条目'
-          : (data[0] && data[0].sentCount > 0 ? '本次已发送 ' + data[0].sentCount + ' 条漏洞资料'
-            : (data[0] && data[0].pendingCount > 0 ? '有 ' + data[0].pendingCount + ' 条知识待发送' : '查看已用条目'))),
-      React.createElement('button', { type: 'button', onClick: openHostKnowledge }, '管理知识库'),
-      usageOpen[0] && usage[0] ? React.createElement('div', { className: 'dsh-knowledge-usage' },
-        usage[0].total === 0 ? React.createElement('small', null, '本任务还没有把知识内容交给模型。') : null,
-        (usage[0].items || []).map(function (item) {
-          return React.createElement('div', { key: item.id, className: 'dsh-knowledge-usage-row' },
-            React.createElement('span', null, (item.title || item.docPath || item.query || '高相关片段') + ' · ' + (item.reason || '')),
-            React.createElement('small', null, (item.source ? item.source + ' · ' : '')
-              + (item.docPath && item.title ? item.docPath + ' · ' : '')
-              + (item.contentBytes ? item.contentBytes + ' 字节' : '字节未知')
-              + (item.deliveryState && item.deliveryState !== 'sent'
-                ? ' · ' + (item.deliveryState === 'legacy' ? '历史记录·发送未核实' : '尚未确认发送') : '')
-              + ' · ' + new Date(item.at).toLocaleString()),
-            // 片段原文（v6 第 6.3 节）：列表里直接看模型实际收到的那一段，不用回原文。
-            item.excerpt ? React.createElement('pre', { className: 'dsh-knowledge-usage-excerpt' }, item.excerpt) : null);
-        }),
-        (usage[0].items || []).length && usage[0].items[0] ? React.createElement('small', null, usage[0].note) : null) : null,
-      notice[0] ? React.createElement('small', { role: 'status' }, notice[0]) : null,
-      error[0] ? React.createElement('p', { role: 'alert' }, error[0]) : null) : null);
-}
 // 任务工作区（发现页/资料页）要能打开输入框上方的「添加测试资料」面板，但两者是宿主的不同 slot，
 // 拿不到彼此的 props。模块级桥接只暴露一个「打开资料面板」动作，不引入新的全局状态。
 var materialsPanelBridge = { open: null };
@@ -2416,11 +2226,11 @@ function ChatSetup(props) {
   // v6 第 3.3 节第 8 条：提示词抽屉的插入落点必须在**打开抽屉之前**捕获，否则宿主 caretSpan 已经
   // 因为编辑器失焦而退化成文档末尾，原来的光标/选区就丢了。
   var promptInsertion=useRef(null);
-  // 四个入口共用一份「当前打开哪个面板」：始终最多一个（v6 第 10.5 节 UI09/UI12）。
+  // 三个入口共用一份「当前打开哪个面板」：始终最多一个（v6 第 10.5 节 UI09/UI12）。
   function setPanelOnly(name, next){ panel[1](function(previous){ if(next) return name; return previous===name?null:previous; }); }
   var open=[panel[0]==='prompt', function(next){ setPanelOnly('prompt',next); }];
   var more=[panel[0]==='settings', function(next){ setPanelOnly('settings',next); }];
-  var workerDraft=useState('2'), draft=useState(null), targetInput=useState(''), contentDefault=useState(null), workScenario=useState('pentest');
+  var workerDraft=useState('2'), draft=useState(null), targetInput=useState(''), workScenario=useState('pentest');
   // 本轮预算（开始测试时用）：放在抽屉的「限制请求和用量」折叠里，任务页单独使用时由 TaskPanel 自己管。
   var budget=useState({calls:'30',modelCalls:'',tokens:'',minutes:'15',unmetered:'0',discovery:'5'});
   function setBudget(patch){budget[1](function(previous){return Object.assign({},previous||{},patch);});}
@@ -2447,16 +2257,21 @@ function ChatSetup(props) {
       .catch(function(failure){error[1](failure.message);}).finally(function(){saving.current=false;busy[1](false);return load();});
   }
   var current=state[0], policy=current&&current.policy, options=current&&current.options||{}, mode=policy?policy.mode:current&&current.choice||'regular';
-  var activeScenario=policy?.scenario||options.scenario||workScenario[0], directionValue=activeScenario==='project'?'project':mode;
+  var activeScenario=policy?.scenario||options.scenario||workScenario[0], directionValue=mode;
   var interaction=policy?policy.interaction:options.interaction||'auto', workers=policy?policy.workerLimit:options.workers??2, reporting=chatReporting(policy||options), cooperation=cooperationValue(interaction), startMode=policy?(policy.startMode||'materials-first'):(options.startMode||'materials-first');
   var explainValue=policy?(policy.explain===true):(options.explain===true);
   var hostWorkerLimit=current&&Number.isInteger(current.hostWorkerLimit)?current.hostWorkerLimit:16;
   if(workers>hostWorkerLimit)workers=hostWorkerLimit;
   var workerOptions=[0,1,2,4,8,16].filter(function(value){return value<=hostWorkerLimit;});
-  var labels={regular:'常规测试',nday:'Nday发现','0day':'0Day挖掘',project:'按文档测试'};
+  var labels={regular:'常规测试',nday:'Nday发现','0day':'0Day挖掘'};
+  function changeScenario(next){
+    if(!next||next===activeScenario)return Promise.resolve();
+    workScenario[1](next);
+    return run('task.scenario',{scenario:next});
+  }
   function change(patch){if(policy){if(patch.explain!==undefined)return run('task.explain',{explain:patch.explain});if(patch.interaction!==undefined||patch.reporting!==undefined)return run('task.interaction',{interaction:patch.interaction??interaction,reporting:patch.reporting??reporting});return run('task.workers',{workers:patch.workers});}
-    var next=Object.assign({mode:mode,workflow:mode==='regular'?(options.workflow||'single'):'single',workers:workers,interaction:interaction,reporting:reporting,explain:explainValue,startMode:startMode},patch);
-    if(next.mode!=='regular')next.workflow='single';return run('task.choose',next);
+    var next=Object.assign({mode:mode,workflow:'single',workers:workers,interaction:interaction,reporting:reporting,explain:explainValue,startMode:startMode},patch);
+    next.workflow='single';return run('task.choose',next);
   }
   function close(){open[1](false);if(openButton.current)openButton.current.focus();}
   // 关闭提示词模板/设置并把焦点还给对应的入口按钮（v6 第 10.5 节 UI09/UI12）。
@@ -2507,9 +2322,7 @@ function ChatSetup(props) {
   var draftAllowedOrigins=draftValues.allowedOrigins===undefined?liveAllowedOrigins.join('\n'):draftValues.allowedOrigins;
   var draftRequestRate=draftValues.requestRatePerMinute===undefined?liveRequestRate:draftValues.requestRatePerMinute;
   var draftRequestConcurrency=draftValues.requestConcurrency===undefined?liveRequestConcurrency:draftValues.requestConcurrency;
-  // 全不选时必须关闭网站访问：复选框置灰且显示为关，重新选项目也不暗中恢复。
-  var contentSelectionEmpty=Array.isArray(contentDefault[0])&&contentDefault[0].length===0;
-  var effectiveAllowTargetNetwork=contentSelectionEmpty?false:draftAllowTargetNetwork;
+  var effectiveAllowTargetNetwork=draftAllowTargetNetwork;
   // 函数式更新：同一次渲染里连续改两项（例如先关网站访问再勾只读）不会互相覆盖。
   function patchDraft(patch){error[1]('');draft[1](function(previous){return Object.assign({},previous||{},patch);});}
   function draftChanges(){var d=draft[0]||{},out={};
@@ -2542,10 +2355,10 @@ function ChatSetup(props) {
       if(changes.workers!==undefined)chain=chain.then(function(){return run('task.workers',{workers:changes.workers});});
       if(changes.allowTargetNetwork!==undefined||changes.readOnly!==undefined||changes.excludedPaths!==undefined||changes.requestRatePerMinute!==undefined||changes.requestConcurrency!==undefined)chain=chain.then(function(){return run('task.limits',{allowTargetNetwork:changes.allowTargetNetwork,readOnly:changes.readOnly,excludedPaths:changes.excludedPaths,requestRatePerMinute:changes.requestRatePerMinute,requestConcurrency:changes.requestConcurrency});});
     }else{
-      var next=Object.assign({mode:mode,workflow:mode==='regular'?liveWorkflow:'single',workers:workers,interaction:interaction,reporting:reporting,explain:explainValue,startMode:startMode,
+      var next=Object.assign({mode:mode,workflow:'single',workers:workers,interaction:interaction,reporting:reporting,explain:explainValue,startMode:startMode,
         workerModel:liveWorkerModel,reviewModel:liveReviewModel,reportModel:liveReportModel,
         allowTargetNetwork:effectiveAllowTargetNetwork,readOnly:draftReadOnly,excludedPaths:draftExcludedPaths,requestRatePerMinute:draftRequestRate,requestConcurrency:draftRequestConcurrency},changes);
-      if(next.mode!=='regular')next.workflow='single';
+      next.workflow='single';
       chain=chain.then(function(){return run('task.choose',next);});
     }
     if(changes.allowedOrigins!==undefined)chain=chain.then(function(){return run('task.limits',{allowedOrigins:changes.allowedOrigins});});
@@ -2556,7 +2369,8 @@ function ChatSetup(props) {
   }
   return React.createElement('section',{ref:overlayRoot,'aria-label':'聊天任务设置',className:'dsh-chat-setup'},
     React.createElement('div',{className:'dsh-chat-settings-row'},
-      React.createElement('label',{className:'dsh-chat-chip saker-ui-select',title:policy?'本轮方向已固定':'选择安全测试或按文档测试'},React.createElement(ChatIcon,{name:'direction'}),React.createElement('select',{'aria-label':'任务方向',value:directionValue,disabled:busy[0]||!current||!!policy,onChange:function(event){var next=event.target.value;if(next==='project')return run('task.scenario',{scenario:'project'});return run('task.scenario',{scenario:'pentest'}).then(function(){return change({mode:next});});}},['regular','nday','0day','project'].map(function(value){return React.createElement('option',{key:value,value:value},labels[value]);}))),
+      React.createElement('label',{className:'dsh-chat-chip saker-ui-select',title:policy?'本轮场景已固定':'选择自由测试或按文档测试'},React.createElement(ChatIcon,{name:'direction'}),React.createElement('select',{'aria-label':'测试场景',value:activeScenario,disabled:busy[0]||!current||!!policy,onChange:function(event){return changeScenario(event.target.value);}},['pentest','project'].map(function(value){return React.createElement('option',{key:value,value:value},value==='project'?'按文档测试':'自由测试');}))),
+      activeScenario==='project'?null:React.createElement('label',{className:'dsh-chat-chip saker-ui-select',title:policy?'本轮方向已固定':'选择常规、Nday 或 0Day 方向'},React.createElement(ChatIcon,{name:'prompt'}),React.createElement('select',{'aria-label':'测试方向',value:directionValue,disabled:busy[0]||!current||!!policy,onChange:function(event){return change({mode:event.target.value});}},['regular','nday','0day'].map(function(value){return React.createElement('option',{key:value,value:value},labels[value]);}))),
       activeScenario==='project'?null:React.createElement('label',{className:'dsh-chat-chip saker-ui-select',title:CHAT_COOPERATION_HINT[cooperation]},React.createElement(ChatIcon,{name:'chat'}),React.createElement('select',{'aria-label':'聊天协作方式',value:cooperation,disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){return change({interaction:event.target.value});}},
         ['auto','confirm-data-change','confirm-step'].map(function(value){return React.createElement('option',{key:value,value:value},CHAT_COOPERATION[value]);}))),
       activeScenario==='project'?null:React.createElement('label',{className:'dsh-chat-chip saker-ui-select',title:'按需分派，当前占用 '+(current?.active||0)+'/'+workers},React.createElement(ChatIcon,{name:'users'}),React.createElement('select',{'aria-label':'聊天子代理上限',value:String(workers),disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){return event.target.value==='custom'?editWorkers():change({workers:Number(event.target.value)});}},workerOptions.concat(workerOptions.includes(workers)?[]:[workers]).sort(function(a,b){return a-b;}).map(function(value){return React.createElement('option',{key:value,value:String(value)},value===0?'只用当前 AI':value===2?'自动，最多 2 个':'最多 '+value+' 个');}),React.createElement('option',{value:'custom'},'自定义人数…'))),
@@ -2564,15 +2378,13 @@ function ChatSetup(props) {
       React.createElement('div',{className:'dsh-chat-entry-group'},
       React.createElement('button',{ref:openButton,type:'button',className:open[0]?'dsh-chat-toolbar-button saker-ui-btn is-active':'dsh-chat-toolbar-button saker-ui-btn','aria-expanded':open[0],title:'选一段需求文字，改目标和重点后发送。只编辑或复制；插入后仍由用户发送。',onClick:function(){var next=!open[0];if(next){promptInsertion.current=props.inputActions&&typeof props.inputActions.captureInsertion==='function'?props.inputActions.captureInsertion():null;}open[1](next);if(next)more[1](false);}},React.createElement(ChatIcon,{name:'prompt'}),'提示词模板'),
       React.createElement(MaterialsEntry,{key:props.sessionId+'-materials-entry',sessionId:props.sessionId,scenario:activeScenario,open:panel[0]==='materials',onOpenChange:function(next){setPanelOnly('materials',next);}}),
-      React.createElement('button',{ref:moreButton,type:'button',className:more[0]?'dsh-chat-toolbar-button is-active':'dsh-chat-toolbar-button','aria-expanded':more[0],title:'选择什么时候问你、怎么汇报，以及助手数量。保存后更新本任务；不改别的会话。',onClick:function(){var next=!more[0];workerDraft[1](String(workers));more[1](next);if(next)open[1](false);}},React.createElement(ChatIcon,{name:'settings'}),'测试设置'),
-      React.createElement(KnowledgeEntry,{key:props.sessionId+'-knowledge',sessionId:props.sessionId,open:panel[0]==='knowledge',onOpenChange:function(next){setPanelOnly('knowledge',next);}}))),
+      React.createElement('button',{ref:moreButton,type:'button',className:more[0]?'dsh-chat-toolbar-button is-active':'dsh-chat-toolbar-button','aria-expanded':more[0],title:'选择什么时候问你、怎么汇报，以及助手数量。保存后更新本任务；不改别的会话。',onClick:function(){var next=!more[0];workerDraft[1](String(workers));more[1](next);if(next)open[1](false);}},React.createElement(ChatIcon,{name:'settings'}),'测试设置'))),
     more[0]?React.createElement('div',{className:'dsh-chat-more','aria-label':'聊天协作设置'},
       React.createElement('div',{className:'dsh-chat-panel-head'},React.createElement('strong',null,'本次测试设置'),React.createElement('button',{type:'button','aria-label':'关闭测试设置',onClick:closePanels},'关闭')),
       React.createElement('p',{className:'dsh-chat-setting-hint'},'只影响当前任务，保存后生效。'),
       React.createElement('p',{className:'dsh-chat-setting-hint'},activeScenario==='project'?'设置目标、访问限制、账号和本轮预算；不改别的会话。':'选择什么时候问你、怎么汇报，以及助手数量；不改别的会话。'),
       React.createElement('label',{className:'dsh-chat-target'},React.createElement('span',null,'测试哪些网站（选填）'),
         React.createElement('input',{'aria-label':'测试哪些网站（选填）',type:'text',value:policy?policy.target||'':targetInput[0],disabled:!!policy,placeholder:activeScenario==='project'?'文档只有一个网站时自动识别；有多个网站时在这里指定主目标':'例如 https://example.com；只测试已获授权的网站',onChange:function(event){targetInput[1](event.target.value);}})),
-      activeScenario==='project'?null:React.createElement(TestContentSection,{key:props.sessionId+'-content',sessionId:props.sessionId,onSelection:function(active){contentDefault[1](active);}}),
       // 执行入口与观测范围（v6 第 8.1 节）：如实列出已接通的能力，以及不在 Saker 观测内的通道，
       // 不拿"工具已装"冒充全部计量。
       React.createElement('details',{className:'dsh-execution-scope'},
@@ -2583,7 +2395,7 @@ function ChatSetup(props) {
       React.createElement('details',{className:'dsh-action-limits'},
         React.createElement('summary',null,'限制请求和用量'),
         React.createElement('label',{className:'dsh-chat-explain'},
-          React.createElement('input',{type:'checkbox','aria-label':'允许访问网站',checked:effectiveAllowTargetNetwork,disabled:contentSelectionEmpty||busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){return patchDraft({allowTargetNetwork:event.target.checked});}}),
+          React.createElement('input',{type:'checkbox','aria-label':'允许访问网站',checked:effectiveAllowTargetNetwork,disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){return patchDraft({allowTargetNetwork:event.target.checked});}}),
           '允许访问网站'),
         React.createElement('small',null,'关闭后只分析已添加的内容；程序会拒绝新的目标网络操作（MCP、扫描器、shell、浏览器、已存请求与基线复查）。'),
         activeScenario==='project'?React.createElement('label',{className:'dsh-chat-exclude'},React.createElement('span',null,'其他允许访问的网站（选填）'),
@@ -2624,9 +2436,7 @@ function ChatSetup(props) {
               mode==='0day'?React.createElement('label',null,'初步观察预算（次）',
                 React.createElement('input',{'aria-label':'初步观察预算（次）',type:'number',min:0,value:budget[0].discovery,placeholder:'未设置',disabled:busy[0]||!current,onChange:function(event){setBudget({discovery:event.target.value});}})):null),
             React.createElement('small',null,'这些是“开始测试”时的本轮预算，留空表示未设置，实际沿用宿主当前限制；未设置时不额外收紧。')),
-        contentSelectionEmpty?React.createElement('p',{role:'status'},'只分析已添加内容，不再访问网站。再次选择项目后，需明确打开“允许访问网站”。'):null,
-        // v6 第 4.3 节：再次选项目不暗中恢复网络访问，界面要明说「访问网站仍已关闭」。
-        (!contentSelectionEmpty&&!effectiveAllowTargetNetwork)?React.createElement('p',{role:'status'},'访问网站仍已关闭：重新选择测试内容不会恢复网络访问，需要访问时请明确打开上面的“允许访问网站”。'):null),
+        !effectiveAllowTargetNetwork?React.createElement('p',{role:'status'},'访问网站已关闭：只分析已添加的内容，需要访问时请明确打开上面的“允许访问网站”。'):null),
       activeScenario==='project'?null:React.createElement(WorkerModelSection,{key:props.sessionId+'-worker-model',sessionId:props.sessionId,
         values:{workerModel:draftWorkerModel,reviewModel:draftReviewModel,reportModel:draftReportModel},
         disabled:busy[0]||!current||!!policy,onChange:function(key,value){var patch={};patch[key]=value;patchDraft(patch);}}),
@@ -2637,17 +2447,13 @@ function ChatSetup(props) {
       activeScenario==='project'?null:React.createElement('label',{className:'dsh-chat-worker-custom'},'子代理上限',React.createElement('input',{type:'number',min:0,max:hostWorkerLimit,step:1,'aria-label':'自定义子代理上限',value:draftWorkersRaw,disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){workerDraft[1](event.target.value);patchDraft({workers:event.target.value});}})),
       activeScenario==='project'?null:React.createElement('label',null,'起步方式 ',React.createElement('select',{'aria-label':'聊天起步方式',value:draftStartMode,disabled:busy[0]||!current||!!policy,onChange:function(event){return patchDraft({startMode:event.target.value});}},Object.keys(START_MODE).map(function(value){return React.createElement('option',{key:value,value:value},START_MODE[value]);}))),
       activeScenario==='project'?null:React.createElement('small',null,START_MODE_HINT[draftStartMode]),
-      mode==='regular'&&activeScenario!=='project'?React.createElement('label',null,'测试安排 ',React.createElement('select',{'aria-label':'聊天测试安排',value:draftWorkflow,disabled:busy[0]||!current||!!policy,onChange:function(event){return patchDraft({workflow:event.target.value});}},
-      React.createElement('option',{value:'single'},'只做当前方向'),React.createElement('option',{value:'regular-to-nday'},'常规收集后接 Nday'),React.createElement('option',{value:'regular-with-nday'},'常规与 Nday 一起推进'))):null,
       activeScenario==='project'?null:React.createElement('small',null,'宿主当前支持0–'+hostWorkerLimit+'个。按需分派，共用预算；人数不代表一定创建这么多代理，增加人数可能增加用量。'),
       React.createElement('div',{className:'dsh-chat-settings-actions'},
         React.createElement('button',{type:'button',disabled:busy[0],onClick:cancelDraft},'取消'),
         React.createElement('button',{type:'button',disabled:busy[0]||!current,onClick:saveDraft},'保存'),
         Object.keys(draftChanges()).length?React.createElement('small',{role:'status'},'尚未保存'):null),
-      // v6 第 5.5 节：控件名是「存为默认偏好」。原来的提示只写「协作、汇报和人数」，
-      // 但它实际还会保存解释原理与测试内容偏好——提示必须说全，否则用户不知道点了会存什么。
-      activeScenario==='project'?null:React.createElement('button',{type:'button',disabled:busy[0]||!current||!!(policy&&policy.parentSession),onClick:function(){return run('chat.defaults',{interaction:interaction,reporting:reporting,workers:workers,explain:explainValue,content:contentDefault[0]===null?undefined:contentDefault[0],workerModel:draftWorkerModel,reviewModel:draftReviewModel,reportModel:draftReportModel});}},'存为默认偏好'),
-      activeScenario==='project'?null:React.createElement('small',null,'只保存询问、汇报、解释原理、助手和测试内容偏好；目标、账号、排除路径和已用量不会复制到新任务。'),
+      activeScenario==='project'?null:React.createElement('button',{type:'button',disabled:busy[0]||!current||!!(policy&&policy.parentSession),onClick:function(){return run('chat.defaults',{interaction:interaction,reporting:reporting,workers:workers,explain:explainValue,workerModel:draftWorkerModel,reviewModel:draftReviewModel,reportModel:draftReportModel});}},'存为默认偏好'),
+      activeScenario==='project'?null:React.createElement('small',null,'只保存询问、汇报、解释原理、助手和模型偏好；目标、账号、排除路径和已用量不会复制到新任务。'),
       current&&!policy?.parentSession?React.createElement('details',null,React.createElement('summary',null,policy?'本轮任务与预算':'开始任务与预算'),
         React.createElement('small',null,'可在首次模型调用前设定本轮问题和额度；点击开始后立即执行。'),
         React.createElement(TaskPanel,{key:props.sessionId+'-budget',sessionId:props.sessionId,scenario:activeScenario,targetState:targetInput,budgetDraft:{value:budget[0],set:setBudget}})):null):null,
@@ -2662,7 +2468,7 @@ function ChatSetup(props) {
       policy&&!current.stopped&&current.currentAction?React.createElement('span',{className:'dsh-chat-action'},current.currentAction):null,
       // 停止按钮在运行状态始终可见（v6 第 5.2 节）：不等用户先点开设置或确认区。
       !current.stopped?React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){return run('task.cancel');}},'停止本轮'):null,
-      current.stopped&&!policy.blocker&&!policy.parentSession?React.createElement('button',{type:'button',disabled:busy[0]||current.agentRunning||(current.active||0)>0,onClick:function(){return run('task.new-round',{preferences:{mode:policy.scenario==='project'?'regular':(policy.flow?.kind||'single')==='single'?policy.mode:'regular',scenario:policy.scenario,workflow:policy.scenario==='project'?'single':policy.flow?.kind||'single',interaction:policy.interaction,reporting:reporting,workers:policy.workerLimit,allowTargetNetwork:policy.allowTargetNetwork!==false,readOnly:policy.readOnly===true}});}},'新建测试'):null):null,
+      current.stopped&&!policy.blocker&&!policy.parentSession?React.createElement('button',{type:'button',disabled:busy[0]||current.agentRunning||(current.active||0)>0,onClick:function(){return run('task.new-round',{preferences:{mode:policy.scenario==='project'?'regular':policy.mode,scenario:policy.scenario,workflow:'single',interaction:policy.interaction,reporting:reporting,workers:policy.workerLimit,allowTargetNetwork:policy.allowTargetNetwork!==false,readOnly:policy.readOnly===true}});}},'新建测试'):null):null,
     // 需要用户处理时只显示单条具体事项（v6 第 5.2 节）：说清哪一项受影响，并给出重新绑定/继续两条路。
     current&&Array.isArray(current.attention)&&current.attention.length&&!attentionDismissed[0]?React.createElement('div',{className:'dsh-chat-attention',role:'alert'},
       React.createElement('span',null,current.attention[0].message),
@@ -2828,18 +2634,6 @@ function installChatSetupStyles() {
     + '.dsh-materials-import button.is-primary{margin-top:8px;background:var(--dsw-alias-state-business-primary,#4b74d9);border-color:transparent;color:#fff}'
     + '.dsh-materials-import small{display:block;margin-top:8px;color:var(--dsw-alias-label-secondary,inherit)}'
     + '.dsh-materials-import [role=alert]{color:var(--dsw-alias-state-error-primary,#c84040)}';
-  style.textContent += '.dsh-knowledge{position:relative;display:inline-flex}'
-    + '.dsh-knowledge-pop{position:absolute;bottom:calc(100% + 6px);right:0;z-index:660;box-sizing:border-box;width:min(320px,calc(100vw - 32px));max-height:min(70vh,540px);overflow:auto;overscroll-behavior:contain;padding:12px 16px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.18));border-radius:12px;background:var(--dsw-alias-bg-base,#fff);box-shadow:0 10px 32px rgba(0,0,0,.18);font-size:12px;line-height:1.5;color:var(--dsw-alias-label-primary,inherit)}'
-    + '.dsh-knowledge-pop label{display:flex;align-items:center;gap:8px;margin:8px 0}'
-    + '.dsh-knowledge-pop input{padding:0;accent-color:var(--dsw-alias-state-business-primary,#4b74d9)}'
-    + '.dsh-knowledge-pop p{margin:8px 0}'
-    + '.dsh-knowledge-pop small{display:block;color:var(--dsw-alias-label-secondary,inherit);font-size:12px}'
-    + '.dsh-knowledge-pop [role=alert]{color:var(--dsw-alias-state-error-primary,#c84040)}';
-  style.textContent += '.dsh-knowledge-pop>button{margin:8px 0;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;padding:4px 10px;background:transparent;color:inherit;cursor:pointer;font:inherit}'
-    + '.dsh-knowledge-usage{margin-top:8px;border-top:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));padding-top:8px}'
-    + '.dsh-knowledge-usage-row{display:flex;flex-direction:column;padding:4px 0;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.10))}'
-    + '.dsh-knowledge-usage-row small{color:var(--dsw-alias-label-secondary,inherit);font-size:12px}'
-    + '.dsh-knowledge-usage-excerpt{margin:4px 0 0;padding:8px 8px;max-height:120px;overflow:auto;white-space:pre-wrap;word-break:break-word;font:inherit;font-size:12px;line-height:1.5;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));border-radius:6px;background:var(--dsw-alias-bg-l1,rgba(128,128,128,.04))}';
   style.textContent += [
     '.dsh-task-workspace{max-width:none;margin:0;padding:12px 16px 16px;font-size:12px;line-height:1.5}',
     '.dsh-task-nav{margin-bottom:12px;padding-bottom:8px;gap:4px}.dsh-task-nav button{padding:5px 11px;font-size:12px}',
@@ -2977,7 +2771,7 @@ function TaskPanel(props) {
   function load(){var revision=++request.current;return api('task.status',{sessionId:props.sessionId}).then(function(value){if(!value.ok)throw Error(value.error||'读取任务失败');if(revision!==request.current)return;error[1]('');status[1](value);if(value.configured&&value.policy)startMode[1](value.policy.startMode||'materials-first');if(!value.configured){if(value.choice)selected[1](value.choice);if(value.options){flow[1](value.options.workflow);var nextWorkers=Number(value.options.workers);if(value.hostWorkerLimit&&nextWorkers>value.hostWorkerLimit)nextWorkers=value.hostWorkerLimit;workers[1](String(nextWorkers));interaction[1](value.options.interaction||'continuous');startMode[1](value.options.startMode||'materials-first');}}if(value.configured&&value.isPentest)return api('findings.list',{sessionId:props.sessionId,scope:'session',mode:'pentest',page:1,pageSize:5}).then(function(value){if(revision!==request.current)return;if(value.ok===false)throw Error(value.error||'读取最近记录失败');records[1]({rows:value.list?.rows||[],stats:value.stats||null,loading:false,error:''});}).catch(function(failure){if(revision===request.current)records[1]({rows:[],stats:null,loading:false,error:failure.message||String(failure)});});}).catch(function(e){if(revision===request.current)error[1](e.message);});}
   useEffect(function(){var active=true;load();var timer=setInterval(function(){if(active)load();},5000);return function(){active=false;request.current++;clearInterval(timer);};},[props.sessionId]);
   function run(endpoint,payload){busy[1](true);error[1]('');return api(endpoint,Object.assign({sessionId:props.sessionId},payload||{})).then(function(value){if(!value.ok)throw Error(value.error||'操作失败');status[1](value);return value;}).catch(function(e){error[1](e.message);}).finally(function(){busy[1](false);});}
-  function choose(mode){selected[1](mode);if(mode!=='regular')flow[1]('single');return run('task.choose',{mode:mode,workflow:mode==='regular'?flow[0]:'single',workers:Number(workers[0]),interaction:interaction[0],startMode:startMode[0]});}
+  function choose(mode){selected[1](mode);flow[1]('single');return run('task.choose',{mode:mode,workflow:'single',workers:Number(workers[0]),interaction:interaction[0],startMode:startMode[0]});}
   function start(){var callsValue=budgetPair('calls')[0],modelCallsValue=budgetPair('modelCalls')[0],tokensValue=budgetPair('tokens')[0],minutesValue=budgetPair('minutes')[0],unmeteredValue=budgetPair('unmetered')[0],discoveryValue=budgetPair('discovery')[0];var budget={toolCalls:Number(callsValue),workers:Number(workers[0]),unmeteredToolCalls:Number(unmeteredValue||0)};if(modelCallsValue!=='')budget.modelCalls=Number(modelCallsValue);if(tokensValue!=='')budget.tokens=Number(tokensValue);if(minutesValue!=='')budget.minutes=Number(minutesValue);if(selected[0]==='0day')budget.discoveryCalls=Number(discoveryValue);var policy={workflow:'single',interaction:interaction[0],startMode:startMode[0],question:question[0].trim(),budget:budget};var targetText=props.targetState?String(props.targetState[0]||''):target[0];if(targetText.trim())policy.target=targetText.trim();if(projectMode){busy[1](true);error[1]('');return api('project.start',{sessionId:props.sessionId,policy:policy}).then(function(value){if(!value.ok)throw Error(value.error||'开始按文档测试失败');return load();}).catch(function(failure){error[1](failure.message);}).finally(function(){busy[1](false);});}policy.mode=selected[0];return run('task.choose',{mode:selected[0],workflow:flow[0],workers:budget.workers,interaction:interaction[0],startMode:startMode[0]}).then(function(value){if(value)return run('task.start',{policy:policy});});}
   var current=status[0], labels={regular:'常规测试',nday:'Nday发现','0day':'0Day挖掘'}, workerLabels={starting:'正在启动',running:'正在工作',closing:'正在关闭','cleanup-failed':'关闭失败',released:'已释放'};
   var reasons={interaction_confirmation_required:'等待你确认是否继续',cancelled:'你已停止测试',turn_ended:'本轮已结束，可继续下一轮',time_budget_exhausted:'已到设置的停止时间',tool_budget_exhausted:current?.policy?.used.toolCalls+' 次操作已用完',first_verified_high:'已确认一个高危漏洞',first_verified_rce:'已确认代码执行漏洞',queue_complete:'已检查所有候选漏洞',plan_complete:'已完成这次测试',observation_budget_exhausted:'初步检查次数已用完',model_budget_exhausted:'模型调用次数已用完'};
@@ -3047,7 +2841,7 @@ function TaskPanel(props) {
         budgetDraft?null:React.createElement('div',{className:'dsh-task-mode-options',role:'group','aria-label':'选择子模式'},['regular','nday','0day'].map(function(mode){return React.createElement(Btn,{key:mode,primary:selected[0]===mode,disabled:busy[0],onClick:function(){return choose(mode);}},labels[mode]);})),
       projectMode?null:budgetDraft?null:React.createElement('p',null,selected[0]==='regular'?'检查登录、权限和业务功能。':selected[0]==='nday'?'根据产品及版本，查找并验证已公开漏洞。':'分析代码和业务逻辑，查找并验证可疑问题。'),
       current&&current.previousRounds?React.createElement('p',null,'已保留 '+current.previousRounds+' 次测试的记录。'):null,
-      budgetDraft?null:React.createElement(FlowControls,{mode:selected[0],workflow:flow[0],workers:Number(workers[0]),interaction:interaction[0],startMode:startMode[0],disabled:busy[0],onChange:function(patch){return run('task.choose',{mode:selected[0],workflow:patch.workflow||flow[0],workers:patch.workers!==undefined?patch.workers:Number(workers[0]),interaction:patch.interaction||interaction[0],startMode:patch.startMode||startMode[0]}).then(function(value){if(value&&value.options){flow[1](value.options.workflow);workers[1](String(value.options.workers));interaction[1](value.options.interaction||'continuous');startMode[1](value.options.startMode||'materials-first');}});}}),
+      budgetDraft?null:React.createElement(FlowControls,{mode:selected[0],workflow:'single',workers:Number(workers[0]),interaction:interaction[0],startMode:startMode[0],disabled:busy[0],onChange:function(patch){return run('task.choose',{mode:selected[0],workflow:'single',workers:patch.workers!==undefined?patch.workers:Number(workers[0]),interaction:patch.interaction||interaction[0],startMode:patch.startMode||startMode[0]}).then(function(value){if(value&&value.options){flow[1]('single');workers[1](String(value.options.workers));interaction[1](value.options.interaction||'continuous');startMode[1](value.options.startMode||'materials-first');}});}}),
       input('这一轮要查什么',question),
       budgetDraft?null:React.createElement('details',null,React.createElement('summary',null,'限制请求和用量'),
         React.createElement('small',null,'留空表示未设置，实际沿用宿主当前限制；未设置时不额外收紧。'),

@@ -17,9 +17,7 @@ const TARGETS = [
   ['dsh-stage-gate', 'lib/index.js'],
   ['dsh-webshell-mgr', 'lib/index.js'],
   ['dsh-trace-vault', 'lib/index.js'],
-  ['dsh-knowledge-hub', 'lib/index.js'],
   ['dsh-tool-scope', 'lib/index.js'],
-  ['dsh-nday-hunter', 'lib/index.js'],
 ]
 
 let failed = 0

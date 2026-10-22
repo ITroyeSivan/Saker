@@ -80,7 +80,7 @@ try {
 
   // 统一返回（v6 第 9.3 节）：ok / error / requestId；错误含 code、具体 message、可恢复操作。
   await test('统一返回：成功也带 requestId，错误带 code/message/可恢复操作', async () => {
-    const failed = await request('/dsh-redteam-results/knowledge.status', { sessionId: '' }, token);
+    const failed = await request('/dsh-redteam-results/task.start', {}, token);
     const failedBody = JSON.parse(failed.text);
     assert.equal(failedBody.ok, false, failed.text);
     assert(failedBody.error, '错误要有具体 message');

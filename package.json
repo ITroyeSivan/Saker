@@ -1,7 +1,7 @@
 {
   "name": "dsh-saker",
-  "version": "0.4.113",
-  "description": "Saker — dsh Desktop 安全测试工作台，按文档连续检查，并支持常规测试、Nday发现与0Day挖掘。",
+  "version": "0.5.0",
+  "description": "Saker — 运行在 dsh Desktop 上的安全测试工作台，支持自由测试与按文档连续检查。",
   "type": "module",
   "main": "./lib/preset-root.js",
   "exports": {

@@ -1,30 +1,27 @@
-# dsh-hunter (hunter 狩猎)
+# dsh-hunter
 
-FOFA / 奇安信 Hunter / 360 Quake **三方资产测绘聚合**：统一 DSL 一次编写 → 自动转换为各平台语法 → 配额感知分页导出，并接入 code-audit 的活体验证流水线（L0 互联网资产指纹核对，L1 最小影响 EXP 仅作用于用户授权资产，L2 完整利用不做）。
+FOFA、奇安信 Hunter、360 Quake 的资产查询插件。它只做公开索引检索、平台配置和授权资产写入，不维护漏洞资料库，不执行后台采集，也不注册聊天页签。
 
 ## 能力
 
-- **聚合检索**：Web 设置页的搜索接口提供统一 DSL（`host="x" && port="80"` 类），内部按平台规则转写并合并去重。
-- **模型工具 `asset_search`**：同一套 adapter 直接给模型调用；先用显式 `scope` 过滤授权范围，
-  再把范围内结果归一合并到工作区 `asset-inventory.json` / `assets.md`。范围外结果只计数、不落账。
-  未配置任何平台 key 时明确失败并给 `subfinder/httpx/fscan/asset_ingest` 降级路径，不返回空成功。
-- **模型工具 `asset_search_batch`**：批量执行 Nday 指纹查询，返回逐查询候选映射；FOFA 请求全局串行限速，授权范围加入查询并在本地再次过滤。支持 FOFA 官方语法中的 `fid`、`app`、`product`、`product.version`、`category`、哈希、banner、JARM、证书/TLS 指纹等字段；FOFA 不支持的字段不会静默降级到 Hunter/Quake 的宽查询。部分高级字段受 FOFA 账号等级限制，相关 API 错误会按查询组保留。
-- **设置与配额**：主设置页「资产平台 API」（或「hunter 狩猎」右上角设置）填 FOFA / Hunter / Quake API key；key 独立存本机 SQLite `~/.dsh/hunter/hunter.db`，页面与模型侧只回显末 4 位，不写进源码。配额感知的分页/导出与每日预算护栏仍然生效。
-- **漏洞情报更新**：设置页勾选来源后直接点“更新已选源”，自动保存当前选择；也可“更新此源”。后台运行并逐源显示进度、失败原因及续传状态。定时更新默认关闭，高级分页与候选排序参数折叠。公众号需要检索词，Git 类来源需要 Git，OSV 首次全库下载较大。
-- **实测流水线**（Live-Verify）：读 redteam-results 成果库取 finding → 指纹搜索 → 存活探测 → L0/L1 分级验证 → 回写 `retestNote / evidence / status` + 历史 + 会话 followup 通知。
-- **授权边界**：互联网资产仅 L0（GET 首页+指纹）；L1 最小影响验证**仅对用户显式标记授权的资产**执行；不提供 L2 完整利用。
+- 统一 DSL 会转换为三个平台的查询语法，结果按资产归一、去重并在本地再次校验授权范围。
+- `asset_search` 保存范围内资产到工作区账本；范围外结果只计数，不写入。
+- `asset_search_batch` 批量执行有界查询，保留逐查询结果和平台错误。
+- 安全配置或设置页可填写 API key；页面只回显末 4 位。
+- 平台未配置、额度用尽、语法错误、网络失败和无命中分别返回，不把失败伪装成零结果。
 
-## 组成
+## 保留边界
 
-- 宿主插件（`webServer` + `webRuntime` + `tools` 注入）：`/dsh-hunter` 前缀 RPC——设置 / 查询 / 导出 / 实测 / 历史；模型侧 `asset_search`。
-- 客户端：会话侧栏「hunter」入口 + 设置面板。
-- 存储：`~/.dsh/hunter/hunter.db`（API key + 实测历史 + 授权白名单）；复用 redteam-results 的 `results.db` 读 finding。
-- 平台适配：`lib/adapters.js`（FOFA / Hunter / Quake 语法转写 + 配额映射）。
+- 平台查询属于被动索引检索，不向候选资产发送请求。
+- 实测流水线只使用用户已标记授权的资产；公开检索命中不等于漏洞成立。
+- 原先的 Nday 目录、来源同步、模型整理和自动更新已经退出，相关设置和 RPC 不再存在。
 
 ## 配置
 
-打开“设置 → 资产平台 API”填入三平台 API key（也可从「hunter 狩猎」右上角设置进入）；实测前先在成果页把目标标记为「授权」。任务目标直接在聊天中提供域名、IP 或机构范围；更新公告在“设置 → 漏洞情报更新”操作。
+在 **设置 → 资产平台 API** 填写 key。任务目标直接写在聊天或按文档项目中，查询范围必须明确。
 
 ## 测试
 
-`node --import ../../scripts/test-stub-register.mjs test/run.mjs`——DSL 转写、配额分页、授权边界、实测流水线。
+```powershell
+node --import ../../scripts/test-stub-register.mjs test/run.mjs
+```

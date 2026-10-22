@@ -24,8 +24,6 @@ import { TASK_COST_SCHEMA } from './task-cost.js';
 import { CHAT_SETUP_SCHEMA } from './chat-setup.js';
 import { ACCOUNTS_SCHEMA } from './accounts.js';
 import { PROMPT_LIBRARY_SCHEMA } from './prompt-store.js';
-import { KNOWLEDGE_SWITCH_SCHEMA } from './knowledge-switch.js';
-import { KNOWLEDGE_USAGE_SCHEMA } from './knowledge-usage.js';
 import { WORK_LEASE_SCHEMA } from './work-lease.js';
 import { MODEL_BUDGET_SCHEMA } from './model-budget.js';
 import { RETEST_SCHEMA, requireCurrentRepairRetest } from './retest.js';
@@ -95,8 +93,6 @@ ${TASK_COST_SCHEMA}
 ${CHAT_SETUP_SCHEMA}
 ${ACCOUNTS_SCHEMA}
 ${PROMPT_LIBRARY_SCHEMA}
-${KNOWLEDGE_SWITCH_SCHEMA}
-${KNOWLEDGE_USAGE_SCHEMA}
 ${WORK_LEASE_SCHEMA}
 ${MODEL_BUDGET_SCHEMA}
 ${RETEST_SCHEMA}

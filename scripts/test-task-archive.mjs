@@ -7,9 +7,8 @@ import { createHash } from 'node:crypto';
 import { openStore, registerFinding } from '../plugins/dsh-redteam-results/lib/store.js';
 import { startTaskPolicy, readTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy.js';
 import { saveTaskContext } from '../plugins/dsh-redteam-results/lib/task-context.js';
-import { recordKnowledgeUsage } from '../plugins/dsh-redteam-results/lib/knowledge-usage.js';
 import { createProjectRun, transitionProjectRun, defineProjectChecks, upsertProjectSource } from '../plugins/dsh-redteam-results/lib/project-store.js';
-import { exportTaskArchive, verifyTaskArchive, importTaskArchive, TASK_ARCHIVE_SCHEMA } from '../plugins/dsh-redteam-results/lib/task-archive.js';
+import { exportTaskArchive, verifyTaskArchive, importTaskArchive, TASK_ARCHIVE_SCHEMA, LEGACY_TASK_ARCHIVE_SCHEMA } from '../plugins/dsh-redteam-results/lib/task-archive.js';
 import { recordObservedProjectCheck } from './lib/project-test-fixtures.mjs';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-task-archive-'));
@@ -22,7 +21,6 @@ try {
   startTaskPolicy(store, 'src', { mode: 'regular', question: '归档用例', target: 'https://app.example.test', budget: { toolCalls: 5 } });
   registerFinding(store, 'src', 'pentest', { title: '归档发现', severity: 'high', target: 'https://app.example.test', summary: 'fixture' });
   saveTaskContext(store, 'src', { assets: [{ id: 'a1', url: 'https://app.example.test', inScope: true, reachable: true }], requests: [], checks: [] });
-  recordKnowledgeUsage(store, 'src', { trigger: 'knowledge_search', query: 'x', docPath: 'sqli.md', contentBytes: 10 });
   // 必要原文与引用：归档必须带上它们，恢复后仍可读（第 9.2 节）。
   store.db.prepare('INSERT INTO business_materials(session_id,id,source_url,digest,record) VALUES(?,?,?,?,?)')
     .run('src', 'material-1', 'https://app.example.test/static/app.js', 'a'.repeat(64),
@@ -38,7 +36,8 @@ try {
     assert.equal(archive.manifest.restoredState, 'unconfirmed');
     assert(archive.manifest.sections.task_policy >= 1);
     assert(archive.manifest.sections.findings >= 1);
-    assert(archive.manifest.sections.knowledge_usage >= 1);
+    assert.equal(archive.manifest.sections.knowledge_usage, undefined);
+    assert.equal(archive.manifest.sections.task_knowledge, undefined);
     assert(archive.manifest.sections.business_materials >= 1, '必要原文进归档');
     assert(archive.manifest.sections.task_context_records >= 1, '引用/请求原文进归档');
     assert.equal(Object.keys(archive.manifest.digests).length, Object.keys(archive.sections).length);
@@ -60,7 +59,8 @@ try {
     assert.equal(restored.restored.state, 'unconfirmed');
     assert.equal(restored.restored.fromSession, 'src');
     assert.equal(store.db.prepare('SELECT count(*) AS n FROM findings WHERE session_id=?').get('restored-1').n, 1);
-    assert.equal(store.db.prepare('SELECT count(*) AS n FROM knowledge_usage WHERE session_id=?').get('restored-1').n, 1);
+    assert(!store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='knowledge_usage'").get(), '新库不再创建 knowledge_usage');
+    assert(!store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_knowledge'").get(), '新库不再创建 task_knowledge');
     // 必要原文与引用一起恢复，内容一致。
     const material = store.db.prepare('SELECT record FROM business_materials WHERE session_id=? AND id=?').get('restored-1', 'material-1');
     assert(material, '原文记录恢复到新任务');
@@ -157,6 +157,32 @@ try {
     assert.equal(dispatched.executionState, 'unknown');
     assert.equal(dispatched.sideEffectUnknown, true);
     assert.equal(readTaskPolicy(store, 'project-live-restored').planComplete, false);
+  });
+  test('旧 v2 归档先完整校验知识分节，再安全忽略退役表恢复其余数据', () => {
+    const current = exportTaskArchive(store, 'src');
+    const legacy = structuredClone(current);
+    legacy.manifest.schema = LEGACY_TASK_ARCHIVE_SCHEMA;
+    legacy.sections.knowledge_usage = [{ session_id: 'src', id: 'k-1', at: '2026-10-22T00:00:00.000Z', record: JSON.stringify({ id: 'k-1', query: 'old' }) }];
+    legacy.sections.task_knowledge = [{ session_id: 'src', enabled: 1, source: 'desktop-user', updated_at: '2026-10-22T00:00:00.000Z' }];
+    legacy.manifest.sections.knowledge_usage = 1;
+    legacy.manifest.sections.task_knowledge = 1;
+    legacy.manifest.digests.knowledge_usage = digest(legacy.sections.knowledge_usage);
+    legacy.manifest.digests.task_knowledge = digest(legacy.sections.task_knowledge);
+    legacy.manifest.columns.knowledge_usage = Object.keys(legacy.sections.knowledge_usage[0]).sort();
+    legacy.manifest.columns.task_knowledge = Object.keys(legacy.sections.task_knowledge[0]).sort();
+    legacy.manifest.tables = Object.keys(legacy.sections).sort();
+    assert.equal(verifyTaskArchive(legacy).ok, true, JSON.stringify(verifyTaskArchive(legacy).problems));
+    const restored = importTaskArchive(store, legacy, { sessionId: 'restored-v2' });
+    assert.deepEqual(restored.retiredSectionsIgnored, ['knowledge_usage', 'task_knowledge']);
+    assert.equal(store.db.prepare('SELECT count(*) AS n FROM findings WHERE session_id=?').get('restored-v2').n, 1);
+    assert(!store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='knowledge_usage'").get());
+
+    const tampered = structuredClone(legacy);
+    tampered.sections.knowledge_usage[0].record = JSON.stringify({ id: 'k-1', query: 'changed' });
+    assert.equal(verifyTaskArchive(tampered).ok, false);
+    assert(verifyTaskArchive(tampered).problems.some(problem => problem.includes('knowledge_usage') && problem.includes('摘要不一致')));
+    assert.throws(() => importTaskArchive(store, tampered, { sessionId: 'restored-v2-tampered' }), /归档校验失败/);
+    assert.equal(store.db.prepare('SELECT count(*) AS n FROM task_policy WHERE session_id=?').get('restored-v2-tampered').n, 0);
   });
   test('归档把外部附件内容内联，原文件删除后仍可恢复', () => {
     const file = path.join(home, 'proof.bin');

@@ -1,4 +1,4 @@
-// W07：项目文档读取与知识开关独立；模型实际读取有记录；项目提示不附文档全文。
+// 项目文档读取不依赖已退役的公共知识功能；模型实际读取有记录；项目提示不附文档全文。
 import './test-home-isolation.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -7,7 +7,6 @@ import path from 'node:path';
 import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
 import { startTaskPolicy, taskPolicyStatus, taskPromptStable } from '../plugins/dsh-redteam-results/lib/task-policy.js';
 import { createProjectRun, transitionProjectRun, defineProjectChecks, upsertProjectSource } from '../plugins/dsh-redteam-results/lib/project-store.js';
-import { setKnowledgeEnabled, knowledgeEnabled, knowledgeSwitchView } from '../plugins/dsh-redteam-results/lib/knowledge-switch.js';
 import { listMaterialReads } from '../plugins/dsh-redteam-results/lib/material-reads.js';
 import { projectContinuation, markProjectContinuation } from '../plugins/dsh-redteam-results/lib/project-runtime.js';
 
@@ -45,10 +44,8 @@ function prepare(sid) {
 }
 
 try {
-  await test('关闭知识库后项目文档仍可读取，读取不依赖知识开关', async () => {
+  await test('项目文档可独立读取，不依赖已退役的公共知识功能', async () => {
     prepare('pk-read');
-    setKnowledgeEnabled(store, 'pk-read', false, 'desktop-user');
-    assert.equal(knowledgeEnabled(store, 'pk-read'), false);
     const tool = tools.get('project_document');
     const read = await tool.execute({ action: 'read', sourceId: 'doc-1', sectionId: 'p1' }, exec('pk-read'));
     assert.equal(read.ok, true, read.error);
@@ -61,14 +58,13 @@ try {
     assert(search.text.includes('审批'));
   });
 
-  await test('模型实际读取项目文档后有记录，知识用量不把任务文档算成知识条目', async () => {
+  await test('模型实际读取项目文档后有记录，任务文档不进入公共知识表', async () => {
     const reads = listMaterialReads(store, 'pk-read');
     const keys = [...reads.keys()];
     assert(keys.some(key => key === 'project:doc-1@rev-1:p1'), '缺少 read 记录：' + keys.join(','));
     assert(keys.some(key => key.startsWith('project:doc-1@rev-1:')), '缺少 search 记录');
-    const view = knowledgeSwitchView(store, 'pk-read');
-    assert.equal(view.enabled, false);
-    assert.equal(view.usedCount, 0, '任务文档读取不能算作知识条目已发送');
+    assert(!store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='knowledge_usage'").get());
+    assert(!store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_knowledge'").get());
   });
 
   await test('项目提示只带当前要求摘要，不附文档全文', () => {
@@ -83,10 +79,10 @@ try {
     console.log('     项目提示 ' + bytes + ' UTF-8 字节');
   });
 
-  await test('知识库关闭不会删除历史读取记录', async () => {
-    setKnowledgeEnabled(store, 'pk-read', false, 'desktop-user');
+  await test('重复读取不会删除已有材料读取记录', async () => {
+    await tools.get('project_document').execute({ action: 'read', sourceId: 'doc-1', sectionId: 'p1' }, exec('pk-read'));
     const reads = listMaterialReads(store, 'pk-read');
-    assert(reads.size > 0, '关闭知识库不能删除文档读取记录');
+    assert(reads.size > 0, '文档读取记录必须保留');
   });
 
   await test('真实文档工具读取新范围计进展，重读和搜索同片段不清零', async () => {

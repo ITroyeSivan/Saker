@@ -16,7 +16,7 @@ cordis.patch.yml 注释，默认不启用——preset 平面分层）。
 共同行为：
 - Pentest 可用 `deferredTools` 将 Nmap、dirsearch、ffuf、Nuclei、Afrog、SQLMap、katana、gau
   从初始模型工具面移出。`tool_pack action=list/load/unload pack=active-scan` 只调整当前 Agent 的工具 schema；
-  load 不会启动扫描，卸载或会话结束会移除这些 schema。常规测试只在已有明确假设时加载；Nday 默认不加载。
+  load 不会启动扫描，卸载或会话结束会移除这些 schema。只在已有明确假设或用户要求时加载。
 - 新增 `katana_crawl`：从已登记入口抓取链接、JS 引用和 API 候选，
   默认 `-d 3 -rl 20`，不主动提交表单。
 - 新增 `afrog_scan`：默认只跑 high/critical，限速 20、并发 5。
@@ -46,7 +46,7 @@ cordis.patch.yml 注释，默认不启用——preset 平面分层）。
   多入口套件不会再把“任意一个 .py”误当成目标模块。
 - **异步执行**：外部扫描器用异步子进程运行，长扫描不再用 `spawnSync`
   冻结宿主事件循环；超时与输出上限仍按每个工具的 `limits` 生效。
-- **Nuclei 默认安全筛选**：广泛扫描排除 `intrusive` 标签；这类模板可能写文件或执行命令，需先按 Nday 线索人工核对具体模板及副作用。
+- **Nuclei 默认安全筛选**：广泛扫描排除 `intrusive` 标签；这类模板可能写文件或执行命令，需先人工核对具体模板及副作用。
 
 ## 测试
 

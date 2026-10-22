@@ -573,6 +573,20 @@ try {
     || ['E:/software/ChromeForTesting/chrome-win64/chrome.exe', 'E:/software/ChromeForTesting/chrome.exe'].find(candidate => { try { return fs.statSync(candidate).isFile(); } catch { return false; } }));
   if (cft) {
     process.env.SAKER_CFT_PATH = cft;
+    await test('自由测试可直接使用受管浏览器，不要求项目检查', async () => {
+      startTaskPolicy(store, 'pt-free-browser', { mode: 'regular', target: origin, question: '直接打开授权页面做观察', budget: { toolCalls: 5 } });
+      const tool = tools.get('saker_browser');
+      const opened = await tool.execute({ action: 'open', url: origin + '/page' }, exec('pt-free-browser'));
+      assert.equal(opened.ok, true, opened.error);
+      assert.equal(String(opened.observationRef).startsWith('free-browser-observation-'), true);
+      assert(store.db.prepare('SELECT 1 FROM business_materials WHERE session_id=? AND id=?').get('pt-free-browser', opened.observationRef));
+      const observed = await tool.execute({ action: 'observe' }, exec('pt-free-browser'));
+      assert.equal(observed.ok, true, observed.error);
+      assert(store.db.prepare('SELECT 1 FROM business_materials WHERE session_id=? AND id=?').get('pt-free-browser', observed.observationRef));
+      assert.equal(listProjectActions(store, 'pt-free-browser', 'not-a-project').length, 0);
+      const closed = await tool.execute({ action: 'close' }, exec('pt-free-browser'));
+      assert.equal(closed.ok, true, closed.error);
+    });
     await test('saker_browser open / observe / close 可用', async () => {
       const { run } = prepareProject('pt-browser');
       const tool = tools.get('saker_browser');

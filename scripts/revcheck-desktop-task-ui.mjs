@@ -21,7 +21,7 @@ const variants = [
 for (const [name, from, to, expected] of variants) {
   const fixture = fs.mkdtempSync(path.join(tmp, 'revcheck-task-ui-'));
   try {
-    for (const dir of ['plugins/dsh-redteam-results/lib', 'plugins/dsh-method-stack/lib', 'plugins/dsh-nday-hunter/lib']) {
+    for (const dir of ['plugins/dsh-redteam-results/lib']) {
       fs.cpSync(path.join(root, dir), path.join(fixture, dir), { recursive: true });
     }
     fs.mkdirSync(path.join(fixture, 'scripts'));

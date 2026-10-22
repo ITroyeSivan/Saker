@@ -15,7 +15,6 @@ const FILES = [
   'plugins/dsh-hunter/lib/client.js',
   'plugins/dsh-session-pulse/lib/client.js',
   'plugins/dsh-mode-group/lib/client.js',
-  'plugins/dsh-knowledge-hub/lib/client.js',
   'plugins/dsh-sec-config/lib/client.js',
   'plugins/dsh-skill-browse/lib/client.js',
 ];
@@ -29,8 +28,7 @@ const variants = [
   { id: 'list-item-capped', file: FILES[0], mutate: (s) => s.replace('.dsh-prompt-items button{display:flex', '.dsh-prompt-items button{height:32px;display:flex'), failure: /两行模板列表项/ },
   { id: 'mcp-btn-32px-removed', file: FILES[1], mutate: (s) => s.replace('.dsh-mcs-btn,.dsh-mcs-iconbtn', '.dsh-mcs-iconbtn'), failure: /MCP 工作台按钮/ },
   { id: 'hunter-input-36px-removed', file: FILES[2], mutate: (s) => s.replace('.dsh-hnt-input{height:36px}', ''), failure: /hunter 输入框/ },
-  { id: 'knowledge-root-detached', file: FILES[5], mutate: (s) => s.replace("'data-saker-ui': 'knowledge'", "''"), failure: /知识库根容器接入共享组件层/ },
-  { id: 'secconfig-root-detached', file: FILES[6], mutate: (s) => s.replace("'data-saker-ui': 'sec-config'", "''"), failure: /安全配置根容器接入共享组件层/ },
+  { id: 'secconfig-root-detached', file: FILES[5], mutate: (s) => s.replace("'data-saker-ui': 'sec-config'", "''"), failure: /安全配置根容器接入共享组件层/ },
 ];
 
 function buildFixture(tag, file, mutate) {

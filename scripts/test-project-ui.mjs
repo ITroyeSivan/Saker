@@ -172,8 +172,8 @@ try {
   });
 
   await test('聊天入口提供按文档测试并接入项目来源导入', () => {
-    assert(source.includes("project:'按文档测试'"), '任务方向必须能选择按文档测试');
-    assert(source.includes("['regular','nday','0day','project']"), '项目场景入口必须出现在任务方向选择器');
+    assert(source.includes("value==='project'?'按文档测试':'自由测试'"), '测试场景必须能选择按文档测试');
+    assert(source.includes("['pentest','project']"), '项目场景入口必须出现在测试场景选择器');
     assert(source.includes("api('project.import'"), '项目文档必须走真实导入接口');
     assert(source.includes("scenario:activeScenario"), '资料入口必须知道当前是项目场景');
     assert(source.includes("projectMode?'开始按文档测试':'开始测试'"), '项目开始按钮必须有明确动作');

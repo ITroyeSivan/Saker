@@ -189,50 +189,6 @@ function evaluateStateChange(store, sessionId, input, referenceTime = Date.now()
     evidenceLimit: 'Shows the reviewed state field changed after a write carrying the reviewed marker, observed by an independent GET readback at the recorded time; does not judge whether the change was authorized (Desktop impact review) or infer effects beyond the reviewed field.' };
 }
 
-// Nday 适用性（v6 第 9.1 / 10.1 节）：只确认「产品、版本（与部署条件）对应原文」，
-// **适用性不是漏洞已验证**——配方固定 proofKind='fingerprint'，交付门禁（delivery.js）
-// 明确拒绝 fingerprint 充当影响证据，实际影响必须另行核对。
-// 阴性（一律不接受）：响应里没有版本原文、未知版本、只有扫描器标签、版本来自请求回显。
-function evaluateNdayApplicability(store, sessionId, input, referenceTime = Date.now()) {
-  if (!Number.isFinite(referenceTime)) fail('invalid verification timestamp');
-  const method = reviewedMethod(store, sessionId, input);
-  if (!method || method.effectSpec?.kind !== 'nday-applicability/v1') fail('current reviewed Nday applicability specification required');
-  const spec = method.effectSpec;
-  if (!identifier(spec.product)) fail('reviewed product name required');
-  if (typeof spec.versionPattern !== 'string' || !spec.versionPattern || spec.versionPattern.length > 200) fail('reviewed version pattern required');
-  let versionPattern;
-  try { versionPattern = new RegExp(spec.versionPattern); } catch { fail('invalid reviewed version pattern'); }
-  let deploymentPattern = null;
-  if (spec.deploymentPattern !== undefined) {
-    if (typeof spec.deploymentPattern !== 'string' || !spec.deploymentPattern || spec.deploymentPattern.length > 200) fail('invalid reviewed deployment pattern');
-    try { deploymentPattern = new RegExp(spec.deploymentPattern); } catch { fail('invalid reviewed deployment pattern'); }
-  }
-  if (!Array.isArray(input.rounds) || input.rounds.length !== 1) fail('exactly one executed fingerprint round required');
-  const round = input.rounds[0] || {};
-  if (typeof round.fingerprint !== 'string') fail('one fingerprint receipt required');
-  const receipt = readExecutionReceipt(store, sessionId, round.fingerprint);
-  const methodBasis = executionMethodBasis(method);
-  requireFreshExecutions([receipt], referenceTime);
-  if (!receipt.current || receipt.source !== 'host-http-execution' || receipt.outcome !== 'response'
-    || receipt.endpoint !== method.endpoint || receipt.methodId !== method.id || receipt.methodVersion !== method.version
-    || receipt.methodBasis !== methodBasis) fail('当前执行证据与请求、身份、目标实例或方法不匹配，或缺少完整响应；请重新采集当前条件下的完整对照。');
-  if (receipt.status < 200 || receipt.status >= 300) fail('fingerprint response did not return the product surface');
-  const body = Buffer.from(receipt.responseBodyBase64 || '', 'base64').toString('utf8');
-  if (!body.toLowerCase().includes(String(spec.product).toLowerCase())) fail('response does not contain the reviewed product text');
-  const match = versionPattern.exec(body);
-  if (!match) fail('response does not contain the reviewed version evidence; unknown versions stay separate');
-  const version = String(match[1] ?? match[0]).slice(0, 120);
-  if (String(receipt.request).includes(version)) fail('request reflection cannot prove product applicability');
-  const deploymentMatch = deploymentPattern ? deploymentPattern.exec(body) : null;
-  if (deploymentPattern && !deploymentMatch) fail('response does not contain the reviewed deployment condition text');
-  const digest = value => createHash('sha256').update(String(value)).digest('hex');
-  return { verified: true, kind: 'nday-applicability/v1', proofKind: 'fingerprint', endpoint: method.endpoint, identity: receipt.authContext,
-    methodId: method.id, methodVersion: method.version, methodBasis, receiptIds: [round.fingerprint], controlReceiptId: round.fingerprint,
-    comparisons: [{ product: String(spec.product).slice(0, 120), version, versionSha256: digest(version), status: receipt.status,
-      deploymentMatched: deploymentPattern ? true : null, requestReflectionExcluded: true }],
-    evidenceLimit: 'Confirms the reviewed product/version text appeared in a real response at the recorded time. Applicability is NOT a verified vulnerability and cannot satisfy the impact delivery gate (proofKind=fingerprint); actual impact and deployment conditions must be established separately.' };
-}
-
 // 泄露/配置（v6 第 9.1 节）：实际非公开内容 + 访问条件 + 原始来源。
 // 关键点：同一入口「带复核身份凭据」与「完全匿名」拿到的是**同一份**含受控 marker 的内容，
 // 才说明非公开内容确实没有访问控制。marker 由复核规格声明为放在非公开配置里（与文件读取、
@@ -422,7 +378,6 @@ function evaluateEffect(store, sessionId, input, referenceTime = Date.now(), sin
   if (kind === 'private-json-read/v1') return evaluatePrivateRead(store, sessionId, input, referenceTime, singleRound);
   if (kind === 'path-read-disclosure/v1') return evaluatePathRead(store, sessionId, input, referenceTime);
   if (kind === 'state-change-impact/v1') return evaluateStateChange(store, sessionId, input, referenceTime);
-  if (kind === 'nday-applicability/v1') return evaluateNdayApplicability(store, sessionId, input, referenceTime);
   if (kind === 'config-disclosure/v1') return evaluateConfigDisclosure(store, sessionId, input, referenceTime);
   if (kind === 'input-processing/v1') return evaluateInputProcessing(store, sessionId, input, referenceTime);
   if (kind === 'server-side-access/v1') return evaluateServerSideAccess(store, sessionId, input, referenceTime);

@@ -5,7 +5,6 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { openStore, registerFinding, updateFinding, getFinding, computeStats, listFindings } from '../plugins/dsh-redteam-results/lib/store.js';
-import { summarizeMetrics } from '../plugins/dsh-nday-hunter/lib/metrics.js';
 import { saveTaskContext, readTaskContext } from '../plugins/dsh-redteam-results/lib/task-context.js';
 import { createResearch, closeResearch, observeResearch, researchDetail } from '../plugins/dsh-redteam-results/lib/research.js';
 import { startTaskPolicy, readTaskPolicy, pauseTaskPolicy, resumeTaskPolicy, setTaskActionLimits } from '../plugins/dsh-redteam-results/lib/task-policy.js';
@@ -282,7 +281,7 @@ try {
     assert.equal(computeStats(store, sid, 'pentest').delivery.ready, 0);
     assert.equal(listFindings(store, sid, 'pentest', { delivery: 'ready' }).total, 0);
     assert.equal(listFindings(store, sid, 'pentest', { delivery: 'incomplete' }).total, 1);
-    assert.equal(summarizeMetrics(home, { sessionId: sid }).confirmedRce, 0);
+    assert.equal(getFinding(store, sid, row.id).delivery.rce, false);
     saveTaskContext(store, sid, { ...context(probeRequest), methods: [{ ...fixtureMethod, reviewer: 'Updated review annotation', reviewNotes: 'Same method content' }] });
     assert.equal(getFinding(store, sid, row.id).delivery.executionVerified, true);
     row = updateFinding(store, sid, 'pentest', row.id, { responsePkt: 'HTTP/1.1 200 OK\r\n\r\ninvented impact' });
@@ -293,7 +292,7 @@ try {
     updateFinding(store, sid, 'pentest', row.id, { reproduction: JSON.stringify(reproduction) });
     saveTaskContext(store, sid, { ...context(probeRequest), methods: [{ ...fixtureMethod, version: 'v2', definition: 'Changed method semantics' }] });
     assert.equal(getFinding(store, sid, row.id).delivery.executionVerified, false);
-    assert.equal(summarizeMetrics(home, { sessionId: sid }).confirmedFindings, 0);
+    assert.equal(computeStats(store, sid, 'pentest').delivery.ready, 0);
   });
   await test('first contact: 没有任何研究方向时，已存的 in-scope GET 可以先跑一次拿回执，之后不再放行', async () => {
     const sid = 'first-contact';

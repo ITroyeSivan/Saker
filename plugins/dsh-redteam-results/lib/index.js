@@ -53,11 +53,6 @@ import { importPastedMaterial } from './materials-import.js';
 import { listWorkDependingOnMaterial } from './work-lease.js';
 import { executionLedger } from './execution-view.js';
 import { readPentestSession } from './session-read.js';
-import { knowledgeSwitchView, setKnowledgeEnabled } from './knowledge-switch.js';
-import { testContentCatalog, TEST_CONTENT_KEYS } from './test-catalog.js';
-import { taskModuleSelection, saveTaskModules } from './task-modules.js';
-import { rootModuleSelection } from './execution-modules.js';
-import { listKnowledgeUsage, recordKnowledgeUsage } from './knowledge-usage.js';
 import { createPurposeTasks } from './purpose-tasks.js';
 import { breakdownFromEvents, maskedRecord, diagnosticsDelta } from './request-diagnostics.js';
 import { redactText, redactValue } from './redaction.js';
@@ -150,6 +145,24 @@ function projectActionSummary(action) {
     pageRef: textOrNull(action?.pageRef),
     reconciliation,
   };
+}
+
+function saveFreeBrowserRecord(store, sessionId, kind, displayName, payload) {
+  const safe = redactValue(payload);
+  const id = 'free-' + kind + '-' + crypto.randomUUID();
+  const record = {
+    id,
+    kind,
+    source: 'host-free-browser',
+    createdAt: new Date().toISOString(),
+    payload: safe,
+  };
+  const original = Buffer.from(JSON.stringify(record));
+  const digest = crypto.createHash('sha256').update(original).digest('hex');
+  store.db.prepare('INSERT INTO business_materials(session_id,id,source_url,digest,record) VALUES(?,?,?,?,?)')
+    .run(sessionId, id, String(safe?.url || safe?.result?.url || ''), digest,
+      JSON.stringify({ ...record, displayName, originalBase64: original.toString('base64'), bytes: original.length, digest, relativeRef: 'materials/' + id }));
+  return id;
 }
 
 //#region 通道与工具共用的业务逻辑
@@ -608,22 +621,8 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
         sessions: cost.sessions.map(row => ({ sessionId: row.sessionId, role: row.role, available: row.available, modelCalls: row.modelCalls,
           toolCalls: row.toolCalls, unknownUsageCalls: row.unknownUsageCalls, totalTokens: row.totalTokens })) } };
   }
-  if (endpoint === 'knowledge.status' || endpoint === 'knowledge.toggle') {
-    const sessionId = String(p.sessionId || '');
-    const session = endpoint === 'knowledge.status' ? await readPentestSession(ctx, sessionId)
-      : (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
-    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
-    // 能力标志随开关视图一起给（v6 第 5.6 节）：缺自动匹配时浮层要如实说明。
-    if (endpoint === 'knowledge.status') return { ok: true, knowledge: { ...knowledgeSwitchView(st, sessionId), autoMatch: knowledgeAutoMatchAvailable() } };
-    return { ok: true, knowledge: setKnowledgeEnabled(st, sessionId, p.enabled, 'desktop-user') };
-  }
-  if (endpoint === 'knowledge.usage') {
-    const sessionId = String(p.sessionId || '');
-    await readPentestSession(ctx, sessionId);
-    // 能力探测结果随用量一起返回（v6 第 5.6 节）：缺自动匹配时界面要如实说明。
-    return { ok: true, knowledgeAutoMatch: knowledgeAutoMatchAvailable(),
-      ...listKnowledgeUsage(st, sessionId, { page: Number.isInteger(p.page) ? p.page : 1, pageSize: Number.isInteger(p.pageSize) ? p.pageSize : 50 }) };
-  }
+  if (endpoint.startsWith('knowledge.'))
+    return { ok: false, code: 'feature_removed', error: '知识库功能已移除；项目文档和用户材料仍可按需读取。' };
   if (endpoint === 'diagnostics.request') {
     const sessionId = String(p.sessionId || '');
     const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
@@ -636,22 +635,7 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
     return { ok: true, ...listTaskEvents(st, sessionId, { afterCursor: Number.isInteger(p.afterCursor) ? p.afterCursor : 0, limit: Number.isInteger(p.limit) ? p.limit : 50 }) };
   }
   if (endpoint === 'test.content') {
-    const sessionId = String(p.sessionId || '');
-    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
-    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
-    const { selection, config } = rootModuleSelection(st, sessionId);
-    if (p.action === 'save') {
-      const next = saveTaskModules(st, sessionId, { mode: p.mode ?? selection.mode, active: p.active,
-        rev: p.rev ?? selection.rev, policyRev: p.policyRev ?? selection.policyRev }, config);
-      // 第 4.3 节：全不选必须同时关闭本任务的网站访问；再次选择项目不暗中恢复，由用户明确打开。
-      if (Array.isArray(next.active) && next.active.length === 0)
-        setTaskActionLimits(st, sessionId, { allowTargetNetwork: false }, 'test-content-empty');
-			// 返回**写完之后**的选择：全不选会顺带写一次动作限制（policyRev +1），返回旧对象会让界面
-			// 拿着过期 revision 再点「全选」时被乐观并发挡下。真机实测报「任务状态已变化，请刷新后重试」，
-			// 而且不重开设置面板就一直失败。
-			return { ok: true, selection: rootModuleSelection(st, sessionId).selection, catalog: testContentCatalog() };
-    }
-    return { ok: true, selection, catalog: testContentCatalog(), keys: TEST_CONTENT_KEYS };
+    return { ok: false, code: 'feature_removed', error: '固定测试内容清单已移除；请直接用本轮问题说明测试重点。' };
   }
   if (endpoint === 'task.scenario') {
     const sessionId = String(p.sessionId || '');
@@ -1048,27 +1032,6 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
 
 //#region host wiring
 
-/**
- * 知识适配器能力探测（v6 第 5.6 节）：自动匹配从 knowledge-hub 0.3.23 起提供。
- * 缺能力时界面要如实显示「本版本由 AI 主动查询」，不能默认自动匹配存在。结果按进程缓存。
- */
-let knowledgeAutoMatchCache = null;
-function knowledgeAutoMatchAvailable() {
-  if (knowledgeAutoMatchCache !== null) return knowledgeAutoMatchCache;
-  knowledgeAutoMatchCache = (() => {
-    try {
-      const home = process.env.DSH_HOME || path.join(os.homedir(), '.dsh');
-      const pkgPath = path.join(home, 'profiles', 'desktop', 'node_modules', '@dsh-external', 'dsh-knowledge-hub', 'package.json');
-      const version = String(JSON.parse(fs.readFileSync(pkgPath, 'utf8')).version || '');
-      const parts = version.split('.').map(Number);
-      if (parts.length < 3 || !parts.slice(0, 3).every(Number.isInteger)) return false;
-      const [major, minor, patch] = parts;
-      return major > 0 || minor > 3 || (minor === 3 && patch >= 23);
-    } catch { return false; }
-  })();
-  return knowledgeAutoMatchCache;
-}
-
 /** 「需要你处理」的单条事项（v6 第 5.2 节）：目前只有账号失效一类，不替用户猜原因。 */
 function taskAttention(store, sessionId) {
   return listAccounts(store, sessionId)
@@ -1250,10 +1213,8 @@ function apply(ctx) {
       if (!session || session.mode !== 'pentest') return '';
       try {
         const store = theStore();
-        // v6 第 4.3 节：把当前测试内容选择一起交给提示，筛过才发一行已选重点。
         const state = taskPolicyStatus(store, session.id);
-        const selection = state.policy?.scenario === 'project' ? null : rootModuleSelection(store, session.id).selection;
-        return taskPromptStable(state, { controlledInterface: controlledInterface(assembly?.agent), selection });
+        return taskPromptStable(state, { controlledInterface: controlledInterface(assembly?.agent) });
       }
       catch { return '本会话任务状态无法读取，停止目标操作并报告原因；不要重建或重置历史。'; }
     });
@@ -1285,7 +1246,7 @@ function apply(ctx) {
 	//#region 模型工具（宿主平面，三种安全模式可见）
 	ctx.tools.register(defineTool({
 		name: "redteam_finding_register",
-		description: "登记本会话成果。弱配置须有真实影响和利用链；独立复核后才能交付。子代理成果存子会话。",
+		description: "登记本会话成果；完整影响和复核证据才能交付。",
 		parameters: {
 			title: { type: "string", required: true, description: "名称（简短）" },
 			severity: { type: "string", enum: SEVERITIES, description: "等级；漏洞型必填，默认 medium" },
@@ -1364,7 +1325,7 @@ function apply(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "redteam_finding_update",
-		description: "按 id 更新 finding：状态、字段、复核/复测注记；首次转 verified 须给 secondRating 与 ≥40 字依据。",
+		description: "按 id 更新成果、复核或复测；转 verified 须给二次评级和依据。",
 		parameters: {
 			id: { type: "string", required: true, description: "finding id（如 pentest-3）" },
 			status: { type: "string", enum: ALL_STATUSES, description: "新状态；按当前模式终态规则，详见 finding-fields.md" },
@@ -1501,7 +1462,7 @@ function apply(ctx) {
   }));
   ctx.tools.register(defineTool({
     name: 'redteam_execution',
-    description: '执行已存请求。run-pair保存正常/异常对照；run-effect核对已审阅效果；回执不是漏洞，见README。',
+    description: '执行已存请求和正常/异常对照；回执不等于漏洞。',
     parameters: {
       action: { type: 'string', required: true, enum: ['run', 'detail', 'run-pair', 'pair-detail', 'run-effect', 'job-detail', 'verify-effect', 'effect-detail', 'oob-issue', 'oob-check', 'browser-run'] },
       document: { type: 'string', description: 'JSON：run-pair含hypothesisId与请求引用；run-effect含methodId/version；verify-effect含rounds' },
@@ -1621,14 +1582,11 @@ function apply(ctx) {
 			workers: { type: 'integer', description: '子代理0–16，≤桌面上限；小任务0' },
 			discoveryCalls: { type: 'integer', description: '0day探路额度0至toolCalls' },
 			unmeteredToolCalls: { type: 'integer', description: '未计量扫描额度0–100，默认0拒绝' },
-			workflow: { type: 'string', enum: ['single', 'regular-to-nday', 'regular-with-nday'], description: '省略沿用桌面；衔接限regular' },
 			stop: { type: 'string', enum: ['budget', 'queue', 'first-high', 'first-rce'] },
 			policy: { type: 'string', description: '旧JSON，与独立字段互斥' },
 			progress: { type: 'string', description: '进度JSON：完成标记和note' },
       planComplete: { type: 'boolean' },
       queueComplete: { type: 'boolean' },
-      regularComplete: { type: 'boolean' },
-      ndayComplete: { type: 'boolean' },
       document: { type: 'string', description: '子代理：delegate/send/report/pause/checkpoint/cleanup/update（范围与预算）。' }
 		},
 		output: {
@@ -1681,7 +1639,7 @@ function apply(ctx) {
 				const state = taskPolicyStatus(theStore(), session.id);
 				return Promise.resolve({ ok: true, enforcementAvailable, ...state, ...(args.action === 'next' && state.configured && !state.stopped ? { next: researchNext(theStore(), session.id) } : {}) });
       } catch (error) { return Promise.resolve({ ok: false, error: error?.message ?? String(error),
-        ...(args.action === 'start' ? { recovery: '使用start独立字段：mode=regular/nday/0day，target=实际URL，question=当前问题，toolCalls=有限额度；workflow通常省略，人数沿用桌面上限。已有任务不能重启或重置预算。' } : {}),
+        ...(args.action === 'start' ? { recovery: '使用start独立字段：mode=regular/nday/0day，target=实际URL，question=当前问题，toolCalls=有限额度。已有任务不能重启或重置预算。' } : {}),
         ...(args.action === 'update' ? { recovery: 'update 只收紧：interaction/reporting/explain/workers/allowTargetNetwork/readOnly/excludedPaths/requestRatePerMinute/requestConcurrency/toolCalls/minutes。放宽（重开网站访问、取消只读、提高速率或助手上限、换目标）必须由用户在桌面设置里操作。' } : {}) }); }
 		}
 	}));
@@ -1798,8 +1756,17 @@ function apply(ctx) {
 		if (policy?.scenario !== 'project') return { error: '仅「按文档测试」场景可用' };
 		const run = activeProjectRun(store, session.id);
 		if (!run) return { error: '当前没有活动的项目运行' };
-		return { session, policy, run, store };
+		return { scenario: 'project', session, policy, run, store };
 	};
+  const browserScopeOf = exec => {
+    const session = sessionOf(ctx, exec);
+    if (!session || session.mode !== 'pentest') return { error: '仅当前渗透会话可用' };
+    const store = theStore();
+    const policy = readTaskPolicy(store, session.id);
+    if (!policy?.startedAt) return { error: '请先开始自由测试或按文档测试，再打开受管浏览器' };
+    if (policy.scenario === 'project') return projectScopeOf(exec);
+    return { scenario: 'pentest', session, policy, store };
+  };
 	const projectBrowserGuardOf = (scope, identityRef) => async ({ url, method }) => {
 		const currentRun = readProjectRun(scope.store, scope.session.id, scope.run.runId);
 		if (!currentRun || currentRun.runId !== scope.run.runId || currentRun.state !== 'running')
@@ -1827,6 +1794,29 @@ function apply(ctx) {
           currentRun.runId, currentRun.controlRev, currentPolicy.policyRev, limits, taskIdentityRevision(identity),
         ])).digest('hex') };
 	};
+  const freeBrowserGuardOf = (scope, identityRef) => async ({ url, method }) => {
+    const currentPolicy = readTaskPolicy(scope.store, scope.session.id);
+    const state = taskPolicyStatus(scope.store, scope.session.id);
+    if (!currentPolicy || state.stopped) return { denial: '当前任务已停止，浏览器请求不能继续派发' };
+    const limits = effectivePolicy(scope.store, currentPolicy);
+    const identity = resolveTaskIdentity(scope.store, scope.session.id, identityRef);
+    const identityReason = identityDenial(identity);
+    if (identityReason) return { denial: identityReason };
+    let parsed;
+    try { parsed = new URL(String(url || '')); } catch { return { denial: '浏览器请求地址无效' }; }
+    const denial = targetTrafficDenial(limits, { method })
+      || excludedPathDenial(limits, { url: parsed.href });
+    if (denial) return { denial };
+    const origins = new Set();
+    if (limits.target) {
+      try { origins.add(new URL(limits.target).origin); } catch { /* invalid target is rejected elsewhere */ }
+    }
+    for (const origin of limits.allowedOrigins || []) try { origins.add(new URL(origin).origin); } catch { /* invalid origin */ }
+    if (!origins.has(parsed.origin)) return { denial: '浏览器请求不在本次授权站点或明确关联资产内' };
+    return { policy: limits, revision: crypto.createHash('sha256').update(JSON.stringify([
+      currentPolicy.startedAt, currentPolicy.policyRev, limits, taskIdentityRevision(identity),
+    ])).digest('hex') };
+  };
 	ctx.tools.register(defineTool({
 		name: 'project_document',
 		description: '项目文档：列出、搜索或分段读取。',
@@ -1834,7 +1824,7 @@ function apply(ctx) {
 			action: { type: 'string', required: true, enum: ['list', 'search', 'read'] },
 			query: { type: 'string' }, sourceId: { type: 'string' }, sourceRevision: { type: 'string' },
 			sectionId: { type: 'string' },
-      sectionIds: { type: 'array', description: 'read 可批量读取同一来源的 1–20 个短段落；与 sectionId/cursor 互斥。limit 为整批字符上限，最多 8000；长段按返回游标单独续读。', items: { type: 'string' } },
+      sectionIds: { type: 'array', description: 'read 批量读取同源 1–20 段；与 sectionId/cursor 互斥。', items: { type: 'string' } },
       cursor: { type: 'integer' }, limit: { type: 'integer' }
 		},
 		output: { schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } }, render: (_args, value) => [{ type: 'text', text: value.ok ? value.text : value.error }] },
@@ -1941,7 +1931,7 @@ function apply(ctx) {
       document: { type: 'string', description: '兼容旧 JSON；新调用用 checks' }, checkId: { type: 'string' },
 			verdict: { type: 'string', enum: ['not_found', 'issue', 'needs_check', 'blocked', 'not_applicable'] },
 			checkedContent: { type: 'string', description: '实际检查、观察及其他说明。' },
-      gaps: { type: 'string', description: '仅写本项文档要求中未完成的部分或缺少条件；没有缺口时省略或空串。范围外提醒写 checkedContent，不写“无”。' },
+      gaps: { type: 'string', description: '只写本项未完成部分或缺少条件；无缺口时留空。' },
 			findingRefs: { type: 'array', items: { type: 'string' } },
 			reusedObservations: { type: 'array', description: '复用已有动作观察时提供 actionId 和具体理由', items: {
 				type: 'object', additionalProperties: false, properties: {
@@ -2025,8 +2015,9 @@ function apply(ctx) {
 		},
 		output: { schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } }, render: (_args, value) => [{ type: 'text', text: value.ok ? value.text : value.error }] },
 		async execute(args, exec) {
-			const scope = projectScopeOf(exec);
+			const scope = browserScopeOf(exec);
 			if (scope.error) return { ok: false, error: scope.error };
+			const isProject = scope.scenario === 'project';
 			let begun;
 			try {
 				const action = String(args.action || '');
@@ -2037,18 +2028,26 @@ function apply(ctx) {
 					const identity = resolveTaskIdentity(scope.store, scope.session.id, identityRef);
 					const identityReason = identityDenial(identity);
 					if (identityReason) throw new Error(identityReason);
-					if (scope.run.state !== 'running') throw new Error('项目运行当前不可派发浏览器动作');
-					if (exec.signal?.aborted) throw new Error('项目动作已取消');
-					const checkId = String(args.checkId || scope.run.currentCheckId
-						|| projectExecutableChecks(scope.store, scope.session.id, scope.run.runId)[0]?.checkId || '');
-					if (!checkId) throw new Error('请先用 project_check 选择当前检查，再执行浏览器目标动作');
-					const denied = taskExecutionGuard(scope.store, scope.session.id, 'recorded-project-execution', Date.now(), {
-						args: { url: args.url || '' },
-						onReserve: () => { begun = beginProjectAction(scope.store, scope.session.id, scope.run.runId, checkId, {
-							identityRef, identityRevision: taskIdentityRevision(identity), controlRev: scope.run.controlRev,
-              scopeFingerprint: crypto.createHash('sha256').update(JSON.stringify([action, args.actType || '', args.url || '', args.selector || '', args.text || '', args.value || '', identityRef])).digest('hex'),
-						}); },
-					});
+					if (exec.signal?.aborted) throw new Error('浏览器动作已取消');
+					let denied;
+					if (isProject) {
+						if (scope.run.state !== 'running') throw new Error('项目运行当前不可派发浏览器动作');
+						const checkId = String(args.checkId || scope.run.currentCheckId
+							|| projectExecutableChecks(scope.store, scope.session.id, scope.run.runId)[0]?.checkId || '');
+						if (!checkId) throw new Error('请先用 project_check 选择当前检查，再执行浏览器目标动作');
+						denied = taskExecutionGuard(scope.store, scope.session.id, 'recorded-project-execution', Date.now(), {
+							args: { url: args.url || '' },
+							onReserve: () => { begun = beginProjectAction(scope.store, scope.session.id, scope.run.runId, checkId, {
+								identityRef, identityRevision: taskIdentityRevision(identity), controlRev: scope.run.controlRev,
+								scopeFingerprint: crypto.createHash('sha256').update(JSON.stringify([action, args.actType || '', args.url || '', args.selector || '', args.text || '', args.value || '', identityRef])).digest('hex'),
+							}); },
+						});
+					} else {
+						denied = taskExecutionGuard(scope.store, scope.session.id, 'recorded-http-execution', Date.now(), {
+							args: { url: args.url || '' },
+							reserve: false,
+						});
+					}
 					if (denied) throw new Error(denied);
 				}
 				if (browser && browser.identityRef !== identityRef) {
@@ -2064,7 +2063,7 @@ function apply(ctx) {
 					if (!targetAction) throw new Error('请先打开浏览器页面，再读取已有观察或请求');
 					browser = await startBrowserSession({
 						identity: scope.session.id, identityRef,
-						requestGuard: projectBrowserGuardOf(scope, identityRef),
+						requestGuard: isProject ? projectBrowserGuardOf(scope, identityRef) : freeBrowserGuardOf(scope, identityRef),
 						pacingSessionId: scope.session.id,
 					});
 					projectBrowsers.set(scope.session.id, browser);
@@ -2078,13 +2077,15 @@ function apply(ctx) {
 					else if (action === 'request-detail') result = await browser.requestDetail(String(args.requestId || ''));
 					else throw new Error('未知的浏览器操作：' + action);
 					if (action === 'open') {
-						const observationRef = saveProjectBrowserObservation(scope.store, scope.session.id, scope.run.runId, begun.action.actionId, result);
 						const page = redactValue(result);
-						return { ok: true, text: JSON.stringify({ title: page.title, url: page.url, executionId: begun.action.actionId, observationRef }), page, actionId: begun.action.actionId, observationRef };
+						const observationRef = isProject
+							? saveProjectBrowserObservation(scope.store, scope.session.id, scope.run.runId, begun.action.actionId, result)
+							: saveFreeBrowserRecord(scope.store, scope.session.id, 'browser-observation', '浏览器页面观察', result);
+						return { ok: true, text: JSON.stringify({ title: page.title, url: page.url, executionId: begun?.action?.actionId || null, observationRef }), page, actionId: begun?.action?.actionId || null, observationRef };
 					}
 					if (action === 'act') {
 						if (result.state === 'failed') {
-							await finishProjectAction(scope.store, scope.session.id, scope.run.runId, begun?.action?.actionId, {
+							if (isProject) await finishProjectAction(scope.store, scope.session.id, scope.run.runId, begun?.action?.actionId, {
 								executionState: 'failed', error: result.error || 'browser-action-failed',
 							});
 							return { ok: false, error: result.error || '浏览器动作失败', result, actionId: begun?.action?.actionId || null };
@@ -2109,27 +2110,36 @@ function apply(ctx) {
 								result = { ...result, state: 'failed', completed: false, error: 'download-file-unreadable: ' + redactText(error.message) };
 							}
 						}
-						await finishProjectAction(scope.store, scope.session.id, scope.run.runId, begun?.action?.actionId, {
+						if (isProject) await finishProjectAction(scope.store, scope.session.id, scope.run.runId, begun?.action?.actionId, {
 							executionState: result.state === 'failed' ? 'failed' : 'completed',
 							error: result.state === 'failed' ? result.error : undefined,
 							attachmentRef,
 						});
+						const actionRef = isProject ? begun?.action?.actionId || null
+							: saveFreeBrowserRecord(scope.store, scope.session.id, 'browser-action', '浏览器操作', {
+								action, actType: args.actType || '', selector: args.selector || '', result,
+							});
 						const safeResult = redactValue(result);
-						return { ok: result.state !== 'failed', text: JSON.stringify(safeResult), ...(result.state === 'failed' ? { error: result.error } : {}), result: safeResult, actionId: begun?.action?.actionId || null };
+						return { ok: result.state !== 'failed', text: JSON.stringify(safeResult), ...(result.state === 'failed' ? { error: result.error } : {}), result: safeResult, actionId: actionRef };
 					}
-					if (action === 'observe' && scope.run.state === 'running') {
-						const checkId = String(args.checkId || scope.run.currentCheckId || '');
-						if (checkId) {
+					if (action === 'observe' && (!isProject || scope.run.state === 'running')) {
+						const checkId = isProject ? String(args.checkId || scope.run.currentCheckId || '') : '';
+						if (isProject && checkId) {
 							begun = beginProjectAction(scope.store, scope.session.id, scope.run.runId, checkId, { controlRev: scope.run.controlRev, identityRef, identityRevision: taskIdentityRevision(resolveTaskIdentity(scope.store, scope.session.id, identityRef)) });
 							const observationRef = saveProjectBrowserObservation(scope.store, scope.session.id, scope.run.runId, begun.action.actionId, result);
 							const page = redactValue(result);
 							return { ok: true, text: JSON.stringify(page), page, actionId: begun.action.actionId, observationRef };
 						}
+						if (!isProject) {
+							const observationRef = saveFreeBrowserRecord(scope.store, scope.session.id, 'browser-observation', '浏览器页面观察', result);
+							const page = redactValue(result);
+							return { ok: true, text: JSON.stringify(page), page, actionId: null, observationRef };
+						}
 					}
 					const safeResult = redactValue(result);
 					return { ok: true, text: action === 'request-detail' ? String(safeResult.responseBody || '').slice(0, 2000) : JSON.stringify(safeResult), [action === 'request-detail' ? 'request' : action === 'observe' ? 'page' : 'requests']: safeResult };
 				} catch (error) {
-					if (begun) {
+					if (begun && isProject) {
 						const sideEffectUnknown = action === 'act' && ['click', 'type', 'select', 'upload', 'dialog'].includes(String(args.actType || ''));
 						await finishProjectAction(scope.store, scope.session.id, scope.run.runId, begun.action.actionId, {
 							executionState: sideEffectUnknown ? 'unknown' : 'failed', error: redactText(error.message), sideEffectUnknown,
@@ -2138,7 +2148,7 @@ function apply(ctx) {
 					throw error;
 				}
 				} catch (error) {
-					if (begun) {
+					if (begun && isProject) {
 						const pending = listProjectActions(scope.store, scope.session.id, scope.run.runId).find(item => item.actionId === begun.action.actionId);
 						if (['queued', 'dispatched'].includes(pending?.executionState))
 							finishProjectAction(scope.store, scope.session.id, scope.run.runId, begun.action.actionId, { executionState: 'failed', error: redactText(error.message) });
@@ -2170,7 +2180,7 @@ function apply(ctx) {
 	//#endregion
 	ctx.tools.register(defineTool({
 		name: 'redteam_delivery',
-		description: '将已复核有效漏洞、复现材料与脱敏证据打为ZIP到会话工作目录；不完整成果不计入。',
+		description: '导出已复核成果、复现材料与脱敏证据。',
 		parameters: {},
 		output: {
 			schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },

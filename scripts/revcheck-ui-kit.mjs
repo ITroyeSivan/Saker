@@ -32,7 +32,7 @@ function buildFixture(tag, mutate) {
   fs.copyFileSync(path.join(root, 'scripts', 'lib', 'product-plugins.mjs'), path.join(fixture, 'scripts', 'lib', 'product-plugins.mjs'));
   for (const gate of GATES) fs.copyFileSync(path.join(root, 'scripts', gate), path.join(fixture, 'scripts', gate));
   fs.copyFileSync(path.join(root, 'shared', 'ui-kit', 'ui-kit.css'), path.join(fixture, 'shared', 'ui-kit', 'ui-kit.css'));
-  for (const name of ['dsh-redteam-results', 'dsh-hunter', 'dsh-session-pulse', 'dsh-mode-group', 'dsh-knowledge-hub', 'dsh-sec-config', 'dsh-skill-browse']) {
+  for (const name of ['dsh-redteam-results', 'dsh-hunter', 'dsh-session-pulse', 'dsh-mode-group', 'dsh-sec-config', 'dsh-skill-browse']) {
     fs.mkdirSync(path.join(fixture, 'plugins', name, 'lib'), { recursive: true });
     fs.copyFileSync(path.join(root, 'plugins', name, 'lib', 'client.js'), path.join(fixture, 'plugins', name, 'lib', 'client.js'));
     fs.writeFileSync(path.join(fixture, 'plugins', name, 'package.json'), JSON.stringify({ name: `@dsh-external/${name}`, version: '1.0.0' }));

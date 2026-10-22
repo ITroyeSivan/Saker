@@ -17,12 +17,15 @@ console.log('ok   regression exit reflects process failures without FAIL asserti
 
 const fixture = mkdtempSync(join(tmpdir(), 'saker-home-isolation-check-'))
 try {
-  const live = join(fixture, 'live-user-home'), file = join(live, 'nday-hunter', 'metrics.json')
-  mkdirSync(join(live, 'nday-hunter'), { recursive: true })
+  const live = join(fixture, 'live-user-home'), file = join(live, 'redteam-results', 'results.db')
+  mkdirSync(join(live, 'redteam-results'), { recursive: true })
   const original = '{"events":[],"sentinel":"user-data-do-not-modify"}\n'
   writeFileSync(file, original)
-  const source = `import { appendMetric } from ${JSON.stringify(new URL('../plugins/dsh-nday-hunter/lib/metrics.js', import.meta.url).href)};
-    appendMetric({kind:'test-isolation-probe'}); console.log(JSON.stringify({home:process.env.DSH_HOME}));`
+  const source = `import ${JSON.stringify(new URL('./test-home-isolation.mjs', import.meta.url).href)};
+    import { join } from 'node:path';
+    import { openStore } from ${JSON.stringify(new URL('../plugins/dsh-redteam-results/lib/store.js', import.meta.url).href)};
+    const store = openStore(join(process.env.DSH_HOME, 'redteam-results', 'results.db'));
+    store.close(); console.log(JSON.stringify({home:process.env.DSH_HOME}));`
   const result = spawnSync(process.execPath, ['--import', new URL('./test-stub-register.mjs', import.meta.url).href, '--input-type=module', '-e', source], {
     encoding: 'utf8', env: { ...process.env, DSH_HOME: live, SAKER_TEST_HOME_PROCESS: '' },
   })

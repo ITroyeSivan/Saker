@@ -14,23 +14,20 @@ const events = [
   { type: 'user/message', data: { role: 'user', source: { kind: 'runtime-context', sections: [
     { name: 'sandbox:policy', text: 'Current DSH file policy: danger-full-access.' },
     { name: 'saker-pentest-task-state', text: 'Saker task state\n目标 https://app.example.test' },
-    { name: 'knowledge-hub', text: '<dsh-knowledge-hub>知识库：3 篇</dsh-knowledge-hub>' },
-    { name: 'knowledge-hub-auto', text: 'Saker knowledge auto-provide\n[user] web/cve.md' },
   ] }, content: [{ type: 'text', text: 'runtime' }] } },
   { type: 'user/message', data: { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '请检查订单接口' }] } },
   { type: 'assistant/message', data: { role: 'assistant', content: [{ type: 'text', text: '好的。' }] } },
   { type: 'tool/result', data: { message: { role: 'tool', content: [{ type: 'text', text: 'GET /api/orders 200' }] } } },
-  { type: 'request/header', data: { header: { tools: [{ function: { name: 'redteam_context' } }, { function: { name: 'knowledge_search' } }] } } },
+  { type: 'request/header', data: { header: { tools: [{ function: { name: 'redteam_context' } }, { function: { name: 'asset_search' } }] } } },
 ];
 
-test('分项把事件拆成固定说明/工具定义/任务事实/知识/用户消息/历史', () => {
+test('分项把事件拆成固定说明/工具定义/任务事实/用户消息/历史', () => {
   const breakdown = breakdownFromEvents(events);
   const byName = Object.fromEntries(breakdown.items.map(item => [item.name, item]));
-  assert.equal(breakdown.items.length, 6, '六个分项都在');
+  assert.equal(breakdown.items.length, 5, '五个分项都在');
   assert(byName.fixed.bytes > 0, '固定说明含宿主 system 与沙箱等运行时 section');
   assert(byName.tools.bytes > 0, '工具定义来自 request/header');
   assert(byName.taskFacts.bytes > 0, '任务事实来自 saker-pentest-task-state');
-  assert.equal(byName.knowledge.count, 2, '知识 section 单独归到知识');
   assert(byName.user.bytes > 0, '用户消息单独归到用户消息');
   assert(byName.history.bytes > 0, '助手与工具结果归到历史');
   assert.equal(breakdown.total, breakdown.items.reduce((sum, item) => sum + item.bytes, 0), '合计等于分项之和');
@@ -41,7 +38,6 @@ test('分项在只有部分事件时也如实返回 0，不猜', () => {
   const breakdown = breakdownFromEvents([{ type: 'user/message', data: { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'hi' }] } }]);
   const byName = Object.fromEntries(breakdown.items.map(item => [item.name, item]));
   assert.equal(byName.tools.bytes, 0);
-  assert.equal(byName.knowledge.bytes, 0);
   assert.equal(byName.user.bytes, 2);
   assert.match(renderBreakdown(breakdown), /用户消息 2 字节/);
 });
@@ -78,7 +74,7 @@ test('RPC diagnostics.request 分项返回，并把已遮蔽的原始记录写�
     const results = await import('../plugins/dsh-redteam-results/lib/index.js');
     const view = await results.dispatch(ctx, store, 'diagnostics.request', { sessionId: 'diag-1' });
     assert.equal(view.ok, true);
-    assert.equal(view.items.length, 6);
+    assert.equal(view.items.length, 5);
     assert(view.total > 0);
     assert(view.items.find(item => item.name === 'tools').bytes > 0, '完整事件日志里能读到工具定义');
     assert(view.rawPath && fs.existsSync(view.rawPath), '私有目录里有原始记录');

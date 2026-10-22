@@ -25,6 +25,7 @@ export { hasBin, configuredToolPaths, configuredPathForTool, resolveToolBin, res
 import { matchesScope, upsertAssets } from "dsh-saker/asset-inventory";
 import { TOOL_DEFS, buildArgs, tiersLine } from "./registry.js";
 import { parseAssetPayload } from "./ingest.js";
+import { readOobConfig, runOobProbe } from "./oob-probe.js";
 
 function sessionIdOf(exec) {
 	return String(exec?.agent?.session?.id ?? exec?.agent?.id ?? "");
@@ -613,7 +614,7 @@ function apply(ctx, config = {}) {
 		"afrog_scan", "sqlmap_inject", "katana_crawl", "gau_urls",
 	];
 	const allToolNames = new Set([
-		"nuclei_scan", "httpx_probe", "ffuf_fuzz", "asset_ingest",
+		"nuclei_scan", "httpx_probe", "ffuf_fuzz", "asset_ingest", "oob_probe",
 		...Object.values(TOOL_DEFS).map((def) => def.name),
 	]);
 	if (config?.exposedTools !== undefined && !Array.isArray(config.exposedTools)) {
@@ -781,6 +782,25 @@ function apply(ctx, config = {}) {
 				inventoryFile: path.relative(workspace, written.file).replace(/\\/g, "/"),
 				text: `asset_ingest：${parsed.format} 解析 ${parsed.assets.length} 条，范围内 ${scoped.length} 条；账本新增 ${written.added}、合并 ${written.merged}，累计 ${written.inventory.assets.length} 条。`,
 			};
+		},
+	}));
+	registerScannerTool(defineTool({
+		name: "oob_probe",
+		description: "DNSLog 带外验证：new 分配可归因子域，batch 为多个资产分别分配，check 回查平台并归因。回连只证明目标触发外连，不等于权限或影响。",
+		parameters: {
+			action: { type: "string", enum: ["new", "batch", "check"], required: true, description: "new / batch / check" },
+			label: { type: "string", description: "new 或 batch 返回的 label" },
+			assets: { type: "string", description: "batch 使用的逗号或换行分隔资产" },
+			workspace: { type: "string", description: "batch 归因表和 check 读取归因表的任务工作区" },
+			waitMs: { type: "integer", description: "check 轮询时长，0-60000ms" },
+		},
+		output: {
+			schema: { type: "object", additionalProperties: true },
+			render: (_args, value) => [{ type: "text", text: value.ok ? value.text : `oob_probe 拒绝/失败：${value.error}` }],
+		},
+		async execute(args, exec) {
+			const workspace = String(args.workspace || "").trim() ? resolveWorkspaceArg(args.workspace, exec) : "";
+			return runOobProbe(args, { config: readOobConfig(ctx.settings), workspace });
 		},
 	}));
 	// 注册表工具统一注册：def 带全部工具面元数据（名称/摘要/参数 schema/阶梯/守卫），新增工具只改 registry.js

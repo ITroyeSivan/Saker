@@ -6,7 +6,6 @@ import { spawnSync } from 'node:child_process';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
 import { startTaskPolicy, readTaskPolicy, taskPolicyStatus, updateTaskProgress } from '../plugins/dsh-redteam-results/lib/task-policy.js';
-import { recordKnowledgeUsage, markKnowledgeUsageSent } from '../plugins/dsh-redteam-results/lib/knowledge-usage.js';
 import { modelBudgetOverview, modelRequestDigest, reserveModelCall, dispatchModelCall, settleModelCall,
   cancelModelReservation, recoverModelRuntime, normalizedModelUsage, registerModelAdmission, authorizeModelWire } from '../plugins/dsh-redteam-results/lib/model-budget.js';
 let failures=0;
@@ -244,37 +243,6 @@ await test('the actual Desktop RPC rejects a new model ceiling when host admissi
     const ctx={tools:{guard(){}},sessions:{get(){return {header:{agentPreset:'pentest'}};}},agents:{get(){return {status:'idle',followup(){dispatched++;}};}}};
     await assert.rejects(dispatch(ctx,store,'task.start',{sessionId:'main',policy:{mode:'regular',budget:{toolCalls:1,modelCalls:1}}}),/准入钩子/);
     assert.equal(dispatched,0);assert.equal(readTaskPolicy(store,'main'),null);
-  }finally{store.close();}
-});
-await test('知识只在请求正文含 ref 时绑定，预留/派发/真实 wire 分层', async () => {
-  const store=openStore(':memory:');
-  try{
-    start(store,{modelCalls:5});
-    recordKnowledgeUsage(store,'main',{trigger:'manual',query:'fixture',reason:'fixture',contentBytes:10,deliveryId:'kh-test'});
-    const before=store.db.prepare('SELECT record FROM knowledge_usage WHERE session_id=?').all('main').map(row=>JSON.parse(row.record));
-    assert.equal(before[0].requestId,'','提供时还没有请求 ID');assert.equal(before[0].state,'prepared');
-    const unmarked=reserveModelCall(store,'main',options,{runtimeId:'fixture-runtime'});
-    assert.equal(unmarked.ok,true,'不含 ref 的请求仍可正常预留');
-    let after=store.db.prepare('SELECT record FROM knowledge_usage WHERE session_id=?').all('main').map(row=>JSON.parse(row.record));
-    assert.equal(after[0].requestId,'','请求正文不含 ref 时不能绑定知识记录');
-    cancelModelReservation(store,unmarked.id);
-    const marked={...options,messages:[...options.messages,{role:'user',content:[{type:'text',text:'ref=kh-test'}]}]};
-    const admitted=reserveModelCall(store,'main',marked,{runtimeId:'fixture-runtime'});
-    assert.equal(admitted.ok,true,'预留成功');
-    after=store.db.prepare('SELECT record FROM knowledge_usage WHERE session_id=?').all('main').map(row=>JSON.parse(row.record));
-    assert.equal(after[0].requestId,admitted.id,'回填到本次预留 ID');
-    assert.equal(after[0].state,'reserved','预留不等于已发送');
-    assert.ok(after[0].requestBoundAt,'带回填时间');
-    assert.equal(dispatchModelCall(store,admitted.id),true);
-    after=store.db.prepare('SELECT record FROM knowledge_usage WHERE session_id=?').all('main').map(row=>JSON.parse(row.record));
-    assert.equal(after[0].state,'dispatched');assert.ok(after[0].dispatchedAt);
-    const wire=authorizeModelWire(store,admitted.id,{model:'exact-fixture',bytes:Buffer.from('x'),protocol:'fixture',maximumOutput:10});
-    assert.equal(wire.ok,true,'真实 wire 授权成功');
-    after=store.db.prepare('SELECT record FROM knowledge_usage WHERE session_id=?').all('main').map(row=>JSON.parse(row.record));
-    assert.equal(after[0].state,'dispatched','授权发送本身不等于已经送达');
-    markKnowledgeUsageSent(store,admitted.id,Date.now());
-    after=store.db.prepare('SELECT record FROM knowledge_usage WHERE session_id=?').all('main').map(row=>JSON.parse(row.record));
-    assert.equal(after[0].state,'sent');assert.ok(after[0].sentAt);
   }finally{store.close();}
 });
 process.exitCode=failures?1:0;

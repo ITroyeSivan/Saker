@@ -20,12 +20,12 @@ Saker是官方dsh Desktop上的模式包与功能插件。模式包规定如何�
 | 模式与工作说明 | preset/pentest、lib/preset-visibility.mjs | 一个专业入口、三个子模式，保留旧会话 |
 | 任务与站点协作 | dsh-redteam-results/task-policy、site-workers | 范围、共享预算、停止与续接、必要性判断、数量和真实释放 |
 | 业务资料与事实 | business-materials、task-context | 已有资产、角色、对象、报文、文件摘要和相关片段 |
-| 公开漏洞与方法 | dsh-nday-hunter、dsh-method-stack | 条件相关的情报检索、来源维护、按需读取方法 |
-| 工具声明 | dsh-tool-scope | 当前代理实际工具清单，按需加载资产、Nday和扫描包 |
+| 公开信息 | 联网、文件读取、项目文档 | 按任务直接读取 CVE、公告、仓库、EXP 和用户材料，不维护公共替代库 |
+| 工具声明 | dsh-tool-scope | 当前代理实际工具清单，按需加载资产发现、主动扫描和依赖任务包 |
 | 执行与效果 | comparison-jobs、execution-receipts、effect-verifications、impact-reviews | 对照回执、重复缓存、自动效果检查和明确标识的人工复核 |
 | 成果与桌面操作 | dsh-redteam-results/client、delivery | 本轮状态、证据详情、停止恢复和可交付成果 |
 
-材料摘要、模型解释、实际请求回执和影响证明分别保存。声明执行过不等于产生影响；影响复核随请求、方法和范围变化失效。共享知识不能替代另一站的身份和目标证据。
+材料摘要、模型解释、实际请求回执和影响证明分别保存。声明执行过不等于产生影响；影响复核随请求、方法和范围变化失效。任何公开资料都不能替代另一站的身份和目标证据。
 
 ## 子代理的生命周期
 

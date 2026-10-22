@@ -69,17 +69,18 @@ try {
     const state=await results.dispatch(ctx,store,'chat.settings',{sessionId:'poll-readonly'});
     assert.equal(state.choice,null);assert.equal(state.configured,false);assert.equal(readTaskPolicy(store,'poll-readonly'),null);
     assert.equal(store.db.prepare('SELECT count(*) AS n FROM task_flow_choice WHERE session_id=?').get('poll-readonly').n,0);
-    assert.equal(ui.find(n=>n.props['aria-label']==='任务方向').props.value,'regular');
+    assert.equal(ui.find(n=>n.props['aria-label']==='测试场景').props.value,'pentest');
+    assert.equal(ui.find(n=>n.props['aria-label']==='测试方向').props.value,'regular');
   });
   await test('Desktop interaction control saves preferences, confirms a real checkpoint and preserves policy on failed delivery',async()=>{
     const id='interaction-ui';
     const control=harness('InteractionControl',id);
     const select=control.find(n=>n.type==='select'&&n.props['aria-label']==='什么时候问我');
     assert.equal(select.children.flat().length,3);
-    await results.dispatch(ctx,store,'task.choose',{sessionId:id,mode:'regular',workflow:'regular-to-nday',workers:0,interaction:'confirm-step'});
+    await results.dispatch(ctx,store,'task.choose',{sessionId:id,mode:'regular',workers:0,interaction:'confirm-step'});
     await results.dispatch(ctx,store,'task.start',{sessionId:id,policy:{mode:'regular',budget:{toolCalls:5,minutes:10}}});
     const before=readTaskPolicy(store,id);
-    updateTaskProgress(store,id,{regularComplete:true,note:'Offline stage finished'});
+    checkpointTask(store,id,'Offline stage finished');
     const ui=harness('TaskPanel',id);await ui.button('刷新状态').props.onClick();assert(ui.button('确认并继续'));
     const broken={...ctx,agents:{get:()=>({status:'idle',followup(){throw Error('fixture enqueue failed')}})}};
     await results.dispatch(ctx,store,'task.interaction',{sessionId:id,interaction:'auto'});
@@ -327,14 +328,19 @@ try {
     assert.equal(taskCostOverview(realShape,store,'records').totalTokens,10,'repeated reads cannot charge replayed events again');
     assert.equal(taskCostOverview(realShape,store,'missing').unavailableSessions,1);
   });
-  await test('chat workflow selector persists choice without starting budgets or exposing task details', async () => {
+  await test('chat scenario and direction selectors persist choices without starting budgets or exposing task details', async () => {
     const ui = harness('ChatSetup', 'hero');ui.render();ui.state[0]=await results.dispatch(ctx,store,'chat.settings',{sessionId:'hero'});
-    assert(ui.find(n=>n.props['aria-label']==='任务方向'));
+    assert(ui.find(n=>n.props['aria-label']==='测试场景'));
+    assert(ui.find(n=>n.props['aria-label']==='测试方向'));
     assert(!ui.button('开始测试')); assert(!ui.button('刷新状态'));
-    await ui.find(n=>n.props['aria-label']==='任务方向').props.onChange({target:{value:'regular'}});
+    await ui.find(n=>n.props['aria-label']==='测试方向').props.onChange({target:{value:'regular'}});
     assert.equal(readTaskPolicy(store, 'hero'), null);
     assert.equal((await results.dispatch(ctx, store, 'task.status', { sessionId: 'hero' })).choice, 'regular');
-    assert.equal(ui.find(n=>n.props['aria-label']==='任务方向').props.value, 'regular');
+    assert.equal(ui.find(n=>n.props['aria-label']==='测试方向').props.value, 'regular');
+    await ui.find(n=>n.props['aria-label']==='测试场景').props.onChange({target:{value:'project'}});
+    assert.equal((await results.dispatch(ctx,store,'task.status',{sessionId:'hero'})).options.scenario,'project');
+    await ui.find(n=>n.props['aria-label']==='测试场景').props.onChange({target:{value:'pentest'}});
+    await results.dispatch(ctx,store,'task.choose',{sessionId:'hero',mode:'regular',workers:2,interaction:'auto'});
     assert.match(sections[0].text({ agent: { session: sessionMap.get('hero') } }), /用户选择了\/pentest-regular/);
     await assert.rejects(results.dispatch(ctx, store, 'task.start', { sessionId: 'hero', policy: { mode: 'nday', budget: { toolCalls: 20 } } }), /differs/);
     await results.dispatch(ctx, store, 'task.start', { sessionId: 'hero', policy: { mode: 'regular', budget: { toolCalls: 20 } } });
@@ -412,8 +418,9 @@ try {
     await results.dispatch(ctx,store,'task.choose',{sessionId:id,mode:'regular',workers:1,interaction:'auto'});
     await results.dispatch(ctx,store,'task.start',{sessionId:id,policy:{mode:'regular',question:'Offline chat fixture',budget:{toolCalls:8,minutes:10}}});
     const before=readTaskPolicy(store,id),ui=harness('ChatSetup',id);ui.render();ui.state[0]=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
-    const dirChip=ui.find(n=>n.props['aria-label']==='任务方向');assert(dirChip,'missing 任务方向 chip');
-    assert(dirChip.props.disabled);
+    const scenarioChip=ui.find(n=>n.props['aria-label']==='测试场景');assert(scenarioChip,'missing 测试场景 chip');
+    const dirChip=ui.find(n=>n.props['aria-label']==='测试方向');assert(dirChip,'missing 测试方向 chip');
+    assert(scenarioChip.props.disabled&&dirChip.props.disabled);
     const coopChip=ui.find(n=>n.props['aria-label']==='聊天协作方式');assert(coopChip,'missing 聊天协作方式 chip');
     await coopChip.props.onChange({target:{value:'confirm-step'}});
     assert.equal(readTaskPolicy(store,id).interaction,'confirm-step');
@@ -649,7 +656,7 @@ try {
     await save.props.onClick();
     assert.equal(chosenTaskOptions(store,id).reporting,'step','save must write the draft');
   });
-  await test('动作限制：允许访问网站与不改动网站数据进任务策略，全不选联动关闭网站访问', async () => {
+  await test('动作限制：允许访问网站与不改动网站数据进任务策略，固定测试内容清单已移除', async () => {
     const id='action-limits-ui';sessionMap.set(id,{id,header:{agentPreset:'pentest'}});
     await results.dispatch(ctx,store,'task.choose',{sessionId:id,mode:'regular',workers:1,interaction:'auto',reporting:'end'});
     await results.dispatch(ctx,store,'task.start',{sessionId:id,policy:{mode:'regular',question:'检查登录后的功能',target:'https://fixture.test',budget:{toolCalls:8}}});
@@ -688,37 +695,8 @@ try {
     const paced=readTaskPolicy(store,id);
     assert.equal(paced.requestRatePerMinute,120,'速率要进任务策略');
     assert.equal(paced.requestConcurrency,2,'并发要进任务策略');
-    // 全不选：选项列表为空必须同时关闭网站访问（第 4.3 节）
-    await results.dispatch(ctx,store,'test.content',{sessionId:id,action:'save',active:[]});
-    assert.equal(readTaskPolicy(store,id).allowTargetNetwork,false,'全不选联动关闭网站访问');
-    // 重新选项目不暗中恢复网站访问，要由用户明确打开
-    await results.dispatch(ctx,store,'test.content',{sessionId:id,action:'save',active:['fingerprint']});
-    assert.equal(readTaskPolicy(store,id).allowTargetNetwork,false,'重新选项目不暗中恢复网站访问');
-    // v6 第 4.3 节：界面要明说「访问网站仍已关闭」，不能只靠复选框状态暗示。
-    const notice=harness('ChatSetup',id);notice.render();notice.state[0]=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
-    await notice.button('测试设置').props.onClick();
-    await notice.mount();
-    for(let i=0;i<8;i++)await new Promise(resolve=>setImmediate(resolve));
-    assert(JSON.stringify(notice.render()).includes('访问网站仍已关闭'),'重新选项目后要显示「访问网站仍已关闭」');
-    // 真机 bug（2026-10-17）：界面是带着服务端返回的 policyRev 再点「全选」的，而全不选会顺带写一次
-    // 动作限制（policyRev +1）。接口若返回写之前那份选择，下一次保存就被乐观并发挡下 ——
-    // 真机报「任务状态已变化，请刷新后重试」，且不重开面板就一直失败。
-    const cid='content-rev';sessionMap.set(cid,{id:cid,header:{agentPreset:'pentest'}});
-    await results.dispatch(ctx,store,'task.choose',{sessionId:cid,mode:'regular',workers:1,interaction:'auto'});
-    await results.dispatch(ctx,store,'task.start',{sessionId:cid,policy:{mode:'regular',question:'content rev fixture',budget:{toolCalls:8}}});
-    const firstRead=await results.dispatch(ctx,store,'test.content',{sessionId:cid});
-    const emptied=await results.dispatch(ctx,store,'test.content',{sessionId:cid,action:'save',active:[],
-      mode:firstRead.selection.mode,rev:firstRead.selection.rev,policyRev:firstRead.selection.policyRev});
-    assert.equal(emptied.selection.policyRev,readTaskPolicy(store,cid).policyRev,'全不选返回的 policyRev 必须是写完之后那一份');
-    const restored=await results.dispatch(ctx,store,'test.content',{sessionId:cid,action:'save',active:[...firstRead.keys],
-      mode:emptied.selection.mode,rev:emptied.selection.rev,policyRev:emptied.selection.policyRev});
-    assert.equal(restored.ok,true,'用返回的 revision 重新全选不能被乐观并发挡下');
-    assert.equal(restored.selection.active.length,firstRead.keys.length,'重新全选要真的回到 17 项');
-    // 尚未开始的任务：全不选也要能保存（写进任务选择，不因缺少策略而报错）
-    const fresh='action-limits-fresh';sessionMap.set(fresh,{id:fresh,header:{agentPreset:'pentest'}});
-    const freshSaved=await results.dispatch(ctx,store,'test.content',{sessionId:fresh,action:'save',active:[]});
-    assert.equal(freshSaved.ok,true,'未开始时全不选要能保存');
-    assert.equal(chosenTaskOptions(store,fresh).allowTargetNetwork,false,'未开始时全不选写进任务选择');
+    const removed=await results.dispatch(ctx,store,'test.content',{sessionId:id});
+    assert.equal(removed.ok,false);assert.equal(removed.code,'feature_removed','固定测试内容清单必须明确退出');
     // 未开始的任务：抽屉保存走 task.choose，动作限制必须一起带上
     const chooser='action-limits-choose';sessionMap.set(chooser,{id:chooser,header:{agentPreset:'pentest'}});
     await results.dispatch(ctx,store,'task.choose',{sessionId:chooser,mode:'regular',workers:1,interaction:'auto',reporting:'end',allowTargetNetwork:false,readOnly:true});
@@ -914,8 +892,7 @@ try {
       {type:'system/message',data:{role:'system',content:[{type:'text',text:'宿主原有要求与 Saker 简短能力说明'}]}},
       {type:'user/message',data:{role:'user',source:{kind:'runtime-context',sections:[
         {name:'sandbox:policy',text:'Current DSH file policy: danger-full-access.'},
-        {name:'saker-pentest-task-state',text:'Saker task state\n目标 https://app.example.test'},
-        {name:'knowledge-hub',text:'<dsh-knowledge-hub>知识库：3 篇</dsh-knowledge-hub>'}]},
+        {name:'saker-pentest-task-state',text:'Saker task state\n目标 https://app.example.test'}]},
         content:[{type:'text',text:'runtime context'}]}},
       {type:'user/message',data:{role:'user',source:{kind:'user'},content:[{type:'text',text:'请检查订单接口'}]}},
       {type:'assistant/message',data:{role:'assistant',content:[{type:'text',text:'好的，先看现有请求。'}]}},
@@ -940,9 +917,9 @@ try {
     const detail=JSON.stringify(ui.render());
     assert(detail.includes('缓存读'),'expands cache detail');
     assert(detail.includes('主任务'),'expands per-session detail');
-    // 本次模型输入分项（v6 第 6.3 节）：固定说明/工具定义/任务事实/知识/用户消息/历史分别列出。
+    // 本次模型输入分项：固定说明/工具定义/任务事实/用户消息/历史分别列出。
     assert(ui.calls.some(call=>call[0]==='diagnostics.request'),'明细按需读取 diagnostics.request');
-    for (const label of ['本次模型输入','固定说明','工具定义','任务事实','知识','用户消息','历史']) assert(detail.includes(label),'shows '+label);
+    for (const label of ['本次模型输入','固定说明','工具定义','任务事实','用户消息','历史']) assert(detail.includes(label),'shows '+label);
     // v6 第 6.2 节：分项是 UTF-8 字节，不是 token；没有计量器时这一点必须写在界面上。
     assert(detail.includes('字节控制')||detail.includes('单位是 UTF-8 字节'),'states the byte-control unit');
     assert(!detail.includes('¥')&&!/金额[^未]/.test(detail),'never invents a monetary amount');
@@ -970,54 +947,7 @@ try {
     await results.dispatch(ctx,store,'task.explain',{sessionId:id,explain:false});
     assert.equal(readTaskPolicy(store,id).explain,false);
   });
-  await test('the knowledge entry exposes one boolean switch with fixed wording and no full-library load', async () => {
-    const id='knowledge-ui';sessionMap.set(id,{id,header:{agentPreset:'pentest'}});
-    const ui=harness('KnowledgeEntry',id);await ui.mount();await new Promise(setImmediate);
-    assert(ui.calls.some(call=>call[0]==='knowledge.status'),'the entry reads knowledge.status');
-    const trigger=()=>ui.find(n=>n.type==='button'&&n.children.some(c=>String(c).startsWith('知识库：')));
-    assert(String(trigger().children.join('')).includes('开启'),'default is on');
-    trigger().props.onClick();
-    const text=JSON.stringify(ui.render());
-    assert(text.includes('本任务使用知识库'),'the single switch is shown');
-    assert(text.includes('只读取与当前问题相关的内容，不加载整库'),'the fixed purpose line is shown');
-    const box=ui.find(n=>n.props['aria-label']==='本任务使用知识库');
-    await box.props.onChange({target:{checked:false}});
-    assert(ui.calls.some(call=>call[0]==='knowledge.toggle'&&call[1].enabled===false),'toggling saves off');
-    assert(String(trigger().children.join('')).includes('关闭'),'the trigger reflects the off state');
-    const usageBtn=ui.find(n=>n.type==='button'&&n.children.includes('查看已用条目'));assert(usageBtn,'已用条目入口存在');
-    assert(ui.find(n=>n.type==='button'&&n.children.includes('管理知识库')),'管理知识库入口存在（打开宿主设置页，不复制一份）');
-    // 窄窗不能越出视口：浮层用视口锚定（fixed + 夹取宽度），不再靠 right:0 悬挂在触发器上。
-    await ui.mount(); // 重新跑一次 effects：打开状态下的定位效果才会执行
-    const pop=ui.find(n=>String(n.props.className||'').includes('dsh-knowledge-pop'));
-    assert(pop,'knowledge overlay renders');
-    assert.equal(pop.props.style && pop.props.style.position,'fixed','overlay is viewport-anchored');
-    assert.equal(pop.props.style.left,'16px','overlay is clamped inside the viewport');
-    assert.equal(pop.props.style.right,'auto','overlay does not hang off the trigger');
-    await usageBtn.props.onClick();
-    assert(ui.calls.some(call=>call[0]==='knowledge.usage'),'已用条目通过 knowledge.usage 读取');
-    assert(JSON.stringify(ui.render()).includes('还没有把知识内容交给模型'),'空态说明不把命中当使用');
-  });
-  await test('已用条目列出实际送入的片段、来源与用量，并按条数显示链接', async () => {
-    const id='knowledge-used';sessionMap.set(id,{id,header:{agentPreset:'pentest'}});
-    const { recordKnowledgeUsage } = await import('../plugins/dsh-redteam-results/lib/knowledge-usage.js');
-    recordKnowledgeUsage(store,id,{trigger:'auto-provide',query:'CVE-2026-31337',docPath:'web/cve.md',chunkId:'30000',
-      title:'公告：CVE-2026-31337',reason:'自动补充 检查版本',contentBytes:263,source:'knowledge-hub',
-      state:'sent',requestId:'ui-sent-request',deliveryId:'kh-ui-sent',
-      excerpt:'CVE-2026-31337 影响示例网关组件 3.2.1，未授权接口可读取配置。'});
-    const ui=harness('KnowledgeEntry',id);await ui.mount();await new Promise(setImmediate);
-    const trigger=ui.find(n=>n.type==='button'&&n.children.some(c=>String(c).startsWith('知识库：')));trigger.props.onClick();
-    // 只有条目确实送入模型后才显示条数链接（v6 第 6.3 节）。
-    const usageBtn=ui.find(n=>n.type==='button'&&String(n.children.join('')).includes('本次已发送 1 条漏洞资料'));
-    assert(usageBtn,'按已用条数显示链接');
-    await usageBtn.props.onClick();
-    const html=JSON.stringify(ui.render());
-    assert(html.includes('公告：CVE-2026-31337'),'列表显示标题');
-    assert(html.includes('knowledge-hub'),'列表显示来源');
-    assert(html.includes('263 字节'),'列表显示用量');
-    assert(html.includes('未授权接口可读取配置'),'列表显示实际送入的片段');
-    assert(html.includes('dsh-knowledge-usage-excerpt'),'片段用独立块渲染');
-  });
-  await test('四个入口始终最多一个面板：设置与提示词互斥', async () => {
+  await test('三个入口始终最多一个面板：设置、提示词和资料互斥', async () => {
     // 资料事件按 ID 只唤醒依赖它的工作（v6 第 8.3 节）：同一材料 ID 再出现时，只叫声明过它的子代理。
     const wakeId='material-wake';sessionMap.set(wakeId,{id:wakeId,header:{agentPreset:'pentest'}});
     sessionMap.set('wake-child-a',{id:'wake-child-a',header:{agentPreset:'pentest'}});
@@ -1081,8 +1011,8 @@ try {
     const settingsBtn2=ui.find(n=>n.type==='button'&&n.children.includes('测试设置'));
     settingsBtn2.props.onClick();await ui.mount();await new Promise(setImmediate);
     assert(JSON.stringify(ui.render()).includes('本次测试设置'),'设置面板重新打开');
-    // 长内容也不能把底部操作顶出视口（v6 第 10.5 节 UI12）：四个面板都有高度上限。
-    for (const cls of ['dsh-chat-more','dsh-chat-prompt','dsh-materials-import','dsh-knowledge-pop']) {
+    // 长内容也不能把底部操作顶出视口：三个面板都有高度上限。
+    for (const cls of ['dsh-chat-more','dsh-chat-prompt','dsh-materials-import']) {
       const re = new RegExp(cls.replace('-','\\-') + '\\{[^}]*max-height:');
       assert(re.test(source), cls + ' 有 max-height');
     }
@@ -1099,18 +1029,6 @@ try {
     assert(source.includes("'dsh-execution-scope'")&&source.includes('工具内部发了多少请求，可能无法统计'),'请求记录的范围如实列出');
     // 限制项留空要显示「未设置」，不是含糊的「沿用」（v6 第 5.5 节）。
     assert(source.includes("placeholder:'未设置'")&&source.includes('留空表示未设置，实际沿用宿主当前限制'),'限制项留空显示未设置');
-    // 知识适配器能力如实说明（v6 第 5.6 节）：支持自动匹配时不显示降级文案，缺能力时有固定说明。
-    const capabilityId='knowledge-capability';sessionMap.set(capabilityId,{id:capabilityId,header:{agentPreset:'pentest'}});
-    const capabilityUi=harness('KnowledgeEntry',capabilityId);await capabilityUi.mount();await new Promise(setImmediate);
-    assert(capabilityUi.calls.some(([endpoint])=>endpoint==='knowledge.status'),
-      '知识入口读取开关与能力: '+JSON.stringify(capabilityUi.calls.map(call=>call[0])));
-    const autoMatch=capabilityUi.state[0].autoMatch;
-    assert.equal(typeof autoMatch,'boolean','用量接口带回能力标志');
-    const capabilityTrigger=capabilityUi.find(n=>n.type==='button'&&(n.children||[]).some(c=>typeof c==='string'&&c.includes('知识库：')));
-    assert(capabilityTrigger,'知识库入口存在');
-    capabilityTrigger.props.onClick();await capabilityUi.mount();await new Promise(setImmediate);
-    assert.equal(JSON.stringify(capabilityUi.render()).includes('本版本由 AI 主动查询'),autoMatch===false,'降级说明与能力标志一致');
-    assert(source.includes('本版本由 AI 主动查询知识；不会自动补充相关条目。'),'缺能力时有具体说明');
     // 设置变更摘要（v6 第 4.2 节）：改了范围/偏好后，任务事件里要能回看改了什么。
     const diffId='settings-diff';sessionMap.set(diffId,{id:diffId,header:{agentPreset:'pentest'}});
     await results.dispatch(ctx,store,'task.start',{sessionId:diffId,policy:{mode:'regular',interaction:'auto',budget:{toolCalls:5}}});
@@ -1122,12 +1040,12 @@ try {
     // 资料详情：关联问题 + 从本任务移除（v6 第 5.4 节「删除入口默认从本任务移除」）。
     assert(source.includes('关联问题 ')&&source.includes('从本任务移除')&&source.includes("api('materials.remove'"),'资料详情有移除入口与关联问题');
   });
-  await test('知识库与添加测试资料面板支持 Esc 关闭并把焦点还给入口按钮', async () => {
+  await test('添加测试资料面板支持 Esc 关闭并把焦点还给入口按钮', async () => {
     const listeners={};
     const fakeDoc={addEventListener:(t,fn)=>{(listeners[t]=listeners[t]||[]).push(fn);},removeEventListener:(t,fn)=>{listeners[t]=(listeners[t]||[]).filter(f=>f!==fn);}};
     const focused=[];
     const fire=key=>{for(const fn of listeners.keydown||[])fn({key,stopPropagation(){}});};
-    for(const [component,openText,panelClass] of [['KnowledgeEntry','知识库：','dsh-knowledge-pop'],['MaterialsEntry','添加测试资料','dsh-materials-import']]){
+    for(const [component,openText,panelClass] of [['MaterialsEntry','添加测试资料','dsh-materials-import']]){
       listeners.keydown=[];
       const id='esc-'+panelClass;sessionMap.set(id,{id,header:{agentPreset:'pentest'}});
       const ui=harness(component,id,{},{document:fakeDoc});
@@ -1306,63 +1224,13 @@ try {
     const list=listDrafts(store,id);
     assert(list.every(row=>typeof row.updatedAt==='string'&&row.updatedAt),'草稿列表要带更新时间');
   });
-  await test('the knowledge entry waits for a ready session id and never leaves a stale session error', async () => {
-    // 宿主的 dock 会先挂载插件、后拿到 sessionId；早发 RPC 会留下一句
-    // “请选择当前可用的渗透会话”，用户一打开浮层就看到它。这里守住这个回归。
-    const id = 'knowledge-pending'; sessionMap.set(id, { id, header: { agentPreset: 'pentest' } });
-    const ui = harness('KnowledgeEntry', ''); await ui.mount(); await new Promise(setImmediate);
-    assert(!ui.calls.some(call => call[0] === 'knowledge.status'), 'the entry does not read knowledge.status before the session id is ready');
-    const trigger = () => ui.find(n => n.type === 'button' && n.children.some(c => String(c).startsWith('知识库：')));
-    assert(String(trigger().children.join('')).includes('…'), 'the trigger stays in the loading state, not an error state');
-    trigger().props.onClick();
-    assert(!JSON.stringify(ui.render()).includes('请选择当前可用的渗透会话'), 'opening the float shows no stale session error');
-    // sessionId 就绪后同一组件实例恢复读取，证明是“等待”而不是“永久禁用”。
-    const ready = harness('KnowledgeEntry', id); await ready.mount(); await new Promise(setImmediate);
-    assert(ready.calls.some(call => call[0] === 'knowledge.status'), 'a ready session id still loads knowledge.status');
-  });
-  await test('the knowledge entry retries a transient session-not-ready read instead of parking a stale error', async () => {
-    const id = 'knowledge-retry'; sessionMap.set(id, { id, header: { agentPreset: 'pentest' } });
-    let reads = 0;
-    const ui = harness('KnowledgeEntry', id, {}, {
-      api: async (endpoint) => {
-        if (endpoint !== 'knowledge.status') return { ok: true };
-        reads++;
-        // 首次读取模拟“会话还没注册好”，随后恢复——真实桌面就是这个时序。
-        return reads === 1 ? { ok: false, error: '请选择当前可用的渗透会话' } : { ok: true, knowledge: { sessionId: id, enabled: true, source: 'default' } };
-      },
-    });
-    await ui.mount(); await new Promise(setImmediate);
-    const trigger = () => ui.find(n => n.type === 'button' && n.children.some(c => String(c).startsWith('知识库：')));
-    assert(String(trigger().children.join('')).includes('…'), 'the trigger is still loading after the first failed read');
-    assert(!JSON.stringify(ui.render()).includes('请选择当前可用的渗透会话'), 'the transient failure is not surfaced as an error');
-    await ui.poll();
-    assert(reads >= 2, 'the entry retried the transient read');
-    assert(String(trigger().children.join('')).includes('开启'), 'after the retry the trigger shows the real on state');
-    assert(!JSON.stringify(ui.render()).includes('请选择当前可用的渗透会话'), 'no stale error is left in the float');
-  });
   await test('停止状态先显示正在停止，收到代理退出依据后才显示已停止', () => {
     const sandbox = {};
-    runInNewContext(source.slice(source.indexOf('function taskStatusLabel('), source.indexOf('function KnowledgeEntry(')) + ';this.label=taskStatusLabel;', sandbox);
+    runInNewContext(source.slice(source.indexOf('function taskStatusLabel('), source.indexOf('function ChatSetup(')) + ';this.label=taskStatusLabel;', sandbox);
     assert.equal(sandbox.label({ stopped: false }, {}), '本轮进行中');
     assert.equal(sandbox.label({ stopped: true, reason: 'plan_complete' }, {}), '本轮已完成');
     assert.equal(sandbox.label({ stopped: true, reason: 'cancelled', agentRunning: true }, { cancelled: true }), '正在停止…');
     assert.equal(sandbox.label({ stopped: true, reason: 'cancelled', agentRunning: false }, { cancelled: true }), '已停止');
-  });
-  await test('测试设置里能选 17 项测试内容，全不选后明确"不再访问网站"', async () => {
-    const id='content-ui';sessionMap.set(id,{id,header:{agentPreset:'pentest'}});
-    const list=await results.dispatch(ctx,store,'test.content',{sessionId:id});
-    assert.equal(list.ok,true); assert.equal(list.keys.length,17);
-    assert.equal(list.catalog.reduce((n,g)=>n+g.items.length,0),17);
-    assert.equal(list.selection.active.length,17,'default is all 17 selected');
-    const ui=harness('TestContentSection',id);await ui.mount();await new Promise(setImmediate);
-    assert(ui.calls.some(c=>c[0]==='test.content'),'the section reads test.content');
-    const labels=JSON.stringify(ui.render());
-    assert(labels.includes('网站与子域名')&&labels.includes('网页脚本（XSS）'),'all 17 items are listed with Chinese labels');
-    ui.button('全不选').props.onClick();await new Promise(setImmediate);
-    assert(JSON.stringify(ui.render()).includes('只分析已添加内容，不再访问网站'),'empty selection states no site access');
-    const saved=await results.dispatch(ctx,store,'test.content',{sessionId:id});
-    assert.equal(saved.selection.active.length,0,'the empty selection persists in the task');
-    await assert.rejects(results.dispatch(ctx,store,'test.content',{sessionId:'nope'}),/渗透会话/);
   });
   await test('旧任务策略缺少 flow 时工具行仍能渲染（不得整行崩溃）', async () => {
     const id='legacy-policy';sessionMap.set(id,{id,header:{agentPreset:'pentest'}});
@@ -1372,7 +1240,8 @@ try {
         budget:{toolCalls:5}, used:{toolCalls:1}, startedAt:Date.now(), planComplete:false }), new Date().toISOString());
     const ui=harness('ChatSetup',id);ui.render();ui.state[0]=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
     assert(ui.find(n=>n.type==='section'&&n.props&&n.props['aria-label']==='聊天任务设置'),'old policies must not blank the whole tool row');
-    assert(ui.find(n=>n.props&&n.props['aria-label']==='任务方向'),'the direction control still renders');
+    assert(ui.find(n=>n.props&&n.props['aria-label']==='测试场景'),'the scenario control still renders');
+    assert(ui.find(n=>n.props&&n.props['aria-label']==='测试方向'),'the direction control still renders');
   });
   await test('添加测试资料把粘贴内容保存为原文引用，并提示格式与字节数', async () => {
     const id='materials-entry';sessionMap.set(id,{id,header:{agentPreset:'pentest'}});
@@ -1444,23 +1313,6 @@ try {
     assert(source.includes("'继续读取（已读 '"), '续读按钮写明已读进度');
     assert(!source.includes('已截断，按需分段查看'), '旧文案（只提示截断、无法续读）已退出');
   });
-  await test('存为默认偏好也保存测试内容偏好，并作为新会话初值', async () => {
-    const id='content-defaults';sessionMap.set(id,{id,header:{agentPreset:'pentest'}});
-    await results.dispatch(ctx,store,'chat.defaults',{sessionId:id,interaction:'auto',reporting:'end',workers:1,explain:false,content:['sqli','xss']});
-    const settings=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
-    assert.deepEqual(settings.defaults.content,['sqli','xss'],'测试内容偏好要存进默认偏好');
-    const fresh='content-defaults-fresh';sessionMap.set(fresh,{id:fresh,header:{agentPreset:'pentest'}});
-    const content=await results.dispatch(ctx,store,'test.content',{sessionId:fresh});
-    assert.deepEqual(content.selection.active,['sqli','xss'],'新会话的测试内容初值来自默认偏好');
-    // v6 第 5.5 节：控件名是「存为默认偏好」，提示要说全它保存哪几项。
-    const ui=harness('ChatSetup',id);ui.render();ui.state[0]=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
-    ui.button('测试设置').props.onClick();
-    assert(ui.button('存为默认偏好'),'控件名必须是方案写的「存为默认偏好」');
-    const rendered=JSON.stringify(ui.render());
-    assert(rendered.includes('解释原理'),'提示要说清也会保存解释原理偏好');
-    assert(rendered.includes('测试内容'),'提示要说清也会保存测试内容偏好');
-    store.db.prepare('DELETE FROM chat_defaults').run();
-  });
   await test('给助手选择模型：可用模型来自宿主授权，选择进入任务策略', async () => {
     const id='worker-model-ui';sessionMap.set(id,{id,header:{agentPreset:'pentest'}});
     const withHost={...ctx,subagentModelSelection:{current:()=>({enabled:true,allowedModels:[{provider:'p1',model:'m1'}]})}};
@@ -1489,24 +1341,6 @@ try {
   });
   // v6 第 4.3 节：默认全选**不把完整清单**塞进提示；用户筛过才给一行已选重点，
   // 默认排除项（CORS、开放重定向）单独一行。
-  await test('narrowed test content reaches the prompt as one line while the default all-selection does not',async()=>{
-    const id='content-line';sessionMap.set(id,{id,header:{agentPreset:'pentest'}});
-    const section=sections.find(item=>item.name==='saker-pentest-task');
-    assert(section,'任务提示 section 必须在位');
-    const prompt=()=>section.text({agent:{session:sessionMap.get(id)}});
-    await results.dispatch(ctx,store,'task.choose',{sessionId:id,mode:'regular',workers:0,interaction:'auto'});
-    await results.dispatch(ctx,store,'task.start',{sessionId:id,policy:{mode:'regular',budget:{toolCalls:5}}});
-    const all=prompt();
-    assert(!all.includes('已选重点：'),'默认全选不得把完整清单塞进提示');
-    assert(all.includes('默认不检查：CORS、开放重定向'),'默认排除项要有一行：'+all.slice(-200));
-    const current=await results.dispatch(ctx,store,'test.content',{sessionId:id});
-    await results.dispatch(ctx,store,'test.content',{sessionId:id,action:'save',active:['sqli','xss'],rev:current.selection.rev,policyRev:current.selection.policyRev});
-    const narrowed=prompt();
-    assert(narrowed.includes('已选重点：'),'筛过之后要有一行已选重点：'+narrowed.slice(-260));
-    assert(narrowed.includes('数据库查询（SQL 注入）')&&narrowed.includes('网页脚本（XSS）'),'重点行要带显示名：'+narrowed.slice(-260));
-    assert(narrowed.includes('未选内容不做'),'要写明未选内容不做');
-    assert(!narrowed.includes('网站与子域名'),'未选内容不得出现在提示里');
-  });
   await test('登录账号：列表只给名称与状态，秘密另存且不外泄', async () => {
     const id='accounts-ui';sessionMap.set(id,{id,header:{agentPreset:'pentest'}});
     assert.deepEqual((await results.dispatch(ctx,store,'account.list',{sessionId:id})).accounts,[]);

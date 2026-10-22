@@ -137,16 +137,11 @@ export function createSiteWorkers(ctx, getStore) {
       if (inventory.count >= workerLimit) throw new Error('worker limit reached, including idle and failed-cleanup workers');
       const remaining = state.policy.budget.toolCalls - state.policy.used.toolCalls;
       const available = agent.ctx.tools.schemas(agent).map(row => row.name);
-      const needsNday = focus === 'nday' || state.policy.flow?.kind === 'regular-to-nday' || state.policy.flow?.kind === 'regular-with-nday';
-      if (needsNday && available.includes('tool_pack') && ['nday_catalog', 'nday_match', 'nday_policy_get'].some(name => !available.includes(name)))
-        throw new Error('首次分派前请 tool_pack load nday，再重试；子会话会保存原工具清单，事后加载无法补齐');
       const nested = name => /^(?:subagent(?:_|$)|send_message$|interrupt_agent$|list_agents$|list_subagent_models$|workflow$)/.test(name);
       const deny = available.filter(nested);
       if (input.tools !== undefined && (!Array.isArray(input.tools) || input.tools.length > 12
         || input.tools.some(name => typeof name !== 'string' || !available.includes(name) || nested(name)))) throw new Error('select at most 12 available non-delegating tools');
-      // Native cold resume restores the original tool filter. Approved Nday
-      // handoff must retain its local catalog tools from the initial admission.
-      const needed = name => /^(?:run_code|read|glob|grep|skill|redteam_(?:task|context|research|execution|finding_register|finding_update|checks)|knowledge_(?:search|read))$/.test(name) || (needsNday && /^(?:tool_pack|nday_catalog|nday_match|nday_policy_get)$/.test(name));
+      const needed = name => /^(?:run_code|read|glob|grep|skill|redteam_(?:task|context|research|execution|finding_register|finding_update|checks))$/.test(name);
       const allow = [...new Set([...available.filter(needed), ...(input.tools || [])])];
       // 工作键/租约（第 8.3 节）：同一目标+问题+资料版本跨进程唯一；接手提高 generation，
       // 旧工作者的迟到报告只作历史。
@@ -195,7 +190,7 @@ export function createSiteWorkers(ctx, getStore) {
       const childPolicy = readTaskPolicy(store, childId);
       childPolicy.budget.deadline = Math.min(childPolicy.budget.deadline, state.policy.budget.deadline ?? Infinity);
       writeTaskPolicy(store, childId, childPolicy, 'worker-deadline-set', { workId: childId });
-      const prompt = `Work only on ${site}. Focus: ${focus}. Question: ${question}. Need: ${reason}. Reuse saved redteam_context and task policy; never start/reset budgets or delegate.${needsNday ? ' Before using Nday tools, load the local nday pack via tool_pack; this does not contact the target or expand the saved filter.' : ''} Follow relevant evidence continuously; save unrelated leads without expanding. IP blocking or broken normal access: stop affected requests and report, no repeated workarounds. Before ending/waiting call redteam_task report with document {state:"completed"|"blocked"|"needs-user",summary:"facts, effects, missing conditions, next step"}. Evidence stays in this child session. HTTP 200 and callbacks alone do not prove impact.`;
+      const prompt = `Work only on ${site}. Focus: ${focus}. Question: ${question}. Need: ${reason}. Reuse saved redteam_context and task policy; never start/reset budgets or delegate. Follow relevant evidence continuously; save unrelated leads without expanding. IP blocking or broken normal access: stop affected requests and report, no repeated workarounds. Before ending/waiting call redteam_task report with document {state:"completed"|"blocked"|"needs-user",summary:"facts, effects, missing conditions, next step"}. Evidence stays in this child session. HTTP 200 and callbacks alone do not prove impact.`;
         // v6 5.5：用户给站点子代理选了模型时覆盖 provider/model；未选则沿用当前会话模型。
         const workerModel = state.policy?.workerModel;
         if (api === 'activation') {

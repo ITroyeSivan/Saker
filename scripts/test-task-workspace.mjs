@@ -47,14 +47,14 @@ try {
       reads++;assert.equal(id,'current');assert.equal(options.projectionMode,'none');assert(options.signal instanceof AbortSignal);
       return {header:{agentPreset:'pentest'},[Symbol.dispose](){disposed++;}};
     }}};
-    for(const endpoint of ['execution.list','materials.list','usage.get','knowledge.status','knowledge.usage','task.events','project.status']){
+    for(const endpoint of ['execution.list','materials.list','usage.get','task.events','project.status']){
       const value=await dispatch(cold,store,endpoint,{sessionId:'current'});
       assert.equal(value.ok,true,endpoint);assert.equal(disposed,reads,endpoint+' releases its observation');
     }
-    assert.equal(reads,7);
+    assert.equal(reads,5);
     await assert.rejects(dispatch(cold,store,'project.start',{sessionId:'current'}),/请选择当前可用的渗透会话/);
-    await assert.rejects(dispatch(cold,store,'knowledge.toggle',{sessionId:'current',enabled:false}),/请选择当前可用的渗透会话/);
-    assert.equal(reads,7,'execution mutations cannot borrow a read-only header');
+    assert.equal((await dispatch(cold,store,'knowledge.toggle',{sessionId:'current',enabled:false})).code,'feature_removed');
+    assert.equal(reads,5,'retired features and execution mutations cannot borrow a read-only header');
   });
   await test('cold read rejects wrong presets and missing sessions and releases its observation',async()=>{
     let disposed=0;

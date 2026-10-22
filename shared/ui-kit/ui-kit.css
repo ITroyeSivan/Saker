@@ -27,7 +27,7 @@
 .dsh-mcs-field select,.dsh-mcs-seg button{height:32px}
 .dsh-sp-chip.is-btn{height:32px}
 .dsh-mg-chip{height:32px}
-/* 内联 style 插件（knowledge-hub / sec-config / skill-browse）：根容器打 data-saker-ui，
+/* 内联 style 插件（sec-config / skill-browse）：根容器打 data-saker-ui，
    控件尺寸由共享层统一给，插件自己的 helper 不再写 height。 */
 [data-saker-ui] button{height:32px}
 [data-saker-ui] input:not([type=checkbox]):not([type=radio]):not([type=file]){height:36px}

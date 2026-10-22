@@ -16,7 +16,6 @@ import { stageMethodClassification } from '../plugins/dsh-redteam-results/lib/me
 import { verifyEffect, readEffectVerification, assessPrivateReadRound } from '../plugins/dsh-redteam-results/lib/effect-verifications.js';
 import { runEffectJob, readEffectJob } from '../plugins/dsh-redteam-results/lib/effect-jobs.js';
 import { recordImpactReview, readImpactReview } from '../plugins/dsh-redteam-results/lib/impact-reviews.js';
-import { summarizeMetrics } from '../plugins/dsh-nday-hunter/lib/metrics.js';
 import { buildDeliveryFiles } from '../plugins/dsh-redteam-results/lib/bundle.js';
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'effect-verification-'));
 process.env.DSH_HOME = home;
@@ -236,8 +235,8 @@ try {
     register(); assert.equal(listFindings(store, 'positive', 'pentest', { delivery: 'ready', pageSize: 1 }).total, 1);
     assert.equal(groupByTarget(store, 'positive', 'pentest', { delivery: 'ready' })[0].count, 1);
     assert.equal(computeStats(store, 'positive', 'pentest').delivery.ready, 1);
-    assert.equal(summarizeMetrics(home, { sessionId: 'positive' }).confirmedFindings, 1);
-    assert.equal(summarizeMetrics(home, { sessionId: 'positive' }).confirmedRce, 0);
+    assert.equal(computeStats(store, 'positive', 'pentest').delivery.ready, 1);
+    assert.equal(finding.delivery.rce, false);
     const delivery = buildDeliveryFiles([finding], []);
     assert.equal(delivery.confirmedFindings, 1);
     const evidence = JSON.parse(delivery.files['delivery/evidence/finding-1-effect.json']);
@@ -349,7 +348,6 @@ try {
       assert.equal(getFinding(store, 'positive', finding.id).executionEvidence.verified, false);
       assert.equal(computeStats(store, 'positive', 'pentest').delivery.ready, 0);
       assert.equal(listFindings(store, 'positive', 'pentest', { delivery: 'ready' }).total, 0);
-      assert.equal(summarizeMetrics(home, { sessionId: 'positive' }).confirmedFindings, 0);
       assert.equal(buildDeliveryFiles([getFinding(store, 'positive', finding.id)], []).confirmedFindings, 0);
       assert.equal(requests, before);
     } finally {
@@ -394,7 +392,6 @@ try {
     saveTaskContext(store, 'positive', { ...context(), methods: [{ ...method, version: 'v2' }] });
     assert.equal(readEffectVerification(store, 'positive', effect.id).current, false);
     assert.equal(getFinding(store, 'positive', finding.id).delivery.ready, false);
-    assert.equal(summarizeMetrics(home, { sessionId: 'positive' }).confirmedFindings, 0);
   });
 } finally {
   for (const dispose of disposers.reverse()) await dispose(); store.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));

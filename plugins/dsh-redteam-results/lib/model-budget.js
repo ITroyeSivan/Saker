@@ -5,7 +5,6 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { writeTaskPolicy } from './task-policy-record.js';
 import { registerModelTransport, MODEL_TRANSPORT_SUPPORT } from './model-transport.js';
-import { bindKnowledgeUsageForRequest, markKnowledgeUsageDispatched, markKnowledgeUsageSent, releaseKnowledgeUsageReservation } from './knowledge-usage.js';
 export const MODEL_BUDGET_SCHEMA = `CREATE TABLE IF NOT EXISTS task_model_calls (
  id TEXT PRIMARY KEY, root_session TEXT NOT NULL, round_at INTEGER NOT NULL,
  session_id TEXT NOT NULL, state TEXT NOT NULL, record TEXT NOT NULL);
@@ -136,8 +135,6 @@ export function reserveModelCall(store,sessionId,options,{counter,runtimeId='unk
       provider:options.provider,model:options.model,purpose:options.purpose || 'conversation',
       requestDigest:modelRequestDigest(options),reservedTokens,counter:reservedTokens===null?null:{quality:counter.quality,version:counter.version},at:Date.now()};
     save(store,row);
-    // 预留只绑定“请求正文确实含 ref=<deliveryId>”的知识片段；不把预留当已发送。
-    try { bindKnowledgeUsageForRequest(store, sessionId, row.id, options, row.at); } catch { /* 回填失败不影响本次调用 */ }
     return {ok:true,id:row.id};
   });
 }
@@ -147,18 +144,15 @@ export function dispatchModelCall(store,id) {
     const veto=owner?.policy.modelBudgetBlock && !['model_calls_exhausted','tokens_exhausted'].includes(owner.policy.modelBudgetBlock.code);
     if(!owner || owner.root!==row.root || owner.round!==row.round || veto || stopped(owner)){
       save(store,{...row,state:'cancelled',settledAt:Date.now(),reason:'task stopped before dispatch'});
-      try { releaseKnowledgeUsageReservation(store, row.id); } catch { /* 释放失败不掩盖停止原因 */ }
       return false;
     }
     save(store,{...row,state:'dispatched',dispatchedAt:Date.now()});
-    try { markKnowledgeUsageDispatched(store, row.id, Date.now()); } catch { /* 状态转换失败不掩盖派发事实 */ }
     return true;});
 }
 export function cancelModelReservation(store,id) {
   return transaction(store,()=>{const row=read(store,id);if(row.state==='cancelled')return row;
     if(row.state!=='reserved')throw new Error('model_budget_dispatched_cost_cannot_be_released');
     const next={...row,state:'cancelled',settledAt:Date.now()};save(store,next);
-    try { releaseKnowledgeUsageReservation(store, row.id); } catch { /* 释放失败不改变取消结果 */ }
     return next;});
 }
 
@@ -266,10 +260,7 @@ export function registerModelAdmission(ctx,getStore,{countInput}={}) {
         if(!decision.ok){wireDenial=decision;throw Error(decision.message);}
         wireAttempts++;
         const wireId=currentId,response=await send();
-        if(response.ok){
-          successfulWires++;
-          try { markKnowledgeUsageSent(store, wireId, Date.now()); } catch { /* 知识状态失败不改变发送结果 */ }
-        }
+        if(response.ok) successfulWires++;
         if(currentId===wireId)currentResponseOk=response.ok;return response;
       }};
       for await(const chunk of transport.iterate(wireScope,next)){

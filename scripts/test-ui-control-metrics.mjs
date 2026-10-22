@@ -36,7 +36,6 @@ const MCP = 'plugins/dsh-mcp-studio/lib/client.js';
 const HUNTER = 'plugins/dsh-hunter/lib/client.js';
 const PULSE = 'plugins/dsh-session-pulse/lib/client.js';
 const MODE = 'plugins/dsh-mode-group/lib/client.js';
-const KNOWLEDGE = 'plugins/dsh-knowledge-hub/lib/client.js';
 const SECCONFIG = 'plugins/dsh-sec-config/lib/client.js';
 const SKILL = 'plugins/dsh-skill-browse/lib/client.js';
 
@@ -73,10 +72,8 @@ check(!hasFixedHeight(MODE, '.dsh-mg-item'), '5.7 两行模式菜单项不设高
 // 内联 style 插件：控件尺寸落在基样式 helper 上（输入 36 / 按钮 32）。
 // 三个内联 style 插件改成「根容器打 data-saker-ui + 共享 CSS 给尺寸」，helper 不再写 height。
 // 尺寸值本身由 test-ui-kit 检查共享 CSS 的 [data-saker-ui] 规则。
-check(hasSource(KNOWLEDGE, "'data-saker-ui': 'knowledge'"), '5.7 知识库根容器接入共享组件层');
 check(hasSource(SECCONFIG, "'data-saker-ui': 'sec-config'"), '5.7 安全配置根容器接入共享组件层');
 check(hasSource(SKILL, "'data-saker-ui': 'skill-browse'"), '5.7 技能浏览根容器接入共享组件层');
-check(!hasSource(KNOWLEDGE, 'height: 36, padding'), '5.7 知识库 helper 不再重复写 height');
 check(!hasSource(SECCONFIG, 'height: 32, padding'), '5.7 安全配置 helper 不再重复写 height');
 check(!hasSource(SKILL, 'height: 32, padding'), '5.7 技能浏览 helper 不再重复写 height');
 

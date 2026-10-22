@@ -3,12 +3,19 @@ import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import { SCHEMA_VERSION } from './store.js';
 
-export const TASK_ARCHIVE_SCHEMA = 'saker.task-archive/2';
+export const TASK_ARCHIVE_SCHEMA = 'saker.task-archive/3';
+export const LEGACY_TASK_ARCHIVE_SCHEMA = 'saker.task-archive/2';
 
 const TABLES = Object.freeze([
   'task_policy', 'task_flow_choice', 'task_choice', 'task_context', 'task_context_records',
   'findings', 'counters', 'execution_receipts', 'business_materials', 'task_policy_events',
-  'task_rounds', 'knowledge_usage', 'work_leases', 'task_knowledge',
+  'task_rounds',
+  'project_runs', 'project_sources', 'project_checks', 'project_actions',
+]);
+const LEGACY_TABLES = Object.freeze([
+  'task_policy', 'task_flow_choice', 'task_choice', 'task_context', 'task_context_records',
+  'findings', 'counters', 'execution_receipts', 'business_materials', 'task_policy_events',
+  'task_rounds', 'knowledge_usage', 'task_knowledge',
   'project_runs', 'project_sources', 'project_checks', 'project_actions',
 ]);
 const PROJECT_ACTIVE_STATES = new Set(['preparing', 'running', 'waiting', 'paused']);
@@ -94,7 +101,8 @@ export function verifyTaskArchive(archive) {
   if (!archive || typeof archive !== 'object' || Array.isArray(archive)) return { ok: false, problems: ['归档不是对象'] };
   const { manifest, sections } = archive;
   if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) return { ok: false, problems: ['缺少 manifest'] };
-  if (manifest.schema !== TASK_ARCHIVE_SCHEMA) problems.push('归档 schema 不匹配');
+  if (![TASK_ARCHIVE_SCHEMA, LEGACY_TASK_ARCHIVE_SCHEMA].includes(manifest.schema))
+    problems.push('归档 schema 不匹配或版本不受支持');
   if (!Number.isInteger(manifest.schemaVersion) || manifest.schemaVersion < 1 || manifest.schemaVersion > SCHEMA_VERSION)
     problems.push('schemaVersion 缺失、过旧或高于当前支持版本');
   if (typeof manifest.sourceSession !== 'string' || !manifest.sourceSession.trim()) problems.push('缺少 sourceSession');
@@ -111,10 +119,13 @@ export function verifyTaskArchive(archive) {
   const sectionKeys = sections && typeof sections === 'object' && !Array.isArray(sections) ? Object.keys(sections).sort() : [];
   const countKeys = manifest.sections && typeof manifest.sections === 'object' ? Object.keys(manifest.sections).sort() : [];
   const digestKeys = manifest.digests && typeof manifest.digests === 'object' ? Object.keys(manifest.digests).sort() : [];
+  const expectedTables = manifest.schema === LEGACY_TASK_ARCHIVE_SCHEMA ? LEGACY_TABLES : TABLES;
+  if (JSON.stringify(sectionKeys) !== JSON.stringify([...expectedTables].sort()))
+    problems.push('归档分节与 schema 固定表清单不一致');
   if (JSON.stringify(sectionKeys) !== JSON.stringify(countKeys)) problems.push('sections 与 counts 分节不一致');
   if (JSON.stringify(sectionKeys) !== JSON.stringify(digestKeys)) problems.push('sections 与 digests 分节不一致');
   for (const table of sectionKeys) {
-    if (!TABLES.includes(table)) { problems.push('归档包含未知表：' + table); continue; }
+    if (!expectedTables.includes(table)) { problems.push('归档包含未知表：' + table); continue; }
     const rows = sections[table];
     if (!Array.isArray(rows)) { problems.push(table + ' 不是行数组'); continue; }
     if (!Number.isInteger(manifest.sections[table]) || manifest.sections[table] !== rows.length)
@@ -271,10 +282,15 @@ export function importTaskArchive(store, archive, { sessionId = 'restored-' + ra
   const verdict = verifyTaskArchive(archive);
   if (!verdict.ok) throw Object.assign(new Error('归档校验失败：' + verdict.problems.join('；')), { code: 'task-archive-invalid', details: verdict });
   const available = archiveTables(store);
-  if (JSON.stringify(Object.keys(archive.sections).sort()) !== JSON.stringify([...available].sort()))
+  const activeSections = available.filter(table => TABLES.includes(table));
+  const retiredSections = archive.manifest.schema === LEGACY_TASK_ARCHIVE_SCHEMA
+    ? LEGACY_TABLES.filter(table => !TABLES.includes(table))
+    : [];
+  if (archive.manifest.schema === TASK_ARCHIVE_SCHEMA
+    && JSON.stringify(Object.keys(archive.sections).sort()) !== JSON.stringify([...activeSections].sort()))
     throw new Error('归档分节与当前支持表不一致');
   const schema = {};
-  for (const table of available) {
+  for (const table of activeSections) {
     const info = store.db.prepare(`PRAGMA table_info(${table})`).all();
     const allowed = new Set(info.map(row => row.name));
     schema[table] = { info, allowed };
@@ -286,14 +302,15 @@ export function importTaskArchive(store, archive, { sessionId = 'restored-' + ra
       else if (JSON.stringify([...rowKeys].sort()) !== JSON.stringify([...keys].sort())) throw new Error(table + ' 同一分节行结构不一致');
     }
   }
-  for (const table of available) {
+  for (const table of activeSections) {
     if (store.db.prepare(`SELECT 1 FROM ${table} WHERE session_id=? LIMIT 1`).get(sessionId))
       throw new Error('恢复目标已在 ' + table + ' 中存在数据，请换一个新任务 id，不要在已有数据上覆盖');
   }
 
   store.db.exec('BEGIN IMMEDIATE');
   try {
-    for (const [table, rows] of Object.entries(archive.sections)) {
+    for (const table of activeSections) {
+      const rows = archive.sections[table] || [];
       if (!rows.length) continue;
       const auto = new Set(schema[table].info
         .filter(column => column.pk === 1 && /INT/i.test(String(column.type))).map(column => column.name));
@@ -320,7 +337,8 @@ export function importTaskArchive(store, archive, { sessionId = 'restored-' + ra
       sessionId, restoredFrom: archive.manifest.sourceSession, state: 'unconfirmed', secretsNeedRebind: true,
       projectRunState: state.projectRunState, missingAttachments: state.missingAttachments,
       files: archive.manifest.files || [], missingFiles: archive.manifest.missingFiles || [],
-      sections: archive.manifest.sections,
+      sections: Object.fromEntries(activeSections.map(table => [table, archive.manifest.sections[table]])),
+      retiredSectionsIgnored: retiredSections,
       note: '已写入新任务；未完成运行已暂停，未收尾动作标未知，账号密钥需重新绑定后再继续。',
     };
   } catch (error) { store.db.exec('ROLLBACK'); throw error; }

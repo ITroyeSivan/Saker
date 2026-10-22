@@ -1,27 +1,25 @@
 # 插件清单
 
-Saker 当前包含 19 个独立插件及一个根模式包。运行 `node scripts/pack-all.mjs` 打包，再在官方桌面端插件页面安装并启用；需要脚本安装时使用 `scripts/install-desktop.mjs`。旧 `install-all` 网页安装流程已弃用。
-本版不发布 `dsh-attack-atlas`、`dsh-campaign-memory`、`dsh-webshell-mgr`、`dsh-method-stack`、`dsh-route-boost`；源目录仅保留历史兼容与迁移研究，统一清单禁止打包、安装和交付。hunter 不再注册聊天页，但 Nday/资产后端与设置继续使用。
+Saker 当前包含 17 个独立插件及一个根模式包。运行 `node scripts/pack-all.mjs` 打包，再在官方桌面端插件页面安装并启用；需要脚本安装时使用 `scripts/install-desktop.mjs`。旧 `install-all` 网页安装流程已弃用。
+本版不发布 `dsh-attack-atlas`、`dsh-campaign-memory`、`dsh-webshell-mgr`、`dsh-method-stack`、`dsh-route-boost`、`dsh-knowledge-hub`、`dsh-nday-hunter`。统一清单禁止这些插件打包、安装和激活；旧 profile 升级时由官方插件管理移除。hunter 只保留 FOFA、Hunter、Quake 资产查询、平台配置和授权资产写入。
 
 每个插件目录都有独立 README 说明配置、边界与验证方式。配置方式见各插件 README。
 
 | 位置 | 插件 | 版本 | 做什么 |
 |---|---|---|---|
 | 界面与配置 | `dsh-mode-group` | 1.0.13 | 新会话统一展示渗透测试入口及三个子模式 |
-| 界面与配置 | `dsh-sec-config` | 1.3.37 | 管理本机工具路径与服务配置，提供工具探测、模型接入代理和端点切换 |
+| 界面与配置 | `dsh-sec-config` | 1.3.38 | 管理本机工具路径与服务配置，提供工具探测、模型接入代理和端点切换 |
 | 界面与配置 | `dsh-mcp-studio` | 1.2.13 | 管理 MCP 服务、连接状态与工具；支持直接或代理接入、列表刷新与调用记录 |
-| 界面与配置 | `dsh-knowledge-hub` | 0.3.39 | 管理 23 个可同步知识包，支持离线检索、分块精读、Git/本机导入和个人资料 |
 | 界面与配置 | `dsh-skill-browse` | 1.1.17 | 浏览、导入和卸载用户技能，复制宿主引用；卸载内容可恢复 |
-| 工具 | `dsh-scanner-tools` | 1.1.13 | 封装本机扫描与爬取工具，按需加载；导入已有资产导出结果 |
-| 工具 | `dsh-nday-hunter` | 1.5.11 | 更新漏洞来源，按产品与版本核对适用条件，整理优先级与待验证目标 |
+| 工具 | `dsh-scanner-tools` | 1.2.0 | 封装本机扫描与爬取工具，按需加载；导入已有资产导出结果 |
 | 工具 | `dsh-semgrep-audit` | 1.0.12 | 提供本地 Semgrep 扫描能力；代码审计独立模式已退出新任务菜单 |
-| 工具 | `dsh-hunter` | 1.5.16 | 聚合 FOFA、Hunter、Quake 查询，提供资产平台 API 和漏洞情报更新设置；SRC 范围策略已移除 |
-| 工具 | `dsh-tool-scope` | 0.1.17 | 按任务阶段加载或隐藏工具，缩小模型每轮需要读取的工具列表 |
+| 工具 | `dsh-hunter` | 1.6.0 | 聚合 FOFA、Hunter、Quake 查询，提供资产平台 API 和授权资产写入 |
+| 工具 | `dsh-tool-scope` | 0.2.0 | 按任务阶段加载或隐藏工具，缩小模型每轮需要读取的工具列表 |
 | 过程 | `dsh-stage-gate` | 1.10.2 | 记录目标、方向与任务状态，检查阶段材料和任务结束条件；仅代码审计/CTF 模式可见 |
 | 过程 | `dsh-sec-enforce` | 1.4.12 | 检查工作目录、请求预算与操作约束，阻止不符合当前任务要求的执行 |
 | 过程 | `dsh-auto-advance` | 0.3.15 | 在有限轮次内推进尚未完成的任务，支持用户接管，避免结束后反复自动开工 |
 | 过程 | `dsh-refusal-guard` | 1.0.4 | 识别异常拒答并记录；模型与服务自身的安全限制仍然有效 |
-| 记录 | `dsh-redteam-results` | 1.0.191 | 管理小任务、共享模型调用额度、常规与 Nday 衔接、站点子任务、共享证据与报告材料包，并支持按文档连续测试 |
+| 记录 | `dsh-redteam-results` | 1.0.192 | 管理自由测试、按文档连续检查、执行证据、发现、恢复与报告材料包 |
 | 记录 | `dsh-trace-vault` | 0.3.10 | 记录工具调用、错误和中断，区分执行失败与目标访问受阻 |
 | 协作 | `dsh-product-subagents` | 1.1.3 | 按需接入本机 Claude Code、Codex CLI，提供明确范围的复核任务 |
 | 协作 | `dsh-session-pulse` | 0.1.16 | 默认停用；保留旧宿主兼容实现，当前任务与子代理界面由官方宿主提供 |
@@ -41,15 +39,12 @@ Saker 当前包含 19 个独立插件及一个根模式包。运行 `node script
 </details>
 
 <details>
-<summary><b>离线资料与第三方规则</b></summary>
+<summary><b>直连资料与第三方规则</b></summary>
 
-- 渗透测试资料索引当前记录108篇。
-- 代码审计资料索引当前记录236篇Markdown，并包含自建及第三方Semgrep规则（自建Java 402条 / 开源快照1096条）。
-- 内置 [PayloadsAllTheThings](https://github.com/swisskyrepo/PayloadsAllTheThings) 全量文本（66个漏洞章节的README与payload清单，commit `3ac2790`，MIT），另有 **23 个**自动同步知识包，覆盖 CTF、渗透、AD、云/API、移动、硬件、DFIR 与应急响应，以及护网常用的 Nday/POC 语料（Awesome-POC、Nday-Exploit-Plan、PeiQi WIKI）。
-- 检索使用 SQLite FTS5 + BM25 离线混合索引；中文按 bigram 召回，英文/CVE/EDB-ID 精确定位，结果只返回少量片段，按 `chunkId` 精读。
-- Exploit-DB不随包：放到 `DSH_HOME/refs/imports/exploitdb/` 即建字段化索引，或在设置页一键下载官方索引（约30MB，需可访问gitlab.com）。索引命中形如 `[EDB-12345]`。
-- Semgrep OSS快照、自建规则和其他资料具有不同许可，数量与来源以各目录README为准。
+- 公共漏洞知识库和 Nday 资料库已退出产品。需要 CVE、公告、PoC 或 EXP 时，由当前任务直接读取用户文件或联网获取。
+- 代码审计保留工具实际需要的 Semgrep 规则；随包规则与其许可证见各目录说明。
+- 用户自行保存的 refs、imports 或历史知识数据不会被删除、扫描或自动导入。需要时可按普通文件读取。
 
-Saker自有代码采用MIT License；随附第三方资料不自动转为MIT。再分发前请阅读 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)。
+Saker 自有代码采用 MIT License；随附 Semgrep 规则不自动转为 MIT。再分发前请阅读 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)。
 
 </details>

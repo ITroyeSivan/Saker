@@ -7,7 +7,7 @@ window.__ModuleLoader__.load({ id: '@dsh-external/dsh-sec-config', factory: (req
 var module = { exports: {} }; var exports = module.exports;
 'use strict';
 /* SAKER-UI-KIT:BEGIN */
-var SAKER_UI_KIT_CSS = "/* 5.7 共享组件层：Button / Input / Select / Badge / DataTable / Drawer / InlineNotice / EmptyState\n   单一来源：shared/ui-kit/ui-kit.css（令牌见 shared/ui-kit/ui-kit.json）。\n   由 scripts/sync-ui-kit.mjs 注入到各产品插件；插件里的同类尺寸规则应删除，避免双写。 */\n.saker-ui-btn{height:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px}\n.saker-ui-input{height:36px;border-radius:6px}\n.saker-ui-select{height:32px;border-radius:6px}\n.saker-ui-table td{height:38px}\n.saker-ui-badge{border-radius:6px;font-size:12px;line-height:1.5}\n.saker-ui-drawer{border-radius:12px}\n.saker-ui-notice{border-radius:6px;font-size:13px;line-height:1.5}\n.saker-ui-empty{border-radius:6px;font-size:13px;line-height:1.5}\n/* 现有插件类别名：与 canonical 类共用同一套尺寸 */\n.dsh-chat-panel-head button,.dsh-chat-actions button,.dsh-chat-task-status button,.dsh-task-nav button,.dsh-task-actions button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-prompt-io button,.dsh-prompt-more,.dsh-prompt-scopes button,.dsh-prompt-modes button,.dsh-prompt-foot button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-tools button,.dsh-materials-types button,.dsh-materials-foot button,.dsh-materials-table td button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-new button,.dsh-materials-import-actions button,.dsh-execution-tools>button,.dsh-test-content-actions button,.dsh-rtr-btn{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-task-nav select,.dsh-materials-tools select,.dsh-rtr-select{height:32px}\n.dsh-prompt-saveas input,.dsh-prompt-list input[type=search],.dsh-prompt-field input{height:36px}\n.dsh-materials-tools input[type=search],.dsh-materials-import input,.dsh-task-field input,.dsh-rtr-search{height:36px}\n.dsh-materials-table td{height:38px}\n.dsh-chat-setup svg,.dsh-task-workspace svg{width:16px;height:16px}\n.dsh-hnt-btn,.dsh-hnt-tab{height:32px}\n.dsh-hnt-input{height:36px}\n.dsh-hnt-select{height:32px}\n.dsh-mcs-btn,.dsh-mcs-iconbtn,.dsh-mcs-toolscount--btn{height:32px}\n.dsh-mcs-field input,.dsh-mcs-pairrow input,.dsh-mcs-search{height:36px}\n.dsh-mcs-field select,.dsh-mcs-seg button{height:32px}\n.dsh-sp-chip.is-btn{height:32px}\n.dsh-mg-chip{height:32px}\n/* 内联 style 插件（knowledge-hub / sec-config / skill-browse）：根容器打 data-saker-ui，\n   控件尺寸由共享层统一给，插件自己的 helper 不再写 height。 */\n[data-saker-ui] button{height:32px}\n[data-saker-ui] input:not([type=checkbox]):not([type=radio]):not([type=file]){height:36px}";
+var SAKER_UI_KIT_CSS = "/* 5.7 共享组件层：Button / Input / Select / Badge / DataTable / Drawer / InlineNotice / EmptyState\n   单一来源：shared/ui-kit/ui-kit.css（令牌见 shared/ui-kit/ui-kit.json）。\n   由 scripts/sync-ui-kit.mjs 注入到各产品插件；插件里的同类尺寸规则应删除，避免双写。 */\n.saker-ui-btn{height:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px}\n.saker-ui-input{height:36px;border-radius:6px}\n.saker-ui-select{height:32px;border-radius:6px}\n.saker-ui-table td{height:38px}\n.saker-ui-badge{border-radius:6px;font-size:12px;line-height:1.5}\n.saker-ui-drawer{border-radius:12px}\n.saker-ui-notice{border-radius:6px;font-size:13px;line-height:1.5}\n.saker-ui-empty{border-radius:6px;font-size:13px;line-height:1.5}\n/* 现有插件类别名：与 canonical 类共用同一套尺寸 */\n.dsh-chat-panel-head button,.dsh-chat-actions button,.dsh-chat-task-status button,.dsh-task-nav button,.dsh-task-actions button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-prompt-io button,.dsh-prompt-more,.dsh-prompt-scopes button,.dsh-prompt-modes button,.dsh-prompt-foot button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-tools button,.dsh-materials-types button,.dsh-materials-foot button,.dsh-materials-table td button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-new button,.dsh-materials-import-actions button,.dsh-execution-tools>button,.dsh-test-content-actions button,.dsh-rtr-btn{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-task-nav select,.dsh-materials-tools select,.dsh-rtr-select{height:32px}\n.dsh-prompt-saveas input,.dsh-prompt-list input[type=search],.dsh-prompt-field input{height:36px}\n.dsh-materials-tools input[type=search],.dsh-materials-import input,.dsh-task-field input,.dsh-rtr-search{height:36px}\n.dsh-materials-table td{height:38px}\n.dsh-chat-setup svg,.dsh-task-workspace svg{width:16px;height:16px}\n.dsh-hnt-btn,.dsh-hnt-tab{height:32px}\n.dsh-hnt-input{height:36px}\n.dsh-hnt-select{height:32px}\n.dsh-mcs-btn,.dsh-mcs-iconbtn,.dsh-mcs-toolscount--btn{height:32px}\n.dsh-mcs-field input,.dsh-mcs-pairrow input,.dsh-mcs-search{height:36px}\n.dsh-mcs-field select,.dsh-mcs-seg button{height:32px}\n.dsh-sp-chip.is-btn{height:32px}\n.dsh-mg-chip{height:32px}\n/* 内联 style 插件（sec-config / skill-browse）：根容器打 data-saker-ui，\n   控件尺寸由共享层统一给，插件自己的 helper 不再写 height。 */\n[data-saker-ui] button{height:32px}\n[data-saker-ui] input:not([type=checkbox]):not([type=radio]):not([type=file]){height:36px}";
 /* SAKER-UI-KIT:END */
 (function(){try{if(document.getElementById('saker-ui-kit-style'))return;var st=document.createElement('style');st.id='saker-ui-kit-style';st.textContent=SAKER_UI_KIT_CSS;document.head.appendChild(st);}catch(e){}})();
 var React = require('react');
@@ -19,6 +19,7 @@ var CHANNEL = '/dsh-sec-config';
 // answers). Custom tools (arbitrary keys) are managed alongside them.
 var CATEGORY_ORDER = ['信息收集', '漏洞扫描', '目录与接口', '注入与利用', '令牌与认证'];
 var FALLBACK_PRESETS = [
+  { key: 'chrome_for_testing', label: 'Chrome for Testing', category: '浏览器' },
   { key: 'subfinder', label: 'Subfinder', category: '信息收集' },
   { key: 'httpx', label: 'Httpx', category: '信息收集' },
   { key: 'nmap', label: 'Nmap', category: '信息收集' },
@@ -99,7 +100,7 @@ function Group(props) {
 // ============ 工具库 v2（目录即库）：默认空 → 选根目录一键探测自动分类导入 ============
 // 分类默认沿用操作者工具库的编号目录风格（01-WebShell管理 … 11-报告与模板）；
 // 探测时若根目录下就是这些目录，直接用目录名当分类 id。
-var BASE_CATEGORIES = ['01-WebShell管理', '02-流量抓包与代理', '03-扫描与信息收集', '04-漏洞利用', '05-内网与域渗透', '06-C2与免杀', '07-隧道与代理', '08-钓鱼社工', '09-口令与字典', '10-靶场与情报', '11-报告与模板', '信息收集', '漏洞扫描', '目录与接口', '注入与利用', '令牌与认证', '内网与横向', '其他'];
+var BASE_CATEGORIES = ['浏览器', '01-WebShell管理', '02-流量抓包与代理', '03-扫描与信息收集', '04-漏洞利用', '05-内网与域渗透', '06-C2与免杀', '07-隧道与代理', '08-钓鱼社工', '09-口令与字典', '10-靶场与情报', '11-报告与模板', '信息收集', '漏洞扫描', '目录与接口', '注入与利用', '令牌与认证', '内网与横向', '其他'];
 var CAT_FALLBACK = '其他';
 
 function sanitizeKey(name) {
@@ -256,6 +257,12 @@ function ToolLibrary(props) {
       entries: entries.map(function (e) { return e.category === c ? Object.assign({}, e, { category: CAT_FALLBACK }) : e; }),
     });
   };
+  var chromeEntry = entries.filter(function (e) { return e.key === 'chrome_for_testing'; })[0] || null;
+  var setChromePath = function (path) {
+    var next = entries.filter(function (e) { return e.key !== 'chrome_for_testing'; });
+    if (String(path || '').trim()) next.push({ key: 'chrome_for_testing', name: 'Chrome for Testing', path: String(path).trim(), category: '浏览器' });
+    patchCfg({ entries: next });
+  };
 
   var grouped = {};
   cats.forEach(function (c) { grouped[c] = []; });
@@ -282,6 +289,19 @@ function ToolLibrary(props) {
   rootRow.push(el('button', { key: 'add', type: 'button', style: rowBtnStyle(), onClick: addRoot }, '添加目录'));
   rootRow.push(el('button', { key: 'scan', type: 'button', disabled: S.scanning, style: rowBtnStyle({ borderColor: 'var(--dsw-alias-state-business-primary,#4c6ef5)', color: 'var(--dsw-alias-state-business-primary,#4c6ef5)' }), onClick: doScan }, S.scanning ? '探测中…' : '探测并自动导入'));
   children.push(el('div', { key: 'roots', style: { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 8 } }, rootRow));
+  children.push(el('div', { key: 'cft', style: { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', margin: '8px 0 12px', padding: '8px 10px', border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', borderRadius: 6 } },
+    el('div', { style: { flex: '0 0 150px' } },
+      el('div', { style: { fontWeight: 600, fontSize: 13 } }, 'Chrome for Testing'),
+      el('div', { style: miniHint }, '浏览器可执行文件')),
+    el('div', { style: { flex: 1, minWidth: 260 } },
+      el('input', {
+        'aria-label': 'Chrome for Testing 路径',
+        value: chromeEntry ? chromeEntry.path : '',
+        placeholder: '例如 E:\\software\\ChromeForTesting\\chrome-win64\\chrome.exe',
+        style: fieldStyle(),
+        onChange: function (e) { setChromePath(e.target.value); },
+      })),
+    el('button', { type: 'button', style: rowBtnStyle(), disabled: !chromeEntry, onClick: function () { setChromePath(''); } }, '清除')));
   if (roots.length > 0) {
     children.push(el('div', { key: 'rootlist', style: { display: 'flex', flexWrap: 'wrap', gap: 8, margin: '4px 0 8px' } }, roots.map(function (r) {
       return el('span', { key: r, style: { display: 'inline-flex', alignItems: 'center', gap: 4, maxWidth: '100%', padding: '3px 8px', borderRadius: 999, fontSize: 12, border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', background: 'var(--dsw-alias-bg-layer-2,#f6f6f7)' } },

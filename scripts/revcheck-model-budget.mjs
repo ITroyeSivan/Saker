@@ -23,7 +23,7 @@ try{
     const module=join(directory,variant.id+'.mjs');writeFileSync(module,source.replace(variant.from,variant.to));
     writeFileSync(join(directory,'package.json'),JSON.stringify({type:'module'}));
     writeFileSync(join(directory,'model-transport.js'),transportSource);
-    for (const name of ['task-policy-record.js','row-record.js','knowledge-usage.js']) writeFileSync(join(directory,name),readFileSync(join(root,'plugins/dsh-redteam-results/lib',name),'utf8'));
+    for (const name of ['task-policy-record.js','row-record.js']) writeFileSync(join(directory,name),readFileSync(join(root,'plugins/dsh-redteam-results/lib',name),'utf8'));
     // Keep the actual production store and task policy; redirect only the tested
     // ledger module. Run the targeted sequential cases; race/restart coverage
     // uses the real suite separately, avoiding false reds from temp imports.

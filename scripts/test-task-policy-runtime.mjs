@@ -99,31 +99,6 @@ try {
     updateTaskProgress(store, 'queue', { queueComplete: true }); assert.equal(taskPolicyStatus(store, 'queue').reason, 'queue_complete');
     assert.throws(() => updateTaskProgress(store, 'queue', { queueComplete: false }), /cannot be reopened/);
   });
-  await test('independent discovery budget ends portal search and a scoped observed API permits only remaining overall budget', () => {
-    startTaskPolicy(store, 'portal', { mode: '0day', budget: { toolCalls: 5, discoveryCalls: 1, unmeteredToolCalls: 5 } });
-    assert.equal(taskExecutionGuard(store, 'portal', 'fetch'), undefined);
-    assert.equal(taskPolicyStatus(store, 'portal').stopped, false);
-    assert.equal(taskPolicyStatus(store, 'portal').observationExhausted, true);
-    assert.match(taskExecutionGuard(store, 'portal', 'pwsh'), /observation_budget_exhausted/);
-    assert.equal(taskExecutionGuard(store, 'portal', 'read'), undefined);
-    startTaskPolicy(store, 'api', { mode: '0day', budget: { toolCalls: 5, discoveryCalls: 1, unmeteredToolCalls: 5 } });
-    assert.equal(taskExecutionGuard(store, 'api', 'fetch'), undefined);
-    saveTaskContext(store, 'api', { assets: [{ id: 'a', url: 'https://fixture.test', inScope: true, reachable: true }], requests: [{
-      id: 'baseline', endpoint: 'https://fixture.test/api', authContext: 'fixture-user', revision: 'v1', kind: 'api', valid: true,
-      request: 'GET /api HTTP/1.1', response: 'HTTP/1.1 200 OK', inputs: [{ name: 'id', location: 'query', evidenceIds: ['baseline'] }] }] });
-    assert.equal(taskPolicyStatus(store, 'api').researchReady, true);
-    assert.match(taskExecutionGuard(store, 'api', 'fetch'), /research_hypothesis_missing/);
-    assert.equal(readTaskPolicy(store, 'api').used.toolCalls, 1);
-    createResearch(store, 'api', { id: 'fixture-research', requestId: 'baseline', requestRevision: 'v1', controlledInputs: [{ name: 'id', location: 'query' }],
-      title: 'Fixture object boundary', serverPath: 'Object lookup handler', boundary: 'Owner identity', normalBehavior: 'Only own fixture object is visible',
-      supportCriterion: 'Another owner fixture object appears', falsifier: 'The handler consistently denies a different owner object', nextInformation: 'Compare own and different owner fixture objects',
-      knownCheck: { outcome: 'not-assessed', rationale: 'Fixture has no public product identity; classify observations as unconfirmed.', sources: [] } });
-    finding('api'); assert.equal(taskPolicyStatus(store, 'api').stopped, false);
-    assert.equal(taskExecutionGuard(store, 'api', 'zday_pattern'), undefined);
-    for (let i = 0; i < 3; i++) assert.equal(taskExecutionGuard(store, 'api', 'fetch'), undefined, 'probing runs on the task budget, not on a per-direction count');
-    assert.match(taskExecutionGuard(store, 'api', 'fetch'), /tool_budget_exhausted/);
-    assert.equal(readTaskPolicy(store, 'api').used.discoveryCalls, 1);
-  });
   await test('time deadline cancellation malformed progress and unsupported hosts cannot silently reset or evade task limits', async () => {
     startTaskPolicy(store, 'deadline', { mode: 'regular', budget: { toolCalls: 5, minutes: 1 } }, 1000);
     assert.equal(taskPolicyStatus(store, 'deadline', 60999).stopped, false);

@@ -4,7 +4,7 @@ var module = { exports: {} }; var exports = module.exports;
 // 三平台资产搜索（统一 DSL / 高级原生）、设置面板（API key）、分页、导出、授权标记、实测历史。
 "use strict";
 /* SAKER-UI-KIT:BEGIN */
-var SAKER_UI_KIT_CSS = "/* 5.7 共享组件层：Button / Input / Select / Badge / DataTable / Drawer / InlineNotice / EmptyState\n   单一来源：shared/ui-kit/ui-kit.css（令牌见 shared/ui-kit/ui-kit.json）。\n   由 scripts/sync-ui-kit.mjs 注入到各产品插件；插件里的同类尺寸规则应删除，避免双写。 */\n.saker-ui-btn{height:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px}\n.saker-ui-input{height:36px;border-radius:6px}\n.saker-ui-select{height:32px;border-radius:6px}\n.saker-ui-table td{height:38px}\n.saker-ui-badge{border-radius:6px;font-size:12px;line-height:1.5}\n.saker-ui-drawer{border-radius:12px}\n.saker-ui-notice{border-radius:6px;font-size:13px;line-height:1.5}\n.saker-ui-empty{border-radius:6px;font-size:13px;line-height:1.5}\n/* 现有插件类别名：与 canonical 类共用同一套尺寸 */\n.dsh-chat-panel-head button,.dsh-chat-actions button,.dsh-chat-task-status button,.dsh-task-nav button,.dsh-task-actions button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-prompt-io button,.dsh-prompt-more,.dsh-prompt-scopes button,.dsh-prompt-modes button,.dsh-prompt-foot button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-tools button,.dsh-materials-types button,.dsh-materials-foot button,.dsh-materials-table td button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-new button,.dsh-materials-import-actions button,.dsh-execution-tools>button,.dsh-test-content-actions button,.dsh-rtr-btn{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-task-nav select,.dsh-materials-tools select,.dsh-rtr-select{height:32px}\n.dsh-prompt-saveas input,.dsh-prompt-list input[type=search],.dsh-prompt-field input{height:36px}\n.dsh-materials-tools input[type=search],.dsh-materials-import input,.dsh-task-field input,.dsh-rtr-search{height:36px}\n.dsh-materials-table td{height:38px}\n.dsh-chat-setup svg,.dsh-task-workspace svg{width:16px;height:16px}\n.dsh-hnt-btn,.dsh-hnt-tab{height:32px}\n.dsh-hnt-input{height:36px}\n.dsh-hnt-select{height:32px}\n.dsh-mcs-btn,.dsh-mcs-iconbtn,.dsh-mcs-toolscount--btn{height:32px}\n.dsh-mcs-field input,.dsh-mcs-pairrow input,.dsh-mcs-search{height:36px}\n.dsh-mcs-field select,.dsh-mcs-seg button{height:32px}\n.dsh-sp-chip.is-btn{height:32px}\n.dsh-mg-chip{height:32px}\n/* 内联 style 插件（knowledge-hub / sec-config / skill-browse）：根容器打 data-saker-ui，\n   控件尺寸由共享层统一给，插件自己的 helper 不再写 height。 */\n[data-saker-ui] button{height:32px}\n[data-saker-ui] input:not([type=checkbox]):not([type=radio]):not([type=file]){height:36px}";
+var SAKER_UI_KIT_CSS = "/* 5.7 共享组件层：Button / Input / Select / Badge / DataTable / Drawer / InlineNotice / EmptyState\n   单一来源：shared/ui-kit/ui-kit.css（令牌见 shared/ui-kit/ui-kit.json）。\n   由 scripts/sync-ui-kit.mjs 注入到各产品插件；插件里的同类尺寸规则应删除，避免双写。 */\n.saker-ui-btn{height:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px}\n.saker-ui-input{height:36px;border-radius:6px}\n.saker-ui-select{height:32px;border-radius:6px}\n.saker-ui-table td{height:38px}\n.saker-ui-badge{border-radius:6px;font-size:12px;line-height:1.5}\n.saker-ui-drawer{border-radius:12px}\n.saker-ui-notice{border-radius:6px;font-size:13px;line-height:1.5}\n.saker-ui-empty{border-radius:6px;font-size:13px;line-height:1.5}\n/* 现有插件类别名：与 canonical 类共用同一套尺寸 */\n.dsh-chat-panel-head button,.dsh-chat-actions button,.dsh-chat-task-status button,.dsh-task-nav button,.dsh-task-actions button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-prompt-io button,.dsh-prompt-more,.dsh-prompt-scopes button,.dsh-prompt-modes button,.dsh-prompt-foot button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-tools button,.dsh-materials-types button,.dsh-materials-foot button,.dsh-materials-table td button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-new button,.dsh-materials-import-actions button,.dsh-execution-tools>button,.dsh-test-content-actions button,.dsh-rtr-btn{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-task-nav select,.dsh-materials-tools select,.dsh-rtr-select{height:32px}\n.dsh-prompt-saveas input,.dsh-prompt-list input[type=search],.dsh-prompt-field input{height:36px}\n.dsh-materials-tools input[type=search],.dsh-materials-import input,.dsh-task-field input,.dsh-rtr-search{height:36px}\n.dsh-materials-table td{height:38px}\n.dsh-chat-setup svg,.dsh-task-workspace svg{width:16px;height:16px}\n.dsh-hnt-btn,.dsh-hnt-tab{height:32px}\n.dsh-hnt-input{height:36px}\n.dsh-hnt-select{height:32px}\n.dsh-mcs-btn,.dsh-mcs-iconbtn,.dsh-mcs-toolscount--btn{height:32px}\n.dsh-mcs-field input,.dsh-mcs-pairrow input,.dsh-mcs-search{height:36px}\n.dsh-mcs-field select,.dsh-mcs-seg button{height:32px}\n.dsh-sp-chip.is-btn{height:32px}\n.dsh-mg-chip{height:32px}\n/* 内联 style 插件（sec-config / skill-browse）：根容器打 data-saker-ui，\n   控件尺寸由共享层统一给，插件自己的 helper 不再写 height。 */\n[data-saker-ui] button{height:32px}\n[data-saker-ui] input:not([type=checkbox]):not([type=radio]):not([type=file]){height:36px}";
 /* SAKER-UI-KIT:END */
 var React = require("react");
 var useState = React.useState, useEffect = React.useEffect, useRef = React.useRef;
@@ -24,9 +24,9 @@ function postJson(tok, endpoint, payload) {
 }
 function readApiResponse(response) {
 	return response.text().then(function (text) {
-		if (!text.trim()) throw new Error("漏洞情报服务未就绪（HTTP " + response.status + "），请检查插件启用状态后重试。");
+		if (!text.trim()) throw new Error("资产搜索服务未就绪（HTTP " + response.status + "），请检查插件启用状态后重试。");
 		var value;
-		try { value = JSON.parse(text); } catch (_) { throw new Error("漏洞情报服务返回异常（HTTP " + response.status + "），请检查插件运行状态。"); }
+		try { value = JSON.parse(text); } catch (_) { throw new Error("资产搜索服务返回异常（HTTP " + response.status + "），请检查插件运行状态。"); }
 		return value;
 	});
 }
@@ -48,20 +48,6 @@ var PLATFORM_META = [
 	{ id: "quake", label: "Quake 360", site: "quake.360.net" }
 ];
 var PAGE_SIZES = [20, 50, 100];
-var NDAY_FREE_SOURCES = [
-	{ id: "cisa-kev", label: "CISA KEV" },
-	{ id: "cve-official", label: "CVE 官方滚动增量" },
-	{ id: "cve-official-git", label: "CVE 全量基线 / Git 差异" },
-	{ id: "github-research-files", label: "研究项目文件差异" },
-	{ id: "nuclei-files", label: "Nuclei 模板文件差异" },
-	{ id: "afrog-files", label: "Afrog 公开 PoC 文件差异" },
-	{ id: "nvd", label: "NVD" },
-	{ id: "osv", label: "OSV" },
-	{ id: "github-advisories", label: "GitHub Advisories" },
-	{ id: "nuclei", label: "nuclei 模板更新" },
-	{ id: "wechat", label: "微信公众号（需检索词）" }
-];
-
 function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
 function fmtTime(iso) {
 	if (!iso) return "";
@@ -222,238 +208,22 @@ function AssetPlatformsSettings() {
 			React.createElement(Btn, { onClick: reload }, "刷新")));
 }
 
-function SourceLibrary() {
-	var [query, setQuery] = useState("");
-	var [result, setResult] = useState(null);
-	var [content, setContent] = useState(null);
-	var [notice, setNotice] = useState("");
-	var [busy, setBusy] = useState(false);
-	var request = useRef(0);
-	function load(endpoint, payload, receive) {
-		var sequence = ++request.current; setBusy(true); setNotice("");
-		api(endpoint, payload).then(function (value) {
-			if (sequence !== request.current) return;
-			setBusy(false);
-			if (!value.ok) { setNotice(String((value.error && value.error.message) || value.error || "读取失败")); return; }
-			receive(value);
-		}).catch(function (error) { if (sequence === request.current) { setBusy(false); setNotice(String(error.message || error)); } });
-	}
-	function search(cursor) {
-		setContent(null);
-		load("nday.sources.query", { query: query, limit: 20, cursor: cursor || null }, setResult);
-	}
-	function original(row, offset) {
-		if (!offset) setContent(null);
-		load("nday.sources.content", { source: row.source, id: row.id, revision: row.revision, offset: offset || 0 }, function (value) { setContent(Object.assign({}, value.content, { title: row.title })); });
-	}
-	function displayTitle(row) {
-		if (String(row.id).indexOf("file:") === 0) return String(row.title || "来源资料").split("/").pop().replace(/\.(?:yaml|yml|md|txt|json)$/i, "");
-		return row.title && row.title !== row.id ? row.id + " · " + row.title : row.id;
-	}
-	return React.createElement("details", { className: "dsh-hnt-panel", "aria-label": "本地来源资料" },
-		React.createElement("summary", null, "本地资料检索"),
-		React.createElement("div", { className: "dsh-hnt-row", style: { marginTop: 12 } },
-			React.createElement("input", { className: "dsh-hnt-input", "aria-label": "本地资料关键词", placeholder: "产品、组件或 CVE 编号", value: query, disabled: busy, maxLength: 300,
-				onChange: function (event) { setQuery(event.target.value); setResult(null); setContent(null); },
-				onKeyDown: function (event) { if (event.key === "Enter" && !busy) search(null); } }),
-			React.createElement(Btn, { disabled: busy, onClick: function () { search(null); } }, busy ? "读取中…" : "检索本地资料")),
-		notice ? React.createElement("div", { role: "alert", className: "dsh-hnt-notice is-error" }, notice) : null,
-		result ? React.createElement("div", null,
-			React.createElement("div", { className: "dsh-hnt-sub" }, "找到 " + result.total + " 条，当前显示 " + result.rows.length + " 条"),
-			React.createElement("div", { style: { maxHeight: 360, overflowY: "auto", marginBottom: 8 } }, result.rows.map(function (row) {
-				var known = NDAY_FREE_SOURCES.find(function (source) { return source.id === row.source; });
-				return React.createElement("div", { key: row.dedupKey, style: { marginTop: 12 } },
-				React.createElement("div", null, displayTitle(row)),
-				React.createElement("div", { className: "dsh-hnt-sub" }, (known ? known.label : row.source) + " · " + (row.published ? row.published.slice(0, 10) : "披露时间未知") + (row.requiresSourceReview ? " · 需要回源复核" : "")),
-				React.createElement(Btn, { disabled: busy, onClick: function () { original(row, 0); } }, "查看来源原文")); })),
-			result.nextCursor ? React.createElement(Btn, { disabled: busy, onClick: function () { search(result.nextCursor); } }, "下一页资料") : null) : null,
-		content ? React.createElement("div", { "aria-label": "来源原文", style: { marginTop: 12 } },
-			React.createElement("div", { className: "dsh-hnt-sub" }, displayTitle(content) + (content.representation === "serialized-api-json" ? " · 公告 JSON" : "") + " · 原文片段 " + content.offset + "–" + (content.offset + content.text.length)),
-			React.createElement("pre", { style: { whiteSpace: "pre-wrap", maxHeight: 300, overflow: "auto" } }, content.text),
-			content.nextOffset !== null ? React.createElement(Btn, { disabled: busy, onClick: function () { original(content, content.nextOffset); } }, "继续读取原文") : null) : null);
-}
-
-function NdayPolicySettings() {
-	var [data, setData] = useState(null);
-	var [notice, setNotice] = useState(null);
-	var [busy, setBusy] = useState(false);
-	var alive = useRef(true);
-	var [repositoryUrl, setRepositoryUrl] = useState("");
-	var [repositoryMode, setRepositoryMode] = useState("sync");
-	function errorText(error) { return String((error && error.message) || error || "操作失败"); }
-	function reload() {
-		return api("nday.config.get").then(function (r) {
-			if (!alive.current) return;
-			if (!r.ok) throw new Error(errorText(r.error));
-			setData(r);
-		}).catch(function (e) { if (alive.current) setNotice({ kind: "error", text: errorText(e) }); });
-	}
-	function refreshStatus() {
-		return api("nday.collector.status").then(function (r) {
-			if (!alive.current) return;
-			if (!r.ok) throw new Error(errorText(r.error));
-			setData(function (prev) { return Object.assign({}, prev, { status: r.status, job: r.job, reviews: r.reviews, reviewJob: r.reviewJob }); });
-		}).catch(function (e) { if (alive.current) setNotice({ kind: "error", text: errorText(e) }); });
-	}
-	useEffect(function () { alive.current = true; reload(); return function () { alive.current = false; }; }, []);
-	var running = !!(data && ((data.job && data.job.running) || (data.status && data.status.running) || (data.reviewJob && data.reviewJob.running)));
-	useEffect(function () {
-		if (!running) return;
-		var cancelled = false, timer;
-		function poll() { timer = setTimeout(function () { refreshStatus().finally(function () { if (!cancelled) poll(); }); }, 2500); }
-		poll(); return function () { cancelled = true; clearTimeout(timer); };
-	}, [running]);
-	function patch(section, key, value) {
-		setData(function (prev) { var next = Object.assign({}, prev); next[section] = Object.assign({}, prev[section]); next[section][key] = value; return next; });
-	}
-	function toggleSource(id) {
-		var selected = (data.collector.sources || []).slice();
-		var index = selected.indexOf(id);
-		if (index < 0) selected.push(id); else selected.splice(index, 1);
-		patch("collector", "sources", selected);
-	}
-	function save() {
-		setBusy(true); setNotice(null);
-		return api("nday.config.set", { policy: data.policy, collector: data.collector }).then(function (r) {
-			if (!r.ok) throw new Error(errorText(r.error));
-			if (alive.current) { setData(function (prev) { return Object.assign({}, prev, { policy: r.policy, collector: r.collector }); }); setNotice({ kind: "success", text: "已保存" }); }
-		}).catch(function (e) { if (alive.current) setNotice({ kind: "error", text: errorText(e) }); }).finally(function () { if (alive.current) setBusy(false); });
-	}
-	function update(source) {
-		setBusy(true); setNotice(null);
-		return api("nday.collector.start", { collector: data.collector, source: source || null }).then(function (r) {
-			if (!r.ok) throw new Error(errorText(r.error));
-			if (alive.current) { setData(function (prev) { return Object.assign({}, prev, { job: r.job }); }); setNotice({ kind: "success", text: "更新已启动，可以离开此页。部分完成时再次点击更新即可续传。" }); }
-		}).catch(function (e) { if (alive.current) setNotice({ kind: "error", text: errorText(e) }); }).finally(function () { if (alive.current) setBusy(false); });
-	}
-	function subscribeRepository() {
-		setBusy(true); setNotice(null);
-		return api("nday.repository.add", { url: repositoryUrl, mode: repositoryMode }).then(function (r) {
-			if (!r.ok) throw new Error(errorText(r.error));
-			if (alive.current) { setData(function (prev) { return Object.assign({}, prev, { collector: r.collector }); }); setRepositoryUrl(""); setNotice({ kind: "success", text: "已订阅，点击更新即可获取资料。" }); }
-		}).catch(function (e) { if (alive.current) setNotice({ kind: "error", text: errorText(e) }); }).finally(function () { if (alive.current) setBusy(false); });
-	}
-	function removeRepository(id) {
-		setBusy(true); setNotice(null);
-		return api("nday.repository.remove", { id: id }).then(function (r) {
-			if (!r.ok) throw new Error(errorText(r.error));
-			if (alive.current) { setData(function (prev) { return Object.assign({}, prev, { collector: r.collector }); }); setNotice({ kind: "success", text: "已停止订阅，历史资料和知识条目保留。" }); }
-		}).catch(function (e) { if (alive.current) setNotice({ kind: "error", text: errorText(e) }); }).finally(function () { if (alive.current) setBusy(false); });
-	}
-	function reviewNow() {
-		setBusy(true); setNotice(null);
-		return api("nday.reviews.start", { collector: data.collector }).then(function (r) {
-			if (!r.ok) throw new Error(errorText(r.error));
-			if (alive.current) setData(function (prev) { return Object.assign({}, prev, { collector: r.collector, reviewJob: r.reviewJob }); });
-		}).catch(function (e) { if (alive.current) setNotice({ kind: "error", text: errorText(e) }); }).finally(function () { if (alive.current) setBusy(false); });
-	}
-	if (!data) return React.createElement("div", { role: "status" }, notice ? notice.text : "加载情报源…", React.createElement(Btn, { onClick: reload }, "重试"));
-	var collector = data.collector || {}, policy = data.policy || {}, status = data.status || {};
-	var disabled = busy || running;
-	var states = { complete: "本轮完成", partial: "部分完成，点击更新可续传", "partial-failed": "中途失败，点击更新可重试", failed: "更新失败", backoff: "等待重试，可手动更新", limited: "仅有线索" };
-	var purposes = {
-		"cisa-kev": "已被在野利用的漏洞清单", "cve-official": "CVE 官方近期变更", "cve-official-git": "CVE 官方完整库，首次需要 Git 和较大下载",
-		"nvd": "版本影响与产品条件", "osv": "开源依赖漏洞，首次全库下载约数 GB，可续传",
-		"github-advisories": "开源软件安全公告", "nuclei": "模板更新线索，不包含模板正文",
-		"nuclei-files": "Nuclei 模板正文，需要 Git", "afrog-files": "Afrog 公开 PoC 正文，需要 Git",
-		"github-research-files": "Awesome-POC 研究材料，需要 Git", "wechat": "公众号公开检索，需要填写检索词，不能全量同步"
-	};
-	function numberInput(section, key, label, min, max) {
-		return React.createElement("label", { className: "dsh-hnt-field" }, label,
-			React.createElement("input", { className: "dsh-hnt-input", type: "number", disabled: disabled, min: min, max: max, value: data[section][key], onChange: function (e) { patch(section, key, Number(e.target.value)); } }));
-	}
-	return React.createElement("div", { style: { maxWidth: 860 } },
-		React.createElement("h3", null, "漏洞情报更新"),
-		React.createElement("p", null, "把公开漏洞公告和 PoC 资料更新到本机，供 Nday 匹配检索。勾选来源后点更新即可，不需要先保存；这一步不扫描目标。"),
-		notice ? React.createElement("div", { role: "status", className: "dsh-hnt-notice is-" + notice.kind }, notice.text) : null,
-		data.job && data.job.error ? React.createElement("div", { role: "alert" }, "更新未完成：" + data.job.error) : null,
-		data.reviewJob && data.reviewJob.error ? React.createElement("div", { role: "alert" }, "AI 整理未完成：" + data.reviewJob.error) : null,
-		data.reviewJob && data.reviewJob.indexWarning ? React.createElement("div", { role: "alert" }, data.reviewJob.indexWarning) : null,
-		React.createElement("div", { className: "dsh-hnt-panel", "aria-label": "GitHub 仓库订阅" },
-			React.createElement("h4", null, "订阅 GitHub 仓库"),
-			React.createElement("div", { className: "dsh-hnt-row" },
-				React.createElement("input", { className: "dsh-hnt-input", "aria-label": "GitHub 仓库地址", value: repositoryUrl, placeholder: "https://github.com/作者/仓库", disabled: disabled, onChange: function (e) { setRepositoryUrl(e.target.value); } }),
-				React.createElement("select", { className: "dsh-hnt-select", "aria-label": "仓库更新方式", value: repositoryMode, disabled: disabled, onChange: function (e) { setRepositoryMode(e.target.value); } },
-					React.createElement("option", { value: "sync" }, "仅同步"), React.createElement("option", { value: "ai" }, "同步并由 AI 整理")),
-				React.createElement(Btn, { primary: true, disabled: disabled || !repositoryUrl.trim(), onClick: subscribeRepository }, "订阅")),
-			React.createElement("p", { className: "dsh-hnt-sub" }, "首次读取文本和代码文件，之后只同步变化。AI 整理使用默认模型，保存原文依据与来源版本，供知识库检索。"),
-			(collector.repositories || []).map(function (repository) {
-				var selected = (collector.sources || []).indexOf(repository.id) >= 0;
-				var current = (status.checkpoints || {})[repository.id] || {};
-				return React.createElement("div", { className: "dsh-hnt-row", key: repository.id },
-					React.createElement("label", { className: "dsh-hnt-check" }, React.createElement("input", { type: "checkbox", disabled: disabled, checked: selected, onChange: function () { toggleSource(repository.id); } }), repository.repository),
-					React.createElement("select", { className: "dsh-hnt-select", "aria-label": repository.repository + " 更新方式", disabled: disabled, value: repository.mode, onChange: function (e) {
-						patch("collector", "repositories", collector.repositories.map(function (row) { return row.id === repository.id ? Object.assign({}, row, { mode: e.target.value }) : row; }));
-					} }, React.createElement("option", { value: "sync" }, "仅同步"), React.createElement("option", { value: "ai" }, "AI 整理")),
-					React.createElement("span", { className: "dsh-hnt-sub" }, states[current.status] || "尚未更新"),
-					React.createElement(Btn, { disabled: disabled || !selected, onClick: function () { update(repository.id); } }, "更新此仓库"),
-					React.createElement(Btn, { disabled: disabled, onClick: function () { removeRepository(repository.id); } }, "停止订阅"),
-					current.error ? React.createElement("span", { role: "alert" }, current.error) : null);
-			})),
-		data.job && !data.job.running && data.job.summary ? React.createElement("div", { role: "status" }, "本轮结束：完成 " + data.job.summary.completeSources + " 个源，部分 " + data.job.summary.partialSources + " 个，失败 " + data.job.summary.failedSources + " 个。详见下方各源。") : null,
-		status.interrupted ? React.createElement("div", { role: "status" }, "上轮更新被中断，点击更新可继续已有进度。") : null,
-		React.createElement("div", { className: "dsh-hnt-row" },
-			React.createElement(Btn, { primary: true, disabled: disabled || !(collector.sources || []).length, onClick: function () { return update(); } }, running ? "正在更新…" : "更新已选源"),
-			React.createElement(Btn, { disabled: busy, onClick: refreshStatus }, "刷新进度")),
-		React.createElement("p", { role: "status", className: "dsh-hnt-sub" }, running ? "后台更新中；关闭宿主会中断，已提交的进度保留。" : "上次运行：" + (status.lastRunAt ? fmtTime(status.lastRunAt) : "尚未更新")),
-		NDAY_FREE_SOURCES.map(function (source) {
-			var checked = (collector.sources || []).indexOf(source.id) >= 0;
-			var row = (status.sources || []).find(function (r) { return r.source === source.id; });
-			var checkpoint = (status.checkpoints || {})[source.id] || {};
-			var current = row || checkpoint;
-			var active = running && data.job && data.job.sources.indexOf(source.id) >= 0;
-			return React.createElement("div", { key: source.id, className: "dsh-hnt-panel" },
-				React.createElement("div", { className: "dsh-hnt-row" },
-					React.createElement("label", { className: "dsh-hnt-check" }, React.createElement("input", { type: "checkbox", disabled: disabled, checked: checked, onChange: function () { toggleSource(source.id); } }), source.label),
-					React.createElement(Btn, { disabled: disabled || !checked, onClick: function () { return update(source.id); } }, "更新此源")),
-				React.createElement("div", { className: "dsh-hnt-sub" }, purposes[source.id]),
-				React.createElement("div", { role: "status" }, (active ? "本轮已排队 · " : "") + (states[current.status] || "尚未更新") + (row && row.count != null ? " · 本轮读取 " + row.count + " 条" : "")),
-				current.downloadTotalBytes ? React.createElement("div", null, "已下载 " + (current.downloadBytes / 1048576).toFixed(1) + " / " + (current.downloadTotalBytes / 1048576).toFixed(1) + " MB") : null,
-				current.error ? React.createElement("div", { role: "alert" }, "原因：" + errorText(current.error)) : null,
-				current.limitation ? React.createElement("div", null, current.limitation) : null,
-				current.contentGaps ? React.createElement("div", null, "原文缺口：" + current.contentGaps) : null);
-		}),
-		(collector.sources || []).indexOf("wechat") >= 0 ? React.createElement("label", { className: "dsh-hnt-field" }, "公众号检索词", React.createElement("input", { disabled: disabled, className: "dsh-hnt-input", value: collector.wechatQuery || "", placeholder: "例如：泛微 漏洞", onChange: function (e) { patch("collector", "wechatQuery", e.target.value); } })) : null,
-		React.createElement("div", { className: "dsh-hnt-panel" },
-			React.createElement("label", { className: "dsh-hnt-check" }, React.createElement("input", { type: "checkbox", disabled: disabled, checked: collector.enabled === true, onChange: function (e) { patch("collector", "enabled", e.target.checked); } }), "宿主运行时自动更新"),
-			numberInput("collector", "intervalHours", "自动更新间隔（小时）", 1, 168),
-			React.createElement(Btn, { disabled: disabled, onClick: save }, "保存设置")),
-		React.createElement("div", { className: "dsh-hnt-panel", "aria-label": "AI 知识整理" },
-			React.createElement("h4", null, "AI 知识整理"),
-			React.createElement("p", { className: "dsh-hnt-sub" }, "仅处理变化内容。生成条目保留待复核状态；引用存在不代表结论已经验证。超长原文保留待精读。"),
-			["github-research-files", "nuclei-files", "afrog-files"].map(function (id) { return React.createElement("label", { className: "dsh-hnt-check", key: id },
-				React.createElement("input", { type: "checkbox", disabled: disabled, checked: (collector.reviewSources || []).indexOf(id) >= 0, onChange: function () {
-					var ids = (collector.reviewSources || []).slice(), position = ids.indexOf(id); if (position < 0) ids.push(id); else ids.splice(position, 1); patch("collector", "reviewSources", ids);
-				} }), "整理 " + NDAY_FREE_SOURCES.find(function (row) { return row.id === id; }).label); }),
-			numberInput("collector", "reviewPerRun", "每轮最多整理（篇）", 1, 20),
-			numberInput("collector", "reviewPer24Hours", "24 小时最多模型请求（次）", 1, 100),
-			React.createElement(Btn, { disabled: disabled, onClick: save }, "保存整理设置"),
-			React.createElement(Btn, { disabled: disabled, onClick: reviewNow }, "继续整理 / 重试"),
-			React.createElement("p", { role: "status" }, "累计入库 " + ((data.reviews && data.reviews.counts.complete) || 0) + " · 待整理 " + ((data.reviews && data.reviews.counts.pending) || 0) + " · 失败 " + ((data.reviews && data.reviews.counts.error) || 0) + " · 24 小时请求 " + ((data.reviews && data.reviews.callsLast24Hours) || 0)),
-			(data.reviews && data.reviews.recent || []).filter(function (row) { return row.error; }).slice(0, 3).map(function (row) {
-				return React.createElement("div", { key: row.source + row.id, className: "dsh-hnt-sub" }, row.error);
-			})),
-		React.createElement("details", { className: "dsh-hnt-panel" },
-			React.createElement("summary", null, "高级设置（通常无需修改）"),
-			React.createElement("p", null, "每轮达到页数上限会保留进度，下次更新继续。影响候选排序的参数不改变来源内容。"),
-			numberInput("collector", "lastDays", "首次补查最近多少天", 1, 365),
-			numberInput("collector", "limit", "每页条数", 1, 100),
-			numberInput("collector", "maxPagesPerRun", "每源每轮最多页数", 1, 100),
-			numberInput("policy", "recentDays", "优先考虑近期披露（天）", 1, 3650),
-			numberInput("policy", "maxCandidates", "每轮候选上限", 1, 200),
-			numberInput("policy", "queriesPerNday", "每条情报最多资产查询数", 1, 10),
-			React.createElement(Btn, { disabled: disabled, onClick: save }, "保存高级设置")),
-		React.createElement(SourceLibrary),
-		React.createElement("p", { className: "dsh-hnt-sub" }, "同步完成只说明本轮数据已获取。公告、产品命中和 PoC 文件都不等于目标存在漏洞。CNVD、CNNVD 当前需要人工补查。"));
-}
-
-// 平台结局中文标签（v6 第 7.3 节）：无密钥/无权限/额度用尽/语法错/网络失败/无命中要能分辨。
-var SEARCH_STATUS_LABEL = { ok: "成功", "no-hits": "无命中", "no-key": "未配置密钥", "field-forbidden": "字段无权限", "quota-exhausted": "额度用尽", syntax: "语法错误", network: "网络失败", auth: "密钥或账号无效", "rate-limited": "被限流", unknown: "出错" };
-// v6 第 7.3 节表格的四种目的；选目的只改提示与结果关注点，不改查询语义。
+var SEARCH_STATUS_LABEL = {
+	ok: "成功",
+	"no-hits": "无命中",
+	"no-key": "未配置密钥",
+	"field-forbidden": "字段无权限",
+	"quota-exhausted": "额度用尽",
+	syntax: "语法错误",
+	network: "网络失败",
+	auth: "密钥或账号无效",
+	"rate-limited": "被限流",
+	unknown: "出错"
+};
 var SEARCH_PURPOSES = [
 	{ id: "entry", label: "补范围内入口", hint: "明确域名/地址范围、已有资产", placeholder: 'domain="example.test" port:8080' },
 	{ id: "admin", label: "找后台/登录口", hint: "已知产品和具体页面/响应头/图标/FID 特征", placeholder: 'title:"管理后台" body:"login"' },
-	{ id: "nday", label: "找相关 Nday 部署", hint: "有来源的受影响产品与可查询特征", placeholder: 'app:"Apache" version:"2.4"' },
+	{ id: "nday", label: "查公开漏洞部署", hint: "有来源的受影响产品与可查询特征", placeholder: 'app:"Apache" version:"2.4"' },
 	{ id: "similar", label: "查同类授权资产", hint: "已核实入口提取的特征组合", placeholder: 'icon_hash="116323821"' }
 ];
 
@@ -722,15 +492,6 @@ function apply(ctx) {
 			label: function () { return "资产平台 API"; }
 		}, function () { return React.createElement(AssetPlatformsSettings, null); });
 	});
-	ctx.slots.inject("settings.section", function () {
-		return ctx.slots.register({
-			name: "settings.section",
-			id: "hunter-nday-policy",
-			order: 139,
-			label: function () { return "漏洞情报更新"; }
-		}, function () { return React.createElement(NdayPolicySettings, null); });
-	});
-
 }
 
 module.exports = { name: "dsh-hunter-client", inject: ["slots", "configForms", "sessions", "conversation"], apply: apply };

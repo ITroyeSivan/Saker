@@ -17,15 +17,27 @@ function cftFromProfileConfig(home) {
   const profiles = path.join(home, 'profiles');
   let names = [];
   try { names = fs.readdirSync(profiles); } catch { return ''; }
+  const candidates = [];
   for (const name of names) {
     let text = '';
     try { text = fs.readFileSync(path.join(profiles, name, 'cordis.patch.yml'), 'utf8'); } catch { continue; }
-    const keyRe = /key:\s*["']?([A-Za-z0-9_]*chrome[A-Za-z0-9_]*)["']?/gi;
-    let match;
-    while ((match = keyRe.exec(text)) !== null) {
-      const pathMatch = /path:\s*["']?([^"'\r\n]+)/i.exec(text.slice(match.index, match.index + 500));
-      if (pathMatch) return pathMatch[1].trim();
+    const lines = text.split(/\r?\n/);
+    for (let index = 0; index < lines.length; index += 1) {
+      if (!/chrome_for_testing/i.test(lines[index])) continue;
+      const inline = /chrome_for_testing\s*:\s*["']?([^"'\r\n]+?chrome(?:\.exe)?["']?)\s*$/i.exec(lines[index]);
+      if (inline) candidates.push(inline[1].replace(/\\\\/g, '\\').trim());
+      for (let next = index + 1; next < Math.min(lines.length, index + 10); next += 1) {
+        if (/^\s{2,}-?\s*key\s*:/i.test(lines[next]) && !/^\s+path\s*:/i.test(lines[next])) break;
+        const nested = /^\s+path\s*:\s*["']?([^"'\r\n]+)/i.exec(lines[next]);
+        if (nested) {
+          candidates.push(nested[1].replace(/\\\\/g, '\\').trim());
+          break;
+        }
+      }
     }
+  }
+  for (const candidate of new Set(candidates)) {
+    try { if (fs.statSync(candidate).isFile()) return path.resolve(candidate); } catch { /* try the next configured path */ }
   }
   return '';
 }

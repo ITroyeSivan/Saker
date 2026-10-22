@@ -4,7 +4,7 @@
 # 当前模式下**本来就调不动** —— 各插件早已声明自己的模式门禁：
 #   · webshell-mgr  ALLOWED_MODES = ["pentest"]      （非 pentest 硬拒绝）
 #   · ctf-observer  MODE_ID = "ctf-solver"            （只在 ctf-solver 模式生效）
-#   · redteam-results / campaign-memory / trace-vault / knowledge-hub
+#   · redteam-results / campaign-memory / trace-vault
 #                   MODE_IDS = ["pentest","code-audit","ctf-solver"]
 #
 # 本插件在会话创建时用宿主原生的 per-agent 过滤（agent.ctx.tools.restrict）把

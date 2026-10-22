@@ -71,7 +71,7 @@ check(mcpLib.includes('.saker-ui-btn') && mcpLib.includes('.dsh-mcs-btn,.dsh-mcs
 // 三个内联 style 插件：根容器打 data-saker-ui，尺寸由共享 CSS 的作用域规则给。
 check(css.includes('[data-saker-ui] button{height:32px}'), '共享 CSS 给 data-saker-ui 根里的按钮 32px');
 check(css.includes('[data-saker-ui] input'), '共享 CSS 给 data-saker-ui 根里的输入 36px');
-for (const [name, marker] of [['dsh-knowledge-hub', 'knowledge'], ['dsh-sec-config', 'sec-config'], ['dsh-skill-browse', 'skill-browse']]) {
+for (const [name, marker] of [['dsh-sec-config', 'sec-config'], ['dsh-skill-browse', 'skill-browse']]) {
   const source = fs.readFileSync(path.join(root, 'plugins', name, 'lib', 'client.js'), 'utf8');
   check(source.includes(`'data-saker-ui': '${marker}'`), `${name} 根容器接入共享组件层`);
 }

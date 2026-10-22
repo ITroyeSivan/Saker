@@ -1,5 +1,5 @@
 // 本次模型输入分项（v6 第 6.3 节）：把当前会话最近一次请求拆成
-// 固定说明、工具定义、任务事实、知识、用户消息和历史，敏感字段遮蔽；
+// 固定说明、工具定义、任务事实、用户消息和历史，敏感字段遮蔽；
 // 原始（已遮蔽的）记录另存私有目录，不随公开内容发布。
 //
 // 只做只读计算：读会话 surface 与最近一次 request/header，不访问目标、不调用模型。
@@ -22,15 +22,15 @@ function textOf(message) {
   return content.filter(part => part?.type === 'text').map(part => String(part.text ?? '')).join('\n');
 }
 
-const BUCKETS = ['fixed', 'tools', 'taskFacts', 'knowledge', 'user', 'history'];
+const BUCKETS = ['fixed', 'tools', 'taskFacts', 'user', 'history'];
 export const BUCKET_LABELS = {
-  fixed: '固定说明', tools: '工具定义', taskFacts: '任务事实', knowledge: '知识', user: '用户消息', history: '历史',
+  fixed: '固定说明', tools: '工具定义', taskFacts: '任务事实', user: '用户消息', history: '历史',
 };
 
 /**
  * 从会话事件里算出分项字节数。`events` 为按时间顺序的 `{ type, data }` 列表，
  * `tools` 为最近一次 request/header 里的工具定义（可选）。
- * 运行时上下文快照按 section 名拆分：任务状态进「任务事实」，知识进「知识」，其余进「固定说明」。
+ * 运行时上下文快照按 section 名拆分：任务状态进「任务事实」，其余进「固定说明」。
  */
 export function breakdownFromEvents(events, tools = []) {
   const buckets = Object.fromEntries(BUCKETS.map(name => [name, { bytes: 0, count: 0 }]));
@@ -55,7 +55,6 @@ export function breakdownFromEvents(events, tools = []) {
         const name = String(section?.name || '');
         const text = String(section?.text || '');
         if (name === 'saker-pentest-task-state') add('taskFacts', B(text));
-        else if (/^knowledge-hub/.test(name)) add('knowledge', B(text));
         else add('fixed', B(text));
       }
       continue;

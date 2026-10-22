@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import { checkRegistered, configuredToolPaths, hasBin, registerableDefs, resolveToolBin, resolveToolInvocation, RATE_DEFAULTS, buildNucleiArgs, buildHttpxArgs, summarizeHttpxResults, runScan, governPreview, spillOutput, breakerCheck, breakerRecord, runGoverned, persistScanRecords, listScanJobs, ffufParse, apply } from "../lib/index.js";
 import { TOOL_DEFS, buildArgs, tiersLine } from "../lib/registry.js";
 import { parseAssetPayload } from "../lib/ingest.js";
+import { readOobConfig, runOobProbe } from "../lib/oob-probe.js";
 
 const F = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), "fixture");
 let failed = 0;
@@ -122,6 +123,7 @@ const expect = (n, c, d) => { if (c) console.log(`ok   ${n}`); else { failed++; 
 	const tools = new Map();
 	apply({ tools: { register(def) { tools.set(def.name, def); } } });
 	expect("asset_ingest 已注册", tools.has("asset_ingest"));
+	expect("oob_probe 已从扫描工具提供，单提供方", tools.has("oob_probe"));
 	const ws = fs.mkdtempSync(path.join(os.tmpdir(), "asset-ingest-"));
 	try {
 		const out = await tools.get("asset_ingest").execute({
@@ -139,6 +141,43 @@ const expect = (n, c, d) => { if (c) console.log(`ok   ${n}`); else { failed++; 
 		expect("导入写了 evidence-index", fs.readFileSync(path.join(ws, "evidence-index.md"), "utf8").includes("asset_ingest"));
 		const escape = await tools.get("asset_ingest").execute({ workspace: ws, file: "../outside.json" });
 		expect("asset_ingest 拒绝路径越界", escape.ok === false && String(escape.error).includes("越出"));
+	} finally {
+		fs.rmSync(ws, { recursive: true, force: true });
+	}
+}
+
+// ── DNSLog 带外原语：配置缺失明确失败，逐资产归因，不把错误页当回连 ──
+{
+	const config = readOobConfig({ dnslog: { url: 'http://dnslog.example.test', token: 'synthetic-token', domain: 'callbacks.example.test' } });
+	expect("oob 配置读取平台、token 与接收域名", config.base === 'http://dnslog.example.test' && config.root === 'callbacks.example.test');
+	const missing = await runOobProbe({ action: 'new' }, { config: { base: '', token: '', root: '' } });
+	expect("oob 配置缺失时不伪造回连", !missing.ok && missing.error.includes('DNSLog') && missing.error.includes('token'));
+	const created = await runOobProbe({ action: 'new' }, { config });
+	expect("oob new 分配可归因子域", created.ok && /^saker-[a-f0-9]{8}$/.test(created.label) && created.domain.endsWith('.callbacks.example.test'));
+	const ws = fs.mkdtempSync(path.join(os.tmpdir(), "oob-probe-"));
+	try {
+		const batch = await runOobProbe({
+			action: 'batch',
+			assets: 'https://oa.example.test, https://api.example.test\nhttps://oa.example.test',
+		}, { config, workspace: ws });
+		expect("oob batch 去重并为每个资产分配子域", batch.ok && batch.assets === 2 && batch.rows[0].domain !== batch.rows[1].domain, JSON.stringify(batch));
+		const tableFile = path.join(ws, '.saker', `oob-batch-${batch.label}.json`);
+		expect("oob batch 落盘归因表", fs.existsSync(tableFile));
+		const checked = await runOobProbe({ action: 'check', label: batch.label, workspace: ws, waitMs: 0 }, {
+			config,
+			workspace: ws,
+			fetchImpl: async url => ({
+				status: 200,
+				text: async () => JSON.stringify({ data: [{ name: 'x.' + batch.rows[0].domain, remote_addr: '203.0.113.8', created_at: '2026-10-22T12:00:00Z' }] }),
+				url,
+			}),
+		});
+		expect("oob check 按子域后缀归因到具体资产", checked.ok && checked.hit === true && checked.hitAssets[0] === batch.rows[0].asset, JSON.stringify(checked));
+		const unknown = await runOobProbe({ action: 'check', label: 'saker-deadbeef', waitMs: 0 }, {
+			config,
+			fetchImpl: async () => ({ status: 502, text: async () => '<html>bad gateway</html>' }),
+		});
+		expect("oob 平台错误页不能伪装成回连", !unknown.ok && String(unknown.error).includes('无法识别'));
 	} finally {
 		fs.rmSync(ws, { recursive: true, force: true });
 	}

@@ -11,6 +11,8 @@ export const RETIRED_PLUGINS = Object.freeze([
   // 测试内容目录和任务设置替代；保留仓库源码只作迁移参考，不再进入产品安装。
   '@dsh-external/dsh-method-stack',
   '@dsh-external/dsh-route-boost',
+  '@dsh-external/dsh-knowledge-hub',
+  '@dsh-external/dsh-nday-hunter',
 ])
 export function productPluginDirectories(root) {
   return readdirSync(join(root, 'plugins')).sort().filter(name => {

@@ -22,14 +22,6 @@ export const PACKS = [
     hint: '只给 URL 需有限识别，或用户明确要求查少量资产时加载；不自动扩大范围',
   },
   {
-    id: 'nday',
-    label: '公开漏洞与情报源',
-    prefixes: ['nday_'],
-    modes: ['pentest'],
-    defaultVisible: false,
-    hint: 'Nday发现、核对明确组件或维护情报源时加载；已有业务问题无需先查全库',
-  },
-  {
     id: 'active-scan',
     label: '主动扫描器',
     prefixes: ['nmap_portscan', 'dirsearch_dirs', 'ffuf_fuzz', 'nuclei_scan', 'afrog_scan', 'sqlmap_inject', 'katana_crawl', 'gau_urls'],

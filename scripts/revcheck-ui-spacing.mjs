@@ -12,7 +12,7 @@ import { spawnSync } from 'node:child_process';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const boundary = path.resolve(root, '../_ref/tmp');
 const suite = path.join(root, 'scripts', 'test-ui-spacing.mjs');
-const guardFiles = ['plugins/dsh-redteam-results/lib/client.js', 'plugins/dsh-knowledge-hub/lib/client.js', 'plugins/dsh-sec-config/lib/client.js'];
+const guardFiles = ['plugins/dsh-redteam-results/lib/client.js', 'plugins/dsh-sec-config/lib/client.js'];
 const digest = () => createHash('sha256').update(guardFiles.map((rel) => fs.readFileSync(path.join(root, rel))).join('\n')).digest('hex');
 const before = digest();
 

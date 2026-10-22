@@ -24,22 +24,8 @@ Saker 本体（模式/提示词/插件源码/文档）以 MIT 授权（见根目
 
 ## 4. 一般说明
 
-- `preset/*/refs/` 下其余知识库文档为团队自研方法论或整理自公开安全资料，README 已声明"仅用于授权测试学习"；其中引用到的外部检测模式（如私钥正则等）均属公开安全知识。
-- `preset/code-audit/refs/lang/*/semgrep-rules/` 为用户自建规则，无第三方许可负担。
-
-## 5. PayloadsAllTheThings — `preset/shared/refs/PayloadsAllTheThings/`
-
-- 来源：https://github.com/swisskyrepo/PayloadsAllTheThings（swisskyrepo）
-- 许可证：**MIT**（该目录内随附上游 `LICENSE` 原文）
-- 快照：commit `3ac2790`（master，浅克隆，2026-09-07 收录）
-- 收录范围：仅 `md/txt/yaml/yml` 文本（各章节 README、Intruder payload 清单、方法论），不含图片/二进制/脚本
-- 约束要点：MIT 允许自由使用与再分发，需保留版权声明与本声明；用途限定授权测试与学习（详见该目录 `_PATT_SOURCE_NOTICE.md`）
-
-## 6. 外部知识包 — `dsh-knowledge-hub`
-
-- 知识包目录 `plugins/dsh-knowledge-hub/packs/knowledge-packs.json` 只记录上游 URL、许可证、分支和稀疏路径。
-- 第三方知识内容不随 Saker 根包或插件包分发；安装后由用户机器从上游 Git 仓库同步到 `DSH_HOME/refs/imports/`。
-- 每个包独立声明 `bundle-safe`、`separate-pack` 或 `local-only`。CC BY-NC、GPL、无明确许可证的内容只允许本地导入，不进入 MIT 发布包。
-- 上游内容更新、撤回或删除由其原始仓库控制，用户可以在设置页或命令行重新同步。
+- `preset/code-audit/refs/lang/*/semgrep-rules/` 为项目自建规则，无第三方许可负担。
+- 公共安全知识库、PayloadsAllTheThings 镜像和 Nday 资料库已从 0.5.0 产品包退出；历史用户数据不由本仓库重新分发。
+- 用户自行导入的第三方文件仍受原始许可证约束，Saker 不因读取文件而改变其授权。
 
 如你是上述任一内容的权利人并认为本仓库的收录方式不妥，欢迎提 Issue 联系移除。

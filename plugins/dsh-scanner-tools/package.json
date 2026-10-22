@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-scanner-tools",
-  "version": "1.1.13",
+  "version": "1.2.0",
   "description": "调用本机扫描、爬取工具，导入已有扫描结果。",
   "files": [
     "lib",

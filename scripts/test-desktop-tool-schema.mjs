@@ -26,7 +26,7 @@ const disposers = [];
 const makeContext = () => ({
   tools: { register: tool => tools.push({ name: tool.name, parameters: tool.parameters, output: tool.output?.schema }), guard: () => {}, unregister: () => {} },
   // 收集 disposer：trace-vault 这类插件在 apply 里就开 SQLite，不释放的话
-  // 测试进程退出时删 DSH_HOME 会 EPERM（与知识库索引泄漏同一类问题）。
+  // 测试进程退出时删 DSH_HOME 会 EPERM。
   // 清理回调可能是函数，也可能是 async 函数返回的 Promise（redteam-results 就是后者）——
   // 只收集 function 会漏掉它，导致 SQLite 句柄留到退出、清理 EPERM。
   effect: callback => {
@@ -47,10 +47,6 @@ const makeContext = () => ({
 });
 const failures = [];
 const loaded = [];
-// 应用全部插件时 knowledge-hub 会安排后台自动同步（把随包语料索引进 DSH_HOME，单次可达 GB 级）。
-// 本测试只关心 schema 能否被真编译器接受，不需要索引；用插件自带的开关关掉它，
-// 否则每跑一轮回归就会先写再删约 1.2 GB（2026-10-11 实测）。
-process.env.DSH_KNOWLEDGE_AUTOSYNC = '0';
 for (const directory of productPluginDirectories(root)) {
   const entry = join(root, 'plugins', directory, 'lib', 'index.js');
   if (!existsSync(entry)) continue;
@@ -69,9 +65,11 @@ for (const dispose of disposers.reverse()) {
   try { await (typeof dispose === 'function' ? dispose() : dispose) } catch { /* 插件自己的清理失败不改变 schema 契约结论 */ }
 }
 assert.deepEqual(failures, [], 'every product plugin must apply with the shared context: ' + failures.join(' | '));
-// 这里是**默认配置**下的工具面（75 个）。tool-smoke 用 ctf-solver 预设时看到 103 个，
+assert(!tools.some(tool => /^(?:knowledge_|nday_)/.test(tool.name)), 'retired knowledge/Nday tools must not enter the model surface');
+assert(tools.some(tool => tool.name === 'oob_probe'), 'oob_probe must remain available from scanner-tools');
+// 这里是**默认配置**下的工具面；不同预设会按场景注册更多工具。
 // 因为部分工具按模式/工具包分发；本测试只关心"注册出来的 schema 能不能被真编译器接受"。
-assert(tools.length >= 70, `expected the default product tool surface, collected ${tools.length}`);
+assert(tools.length >= 50, `expected the reduced default product tool surface, collected ${tools.length}`);
 console.log(`ok ${loaded.length} product plugins registered ${tools.length} tool schemas for the real compiler`);
 const native = `
 const {createRequire}=require('node:module');

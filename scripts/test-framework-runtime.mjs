@@ -60,12 +60,6 @@ function research(sid){startTaskPolicy(store,sid,{mode:'0day',question:'Can fixt
 const pair={hypothesisId:'direction',normal:{requestId:'normal',requestRevision:'v1'},probe:{requestId:'probe',requestRevision:'v1'},methodId:method.id,methodVersion:method.version};
 try{
   delegateManager=createSiteWorkers(ctx,()=>store);
-  await test('local Nday reads need no invented task and do not relax target execution guards',async()=>{
-    for (const name of ['nday_catalog','nday_policy_get','nday_metrics']) assert.equal(taskExecutionGuard(store,'local-only',name),undefined);
-    assert.equal(readTaskPolicy(store,'local-only'),null);
-    assert.match(taskExecutionGuard(store,'local-only','nday_source_fetch'),/task_policy_missing/);
-    assert.match(taskExecutionGuard(store,'local-only','httpx_probe'),/task_policy_missing/);
-  });
   await test('action limits close site access and data changes without blocking local reads',async()=>{
     const id='action-limits'; parent(id,1,site);
     let policy=readTaskPolicy(store,id);
@@ -77,11 +71,7 @@ try{
     assert.equal(readTaskPolicy(store,id).allowTargetNetwork,false);
     assert.match(taskExecutionGuard(store,id,'httpx_probe'),/target_network_disabled/);
     assert.match(taskExecutionGuard(store,id,'send_http1_request'),/target_network_disabled/);
-    assert.match(taskExecutionGuard(store,id,'nday_match',Date.now(),{args:{targets:endpoint,scope:host,entryIds:'fixture'}}),/target_network_disabled/,'Nday 目标探针不能绕过网站访问开关');
     assert.match(taskExecutionGuard(store,id,'pwsh',Date.now(),{args:{command:'curl https://fixture.test/document'}}),/target_network_disabled/);
-    assert.equal(taskExecutionGuard(store,id,'zday_pattern'),undefined,'规划类工具不访问站点');
-    assert.equal(taskExecutionGuard(store,id,'knowledge_search'),undefined,'知识库检索仍可用');
-    assert.equal(taskExecutionGuard(store,id,'nday_source_fetch'),undefined,'外部公告查阅不访问被测站点');
     assert.equal(taskExecutionGuard(store,id,'read'),undefined,'本地读取不受网络限制');
     // redteam_execution 是本地入口（真正目标请求走执行适配器）：关闭网站访问后由适配器拒绝
     const get=row('readonly-get','own');
@@ -102,13 +92,6 @@ try{
     saveTaskContext(store,id,{assets:[{id:'asset',url:endpoint,inScope:true,reachable:true}],requests:[get],methods:[]});
     await assert.rejects(executeRecordedRequest(store,id,{requestId:'readonly-get',requestRevision:'v1',hypothesisId:'x'}),
       error=>!/read_only_target/.test(error.message));
-    // 尚未开始的任务：限制先记在选择里，开始时带进策略（test.content 全不选联动走这条）
-    setTaskActionLimits(store,'limits-later',{allowTargetNetwork:false,readOnly:true},'test-content-empty');
-    chooseTaskMode(store,'limits-later','regular',{workers:1});
-    startTaskPolicy(store,'limits-later',{mode:'regular',question:'还没开始就先关网站访问',target:site,budget:{toolCalls:5}});
-    const later=readTaskPolicy(store,'limits-later');
-    assert.equal(later.allowTargetNetwork,false,'未开始时的限制要带进策略');
-    assert.equal(later.readOnly,true,'未开始时的只读限制要带进策略');
     // 排除路径：规范化、按路径前缀带边界匹配、命中即在适配器拒绝
     assert.deepEqual(normalizeExcludedPaths('payment\n/api/delete\nhttps://other.test/keep'),['/payment','/api/delete','https://other.test/keep']);
     assert.deepEqual(normalizeExcludedPaths(['/a','/a','  ','/b']),['/a','/b']);
@@ -270,89 +253,9 @@ try{
     const before=starts.length;await delegateManager.send(p,{childId:id,message:'Inspect only the newly supplied product prerequisite'});
     assert.equal(starts.length,before);assert.equal(readTaskPolicy(store,id).mode,'0day');assert.equal(readTaskPolicy(store,id).parentRound,old+100);assert.equal(readTaskPolicy(store,id).used.toolCalls,0);assert.equal(readTaskPolicy(store,id).budget.discoveryCalls,0);
     assert.equal(siteWorkerRows(store,p.session.id)[0].reports.length,1);
-    assert.match(taskExecutionGuard(store,id,'recorded-http-execution'),/observation_budget_exhausted/);assert.equal(readTaskPolicy(store,p.session.id).used.toolCalls,0);
-    await delegateManager.cleanup(p);assert(!live.has(id));
-  });
-  await test('same-round regular to Nday reuses the released child and preserves consumed operations, deadline, materials and reports',async()=>{
-    const p=parent('sequential-worker',1,site,'regular-to-nday');
-    const file=path.join(home,'sequential.js');fs.writeFileSync(file,'fetch("./fixture");');
-    indexBusinessMaterials(store,p.session.id,home,{site,files:[{path:file,url:site+'/fixture.js'}]});
-    const id=(await delegateManager.delegate(p,delegate)).childId;
-    for(const name of ['nday_catalog','nday_match','nday_policy_get'])assert(siteWorkerRows(store,p.session.id).at(-1).allowedTools.includes(name),'persisted filter must support the approved next phase: '+name);
     assert.equal(taskExecutionGuard(store,id,'recorded-http-execution'),undefined);
-    await delegateManager.report(live.get(id),{state:'completed',summary:'Synthetic product and selected material recorded for the next phase.'});
-    await hooks.get('agent/turn-stopping')({agent:live.get(id),turn:1});await settle();
-    const childBefore=readTaskPolicy(store,id),parentBefore=readTaskPolicy(store,p.session.id);
-    const contextBefore=readTaskContext(store,id),materialsBefore=businessMaterialView(store,id);
-    const startsBefore=starts.length;
-    updateTaskProgress(store,p.session.id,{regularComplete:true,note:'Continue related public product metadata only'});
-    const reused=await delegateManager.delegate(p,delegate);assert.equal(reused.childId,id);assert(reused.reused);
-    await delegateManager.send(p,{childId:id,message:'Reuse saved synthetic product metadata for Nday prerequisites.'});
-    const childAfter=readTaskPolicy(store,id),parentAfter=readTaskPolicy(store,p.session.id);
-    assert.equal(starts.length,startsBefore,'continuation must use the retained native session');
-    assert.equal(childAfter.mode,'nday');assert.equal(childAfter.flow.kind,'single');
-    for(const field of ['budget','used','startedAt','parentRound','parentSession','workerLimit'])assert.deepEqual(childAfter[field],childBefore[field],field);
-    for(const field of ['budget','used','startedAt','target','question','workerLimit'])assert.deepEqual(parentAfter[field],parentBefore[field],field);
-    assert.deepEqual(readTaskContext(store,id),contextBefore);assert.deepEqual(businessMaterialView(store,id),materialsBefore);
-    assert.equal(siteWorkerRows(store,p.session.id)[0].reports.length,1);
-    assert.equal(siteWorkerRows(store,p.session.id)[0].focus,'nday');
-    assert.equal(taskPolicyStatus(store,id).stopped,false);
-    assert.equal(taskExecutionGuard(store,id,'recorded-http-execution'),undefined);
-    assert.equal(readTaskPolicy(store,id).used.toolCalls,2);assert.equal(readTaskPolicy(store,p.session.id).used.toolCalls,2);
-    await delegateManager.report(live.get(id),{state:'completed',summary:'Synthetic Nday prerequisites reviewed; no real target was contacted.'});
-    await hooks.get('agent/turn-stopping')({agent:live.get(id),turn:2});await settle();
-    assert.equal(siteWorkerView(store,p.session.id).active,0);
-    updateTaskProgress(store,p.session.id,{ndayComplete:true});assert.equal(taskPolicyStatus(store,p.session.id).reason,'plan_complete');
-  });
-  await test('same-round Nday cannot revive a blocked or cancelled child or reset its exhausted budget',async()=>{
-    for(const kind of ['blocked','cancelled','exhausted']){
-      const p=parent('sequential-refusal-'+kind,1,site,'regular-to-nday'),id=(await delegateManager.delegate(p,delegate)).childId;
-      if(kind==='blocked')pauseTaskPolicy(store,id,{code:'needs-user',reason:'Missing synthetic metadata',evidence:'offline fixture'});
-      else if(kind==='cancelled')updateTaskProgress(store,id,{cancelled:true});
-      else {const policy=readTaskPolicy(store,id);policy.used.toolCalls=policy.budget.toolCalls;store.db.prepare('UPDATE task_policy SET record=? WHERE session_id=?').run(JSON.stringify(policy),id);}
-      await delegateManager.cleanup(p);updateTaskProgress(store,p.session.id,{regularComplete:true});
-      const before=readTaskPolicy(store,id),messagesBefore=messages.length;
-      await assert.rejects(delegateManager.send(p,{childId:id,message:'Continue saved metadata'}),/阻碍|blocked or exhausted/);
-      assert.equal(messages.length,messagesBefore);assert.deepEqual(readTaskPolicy(store,id).budget,before.budget);assert.deepEqual(readTaskPolicy(store,id).used,before.used);
-      assert.equal(siteWorkerView(store,p.session.id).active,0);
-    }
-  });
-  await test('a deferred Nday pack refuses initial delegation before saving an incomplete native filter',async()=>{
-    const p=parent('deferred-nday',1,site,'regular-to-nday');
-    let loaded=false;
-    p.ctx.tools.schemas=scope=>{assert.equal(scope,p);return ['read','tool_pack',...(loaded?['nday_catalog','nday_match','nday_policy_get']:[])].map(name=>({name}));};
-    const before=starts.length;
-    await assert.rejects(delegateManager.delegate(p,delegate),/tool_pack load nday/);
-    assert.equal(starts.length,before);assert.equal(siteWorkerRows(store,p.session.id).length,0);
-    loaded=true;
-    const id=(await delegateManager.delegate(p,delegate)).childId;
-    for(const name of ['tool_pack','nday_catalog','nday_match','nday_policy_get'])assert(siteWorkerRows(store,p.session.id).at(-1).allowedTools.includes(name));
-    assert.match(starts.at(-1).request.prompt[0].text,/load the local nday pack/);
+    assert.equal(readTaskPolicy(store,p.session.id).used.toolCalls,1);
     await delegateManager.cleanup(p);assert(!live.has(id));
-  });
-  await test('a newly delegated child inherits only the parent remaining observation allowance',async()=>{
-    const p=root('remaining-observation');live.set(p.session.id,p);saveTaskContext(store,p.session.id,{assets});
-    startTaskPolicy(store,p.session.id,{mode:'0day',question:'Inspect only this site prerequisite',target:site,budget:{toolCalls:8,workers:1,discoveryCalls:2}});
-    assert.equal(taskExecutionGuard(store,p.session.id,'recorded-http-execution'),undefined);
-    const id=(await delegateManager.delegate(p,delegate)).childId;
-    assert.equal(readTaskPolicy(store,id).budget.discoveryCalls,1);
-    assert.equal(taskExecutionGuard(store,id,'recorded-http-execution'),undefined);
-    assert.match(taskExecutionGuard(store,id,'recorded-http-execution'),/observation_budget_exhausted/);
-    assert.equal(readTaskPolicy(store,p.session.id).used.discoveryCalls,2);
-    await delegateManager.cleanup(p);assert(!live.has(id));
-  });
-  await test('children admitted before observation consumption cannot exceed the shared allowance',async()=>{
-    const p=root('two-observers');live.set(p.session.id,p);saveTaskContext(store,p.session.id,{assets});
-    startTaskPolicy(store,p.session.id,{mode:'0day',question:'Read supplied site prerequisites only',budget:{toolCalls:8,workers:2,discoveryCalls:2}});
-    const first=(await delegateManager.delegate(p,delegate)).childId;
-    const second=(await delegateManager.delegate(p,{...delegate,site:'https://second.test'})).childId;
-    assert.equal(readTaskPolicy(store,second).budget.discoveryCalls,2);
-    assert.equal(taskExecutionGuard(store,p.session.id,'recorded-http-execution'),undefined);
-    assert.equal(taskExecutionGuard(store,first,'recorded-http-execution'),undefined);
-    assert.match(taskExecutionGuard(store,second,'recorded-http-execution'),/parent_observation_budget_exhausted/);
-    assert.equal(readTaskPolicy(store,second).used.toolCalls,0);
-    assert.equal(readTaskPolicy(store,p.session.id).used.discoveryCalls,2);
-    await delegateManager.cleanup(p);assert(!live.has(first));assert(!live.has(second));
   });
   await test('two-worker admission includes preexisting native children and never deletes another parent tree',async()=>{
     const p=parent('cap',2);live.set('legacy',{session:{id:'legacy',header:{parentSession:'cap'}}});
@@ -393,19 +296,6 @@ try{
     await hooks.get('agent/turn-stopping')({agent,turn:1});await settle();
     assert(!live.has(id));assert.equal(siteWorkerView(store,p.session.id).active,0);
   });
-  await test('parallel Nday helper inherits the shared ceiling, cannot nest, reuses one site and charges the same parent',async()=>{
-    const p=parent('parallel-worker',1,site,'regular-with-nday');
-    const id=(await delegateManager.delegate(p,{...delegate,focus:'nday'})).childId;
-    assert.equal(readTaskPolicy(store,id).mode,'nday');assert.equal(readTaskPolicy(store,id).workerLimit,0);
-    assert.equal(readTaskPolicy(store,id).flow.kind,'single');
-    assert.equal((await delegateManager.delegate(p,{...delegate,focus:'regular'})).childId,id);
-    assert.equal(siteWorkerView(store,'parallel-worker').active,1);
-    await assert.rejects(delegateManager.delegate(live.get(id),delegate),/only the main/);
-    assert.equal(taskExecutionGuard(store,id,'recorded-http-execution'),undefined);assert.equal(readTaskPolicy(store,'parallel-worker').used.toolCalls,1);
-    pauseTaskPolicy(store,'parallel-worker',{code:'ip-blocked',reason:'Synthetic fixture pause',evidence:'offline control'});
-    assert.match(taskExecutionGuard(store,id,'recorded-http-execution'),/parent_task_stopped/);
-    await delegateManager.cleanup(p);assert.equal(siteWorkerView(store,'parallel-worker').active,0);
-  });
   await test('offline materials reuse unchanged contents, rebase a second source, redact secrets and preserve uncovered dynamic calls',()=>{
     parent('materials',1,site);const one=path.join(home,'one.js'),two=path.join(home,'two.js');
     fs.writeFileSync(one,'fetch("./teacher?token=fixture-secret"); axios.get("./profile"); fetch(variable); const accessToken="another-secret";');fs.copyFileSync(one,two);
@@ -425,7 +315,7 @@ try{
     assert.throws(()=>assessResearch(store,'pair','direction',{observationId:completed.observationId,outcome:'difference'}),/outcome must be support, counterevidence or no-information/);
     const negative = { assetId:'asset',entryId:'direction',endpoint,methodVersion:'v1',authContext:'fixture-subject',requestRevision:'v1',status:'not-hit',executed:true,requestValid:true,observationValid:true,evidenceIds:[completed.observationId],reason:'Incorrect negative for an unexplained comparison' };
     assert.throws(()=>saveChecks(store,'pair',[negative]),/不能登记为已测未命中/);
-    assert.match(taskExecutionGuard(store,'pair','recorded-http-execution'),/comparison_interpretation_required/);
+    assert.equal(taskExecutionGuard(store,'pair','recorded-http-execution'),undefined,'the comparison remains visible but does not block model judgment');
     assert.equal((await runComparisonJob(store,'pair',pair)).cached,true);assert.equal(requests-before,2);
     assessResearch(store,'pair','direction',{observationId:completed.observationId,outcome:'support',interpretation:'The fabricated excluded object is visible; independent impact review is still required.',nextInformation:'Inspect precise business ownership evidence'});
     assert.equal(researchDetail(store,'pair','direction').state,'active');
