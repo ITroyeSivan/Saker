@@ -2,10 +2,23 @@
 import './test-home-isolation.mjs';
 import assert from 'node:assert/strict';
 import { deflateRawSync } from 'node:zlib';
-import { parseDocumentBuffer, readDocumentUrl, readDocumentSection } from '../plugins/dsh-redteam-results/lib/project-documents.js';
+import { parseDocumentBuffer, readDocumentUrl, readDocumentSection, readDocumentSections } from '../plugins/dsh-redteam-results/lib/project-documents.js';
 
 let failed = 0;
 const test = (name, work) => { try { work(); console.log('ok   ' + name); } catch (error) { failed++; console.log('FAIL ' + name + ': ' + (error.stack || error.message)); } };
+
+test('批量读取共享长度上限，保留逐段游标与未读项，不放大正文', () => {
+  const parsed = { sections: [{ sectionId: 'a', text: 'abcd' }, { sectionId: 'b', text: '0123456789' }, { sectionId: 'c', text: 'tail' }] };
+  const batch = readDocumentSections(parsed, ['a','b','c'], { limit: 8 });
+  assert.deepEqual(batch.entries.map(e => [e.sectionId,e.text,e.nextCursor]), [['a','abcd',null],['b','0123',4]]);
+  assert.deepEqual(batch.unreadSectionIds, ['c']);
+  assert.deepEqual(readDocumentSections(parsed, ['a','b','c'], { limit: 100 }).entries.map(e=>e.text), ['abcd','0123456789','tail']);
+  assert.throws(()=>readDocumentSections(parsed, ['a','missing']), /未找到/);
+  assert.throws(()=>readDocumentSections(parsed, ['a','a']), /不重复/);
+  assert.throws(()=>readDocumentSections(parsed, Array(21).fill('a')), /1–20/);
+  const large = { sections: [{sectionId:'large',text:'x'.repeat(10000)}] };
+  assert.equal(readDocumentSections(large,['large'],{limit:1e8}).entries[0].text.length,8000);
+});
 
 function crc32(buffer) {
   let crc = 0xffffffff;

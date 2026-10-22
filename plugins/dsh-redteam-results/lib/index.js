@@ -40,7 +40,7 @@ import { activeProjectRun, readProjectRun, listProjectRuns, listProjectChecks, l
 import { zipProjectDelivery, projectCounts, projectCheckView } from './project-delivery.js';
 import { startBrowserSession } from './browser-session.js';
 import { executeProjectHttp } from './project-execution.js';
-import { readDocumentSection } from './project-documents.js';
+import { readDocumentSection, readDocumentSections } from './project-documents.js';
 import { parseDocumentIsolated } from './project-document-parser.js';
 import { recordProjectDocumentRead } from './project-progress.js';
 import { taskStartInput, taskProgressInput } from './task-inputs.js';
@@ -1810,7 +1810,9 @@ function apply(ctx) {
 		parameters: {
 			action: { type: 'string', required: true, enum: ['list', 'search', 'read'] },
 			query: { type: 'string' }, sourceId: { type: 'string' }, sourceRevision: { type: 'string' },
-			sectionId: { type: 'string' }, cursor: { type: 'integer' }, limit: { type: 'integer' }
+			sectionId: { type: 'string' },
+      sectionIds: { type: 'array', description: 'read 可批量读取同一来源的 1–20 个短段落；与 sectionId/cursor 互斥。limit 为整批字符上限，最多 8000；长段按返回游标单独续读。', items: { type: 'string' } },
+      cursor: { type: 'integer' }, limit: { type: 'integer' }
 		},
 		output: { schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } }, render: (_args, value) => [{ type: 'text', text: value.ok ? value.text : value.error }] },
 		execute(args, exec) {
@@ -1863,6 +1865,19 @@ function apply(ctx) {
 				if (args.action === 'read') {
 					const source = sources.find(item => item.sourceId === args.sourceId && (!args.sourceRevision || item.sourceRevision === args.sourceRevision));
 					if (!source) throw new Error('未找到该来源：' + args.sourceId);
+          if (args.sectionIds !== undefined) {
+            if (args.sectionId !== undefined || args.cursor !== undefined) throw new Error('批量读取使用 sectionIds；续读长段时改用 sectionId 和 cursor');
+            const batch = readDocumentSections({ sections: source.sections || [] }, args.sectionIds, { limit: args.limit });
+            for (const result of batch.entries) {
+              recordMaterialRead(scope.store, scope.session.id, { materialId: 'project:' + source.sourceId + '@' + source.sourceRevision + ':' + result.sectionId, bytes: Buffer.byteLength(result.text, 'utf8'), offset: 0 });
+              recordProjectDocumentRead(scope.store, scope.session.id, scope.run.runId, { sourceId: source.sourceId, sourceRevision: source.sourceRevision, sectionId: result.sectionId, cursor: 0, text: result.text, controlRev: scope.run.controlRev });
+            }
+            const text = '来源：' + (source.displayName || source.sourceId) + ' · 修订：' + source.sourceRevision + '\n'
+              + batch.entries.map(result => '段落：' + result.sectionId + ' · 范围：[0,' + result.text.length + ')'
+                + (result.more ? ' · 后续：有，改用 sectionId=' + result.sectionId + ' cursor=' + result.nextCursor + ' 续读' : ' · 后续：无') + '\n' + result.text).join('\n\n')
+              + (batch.unreadSectionIds.length ? '\n未返回、仍未读的段落：' + batch.unreadSectionIds.join('、') : '');
+            return Promise.resolve({ ok: true, text, sourceId: source.sourceId, sourceRevision: source.sourceRevision, ...batch });
+          }
 					const result = readDocumentSection({ sections: source.sections || [] }, String(args.sectionId || ''), { cursor: args.cursor, limit: args.limit });
           recordMaterialRead(scope.store, scope.session.id, { materialId: 'project:' + source.sourceId + '@' + source.sourceRevision + ':' + result.sectionId, bytes: Buffer.byteLength(result.text, 'utf8'), offset: Math.max(0, Number(args.cursor) || 0) });
           recordProjectDocumentRead(scope.store, scope.session.id, scope.run.runId, { sourceId: source.sourceId, sourceRevision: source.sourceRevision, sectionId: result.sectionId, cursor: args.cursor, text: result.text, controlRev: scope.run.controlRev });

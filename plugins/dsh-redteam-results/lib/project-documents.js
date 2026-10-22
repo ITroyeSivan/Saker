@@ -231,5 +231,24 @@ export function readDocumentSection(parsed, sectionId, { cursor = 0, limit = 400
   const requested = Number(limit);
   const size = Math.max(1, Math.min(DOCUMENT_LIMITS.maxReadChars, Number.isFinite(requested) && requested > 0 ? requested : 4000));
   const end = Math.min(text.length, start + size);
-  return { sectionId, location: section.location, text: text.slice(start, end), nextCursor: end < text.length ? end : null, more: end < text.length };
+  return { sectionId, location: section.location ?? null, text: text.slice(start, end), nextCursor: end < text.length ? end : null, more: end < text.length };
+}
+
+/** A bounded batch returns only actual text ranges; unreturned sections stay unread. */
+export function readDocumentSections(parsed, sectionIds, { limit = 4000 } = {}) {
+  if (!Array.isArray(sectionIds) || !sectionIds.length || sectionIds.length > 20
+    || sectionIds.some(id => typeof id !== 'string' || !id.trim()) || new Set(sectionIds).size !== sectionIds.length)
+    throw new Error('sectionIds 需要 1–20 个不重复的段落 ID');
+  for (const id of sectionIds) if (!(parsed?.sections || []).some(section => section.sectionId === id))
+    throw new Error('未找到该文档段落：' + id);
+  const requested = Number(limit);
+  let remaining = Math.max(1, Math.min(DOCUMENT_LIMITS.maxReadChars, Number.isFinite(requested) && requested > 0 ? Math.floor(requested) : 4000));
+  const entries = [], unreadSectionIds = [];
+  for (const id of sectionIds) {
+    if (!remaining) { unreadSectionIds.push(id); continue; }
+    const entry = readDocumentSection(parsed, id, { limit: remaining });
+    entries.push(entry);
+    remaining -= entry.text.length;
+  }
+  return { entries, unreadSectionIds };
 }

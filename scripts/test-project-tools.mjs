@@ -363,6 +363,31 @@ try {
     assert.equal(page1.nextCursor, 10);
     const page2 = await tool.execute({ action: 'list', cursor: page1.nextCursor, limit: 20 }, exec('pt-doc'));
     assert(page2.entries.some(entry => entry.sectionId === 's11'), '目录分页必须覆盖后续段落');
+    const batch = await invoke('pt-doc', 'project_document', {action:'read',sourceId:'doc-many',sectionIds:['s1','s2','s45'],limit:5});
+    assert(batch.ok, batch.error);
+    assert.equal(batch.entries.length,2);
+    assert.deepEqual(batch.unreadSectionIds,['s45']);
+    const mixed = await invoke('pt-doc','project_document',{action:'read',sourceId:'doc-many',sectionIds:['s1'],cursor:1});
+    assert.equal(mixed.ok,false);
+  });
+
+  await test('批量读取只为真正返回的范围登记覆盖，截断和未返回段不能声明已整理', async () => {
+    const sid='pt-batch-read';
+    upsertProjectSource(store,sid,{sourceId:'batch-doc',sourceRevision:'r1',displayName:'批量样本',kind:'text',parseState:'ready',sections:[
+      {sectionId:'a',text:'abcd'},{sectionId:'b',text:'0123456789'},{sectionId:'tail',text:'末尾要求'},
+    ]});
+    await dispatch(ctx,store,'project.start',{sessionId:sid,autoStart:false,policy:{question:'批量覆盖',target:origin}});
+    const read=await invoke(sid,'project_document',{action:'read',sourceId:'batch-doc',sectionIds:['a','b','tail'],limit:8});
+    assert(read.ok,read.error);assert.deepEqual(read.unreadSectionIds,['tail']);
+    const decide=sectionId=>invoke(sid,'project_check',{action:'define',sectionDecisions:[{sourceId:'batch-doc',sourceRevision:'r1',sectionId,decision:'reference',rationale:'合成参考资料'}]});
+    const a=await decide('a');assert(a.ok,a.error);
+    for(const id of ['b','tail']){const rejected=await decide(id);assert.equal(rejected.ok,false);assert.match(rejected.error,/尚未完整读取/);}
+    const rest=await invoke(sid,'project_document',{action:'read',sourceId:'batch-doc',sectionId:'b',cursor:4});assert(rest.ok,rest.error);
+    const b=await decide('b');assert(b.ok,b.error);
+    const invalid=await invoke(sid,'project_document',{action:'read',sourceId:'batch-doc',sectionIds:['tail','missing']});assert.equal(invalid.ok,false);
+    const stillUnread=await decide('tail');assert.equal(stillUnread.ok,false);assert.match(stillUnread.error,/尚未完整读取/);
+    const tail=await invoke(sid,'project_document',{action:'read',sourceId:'batch-doc',sectionIds:['tail']});assert(tail.ok,tail.error);
+    const accepted=await decide('tail');assert(accepted.ok,accepted.error);
   });
 
   await test('project_check next / record / detail 可用', async () => {

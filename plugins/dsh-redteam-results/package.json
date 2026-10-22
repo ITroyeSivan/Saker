@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-redteam-results",
-  "version": "1.0.190",
+  "version": "1.0.191",
   "description": "查看测试进展、漏洞记录和验证详情，导出报告与复现文件。",
   "files": [
     "lib",
