@@ -129,6 +129,29 @@ function findingWithProjectEvidence(store, sessionId, input, previous) {
   return { ...input, evidenceRefs: merged };
 }
 
+function projectActionSummary(action) {
+  const textOrNull = value => typeof value === 'string' && value.length ? value : null;
+  const reconciliation = action?.reconciliation && typeof action.reconciliation === 'object'
+    ? {
+        outcome: textOrNull(action.reconciliation.outcome),
+        reason: textOrNull(action.reconciliation.reason),
+        evidenceRefs: Array.isArray(action.reconciliation.evidenceRefs)
+          ? action.reconciliation.evidenceRefs.map(value => String(value)).filter(Boolean)
+          : [],
+        at: textOrNull(action.reconciliation.at),
+      }
+    : null;
+  return {
+    actionId: textOrNull(action?.actionId),
+    state: textOrNull(action?.executionState),
+    method: textOrNull(action?.method),
+    targetUrl: action?.targetUrl ? redactText(String(action.targetUrl)) : null,
+    requestRef: textOrNull(action?.requestRef),
+    pageRef: textOrNull(action?.pageRef),
+    reconciliation,
+  };
+}
+
 //#region 通道与工具共用的业务逻辑
 
 /** 一键验证的注入文案（用户消息；进入会话后由模型按模式验证纪律复核并回写状态）。 */
@@ -1956,8 +1979,8 @@ function apply(ctx) {
 				if (args.action === 'next') {
           const check = selectProjectCheck(scope.store, scope.session.id, scope.run.runId);
 					if (!check) return Promise.resolve({ ok: true, text: '没有可执行的未完成检查', check: null });
-          const actions = listProjectActions(scope.store, scope.session.id, scope.run.runId).filter(a => a.checkId === check.checkId).slice(-10)
-            .map(a => ({ actionId: a.actionId, state: a.executionState, method: a.method, targetUrl: redactText(a.targetUrl), requestRef: a.requestRef, pageRef: a.pageRef, reconciliation: a.reconciliation }));
+          const actions = listProjectActions(scope.store, scope.session.id, scope.run.runId)
+            .filter(a => a.checkId === check.checkId).slice(-10).map(projectActionSummary);
 					return Promise.resolve({ ok: true, text: '当前检查：' + check.requirement + '（' + (check.sourceLocation || '未记录来源') + '）；checkId=' + check.checkId
             + (actions.length ? '\n已保存的动作（先核对，已确认生效的写入不要重复提交）：' + JSON.stringify(actions) : ''), actions,
             check: { checkId: check.checkId, requirement: check.requirement, sourceLocation: check.sourceLocation, dependencies: check.dependencies } });
@@ -1965,8 +1988,8 @@ function apply(ctx) {
 				if (args.action === 'detail') {
 					const check = readProjectCheck(scope.store, scope.session.id, scope.run.runId, String(args.checkId || ''));
 					if (!check) throw new Error('当前运行 ' + scope.run.runId + ' 没有该检查；用 project_check action=next 获取当前项，不沿用历史编号');
-          const actions = listProjectActions(scope.store, scope.session.id, scope.run.runId).filter(a => a.checkId === check.checkId).slice(-10)
-            .map(a => ({ actionId: a.actionId, state: a.executionState, method: a.method, targetUrl: redactText(a.targetUrl), requestRef: a.requestRef, pageRef: a.pageRef, reconciliation: a.reconciliation }));
+          const actions = listProjectActions(scope.store, scope.session.id, scope.run.runId)
+            .filter(a => a.checkId === check.checkId).slice(-10).map(projectActionSummary);
 					return Promise.resolve({ ok: true, text: JSON.stringify({ check, actions }, null, 2), check, actions });
 				}
 				if (args.action === 'record') {

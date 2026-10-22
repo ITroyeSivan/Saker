@@ -7,7 +7,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { openStore, registerFinding, updateFinding } from '../plugins/dsh-redteam-results/lib/store.js';
 import { startTaskPolicy, taskPolicyStatus, readTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy.js';
-import { createProjectRun, transitionProjectRun, defineProjectChecks, upsertProjectSource, readProjectRun, listProjectChecks, listProjectActions, recordProjectCheck } from '../plugins/dsh-redteam-results/lib/project-store.js';
+import { createProjectRun, transitionProjectRun, defineProjectChecks, upsertProjectSource, readProjectRun, listProjectChecks, listProjectActions, recordProjectCheck, beginProjectAction, finishProjectAction, reconcileProjectAction } from '../plugins/dsh-redteam-results/lib/project-store.js';
 import { projectTurnDecision, completeProjectRun } from '../plugins/dsh-redteam-results/lib/project-runtime.js';
 import { registerVerifiedProjectFinding } from './lib/project-test-fixtures.mjs';
 
@@ -406,6 +406,66 @@ try {
     const detail = await tool.execute({ action: 'detail', checkId: check.checkId }, exec('pt-check'));
     assert.equal(detail.ok, true, detail.error);
     assert.equal(detail.check.checkedContent, '员工 B 读到员工 A 的电话');
+  });
+
+  await test('project_check next / detail 对可选动作字段保持无损 JSON', async () => {
+    const sid = 'pt-check-lossless';
+    const { run, check } = prepareProject(sid);
+
+    await invoke(sid, 'project_check', { action: 'next' });
+    const observed = await invoke(sid, 'project_request', {
+      method: 'GET', url: origin + '/lossless-http', checkId: check.checkId,
+    });
+    assert.equal(observed.ok, true, observed.error);
+    const httpAction = listProjectActions(store, sid, run.runId).find(action => action.checkId === check.checkId);
+    assert(httpAction, 'project_request 必须留下实际动作');
+
+    const next = await invoke(sid, 'project_check', { action: 'next' });
+    assert.equal(next.ok, true, next.error);
+    const nextHttpAction = next.actions.find(action => action.actionId === httpAction.actionId);
+    assert(nextHttpAction, 'next 必须返回当前检查已有动作');
+    assert.equal(nextHttpAction.requestRef, httpAction.requestRef);
+    assert.equal(nextHttpAction.pageRef, null);
+    assert.equal(nextHttpAction.reconciliation, null);
+
+    const detail = await invoke(sid, 'project_check', { action: 'detail', checkId: check.checkId });
+    assert.equal(detail.ok, true, detail.error);
+    assert.equal(detail.actions.find(action => action.actionId === httpAction.actionId)?.pageRef, null);
+
+    const [browserCheck] = defineProjectChecks(store, sid, run.runId, [{
+      checkId: 'lossless-browser', requirement: '浏览器观察动作没有 requestRef',
+    }]);
+    const browserBegun = beginProjectAction(store, sid, run.runId, browserCheck.checkId, { method: 'GET', targetUrl: origin + '/page' });
+    finishProjectAction(store, sid, run.runId, browserBegun.action.actionId, {
+      executionState: 'completed', pageRef: 'project-observation-lossless-browser',
+    });
+    const browserDetail = await invoke(sid, 'project_check', { action: 'detail', checkId: browserCheck.checkId });
+    assert.equal(browserDetail.ok, true, browserDetail.error);
+    assert.equal(browserDetail.actions[0].requestRef, null);
+    assert.equal(browserDetail.actions[0].pageRef, 'project-observation-lossless-browser');
+    assert.equal(browserDetail.actions[0].reconciliation, null);
+
+    const [reconciledCheck] = defineProjectChecks(store, sid, run.runId, [{
+      checkId: 'lossless-reconciled', requirement: '核对结果也必须保持无损 JSON',
+    }]);
+    const reconciledBegun = beginProjectAction(store, sid, run.runId, reconciledCheck.checkId, { method: 'POST', targetUrl: origin + '/write' });
+    finishProjectAction(store, sid, run.runId, reconciledBegun.action.actionId, {
+      executionState: 'unknown', sideEffectUnknown: true, error: '合成断流',
+    });
+    reconcileProjectAction(store, sid, run.runId, reconciledBegun.action.actionId, {
+      outcome: 'occurred', reason: '独立只读记录确认合成写入已经发生', evidenceRefs: [],
+    });
+    const reconciledDetail = await invoke(sid, 'project_check', { action: 'detail', checkId: reconciledCheck.checkId });
+    assert.equal(reconciledDetail.ok, true, reconciledDetail.error);
+    assert.equal(reconciledDetail.actions[0].requestRef, null);
+    assert.equal(reconciledDetail.actions[0].pageRef, null);
+    assert.deepEqual(reconciledDetail.actions[0].reconciliation, {
+      outcome: 'occurred',
+      reason: '独立只读记录确认合成写入已经发生',
+      evidenceRefs: [],
+      at: reconciledDetail.actions[0].reconciliation.at,
+    });
+    assert.match(reconciledDetail.actions[0].reconciliation.at, /^\d{4}-\d{2}-\d{2}T/);
   });
 
   await test('完整结论必须引用本次动作、复用观测或已复核 finding', async () => {
