@@ -7,6 +7,7 @@ import path from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
 import { startTaskPolicy, readTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy.js';
+import { writeTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy-record.js';
 import { createProjectRun, transitionProjectRun, defineProjectChecks, recordProjectCheck, upsertProjectSource } from '../plugins/dsh-redteam-results/lib/project-store.js';
 import { registerVerifiedProjectFinding } from './lib/project-test-fixtures.mjs';
 
@@ -151,6 +152,33 @@ try {
     assert(source.includes('检查结果、历史和导出入口在对话上方的项目状态行'), '设置区不能继续复制完整检查表');
     assert(source.includes('用量口径：会话事件调用'), '调用统计必须解释会话事件与准入记账的差异');
     assert.equal(readTaskPolicy(store, 'ui-project').used.toolCalls, 0, '查看与刷新项目状态不能产生目标工具调用');
+  });
+
+  await test('人工接管状态只显示“继续测试”，不并列普通继续入口', async () => {
+    const before = readTaskPolicy(store, 'ui-project');
+    writeTaskPolicy(store, 'ui-project', {
+      ...before,
+      manualTakeover: {
+        active: true, startedAt: Date.now(), source: 'desktop-user', scenario: 'project',
+        runId: 'ui-run', controlRev: 1, identityRef: '',
+      },
+    }, 'manual-takeover-start');
+    const panel = mount('ui-project');
+    await new Promise(setImmediate);
+    const panelLabels = nodes(panel.render()).filter(node => node.type === 'button')
+      .map(node => node.children.flat(Infinity).join(''));
+    assert(panelLabels.includes('继续测试'));
+    assert(!panelLabels.includes('继续'), '人工接管时不能同时显示会绕开观察的普通继续按钮');
+    const chat = mountChatStatus('ui-project');
+    await new Promise(setImmediate);
+    const chatLabels = nodes(chat.render()).filter(node => node.type === 'button')
+      .map(node => node.children.flat(Infinity).join(''));
+    assert(chatLabels.includes('继续测试'));
+    assert(!chatLabels.includes('继续'));
+    const current = readTaskPolicy(store, 'ui-project');
+    const restored = { ...current };
+    delete restored.manualTakeover;
+    writeTaskPolicy(store, 'ui-project', restored, 'manual-takeover-resume');
   });
 
   await test('项目面板拒绝读取非项目会话时不渲染旧任务视图', async () => {

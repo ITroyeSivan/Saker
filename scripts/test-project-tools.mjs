@@ -6,9 +6,10 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { openStore, registerFinding, updateFinding } from '../plugins/dsh-redteam-results/lib/store.js';
-import { startTaskPolicy, taskPolicyStatus, readTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy.js';
+import { startTaskPolicy, taskPolicyStatus, readTaskPolicy, finishTaskOnTurnEnd } from '../plugins/dsh-redteam-results/lib/task-policy.js';
 import { createProjectRun, transitionProjectRun, defineProjectChecks, upsertProjectSource, readProjectRun, listProjectChecks, listProjectActions, recordProjectCheck, beginProjectAction, finishProjectAction, reconcileProjectAction } from '../plugins/dsh-redteam-results/lib/project-store.js';
 import { projectTurnDecision, completeProjectRun } from '../plugins/dsh-redteam-results/lib/project-runtime.js';
+import { browserProfileName } from '../plugins/dsh-redteam-results/lib/browser-session.js';
 import { registerVerifiedProjectFinding } from './lib/project-test-fixtures.mjs';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-project-tools-'));
@@ -19,6 +20,18 @@ let failed = 0;
 const test = async (name, work) => { try { await work(); console.log('ok   ' + name); } catch (error) { failed++; console.log('FAIL ' + name + ': ' + (error.stack || error.message)); } };
 
 const server = http.createServer((request, response) => {
+  if (request.url === '/page') {
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    response.end('<!doctype html><html><head><title>Saker Takeover</title></head><body>'
+      + '<h1 id="title">等待操作</h1><button id="go" onclick="document.getElementById(\'title\').textContent=\'人工已操作\';fetch(\'/human-action\').catch(function(){})">人工操作</button>'
+      + '</body></html>');
+    return;
+  }
+  if (request.url === '/human-action') {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ ok: true, marker: 'SAKER_HUMAN_ACTION' }));
+    return;
+  }
   if (request.url === '/download-page') {
     response.writeHead(200, { 'content-type': 'text/html' });
     response.end('<a id="download" href="/download.bin">download</a>');
@@ -67,6 +80,51 @@ async function invoke(sid, name, args) {
   const result = await tools.get(name).execute(args, scope);
   assert.deepEqual(JSON.parse(JSON.stringify(result)), result, name + ' must return lossless JSON for the real host');
   return result;
+}
+
+async function clickInManagedBrowser(sessionId, selector) {
+  const profileDir = path.join(home, 'project-browser', browserProfileName(sessionId, ''));
+  const activePort = path.join(profileDir, 'DevToolsActivePort');
+  const [port] = fs.readFileSync(activePort, 'utf8').trim().split(/\r?\n/);
+  const targets = await (await fetch('http://127.0.0.1:' + port + '/json/list')).json();
+  const target = targets.find(item => item.type === 'page' && String(item.url).startsWith(origin));
+  assert(target, '必须能取得当前受管浏览器页面');
+  const socket = new WebSocket(target.webSocketDebuggerUrl);
+  await new Promise((resolve, reject) => {
+    socket.addEventListener('open', resolve, { once: true });
+    socket.addEventListener('error', reject, { once: true });
+  });
+  let nextId = 0;
+  const pending = new Map();
+  socket.addEventListener('message', event => {
+    const message = JSON.parse(String(event.data));
+    const waiter = pending.get(message.id);
+    if (!waiter) return;
+    pending.delete(message.id);
+    if (message.error) waiter.reject(new Error(message.error.message || JSON.stringify(message.error)));
+    else waiter.resolve(message.result);
+  });
+  const call = (method, params = {}) => new Promise((resolve, reject) => {
+    const id = ++nextId;
+    pending.set(id, { resolve, reject });
+    socket.send(JSON.stringify({ id, method, params }));
+  });
+  try {
+    const located = await call('Runtime.evaluate', {
+      expression: '(function(){var e=document.querySelector(' + JSON.stringify(selector) + ');if(!e)return null;var r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()',
+      returnByValue: true,
+    });
+    const point = located.result?.value;
+    assert(point, '人工操作元素必须存在');
+    for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
+      await call('Input.dispatchMouseEvent', {
+        type, x: point.x, y: point.y, ...(type === 'mouseMoved' ? {} : { button: 'left', clickCount: 1 }),
+      });
+    }
+    await new Promise(resolve => setTimeout(resolve, 300));
+  } finally {
+    socket.close();
+  }
 }
 
 function prepareProject(sid) {
@@ -622,6 +680,85 @@ try {
       assert.match(pausedOpen.error, /不可派发|已暂停/);
       const closed = await tool.execute({ action: 'close' }, exec('pt-browser'));
       assert.equal(closed.ok, true, closed.error);
+    });
+    await test('人工接管保留同一浏览器，人工流量归属清楚，继续前先观察且预算不变', async () => {
+      const tool = tools.get('saker_browser');
+
+      const freeId = 'pt-manual-free';
+      startTaskPolicy(store, freeId, {
+        mode: 'regular', target: origin, question: '人工接管自由测试',
+        budget: { toolCalls: 8, modelCalls: 4 },
+      });
+      const freeOpen = await tool.execute({ action: 'open', url: origin + '/page' }, exec(freeId));
+      assert.equal(freeOpen.ok, true, freeOpen.error);
+      const freeSettings = await dispatch(ctx, store, 'chat.settings', { sessionId: freeId });
+      assert.equal(freeSettings.browserTakeover?.open, true, '聊天状态栏必须拿到真实浏览器接管状态');
+      assert.equal(freeSettings.browserTakeover?.headless, process.env.SAKER_CFT_HEADLESS === '1');
+      finishTaskOnTurnEnd(store, freeId);
+      assert.equal(taskPolicyStatus(store, freeId).reason, 'turn_ended', '人工接管必须能接住已结束模型回合但浏览器仍开着的场景');
+      const freeBefore = readTaskPolicy(store, freeId);
+      const freeTaken = await dispatch(ctx, store, 'task.takeover', {
+        sessionId: freeId, expectedPolicyRev: freeBefore.policyRev,
+      });
+      assert.equal(freeTaken.ok, true, freeTaken.error);
+      assert.equal(freeTaken.manualTakeover.active, true);
+      assert.equal(freeTaken.browser.open, true);
+      assert.equal(freeTaken.browser.identityRef, '');
+      const freeBlocked = await tool.execute({ action: 'open', url: origin + '/blocked' }, exec(freeId));
+      assert.equal(freeBlocked.ok, false, '人工接管期间模型不能继续派发浏览器动作');
+      await clickInManagedBrowser(freeId, '#go');
+      const freeRequests = await tool.execute({ action: 'requests', limit: 50 }, exec(freeId));
+      assert.equal(freeRequests.ok, true, freeRequests.error);
+      const humanRequest = freeRequests.requests.entries.find(item => item.url.endsWith('/human-action'));
+      assert(humanRequest, '人工点击产生的请求必须进入同一浏览器请求记录');
+      assert.equal(humanRequest.source, 'human-takeover');
+      const freeResumeResults = await Promise.allSettled([
+        dispatch(ctx, store, 'task.takeover-resume', {
+          sessionId: freeId, expectedPolicyRev: freeTaken.policyRev,
+        }),
+        dispatch(ctx, store, 'task.takeover-resume', {
+          sessionId: freeId, expectedPolicyRev: freeTaken.policyRev,
+        }),
+      ]);
+      assert.equal(freeResumeResults.filter(item => item.status === 'fulfilled').length, 1, '两个窗口同时继续时只能有一个执行者');
+      assert.equal(freeResumeResults.filter(item => item.status === 'rejected').length, 1);
+      const freeResumed = freeResumeResults.find(item => item.status === 'fulfilled').value;
+      assert.equal(freeResumed.ok, true, freeResumed.error);
+      assert(freeResumed.observationRef);
+      assert.equal(freeResumed.browser.open, true);
+      const freeAfter = readTaskPolicy(store, freeId);
+      assert.equal(freeAfter.used.toolCalls, freeBefore.used.toolCalls, '人工操作不消耗模型目标动作预算');
+      assert.equal(freeAfter.budget.modelCalls, freeBefore.budget.modelCalls);
+      assert.equal(freeAfter.manualTakeover, undefined);
+      assert.equal(taskPolicyStatus(store, freeId).stopped, false, '接管继续后必须真正回到可执行状态');
+      const freeClose = await tool.execute({ action: 'close' }, exec(freeId));
+      assert.equal(freeClose.ok, true, freeClose.error);
+
+      const projectId = 'pt-manual-project';
+      const { run } = prepareProject(projectId);
+      const projectOpen = await tool.execute({ action: 'open', url: origin + '/page' }, exec(projectId));
+      assert.equal(projectOpen.ok, true, projectOpen.error);
+      const projectBefore = readTaskPolicy(store, projectId);
+      const projectTaken = await dispatch(ctx, store, 'task.takeover', {
+        sessionId: projectId, expectedPolicyRev: projectBefore.policyRev, runId: run.runId,
+      });
+      assert.equal(projectTaken.ok, true, projectTaken.error);
+      assert.equal(projectTaken.run.state, 'paused');
+      assert.equal(projectTaken.browser.open, true);
+      const projectBlocked = await tool.execute({ action: 'open', url: origin + '/blocked' }, exec(projectId));
+      assert.equal(projectBlocked.ok, false, '项目人工接管期间模型不能继续派发');
+      await clickInManagedBrowser(projectId, '#go');
+      const projectResumed = await dispatch(ctx, store, 'task.takeover-resume', {
+        sessionId: projectId, expectedPolicyRev: projectTaken.policyRev,
+        runId: run.runId, expectedControlRev: projectTaken.run.controlRev,
+      });
+      assert.equal(projectResumed.ok, true, projectResumed.error);
+      assert(projectResumed.observationRef);
+      assert.equal(projectResumed.run.state, 'preparing');
+      assert.equal(readTaskPolicy(store, projectId).used.toolCalls, projectBefore.used.toolCalls);
+      assert.equal(readTaskPolicy(store, projectId).manualTakeover, undefined);
+      const projectClose = await tool.execute({ action: 'close' }, exec(projectId));
+      assert.equal(projectClose.ok, true, projectClose.error);
     });
   } else {
     console.log('skip saker_browser 真实 CfT 不在本机');

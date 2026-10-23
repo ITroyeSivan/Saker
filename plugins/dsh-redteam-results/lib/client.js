@@ -2260,6 +2260,7 @@ function ChatSetup(props) {
   var activeScenario=policy?.scenario||options.scenario||workScenario[0], directionValue=mode;
   var interaction=policy?policy.interaction:options.interaction||'auto', workers=policy?policy.workerLimit:options.workers??2, reporting=chatReporting(policy||options), cooperation=cooperationValue(interaction), startMode=policy?(policy.startMode||'materials-first'):(options.startMode||'materials-first');
   var explainValue=policy?(policy.explain===true):(options.explain===true);
+  var takeoverTerminal=!policy||policy.cancelled||policy.planComplete||['cancelled','plan_complete','queue_complete','first_verified_rce','first_verified_high','time_budget_exhausted','tool_budget_exhausted'].indexOf(current&&current.reason)>=0||String(current&&current.reason||'').startsWith('model_budget:')||(current&&current.stopped&&['turn_ended','paused:needs-user'].indexOf(current.reason)<0);
   var hostWorkerLimit=current&&Number.isInteger(current.hostWorkerLimit)?current.hostWorkerLimit:16;
   if(workers>hostWorkerLimit)workers=hostWorkerLimit;
   var workerOptions=[0,1,2,4,8,16].filter(function(value){return value<=hostWorkerLimit;});
@@ -2463,11 +2464,13 @@ function ChatSetup(props) {
       React.createElement('button',{type:'button',disabled:busy[0]||current.agentRunning||current.reason!=='interaction_confirmation_required',onClick:function(){return run('task.continue',{note:decisionNote[0]});}},current.agentRunning?'正在收尾，请稍候':cooperation==='confirm-step'?'按当前思路继续':'确认并继续'),
       React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){return run('task.cancel');}},'停止本轮'),React.createElement('small',null,'改变协作或汇报设置不会解除当前等待；原截止时间仍有效。')):null,
     current&&current.configured&&current.policy&&current.policy.scenario==='project'?React.createElement(ProjectChatStatus,{sessionId:props.sessionId,status:current}):null,
-    policy&&!policy.awaitingConfirmation?React.createElement('div',{className:'dsh-chat-task-status',role:'status'},React.createElement('span',null,taskStatusLabel(current,policy)),(current.active||0)>0?React.createElement('span',null,'子代理 '+current.active+'/'+workers):null,
+    policy&&!policy.awaitingConfirmation?React.createElement('div',{className:'dsh-chat-task-status',role:'status'},React.createElement('span',null,policy.manualTakeover&&policy.manualTakeover.active?'人工操作中（模型已暂停）':taskStatusLabel(current,policy)),(current.active||0)>0?React.createElement('span',null,'子代理 '+current.active+'/'+workers):null,
       // 当前动作来自真实执行回执（v6 第 5.1 节）：只在运行中显示，没运行时不给状态栏堆零指标。
       policy&&!current.stopped&&current.currentAction?React.createElement('span',{className:'dsh-chat-action'},current.currentAction):null,
       // 停止按钮在运行状态始终可见（v6 第 5.2 节）：不等用户先点开设置或确认区。
       !current.stopped?React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){return run('task.cancel');}},'停止本轮'):null,
+      policy.scenario!=='project'&&policy.manualTakeover&&policy.manualTakeover.active?React.createElement('button',{type:'button',disabled:busy[0]||current.agentRunning,onClick:function(){return run('task.takeover-resume',{expectedPolicyRev:policy.policyRev});}},'继续测试'):null,
+      policy.scenario!=='project'&&!(policy.manualTakeover&&policy.manualTakeover.active)&&current.browserTakeover&&current.browserTakeover.open&&!takeoverTerminal?React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){return run('task.takeover',{expectedPolicyRev:policy.policyRev});}},'我来操作'):null,
       current.stopped&&!policy.blocker&&!policy.parentSession?React.createElement('button',{type:'button',disabled:busy[0]||current.agentRunning||(current.active||0)>0,onClick:function(){return run('task.new-round',{preferences:{mode:policy.scenario==='project'?'regular':policy.mode,scenario:policy.scenario,workflow:'single',interaction:policy.interaction,reporting:reporting,workers:policy.workerLimit,allowTargetNetwork:policy.allowTargetNetwork!==false,readOnly:policy.readOnly===true}});}},'新建测试'):null):null,
     // 需要用户处理时只显示单条具体事项（v6 第 5.2 节）：说清哪一项受影响，并给出重新绑定/继续两条路。
     current&&Array.isArray(current.attention)&&current.attention.length&&!attentionDismissed[0]?React.createElement('div',{className:'dsh-chat-attention',role:'alert'},
@@ -2697,8 +2700,10 @@ function ProjectPanel(props) {
       React.createElement('p',{className:'dsh-task-result'},summary.join(' · ')),
       React.createElement(ProjectUnknownActions,{sessionId:props.sessionId,run:run,actions:status.unknownActions||[],onSaved:load}),
       React.createElement('div',{className:'dsh-task-metrics'},
+        status.manualTakeover&&status.manualTakeover.active?React.createElement(Btn,{disabled:busy[0]||run.state==='cancelled',onClick:function(){return act('task.takeover-resume');}},'继续测试'):null,
+        !(status.manualTakeover&&status.manualTakeover.active)&&status.browserTakeover&&status.browserTakeover.open&&['preparing','running','paused','waiting'].indexOf(run.state)>=0?React.createElement(Btn,{disabled:busy[0],onClick:function(){return act('task.takeover');}},'我来操作'):null,
         React.createElement(Btn,{disabled:busy[0]||['preparing','running'].indexOf(run.state)<0,onClick:function(){return act('project.pause');}},'暂停'),
-        React.createElement(Btn,{disabled:busy[0]||['paused','waiting'].indexOf(run.state)<0,onClick:function(){return act('project.resume');}},'继续'),
+        !(status.manualTakeover&&status.manualTakeover.active)?React.createElement(Btn,{disabled:busy[0]||['paused','waiting'].indexOf(run.state)<0,onClick:function(){return act('project.resume');}},'继续'):null,
         React.createElement(Btn,{disabled:busy[0]||['cancelled','completed','failed'].indexOf(run.state)>=0,onClick:function(){return act('project.stop');}},'停止'),
         React.createElement(Btn,{disabled:busy[0],onClick:exportResult},'导出结果'),
         props.onFindings?React.createElement(Btn,{onClick:props.onFindings},'查看发现问题'):null),
@@ -2729,8 +2734,10 @@ function ProjectChatStatus(props) {
       counts.needsCheck?React.createElement('span',null,'待确认 '+counts.needsCheck):null,
       currentCheck?React.createElement('span',{className:'dsh-chat-project-current'},'当前：'+currentCheck.requirement):React.createElement('span',{className:'dsh-chat-project-current'},'当前没有待执行检查'),
       React.createElement(Btn,{disabled:busy[0],onClick:function(){open[1](!open[0]);}},'查看检查表'),
+      status.manualTakeover&&status.manualTakeover.active?React.createElement(Btn,{disabled:busy[0],onClick:function(){return act('task.takeover-resume');}},'继续测试'):null,
+      !(status.manualTakeover&&status.manualTakeover.active)&&status.browserTakeover&&status.browserTakeover.open&&['preparing','running','paused','waiting'].indexOf(run.state)>=0?React.createElement(Btn,{disabled:busy[0],onClick:function(){return act('task.takeover');}},'我来操作'):null,
       run.state==='running'||run.state==='preparing'?React.createElement(Btn,{disabled:busy[0],onClick:function(){return act('project.pause');}},'暂停'):null,
-      run.state==='paused'||run.state==='waiting'?React.createElement(Btn,{disabled:busy[0],onClick:function(){return act('project.resume');}},'继续'):null,
+      !(status.manualTakeover&&status.manualTakeover.active)&&(run.state==='paused'||run.state==='waiting')?React.createElement(Btn,{disabled:busy[0],onClick:function(){return act('project.resume');}},'继续'):null,
       ['completed','cancelled','failed'].indexOf(run.state)<0?React.createElement(Btn,{disabled:busy[0],onClick:function(){return act('project.stop');}},'结束本次'):null,
       React.createElement(Btn,{disabled:busy[0],onClick:exportResult},'导出结果')),
     run.blocker&&run.blocker.reason?React.createElement('p',{className:'dsh-chat-project-current'},run.blocker.reason):null,

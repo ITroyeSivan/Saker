@@ -165,6 +165,78 @@ function saveFreeBrowserRecord(store, sessionId, kind, displayName, payload) {
   return id;
 }
 
+function saveHumanTakeoverObservation(store, sessionId, policy, page) {
+  const safe = redactValue(page);
+  const id = 'human-takeover-observation-' + crypto.randomUUID();
+  const takeover = policy.manualTakeover || {};
+  const record = {
+    id,
+    kind: 'human-takeover-observation',
+    source: 'desktop-user-browser-takeover',
+    scenario: policy.scenario,
+    projectRunId: takeover.runId || null,
+    controlRev: takeover.controlRev ?? null,
+    observedAt: new Date().toISOString(),
+    page: safe,
+  };
+  const original = Buffer.from(JSON.stringify(record));
+  const digest = crypto.createHash('sha256').update(original).digest('hex');
+  store.db.prepare('INSERT INTO business_materials(session_id,id,source_url,digest,record) VALUES(?,?,?,?,?)')
+    .run(sessionId, id, String(safe?.url || ''), digest,
+      JSON.stringify({ ...record, displayName: '人工操作后页面观察', originalBase64: original.toString('base64'),
+        bytes: original.length, digest, relativeRef: 'materials/' + id }));
+  return id;
+}
+
+function browserTakeoverView(browser) {
+  if (!browser) return { available: false, open: false, identityRef: '', headless: null };
+  return {
+    available: !browser.closed,
+    open: !browser.closed,
+    identityRef: String(browser.identityRef || ''),
+    headless: browser.headless === true,
+  };
+}
+
+function setManualTakeover(store, sessionId, input, expectedPolicyRev) {
+  const policy = readTaskPolicy(store, sessionId);
+  if (!policy) throw new Error('任务尚未开始');
+  if (expectedPolicyRev !== undefined && Number(expectedPolicyRev) !== policy.policyRev)
+    throw new Error('任务状态已变化，请刷新后重试');
+  if (policy.manualTakeover?.active) return policy;
+  const manualTakeover = {
+    active: true,
+    startedAt: Date.now(),
+    source: 'desktop-user',
+    scenario: policy.scenario,
+    runId: input.runId || null,
+    controlRev: input.controlRev ?? null,
+    identityRef: String(input.identityRef || ''),
+  };
+  return writeTaskPolicy(store, sessionId, { ...policy, manualTakeover }, 'manual-takeover-start',
+    { runId: manualTakeover.runId, controlRev: manualTakeover.controlRev });
+}
+
+function clearManualTakeover(store, sessionId, observationRef) {
+  const policy = readTaskPolicy(store, sessionId);
+  if (!policy?.manualTakeover?.active) throw new Error('当前没有人工接管');
+  const history = [...(policy.takeoverHistory || []), {
+    ...policy.manualTakeover,
+    endedAt: Date.now(),
+    observationRef,
+  }].slice(-20);
+  const next = { ...policy, takeoverHistory: history };
+  delete next.manualTakeover;
+  if (next.blocker?.source === 'manual-takeover') delete next.blocker;
+  delete next.turnEndedAt;
+  if (!next.planComplete && !next.cancelled) delete next.finishedAt;
+  return writeTaskPolicy(store, sessionId, next, 'manual-takeover-resume', {
+    runId: policy.manualTakeover.runId,
+    controlRev: policy.manualTakeover.controlRev,
+    observationRef,
+  });
+}
+
 //#region 通道与工具共用的业务逻辑
 
 /** 一键验证的注入文案（用户消息；进入会话后由模型按模式验证纪律复核并回写状态）。 */
@@ -509,6 +581,7 @@ export async function dispatch(ctx, st, endpoint, payload) {
     synchronizeStoppedProjectRun(st, sessionId);
     const state = taskPolicyStatus(st, sessionId), workers = siteWorkerView(st, sessionId);
     return { ok: true, ...state, active: workers.active, hostWorkerLimit: hostWorkerLimit(ctx), defaults: chatDefaults(st),
+      browserTakeover: browserTakeoverView(projectBrowsers.get(sessionId)),
       attention: taskAttention(st, sessionId),
       currentAction: taskCurrentAction(st, sessionId),
       // 「暂停中」：已请求停止但代理还在收尾（v6 第 8.2 节）；收尾结束才是「已暂停」。
@@ -648,7 +721,7 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
     st.db.prepare('INSERT INTO task_flow_choice(session_id,record) VALUES(?,?) ON CONFLICT(session_id) DO UPDATE SET record=excluded.record').run(sessionId, JSON.stringify(choice));
     return { ok: true, scenario: p.scenario };
   }
-  if (['task.status', 'task.choose', 'task.start', 'task.cancel', 'task.resume', 'task.cleanup', 'task.new-round', 'task.interaction', 'task.workers', 'task.explain', 'task.limits', 'task.continue'].includes(endpoint)) {
+  if (['task.status', 'task.choose', 'task.start', 'task.cancel', 'task.resume', 'task.cleanup', 'task.new-round', 'task.interaction', 'task.workers', 'task.explain', 'task.limits', 'task.continue', 'task.takeover', 'task.takeover-resume'].includes(endpoint)) {
     const sessionId = String(p.sessionId || '');
     if (!sessionId) throw new Error('sessionId required');
     let sessions;
@@ -657,6 +730,123 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
     if (endpoint !== 'task.status') {
       if (!session || session.header?.agentPreset !== 'pentest') throw new Error('请选择当前可用的渗透会话');
       if (typeof ctx.tools?.guard !== 'function') throw new Error('桌面宿主缺少任务预算守卫');
+      if (endpoint === 'task.takeover') {
+        const policy = readTaskPolicy(st, sessionId);
+        if (!policy?.startedAt) throw new Error('当前没有可接管的测试任务');
+        if (p.expectedPolicyRev !== undefined && Number(p.expectedPolicyRev) !== policy.policyRev)
+          throw new Error('任务状态已变化，请刷新后重试');
+        if (policy.manualTakeover?.active) {
+          const browser = projectBrowsers.get(sessionId);
+          return { ok: true, manualTakeover: policy.manualTakeover, browser: browserTakeoverView(browser), policy };
+        }
+        const currentState = taskPolicyStatus(st, sessionId);
+        const terminal = policy.parentSession || policy.cancelled || policy.planComplete || [
+          'cancelled', 'plan_complete', 'queue_complete', 'first_verified_rce', 'first_verified_high',
+          'time_budget_exhausted', 'tool_budget_exhausted',
+        ].includes(currentState.reason) || String(currentState.reason || '').startsWith('model_budget:')
+          || (currentState.stopped && !['turn_ended', 'paused:needs-user'].includes(currentState.reason));
+        if (terminal)
+          throw new Error('本轮已经结束；请创建下一轮后再接管浏览器');
+        const browser = projectBrowsers.get(sessionId);
+        if (!browser || browser.closed)
+          throw new Error('当前没有可显示的浏览器页面；请先让模型打开目标页面');
+        let run = null;
+        if (policy.scenario === 'project') {
+          run = activeProjectRun(st, sessionId);
+          if (!run || ['completed', 'cancelled', 'failed'].includes(run.state))
+            throw new Error('当前项目运行不在可接管状态');
+          run = pauseProjectRun(st, sessionId, run.runId, {
+            code: 'needs-user', reason: '人工接管浏览器', at: new Date().toISOString(),
+          }, p.expectedControlRev);
+        } else {
+          pauseTaskPolicy(st, sessionId, {
+            code: 'needs-user', reason: '人工接管浏览器', evidence: 'desktop-user requested direct browser operation',
+          }, 'manual-takeover');
+        }
+        const taken = setManualTakeover(st, sessionId, {
+          runId: run?.runId,
+          controlRev: run?.controlRev,
+          identityRef: browser.identityRef,
+        });
+        browser.trafficSource = 'human-takeover';
+        const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
+        let controlWarning = '';
+        if (agent?.status === 'running') {
+          try {
+            if (typeof agent.cancel !== 'function') controlWarning = '模型停止接口不可用；目标动作已被阻断';
+            else agent.cancel({ kind: 'user' });
+          } catch (error) {
+            controlWarning = '模型停止请求未确认：' + (error.message || error);
+          }
+        }
+        return {
+          ok: true, manualTakeover: taken.manualTakeover, browser: browserTakeoverView(browser),
+          policy: taken, ...(run ? { run } : {}), ...(controlWarning ? { warning: controlWarning } : {}),
+        };
+      }
+      if (endpoint === 'task.takeover-resume') {
+        const policy = readTaskPolicy(st, sessionId);
+        if (!policy?.manualTakeover?.active) throw new Error('当前没有人工接管');
+        if (p.expectedPolicyRev !== undefined && Number(p.expectedPolicyRev) !== policy.policyRev)
+          throw new Error('任务状态已变化，请刷新后重试');
+        const browser = projectBrowsers.get(sessionId);
+        if (!browser || browser.closed)
+          throw new Error('浏览器已关闭；请重新打开页面后再继续');
+        if (String(browser.identityRef || '') !== String(policy.manualTakeover.identityRef || ''))
+          throw new Error('当前浏览器身份与接管开始时不一致');
+        const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
+        if (typeof agent?.followup !== 'function' || agent.status === 'running')
+          throw new Error('模型仍在收尾或不可用，请稍后继续');
+        let page;
+        try {
+          page = await browser.observe();
+        } catch (error) {
+          throw new Error('无法读取接管后的页面，仍未继续：' + (error.message || error));
+        }
+        const current = readTaskPolicy(st, sessionId);
+        if (!current?.manualTakeover?.active || current.policyRev !== policy.policyRev)
+          throw new Error('人工接管状态已变化，请刷新后重试');
+        const observationRef = saveHumanTakeoverObservation(st, sessionId, policy, page);
+        let run = null;
+        let resumedPolicy;
+        try {
+          clearManualTakeover(st, sessionId, observationRef);
+          if (policy.scenario === 'project') {
+            run = resumeProjectRun(st, sessionId, policy.manualTakeover.runId, p.expectedControlRev,
+              modelAdmissions.get(ctx)?.runtimeId || '');
+          }
+          resumedPolicy = readTaskPolicy(st, sessionId);
+          browser.trafficSource = 'agent';
+          const target = page?.url ? '当前页面 ' + redactText(String(page.url)) : '当前浏览器页面';
+          const text = policy.scenario === 'project'
+            ? `继续当前文档测试。人工接管已结束，程序已重新观察${target}，观察引用 ${observationRef}。先核对最新页面和身份状态，再继续未完成项；不要重放人工已完成的业务动作，不重建运行、不重置额度。`
+            : `继续当前自由测试。人工接管已结束，程序已重新观察${target}，观察引用 ${observationRef}。先核对最新页面和身份状态，再继续原任务；不要重放人工已完成的业务动作，不重置额度。`;
+          await agent.followup({ id: `saker-takeover-resume-${sessionId}-${policy.policyRev}`,
+            role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text }] });
+        } catch (error) {
+          if (policy.scenario === 'project') {
+            const currentRun = readProjectRun(st, sessionId, policy.manualTakeover.runId);
+            if (currentRun && ['preparing', 'running', 'waiting'].includes(currentRun.state)) {
+              run = pauseProjectRun(st, sessionId, currentRun.runId, {
+                code: 'needs-user', reason: '人工操作已结束，但模型未能继续',
+              }, currentRun.controlRev);
+            }
+          }
+          const currentPolicy = readTaskPolicy(st, sessionId) || policy;
+          writeTaskPolicy(st, sessionId, {
+            ...currentPolicy,
+            manualTakeover: policy.manualTakeover,
+            blocker: { code: 'needs-user', reason: '人工操作已结束，但模型未能继续',
+              source: 'manual-takeover', evidence: String(error.message || error), recordedAt: Date.now() },
+          }, 'manual-takeover-resume-delivery-failed');
+          browser.trafficSource = 'human-takeover';
+          throw new Error('模型未能继续，已保留暂停状态：' + (error.message || error));
+        }
+        return {
+          ok: true, manualTakeover: null, browser: browserTakeoverView(browser),
+          policy: resumedPolicy, observationRef, page: redactValue(page), ...(run ? { run } : {}),
+        };
+      }
       if (endpoint === 'task.choose') {
         const hostLimit = hostWorkerLimit(ctx);
         if (p.workers !== undefined && Number(p.workers) > hostLimit) throw new Error(`worker limit exceeds host maxActiveSubagents (${hostLimit}); allowed 0 and ${hostLimit}`);
@@ -675,6 +865,8 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
         { allowTargetNetwork: p.allowTargetNetwork, readOnly: p.readOnly, excludedPaths: p.excludedPaths, allowedOrigins: p.allowedOrigins,
           requestRatePerMinute: p.requestRatePerMinute, requestConcurrency: p.requestConcurrency }, 'desktop-user');
       else if (endpoint === 'task.continue') {
+        if (readTaskPolicy(st, sessionId)?.manualTakeover?.active)
+          throw new Error('人工接管进行中，请在状态行点击“继续测试”');
         if (p.note !== undefined && (typeof p.note !== 'string' || p.note.length > 2000)) throw Error('补充思路应为2000字以内文本');
         const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
         if (typeof agent?.followup !== 'function' || agent.status === 'running') throw new Error('请先等待当前回合结束，再确认继续');
@@ -708,7 +900,11 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
           throw new Error(`模型未能开始，已停止本轮，请保留资料后重新选择问题：${error.message}`);
         }
       }
-      else if (endpoint === 'task.resume') resumeTaskPolicy(st, sessionId, p.note, 'desktop-user');
+      else if (endpoint === 'task.resume') {
+        if (readTaskPolicy(st, sessionId)?.manualTakeover?.active)
+          throw new Error('人工接管进行中，请在状态行点击“继续测试”');
+        resumeTaskPolicy(st, sessionId, p.note, 'desktop-user');
+      }
       else if (endpoint === 'task.cancel') {
         const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
         if (typeof agent?.cancel !== 'function') throw new Error('当前代理不可用，尚未确认模型停止；请打开该会话后重试');
@@ -738,7 +934,9 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
     if (manager && agent && workers.workers.length) workers = await manager.status(agent);
     synchronizeStoppedProjectRun(st, sessionId);
     const overview = taskOverview(st, sessionId), cost = taskCostOverview(ctx, st, sessionId);
+    const takeoverBrowser = projectBrowsers.get(sessionId);
     return { ok: true, isPentest: session?.header?.agentPreset === 'pentest', hostWorkerLimit: hostWorkerLimit(ctx), ...overview, ...workers, cost,
+      browserTakeover: browserTakeoverView(takeoverBrowser),
       attention: taskAttention(st, sessionId),
       // 「暂停中」：已请求停止但代理还在收尾（v6 第 8.2 节）。
       phase: overview.phase === 'paused' && agent?.status === 'running' ? 'pausing' : overview.phase,
@@ -852,6 +1050,8 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
       }));
       return {
         ok: true, configured: !!run, run, checks: checks.map(projectCheckView), sources, counts: projectCounts(checks),
+        manualTakeover: readTaskPolicy(st, sessionId)?.manualTakeover || null,
+        browserTakeover: browserTakeoverView(projectBrowsers.get(sessionId)),
         unknownActions: run ? listProjectActions(st, sessionId, run.runId).filter(action => action.sideEffectUnknown === true)
           .map(action => ({ actionId: action.actionId, checkId: action.checkId, method: action.method || '', targetUrl: redactText(action.targetUrl || ''), error: redactText(action.error || ''), startedAt: action.startedAt })) : [],
         runs: listProjectRuns(st, sessionId, { limit: 50 }).map(item => ({
@@ -922,13 +1122,15 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
         else agent.cancel({ kind: 'user' });
       }
       const browser = projectBrowsers.get(sessionId);
-      if (browser) {
+      if (endpoint === 'project.stop' && browser) {
         try { await browser.close(); } finally { projectBrowsers.delete(sessionId); }
       }
       if (controlError) throw controlError;
       return { ok: true, run: next };
     }
     if (endpoint === 'project.resume') {
+      if (readTaskPolicy(st, sessionId)?.manualTakeover?.active)
+        throw new Error('人工接管进行中，请在状态行点击“继续测试”');
       const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
       if (typeof agent?.followup !== 'function' || agent.status === 'running') throw new Error('模型仍在收尾或不可用，请稍后继续');
       const resumed = resumeProjectRun(st, sessionId, run.runId, p.expectedControlRev, modelAdmissions.get(ctx)?.runtimeId || '');
@@ -1769,11 +1971,14 @@ function apply(ctx) {
   };
 	const projectBrowserGuardOf = (scope, identityRef) => async ({ url, method }) => {
 		const currentRun = readProjectRun(scope.store, scope.session.id, scope.run.runId);
-		if (!currentRun || currentRun.runId !== scope.run.runId || currentRun.state !== 'running')
+		const currentPolicy = readTaskPolicy(scope.store, scope.session.id);
+		const manual = currentPolicy?.manualTakeover?.active === true
+			&& currentPolicy.manualTakeover.runId === scope.run.runId;
+		if (!currentRun || currentRun.runId !== scope.run.runId
+			|| (!manual && currentRun.state !== 'running'))
 			return { denial: '项目已暂停或停止，浏览器请求不能继续派发' };
 		if (listProjectActions(scope.store, scope.session.id, scope.run.runId).some(action => action.sideEffectUnknown === true))
 			return { denial: '原写入结果未知，浏览器请求已暂停，需先核对原动作' };
-		const currentPolicy = readTaskPolicy(scope.store, scope.session.id);
 		if (currentPolicy?.scenario !== 'project') return { denial: '当前会话已不是按文档测试场景' };
 		const limits = effectivePolicy(scope.store, currentPolicy);
 		const identity = resolveTaskIdentity(scope.store, scope.session.id, identityRef);
@@ -1790,14 +1995,16 @@ function apply(ctx) {
 		}
 		for (const origin of limits.allowedOrigins || []) try { origins.add(new URL(origin).origin); } catch { /* 无效站点 */ }
 		if (!origins.has(parsed.origin)) return { denial: '浏览器请求不在本次授权站点或明确关联资产内' };
-        return { policy: limits, revision: crypto.createHash('sha256').update(JSON.stringify([
+        return { ...(!manual ? { policy: limits } : { manual: true }), revision: crypto.createHash('sha256').update(JSON.stringify([
           currentRun.runId, currentRun.controlRev, currentPolicy.policyRev, limits, taskIdentityRevision(identity),
+          manual ? currentPolicy.manualTakeover.startedAt : null,
         ])).digest('hex') };
 	};
   const freeBrowserGuardOf = (scope, identityRef) => async ({ url, method }) => {
     const currentPolicy = readTaskPolicy(scope.store, scope.session.id);
     const state = taskPolicyStatus(scope.store, scope.session.id);
-    if (!currentPolicy || state.stopped) return { denial: '当前任务已停止，浏览器请求不能继续派发' };
+    const manual = currentPolicy?.manualTakeover?.active === true;
+    if (!currentPolicy || (!manual && state.stopped)) return { denial: '当前任务已停止，浏览器请求不能继续派发' };
     const limits = effectivePolicy(scope.store, currentPolicy);
     const identity = resolveTaskIdentity(scope.store, scope.session.id, identityRef);
     const identityReason = identityDenial(identity);
@@ -1813,8 +2020,9 @@ function apply(ctx) {
     }
     for (const origin of limits.allowedOrigins || []) try { origins.add(new URL(origin).origin); } catch { /* invalid origin */ }
     if (!origins.has(parsed.origin)) return { denial: '浏览器请求不在本次授权站点或明确关联资产内' };
-    return { policy: limits, revision: crypto.createHash('sha256').update(JSON.stringify([
+    return { ...(!manual ? { policy: limits } : { manual: true }), revision: crypto.createHash('sha256').update(JSON.stringify([
       currentPolicy.startedAt, currentPolicy.policyRev, limits, taskIdentityRevision(identity),
+      manual ? currentPolicy.manualTakeover.startedAt : null,
     ])).digest('hex') };
   };
 	ctx.tools.register(defineTool({

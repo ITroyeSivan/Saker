@@ -8,6 +8,9 @@ if (process.env.SAKER_TEST_HOME_PROCESS !== String(process.pid)) {
   const home = mkdtempSync(join(tmpdir(), 'saker-test-home-'))
   process.env.DSH_HOME = home
   process.env.DSH_ATLAS_DB = join(home, 'attack-atlas', 'atlas.db')
+  // Integration tests should not leave visible CfT windows; the official Desktop
+  // verification uses the product default (visible) separately.
+  process.env.SAKER_CFT_HEADLESS = '1'
   process.env.SAKER_TEST_HOME_PROCESS = String(process.pid)
   // Windows 上子进程（如知识库索引）刚退出时句柄可能还没释放，第一次删除会 EPERM。
   // 这里同步小睡后重试几次；'exit' 阶段不能再设 exitCode（已经无效），所以失败必须**打印出来**，

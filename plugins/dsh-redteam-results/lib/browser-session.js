@@ -168,6 +168,7 @@ export class BrowserSession {
     this.pendingDialog = null;
     this.requestIndexLimit = 5000;
     this.relatedTargets = new Map();
+    this.trafficSource = options.trafficSource === 'human-takeover' ? 'human-takeover' : 'agent';
   }
 
   static async start(options = {}) {
@@ -176,11 +177,14 @@ export class BrowserSession {
     const profileRoot = path.resolve(options.profileRoot || path.join(home, 'project-browser'));
     const profileDir = path.join(profileRoot, browserProfileName(options.identity, options.identityRef));
     fs.mkdirSync(profileDir, { recursive: true });
-    const child = spawn(executable, [
-      '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
+    const headless = options.headless === true || process.env.SAKER_CFT_HEADLESS === '1';
+    const browserArgs = [
+      '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--window-size=1280,820',
       '--disable-extensions', '--remote-debugging-port=0', '--user-data-dir=' + profileDir,
       '--disable-background-networking', 'about:blank',
-    ], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+    ];
+    if (headless) browserArgs.unshift('--headless=new');
+    const child = spawn(executable, browserArgs, { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: headless });
     let client, session;
     try {
     const wsUrl = await waitForDevtoolsUrl(child, options.timeoutMs || 20000);
@@ -191,6 +195,7 @@ export class BrowserSession {
     await client.call('Runtime.enable');
     await client.call('Network.enable');
     await client.call('Network.setBypassServiceWorker', { bypass: true });
+    if (!headless) await client.call('Page.bringToFront').catch(() => {});
     const versionInfo = await client.call('Browser.getVersion').catch(() => null);
     const version = String(versionInfo?.product || '');
     const identityRef = String(options.identityRef || '').trim();
@@ -200,6 +205,8 @@ export class BrowserSession {
       identityRef,
       requestGuard: options.requestGuard,
       pacingSessionId: options.pacingSessionId,
+      headless,
+      trafficSource: options.trafficSource,
     });
     session.watchNetwork();
     try {
@@ -267,7 +274,7 @@ export class BrowserSession {
         requestId: id, url: params.request?.url || '', method: params.request?.method || '',
         headers: params.request?.headers || {}, postData: params.request?.postData || '',
         status: null, responseHeaders: {}, mimeType: '', fromCache: false, at: new Date().toISOString(),
-        redirects: redirects.slice(-20),
+        redirects: redirects.slice(-20), source: this.trafficSource,
       });
       while (this.requestOrder.length > this.requestIndexLimit) {
         const expired = this.requestOrder.shift();
@@ -397,6 +404,7 @@ export class BrowserSession {
     this.assertOpen();
     const parsed = new URL(url);
     if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('浏览器只接受 HTTP(S) URL');
+    if (!this.headless) await this.client.call('Page.bringToFront').catch(() => {});
     const denialStart = this.policyDenials.length;
     const loaded = new Promise(resolve => {
       let done = false;

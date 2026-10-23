@@ -2,48 +2,46 @@
 
 当前版本：Saker **0.5.0**。宿主：Windows 官方 DeepSeek Harness Desktop **0.2.1-rc.2**（同时兼容 0.2.0-rc.2）。
 
-[下载 Saker](https://github.com/ITroyeSivan/Saker/releases/latest) · [下载对应官方桌面](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-rc.2)
+[官方 Desktop](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-rc.2) · [源码仓库](https://github.com/ITroyeSivan/Saker)
 
-## 使用发布包
+> 0.5.0 的公开发布标签、Release 页面和下载附件已撤回。本节只描述当前源码验收版，不代表已经发布成品。
+
+## 从源码安装
 
 1. 安装并打开官方 Desktop，完成首次初始化，配置一个可用模型。
-2. 下载 `Saker-0.5.0-desktop.zip`，解压到长期保留的目录。
-3. 完全退出 Desktop。在解压目录打开 PowerShell，运行：
+2. 获取源码并生成当前安装包：
+
+```powershell
+git clone https://github.com/ITroyeSivan/Saker.git
+cd Saker
+pnpm install
+node scripts/pack-all.mjs
+```
+
+3. 完全退出 Desktop。在源码目录打开 PowerShell，运行：
 
 ```powershell
 node scripts/install-desktop.mjs --desktop-dir "C:/实际安装目录/DeepSeek Harness" --check
 node scripts/install-desktop.mjs --desktop-dir "C:/实际安装目录/DeepSeek Harness"
 ```
 
-脚本安装需要 Node.js 22.19 及以上的 22.x，或 24 及以上版本，不需要另外安装 pnpm。它调用指定应用内的官方命令，在一个安装事务中添加 17 个功能插件和根包，并检查已安装文件。当前安装器接受已验证的 Desktop 0.2.0-rc.2 与 0.2.1-rc.2。
+脚本安装需要 Node.js 22.19 及以上的 22.x，或 24 及以上版本；从源码打包还需要 pnpm。它调用指定应用内的官方命令，在一个安装事务中添加 17 个功能插件和根包，并检查已安装文件。当前安装器接受已验证的 Desktop 0.2.0-rc.2 与 0.2.1-rc.2。
 
 安装完成后双击桌面的 **Saker (dsh Desktop)** 快捷方式。脚本每次更新都会刷新它；更换应用目录时保留原来的用户数据目录和 `.dsh` 配置。
 
 请保留解压目录中的 `dist/desktop`：安装后的插件依赖会引用其中按内容保存的 tgz。不要把它当作临时缓存删除。已停用的插件不会被脚本擅自启用，可在官方「插件」页自行开启。
 
-## 在应用内安装
+## 安装行为
 
 从旧版升级请优先使用安装器：它先通过官方命令移除已退役插件，再安装当前 18 个包，不删除历史数据库、项目材料或用户配置。
 
-不想使用脚本时，可在官方「插件」页依次安装发布包内的 tgz：先功能插件，最后 `dsh-saker-0.5.0.tgz`，再按应用提示重启。应用内安装使用桌面自带的 Node 和 pnpm，无需额外安装它们。
+安装器会从 `dist/desktop` 保存按内容寻址的 tgz，再把 profile 依赖指向这些文件。安装完成后不要删除 `dist/desktop`。
 
 如果需要命令行管理插件，通过应用菜单「管理 dsh 命令」安装桌面自带命令；完全退出应用后再操作 desktop profile。不要用 npm 安装的独立 dsh 命令修改它。
 
 ```powershell
 # 此处的 dsh 必须来自官方桌面菜单
 dsh plugin --profile desktop list
-```
-
-## 从源码安装
-
-需要 Node.js 22.19 及以上的 22.x，或 24 及以上版本，以及 pnpm。
-
-```powershell
-git clone https://github.com/ITroyeSivan/Saker.git
-cd Saker
-node scripts/pack-all.mjs
-# 完全退出官方 Desktop 后：
-node scripts/install-desktop.mjs --desktop-dir "C:/实际安装目录/DeepSeek Harness"
 ```
 
 当前桌面版本使用 `install-desktop.mjs`。`install-all.mjs` 与 `dsh web` 是历史网页流程。
