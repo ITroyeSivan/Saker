@@ -1340,6 +1340,25 @@ async function importProjectSource(store, sessionId, input = {}) {
 }
 
 function apply(ctx) {
+  // Tool visibility needs the product scenario before a task policy exists.
+  // Read the same persisted choice used by the UI instead of inferring it from
+  // preset name (both free and document scenarios share the pentest preset).
+  ctx.provide?.('sakerTaskScenario', {
+    get(sessionId) {
+      const id = String(sessionId || '');
+      if (!id) return 'pentest';
+      try {
+        const policy = readTaskPolicy(theStore(), id);
+        if (policy?.scenario) return policy.scenario;
+        const row = theStore().db.prepare('SELECT record FROM task_flow_choice WHERE session_id=?').get(id);
+        if (row) {
+          const choice = JSON.parse(row.record);
+          if (choice?.scenario === 'project') return 'project';
+        }
+      } catch { /* before store init or during shutdown */ }
+      return 'pentest';
+    },
+  });
   const modelAdmission=registerModelAdmission(ctx,theStore,{countInput:options=>{
     let counter;try{counter=ctx.get?.('sakerInputCounter');}catch{ /* optional certified provider counter is unavailable */ }
     return counter?.countInput?.(options);

@@ -18,10 +18,10 @@
 export const name = 'dsh-tool-scope'
 
 /** 需要 tools 服务（读全局工具清单 + 在 agent scope 下挂过滤）。 */
-export const inject = ['tools']
+export const inject = { tools: { required: true }, sakerTaskScenario: { required: false } }
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { computeDeny, enabledRules, matchByRule, RULES } from './rules.js'
+import { computeDeny, computeScenarioDeny, enabledRules, matchByRule, RULES } from './rules.js'
 import { PACKS, deferredPackTools, enabledPacks, findPack, packsForMode, packTools } from './packs.js'
 
 /**
@@ -94,6 +94,33 @@ export function apply(ctx, config = {}) {
     return bind(agent)
   }
 
+  const scenarioOf = (agent) => {
+    try {
+      const value = ctx.sakerTaskScenario?.get?.(agent?.session?.id ?? agent?.id)
+      return value === 'project' ? 'project' : 'pentest'
+    } catch {
+      return 'pentest'
+    }
+  }
+
+  const refreshScenario = (agent, state) => {
+    const scenario = scenarioOf(agent)
+    if (state.scenario === scenario && (state.scenarioDispose || !computeScenarioDeny(scenario, state.toolNames).length)) return
+    try { state.scenarioDispose?.() } catch { /* agent scope may already be gone */ }
+    state.scenarioDispose = null
+    state.scenario = scenario
+    const deny = computeScenarioDeny(scenario, state.toolNames)
+    if (!deny.length) return
+    try {
+      state.scenarioDispose = agent.ctx.tools.restrict({ deny })
+      say(`场景 ${scenario} 隐藏 ${deny.length} 个另一场景工具（${deny.join(' ')}）`)
+    } catch (error) {
+      const msg = `场景工具收窄失败（保持可见）: ${String(error?.message ?? error)}`
+      ctx.logger?.warn?.('dsh-tool-scope: %s', msg)
+      console.error('[tool-scope] ' + msg)
+    }
+  }
+
   const installPack = (agent, state, known, pack) => {
     if (state.packDisposers.has(pack.id)) return false
     const names = packTools(known, pack)
@@ -124,8 +151,12 @@ export function apply(ctx, config = {}) {
     if (!enable || !agent?.id || !agent?.ctx) return
     if (states.has(agent.id)) {
       // agent/created may precede preset tool injection; refresh after inbox insertion.
-      refreshPacks(agent, states.get(agent.id))
-      return states.get(agent.id)
+      const state = states.get(agent.id)
+      const current = visibleTools(agent)
+      state.toolNames = [...new Set([...state.toolNames, ...current])]
+      refreshScenario(agent, state)
+      refreshPacks(agent, state)
+      return state
     }
 
     const known = knownTools()
@@ -134,7 +165,7 @@ export function apply(ctx, config = {}) {
     const mode = modeOf(agent)
     const deny = computeDeny(mode, known, rules)
     const agentTools = visibleTools(agent)
-    const state = { baseDispose: null, packDisposers: new Map(), loadedPacks: new Set(), mode, toolNames: agentTools }
+    const state = { baseDispose: null, scenarioDispose: null, scenario: '', packDisposers: new Map(), loadedPacks: new Set(), mode, toolNames: agentTools }
     states.set(agent.id, state)
 
     if (deny.length) {
@@ -157,6 +188,7 @@ export function apply(ctx, config = {}) {
       }
     }
 
+    refreshScenario(agent, state)
     const packDeny = deferredPackTools(mode, agentTools, packs)
     refreshPacks(agent, state)
     if (!deny.length && !packDeny.length) say(`模式 ${mode || '(默认)'} 无需要收窄的工具`)
@@ -241,6 +273,7 @@ export function apply(ctx, config = {}) {
     for (const entry of state.packDisposers.values()) {
       try { entry.dispose() } catch { /* agent scope 随 agent 一起销毁，这里只做尽力释放 */ }
     }
+    try { state.scenarioDispose?.() } catch { /* 同上 */ }
     try { state.baseDispose?.() } catch { /* 同上 */ }
   })
 
@@ -249,4 +282,4 @@ export function apply(ctx, config = {}) {
   )
 }
 
-export { RULES, computeDeny, enabledRules, matchByRule, PACKS, deferredPackTools, enabledPacks, findPack, packTools, packsForMode }
+export { RULES, computeDeny, computeScenarioDeny, enabledRules, matchByRule, PACKS, deferredPackTools, enabledPacks, findPack, packTools, packsForMode }

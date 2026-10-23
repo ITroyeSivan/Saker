@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-redteam-results",
-  "version": "1.0.196",
+  "version": "1.0.197",
   "description": "管理自由测试、按文档连续检查、执行证据、发现与交付。",
   "files": [
     "lib",

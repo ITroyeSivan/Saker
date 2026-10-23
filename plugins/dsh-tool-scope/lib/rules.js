@@ -17,6 +17,11 @@
 /** 宿主内置的默认模式（Saker 三个 preset 之外的那个「标准」）。 */
 export const DEFAULT_MODES = ['pentest', 'code-audit', 'ctf-solver']
 
+// 同一 pentest preset 下还有「自由测试 / 按文档测试」两种产品场景。它们不是
+// 新 preset，不能用 mode 规则区分；由 redteam-results 提供服务在运行时给出场景。
+export const PROJECT_ONLY_TOOLS = ['project_document', 'project_check', 'project_request']
+export const FREE_ONLY_TOOLS = ['redteam_checks', 'redteam_execution', 'redteam_method', 'redteam_research']
+
 /**
  * 一条规则 = 「某组工具只能在某些模式下可见」。
  * @typedef {object} ToolScopeRule
@@ -130,6 +135,12 @@ export function computeDeny(mode, known, rules) {
     }
   }
   return [...deny].sort()
+}
+
+/** 按产品场景隐藏只属于另一场景的工具；未知/缺省场景按自由测试处理。 */
+export function computeScenarioDeny(scenario, known) {
+  const hidden = scenario === 'project' ? FREE_ONLY_TOOLS : PROJECT_ONLY_TOOLS
+  return known.filter((name) => hidden.includes(name)).sort()
 }
 
 /**

@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-tool-scope",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "按需显示工具，减少每次模型调用需要读取的工具说明。",
   "files": [
     "lib",
