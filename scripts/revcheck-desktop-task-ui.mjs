@@ -9,7 +9,7 @@ const source = path.join(root, 'plugins/dsh-redteam-results/lib/client.js');
 const hash = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const before = hash(source);
 const variants = [
-  ['placeholder-target', "'目标：'+(current.policy.target||'尚未指定目标')", "'目标：'+(current.policy.target||'未填写')",
+  ['placeholder-target', ":React.createElement('p',null,'目标：尚未指定'),", ":React.createElement('p',null,'目标：未填写'),",
     'overview distinguishes missing task details, excluded records and unavailable result counts'],
   ['zero-count-without-target', "hasTarget&&stats?.delivery?", "stats?.delivery?",
     'overview distinguishes missing task details, excluded records and unavailable result counts'],

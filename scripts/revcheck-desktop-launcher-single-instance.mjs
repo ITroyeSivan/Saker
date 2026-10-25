@@ -24,6 +24,14 @@ const variants = [
     from: "if ($foreign.Count -gt 0) {\n  # The port is held by a test/isolated instance.",
     to: "if ($false) {\n  # The port is held by a test/isolated instance.",
     failure: /FAIL the launcher never focuses a verification instance as the daily window/ },
+  { id: 'cookie-prune-removed',
+    from: "& ([string]$settings.nodeExecutable) $cookieHelper $cookieDb",
+    to: "Write-Warning 'cookie pruning removed'",
+    failure: /FAIL the launcher prunes only loopback launch cookies with an explicit Node runtime/ },
+  { id: 'window-show-removed',
+    from: "ShowWindowAsync(window, 9);",
+    to: "// window remains hidden",
+    failure: /FAIL the launcher restores the Electron window started by a hidden shortcut/ },
 ];
 
 try {

@@ -89,13 +89,17 @@ await test('agent scoped tools excluded by visibility API remain denied by the d
     assert.equal(taskExecutionGuard(store, 'child', 'read'), undefined);
   } finally { await manager.dispose(); store.close(); }
 });
-await test('HTTPS raw requests and unknown network tools require explicit unmetered quota', async () => {
+await test('opaque network tools obey scope and hard limits without a default unmetered quota', async () => {
   const store = openStore(':memory:'); parent(store, 'tls', 'https://127.0.0.1:1');
   try {
     for (const args of [{ https: true, request: 'GET / HTTP/1.1\r\nHost: 127.0.0.1:1\r\n\r\n' },
-      { https: false, host: '127.0.0.1', port: 1 }, { batch: [{ isHttps: true, host: '127.0.0.1:1' }] }, {}])
-      assert.match(taskExecutionGuard(store, 'tls', 'mcp_http', Date.now(), { args }), /unmetered_target_traffic/);
-    assert.equal(taskExecutionGuard(store, 'tls', 'knowledge_search', Date.now(), { args: { query: 'offline' } }), undefined);
+      { batch: [{ isHttps: true, host: '127.0.0.1:1' }] }, {}])
+      assert.equal(taskExecutionGuard(store, 'tls', 'mcp_http', Date.now(), { args }), undefined);
+    assert.match(taskExecutionGuard(store, 'tls', 'mcp_http', Date.now(), { args: { https: false, host: '127.0.0.1', port: 1 } }), /outside_scope/);
+    assert.equal(taskExecutionGuard(store, 'tls', 'redteam_context', Date.now(), { args: { kind: 'material' } }), undefined,
+      'reading saved local material must not consume the target-traffic allowance');
+    assert.equal(taskExecutionGuard(store, 'tls', 'mcp_search', Date.now(), { args: { server: 'burp', query: 'base64' } }), undefined,
+      'read-only MCP catalog lookup remains local');
   } finally { store.close(); }
 });
 await test('a historical HTTP receipt never hides an unrelated successful tool call', async () => {
@@ -150,7 +154,7 @@ await test('malformed owned purpose records block admission rather than disappea
     assert.throws(() => ownedPurposeTasks(store, 'bad-owner'), /task_policy|JSON|损坏/);
   } finally { store.close(); }
 });
-await test('explicit unmetered quota still enforces TLS origins, every batch address and enforceable request limits', async () => {
+await test('explicit optional unmetered cap still enforces TLS origins, every batch address and enforceable request limits', async () => {
   const store = openStore(':memory:');
   try {
     startTaskPolicy(store, 'scope-limits', { mode: 'regular', target: 'https://fixture.test:8443',

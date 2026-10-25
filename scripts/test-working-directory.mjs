@@ -32,7 +32,6 @@ await assert.rejects(
 
 for (const file of [
   'plugins/dsh-hunter/lib/index.js',
-  'plugins/dsh-nday-hunter/lib/index.js',
   'plugins/dsh-scanner-tools/lib/index.js',
   'plugins/dsh-semgrep-audit/lib/index.js',
   'plugins/dsh-redteam-results/lib/index.js',

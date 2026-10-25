@@ -60,7 +60,7 @@ const context = (mode = 'vulnerable') => ({ assets: [{ id: 'asset', url: endpoin
 const jobInput = { methodId: method.id, methodVersion: method.version, roles: Object.fromEntries(
   ['owner', 'normal', 'probe', 'denied'].map(role => [role, { requestId: role, requestRevision: 'v1' }])) };
 function prepareJob(sid, mode = 'vulnerable', budget = 20) {
-  startTaskPolicy(store, sid, { mode: 'regular', budget: { toolCalls: budget } });
+  startTaskPolicy(store, sid, { mode: 'regular', target: endpoint, budget: { toolCalls: budget } });
   saveTaskContext(store, sid, context(mode));
 }
 function direction(sid, id, requestId) {
@@ -71,7 +71,7 @@ function direction(sid, id, requestId) {
 }
 const execute = (sid, hypothesisId, requestId) => executeRecordedRequest(store, sid, { hypothesisId, requestId, requestRevision: 'v1', methodId: method.id, methodVersion: method.version });
 async function collect(sid, mode = 'vulnerable', stop = 'budget') {
-  startTaskPolicy(store, sid, { mode: 'regular', stop, budget: { toolCalls: 20 } }); saveTaskContext(store, sid, context(mode));
+  startTaskPolicy(store, sid, { mode: 'regular', target: endpoint, stop, budget: { toolCalls: 20 } }); saveTaskContext(store, sid, context(mode));
   const rounds = [{}, {}];
   direction(sid, 'owner-direction', 'owner');
   for (const round of rounds) round.owner = (await execute(sid, 'owner-direction', 'owner')).id;

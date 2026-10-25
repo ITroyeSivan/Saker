@@ -818,18 +818,20 @@ function apply(ctx) {
 	}));
   ctx.tools.register(defineTool({
     name: "asset_candidate_search_batch",
-    description: "Run bounded FOFA-only organization/Nday searches and save passive candidates outside the active asset ledger. No requests are sent to candidate hosts.",
+    description: "Run bounded FOFA-only passive searches, preserve each literal query and cursor, and save candidates outside the active asset ledger. No requests are sent to candidate hosts.",
     parameters: {
       queries: {
         type: "array", required: true,
-        description: "FOFA DSL queries. Each must include an organization identity field and may include an Nday fingerprint.",
+        description: "FOFA DSL queries. Queries may use any user-approved product, certificate, organization or Nday fingerprint.",
         items: { type: "object", properties: {
           id: { type: "string", required: true }, query: { type: "string", required: true },
           basis: { type: "string" }, entryIds: { type: "array", items: { type: "string" } }, identityType: { type: "string" },
+          nextCursor: { type: "string", description: "FOFA next cursor returned by a previous run for this same query" },
         }, additionalProperties: false },
       },
       workspace: { type: "string", required: true, description: "Task workspace for the passive candidate file" },
       size: { type: "integer", description: "Rows per FOFA query (default 50, maximum 200)" },
+      mode: { type: "string", enum: ["dsl", "native"], description: "Query syntax: built-in DSL (default) or unchanged native FOFA syntax" },
     },
     output: {
       schema: { type: "object", additionalProperties: true },
@@ -842,7 +844,7 @@ function apply(ctx) {
       }
       const seen = new Set();
       const queries = [];
-      const identityFields = new Set(["icp", "domain", "host", "title", "body", "cert.subject.org", "cert.subject.cn"]);
+      const mode = args.mode === "native" ? "native" : "dsl";
       try {
         for (const [index, item] of args.queries.entries()) {
           const id = String(item?.id ?? ("q" + (index + 1))).trim();
@@ -850,16 +852,14 @@ function apply(ctx) {
           if (!id || !query || query.length > 1200) throw new Error("queries[" + index + "] 必须有 id 和不超过 1200 字符的 query");
           if (seen.has(id)) throw new Error("查询 id 重复：" + id);
           seen.add(id);
-          const fields = buildQueries(query, "dsl");
-          if (!everyBranchHasField(parseQueryExpression(query), identityFields)) {
-            throw new Error("查询 " + id + " 缺少机构归属字段（ICP/域名/主机名/标题/正文/证书组织）");
-          }
+          const fields = buildQueries(query, mode);
           if (!fields.fofa) throw new Error("查询 " + id + " 无法转换为 FOFA 语法");
           queries.push({
             id, query,
             basis: String(item?.basis ?? "").trim().slice(0, 80),
             entryIds: Array.isArray(item?.entryIds) ? [...new Set(item.entryIds.map(String).filter(Boolean))].slice(0, 100) : [],
             identityType: String(item?.identityType ?? "").trim().slice(0, 40),
+            nextCursor: String(item?.nextCursor ?? "").trim().slice(0, 500),
           });
         }
       } catch (error) { return { ok: false, error: String(error?.message || error) }; }
@@ -869,8 +869,9 @@ function apply(ctx) {
       const size = Math.max(1, Math.min(200, Math.floor(Number(args.size) || 50)));
       const queryResults = await Promise.all(queries.map(async (item) => {
         try {
-          const result = await runSearch({ query: item.query, mode: "dsl", platform: "fofa", size }, st);
-          return { ...item, ok: true, assets: result.assets, effectiveQueries: result.effectiveQueries, platformErrors: result.platformErrors || [] };
+          const result = await runSearch({ query: item.query, mode, platform: "fofa", size, next: item.nextCursor }, st);
+          return { ...item, ok: true, assets: result.assets, effectiveQueries: result.effectiveQueries,
+            platformStatuses: result.platformStatuses || [], platformErrors: result.platformErrors || [] };
         } catch (error) {
           return { ...item, ok: false, error: String(error?.message || error), assets: [] };
         }
@@ -881,12 +882,15 @@ function apply(ctx) {
       const rawFile = path.join("artifacts", "recon", "fofa-candidates-" + stamp() + ".json");
       const rawAbs = path.join(workspace, rawFile);
       fs.mkdirSync(path.dirname(rawAbs), { recursive: true });
-      fs.writeFileSync(rawAbs, JSON.stringify({ generatedAt: new Date().toISOString(), candidateOnly: true, queries: queryResults, assets }, null, 2) + "\n", "utf8");
+      fs.writeFileSync(rawAbs, JSON.stringify({ generatedAt: new Date().toISOString(), candidateOnly: true, mode, queries: queryResults, assets }, null, 2) + "\n", "utf8");
       appendEvidence(workspace, "FOFA 被动机构/Nday 候选 " + successful.length + "/" + queries.length + " 组；未写入活动资产账本", rawFile.replace(/\\/g, "/"));
       const errors = queryResults.filter((item) => !item.ok).length;
       const text = [
         "FOFA 被动候选搜索：" + successful.length + "/" + queries.length + " 组成功，" + assets.length + " 个去重候选；预计最多 " + queries.length + " 次 API 请求。",
         "结果保存在 " + rawFile.replace(/\\/g, "/") + "，没有加入活动资产账本，也没有连接候选主机。",
+        ...successful.map(item => item.id + "：已获取 " + item.assets.length + " 条；总数 "
+          + item.platformStatuses.map(status => status.total == null ? "未知" : status.total).join("/")
+          + "；下一页 " + (item.platformStatuses.map(status => status.nextCursor).filter(Boolean).join("/") || "无")),
         ...(errors ? [errors + " 组失败，需与零结果区分；详见证据文件。"] : []),
       ];
       return { ok: true, candidateOnly: true, queryCount: queries.length, estimatedRequests: queries.length, successfulQueries: successful.length, assetCount: assets.length, queryResults, assets, rawFile: rawFile.replace(/\\/g, "/"), text: text.join("\n") };

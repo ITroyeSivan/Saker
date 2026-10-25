@@ -10,6 +10,7 @@ import { beginProjectAction, markProjectActionDispatched, finishProjectAction, r
 import { redactHeaders, redactText } from './redaction.js';
 import { readTaskContext } from './task-context.js';
 import { responseBodyText } from './response-body.js';
+import { taskScopeIncludesUrl } from './task-scope.js';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
 
@@ -21,22 +22,15 @@ function parseTarget(input) {
   return url;
 }
 
-function projectScopeOrigins(store, sessionId, limits) {
-  const origins = new Set();
-  if (limits.target) try { origins.add(new URL(limits.target).origin); } catch { /* 无效目标由其他闸拒绝 */ }
-  for (const origin of limits.allowedOrigins || []) try { origins.add(new URL(origin).origin); } catch { /* 无效站点 */ }
-  return origins;
-}
-
 function targetScopeDenial(store, sessionId, limits, url) {
-  const origins = projectScopeOrigins(store, sessionId, limits);
-  return !origins.has(url.origin) ? 'request is outside the current task site or user-allowed associated sites' : undefined;
+  return !taskScopeIncludesUrl(limits, url)
+    ? 'request is outside the current task site or user-allowed associated sites' : undefined;
 }
 
 function associatedIdentityDenial(store, sessionId, limits, url, authContext) {
   if (!authContext) return undefined;
   let primary = '';
-  try { primary = new URL(limits.target).origin; } catch { primary = ''; }
+  try { primary = new URL(limits.primaryTarget).origin; } catch { primary = ''; }
   if (primary && url.origin === primary) return undefined;
   const asset = (readTaskContext(store, sessionId)?.assets || []).find(item => {
     try { return item.inScope === true && item.reachable === true && new URL(item.url).origin === url.origin; } catch { return false; }
@@ -214,6 +208,12 @@ export async function executeProjectHttp(store, sessionId, runId, checkId, input
       },
     });
     if (admission) throw new Error(admission);
+    const dispatchPolicy = readTaskPolicy(store, sessionId);
+    const dispatchLimits = dispatchPolicy ? effectivePolicy(store, dispatchPolicy) : dispatchPolicy;
+    const dispatchDenial = targetTrafficDenial(dispatchLimits, { method })
+      || excludedPathDenial(dispatchLimits, { url: url.href })
+      || targetScopeDenial(store, sessionId, dispatchLimits, url);
+    if (dispatchDenial) throw new Error(dispatchDenial);
     result = await dispatch(url, method, dispatchHeaders, body, input.timeoutMs ?? 10000, signal);
   } catch (error) {
     const sideEffectUnknown = dispatched && !['GET', 'HEAD', 'OPTIONS'].includes(method);

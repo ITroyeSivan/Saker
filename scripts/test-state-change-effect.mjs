@@ -49,7 +49,7 @@ const row = (id, request) => ({ id, revision: 'v1', endpoint, authContext: 'fixt
   inputs: [{ name: 'id', location: 'query', evidenceIds: [id] }] });
 
 function prepare(sid, rows) {
-  startTaskPolicy(store, sid, { mode: 'regular', budget: { toolCalls: 20 } });
+  startTaskPolicy(store, sid, { mode: 'regular', target: endpoint, budget: { toolCalls: 20 } });
   saveTaskContext(store, sid, { assets: [{ id: 'asset', url: endpoint, inScope: true, reachable: true }], methods: [method], requests: rows });
   createResearch(store, sid, { id: 'direction', requestId: rows[0].id, requestRevision: 'v1', controlledInputs: [{ name: 'id', location: 'query' }],
     title: 'Controlled state change comparison', serverPath: 'Local state fixture', boundary: 'Reviewed write vs independent readback',

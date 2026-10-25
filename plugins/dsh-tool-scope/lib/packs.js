@@ -11,7 +11,7 @@ export const PACKS = [
     prefixes: ['operation_'],
     modes: ['pentest'],
     defaultVisible: false,
-    hint: '多步任务需要前置条件、持久队列或中断恢复时加载；复用现有任务账本，小问题无需加载',
+    hint: '需要持久队列、取消恢复或完整任务账本时加载；复用现有任务状态，不要求先建研究流程',
   },
   {
     id: 'asset-discovery',
@@ -19,7 +19,7 @@ export const PACKS = [
     prefixes: ['asset_search', 'asset_candidate_search', 'asset_ingest', 'subfinder_enum', 'httpx_probe', 'whatweb_fingerprint', 'wafw00f_detect'],
     modes: ['pentest'],
     defaultVisible: false,
-    hint: '只给 URL 需有限识别，或用户明确要求查少量资产时加载；不自动扩大范围',
+    hint: '用户要求识别资产、子域、端口或候选入口时加载；可重复处理授权范围，不自动扩大范围',
   },
   {
     id: 'active-scan',
@@ -27,15 +27,7 @@ export const PACKS = [
     prefixes: ['nmap_portscan', 'dirsearch_dirs', 'ffuf_fuzz', 'nuclei_scan', 'afrog_scan', 'sqlmap_inject', 'katana_crawl', 'gau_urls'],
     modes: ['pentest'],
     defaultVisible: false,
-    hint: 'Nmap、目录/内容发现、Nuclei、Afrog、SQLMap 与爬取；按单个假设加载，不默认全扫',
-  },
-  {
-    id: 'webshell',
-    label: 'WebShell 管理',
-    prefixes: ['webshell_'],
-    modes: ['pentest'],
-    defaultVisible: false,
-    hint: '连接、文件、数据库、载荷生成',
+    hint: 'Nmap、目录/内容发现、Nuclei、Afrog、SQLMap 与爬取；按用户要求加载，执行时仍受范围和真实参数限制',
   },
 ]
 

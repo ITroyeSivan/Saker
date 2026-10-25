@@ -39,7 +39,7 @@ function linkChild(parentId, childId, site) {
 }
 function prepareChild(parentId, childId, site) {
   linkChild(parentId, childId, site);
-  startTaskPolicy(store, childId, { mode: 'regular', budget: { toolCalls: 20, workers: 0 } });
+  startTaskPolicy(store, childId, { mode: 'regular', target: site, budget: { toolCalls: 20, workers: 0 } });
   saveTaskContext(store, childId, { assets: [{ id: 'a', url: site, inScope: true, reachable: true }], requests: [requestRow(site)], methods: [method] });
   createResearch(store, childId, { id: 'direction', requestId: 'probe', requestRevision: 'v1', controlledInputs: [{ name: 'mode', location: 'query' }],
     title: 'Child concurrency fixture', serverPath: 'Local fixture', boundary: 'Synthetic', normalBehavior: 'Fixture own response',
@@ -56,7 +56,7 @@ try {
 
   await test('两个子任务并发限流：各自停下，父任务只被暂停一次且计数一致', async () => {
     const parent = 'parent', children = ['child-a', 'child-b'];
-    startTaskPolicy(store, parent, { mode: 'regular', budget: { toolCalls: 20, workers: 2 } });
+    startTaskPolicy(store, parent, { mode: 'regular', target: endpoints.join('\n'), budget: { toolCalls: 20, workers: 2 } });
     saveTaskContext(store, parent, { assets: endpoints.map((url, i) => ({ id: 'a' + i, url, inScope: true, reachable: true })), requests: [], methods: [method] });
     for (const [index, child] of children.entries()) prepareChild(parent, child, endpoints[index]);
     const results = await Promise.all(children.map(child => run(child)));
@@ -80,7 +80,7 @@ try {
 
   await test('父任务已停止时，子任务也不能被重新放行', async () => {
     const child = 'child-c', parent = 'parent2';
-    startTaskPolicy(store, parent, { mode: 'regular', budget: { toolCalls: 20, workers: 2 } });
+    startTaskPolicy(store, parent, { mode: 'regular', target: endpoints[0], budget: { toolCalls: 20, workers: 2 } });
     prepareChild(parent, child, endpoints[0]);
     store.db.prepare('UPDATE task_policy SET record=? WHERE session_id=?').run(JSON.stringify({ ...readTaskPolicy(store, parent), cancelled: true, finishedAt: Date.now() }), parent);
     await assert.rejects(run(child), /任务已停止|active direction|direction/);

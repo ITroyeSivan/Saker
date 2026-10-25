@@ -39,7 +39,7 @@ async function receipt(sid, mode, rowId = 'probe') {
   const request = { id: rowId, revision: 'v1', endpoint, authContext: 'fixture-user', kind: 'api', valid: true,
     request: packet(mode), response: 'HTTP/1.1 200 OK\r\n\r\nold baseline', inputs: [{ name: 'mode', location: 'query', evidenceIds: [rowId] }] };
   if (!preparedSessions.has(sid)) {
-    startTaskPolicy(store, sid, { mode: 'regular', budget: { toolCalls: 20 } });
+    startTaskPolicy(store, sid, { mode: 'regular', target: endpoint, budget: { toolCalls: 20 } });
     saveTaskContext(store, sid, { assets: [{ id: 'a', url: endpoint, inScope: true, reachable: true }], requests: [request], methods: [fixtureMethod] });
     createResearch(store, sid, { id: 'direction', requestId: rowId, requestRevision: 'v1', controlledInputs: [{ name: 'mode', location: 'query' }],
       title: 'Fixture retest', serverPath: 'Local fixture', boundary: 'Synthetic', normalBehavior: 'Fixture own response',

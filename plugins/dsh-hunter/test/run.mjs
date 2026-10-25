@@ -443,22 +443,68 @@ await ok("CSRF 头校验：匹配放行/缺失或错值拒", () => {
 		st.setKey.run("fofa", "test-key", new Date().toISOString());
 		st.close();
 		const oldFetch = globalThis.fetch;
+		const decoded = [];
 		const workspace = mkdtempSync(join(process.env.TEMP || process.env.TMP || process.cwd(), "hunter-candidate-"));
 		try {
 			globalThis.fetch = async (url) => {
 				const q = Buffer.from(new URL(String(url)).searchParams.get("qbase64"), "base64").toString("utf8");
-				assert.ok(q.includes('icp=="湘ICP备20260001号"') && q.includes('title="市立医院"'), q);
-				return { ok: true, status: 200, text: async () => JSON.stringify({ error: false, size: 1, results: [["203.0.113.9:8443", "市立医院管理平台", "203.0.113.9", "", "8443", "https", "nginx"]] }) };
+				decoded.push(q);
+				return { ok: true, status: 200, text: async () => JSON.stringify({ error: false, size: 1, page: 1, next: "NEXT-CANDIDATE-PAGE",
+					results: [["203.0.113.9:8443", "市立医院管理平台", "203.0.113.9", "", "8443", "https", "nginx"]] }) };
 			};
 			const out = await tools.get("asset_candidate_search_batch").execute({
-				queries: [{ id: "org-rce", query: 'icp:"湘ICP备20260001号" title:"市立医院" app:"Example-Portal"', identityType: "icp+title" }],
+				queries: [
+					{ id: "org-rce", query: 'icp:"湘ICP备20260001号" title:"市立医院" app:"Example-Portal"', identityType: "icp+title" },
+					{ id: "product-only", query: 'app:"Example-Portal"', identityType: "product" },
+				],
 				workspace, size: 5,
 			});
 			assert.equal(out.ok, true, JSON.stringify(out));
 			assert.equal(out.candidateOnly, true);
 			assert.equal(out.assetCount, 1);
+			assert.equal(decoded.length, 2);
+			assert.ok(decoded.some(q => q.includes('icp=="湘ICP备20260001号"') && q.includes('title="市立医院"')), decoded.join("\n"));
+			assert.ok(decoded.some(q => q.includes('app="Example-Portal"') && !q.includes("icp==")), decoded.join("\n"));
+			for (const row of out.queryResults) {
+				assert.equal(row.platformStatuses[0].total, 1);
+				assert.equal(row.platformStatuses[0].nextCursor, "NEXT-CANDIDATE-PAGE");
+			}
+			assert.match(out.text, /总数 1/);
+			assert.match(out.text, /下一页 NEXT-CANDIDATE-PAGE/);
 			assert.equal(existsSync(join(workspace, "asset-inventory.json")), false);
 			assert.ok(existsSync(join(workspace, out.rawFile)));
+		} finally {
+			globalThis.fetch = oldFetch;
+			rmSync(workspace, { recursive: true, force: true });
+			const cleanupStore = openHunterStore(join(TEST_HOME, "hunter", "hunter.db"));
+			cleanupStore.setKey.run("fofa", "", new Date().toISOString());
+			cleanupStore.close();
+		}
+	});
+	await ok("FOFA candidate batch mode=native passes the user syntax without the built-in DSL compiler", async () => {
+		const st = openHunterStore(join(TEST_HOME, "hunter", "hunter.db"));
+		st.setKey.run("fofa", "test-key", new Date().toISOString());
+		st.close();
+		const oldFetch = globalThis.fetch;
+		const decoded = [];
+		const workspace = mkdtempSync(join(process.env.TEMP || process.env.TMP || process.cwd(), "hunter-candidate-native-"));
+		try {
+			globalThis.fetch = async url => {
+				decoded.push(Buffer.from(new URL(String(url)).searchParams.get("qbase64"), "base64").toString("utf8"));
+				return { ok: true, status: 200, text: async () => JSON.stringify({
+					error: false, size: 0, page: 1, next: "", results: [],
+				}) };
+			};
+			const query = 'domain="example.test" && (port="443" || port="8443")';
+			const out = await tools.get("asset_candidate_search_batch").execute({
+				queries: [{ id: "native", query }], workspace, size: 5, mode: "native",
+			});
+			assert.equal(out.ok, true, JSON.stringify(out));
+			assert.equal(decoded.length, 1);
+			assert.equal(decoded[0].includes(query), true, 'native query must survive without DSL field rewriting');
+			assert(!decoded[0].includes('domain=="'), 'native syntax must not be compiled through the DSL converter');
+			const raw = JSON.parse(readFileSync(join(workspace, out.rawFile), "utf8"));
+			assert.equal(raw.mode, "native");
 		} finally {
 			globalThis.fetch = oldFetch;
 			rmSync(workspace, { recursive: true, force: true });

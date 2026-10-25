@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { readTaskContext } from './task-context.js';
 import { readTaskPolicy } from './task-policy.js';
 import { parseRowRecord } from './row-record.js';
+import { taskScopeAllowsUrl } from './task-scope.js';
 export const BUSINESS_MATERIAL_SCHEMA = `CREATE TABLE IF NOT EXISTS business_materials (
  session_id TEXT NOT NULL, id TEXT NOT NULL, source_url TEXT NOT NULL, digest TEXT NOT NULL,
  record TEXT NOT NULL, PRIMARY KEY(session_id,id));`;
@@ -76,7 +77,7 @@ export function indexBusinessMaterials(store, sessionId, cwd, input) {
   if (!input || !Array.isArray(input.files) || !input.files.length || input.files.length > 30) throw new Error('provide 1..30 selected source files');
   const context = readTaskContext(store, sessionId), policy = readTaskPolicy(store, sessionId), site = safeUrl(input.site).origin;
   if (!context?.assets.some(asset => asset.inScope && new URL(asset.url).origin === site)) throw new Error('source site must be in current authorized context');
-  if (policy?.target && new URL(policy.target).origin !== site) throw new Error('materials cannot expand the current site');
+  if (!policy || !taskScopeAllowsUrl(policy, site)) throw new Error('materials cannot expand the current task scope');
   const prepared = [], existingIds = new Set(store.db.prepare('SELECT id FROM business_materials WHERE session_id=?').all(sessionId).map(row => row.id)); let bytes = 0;
   for (const supplied of input.files) {
     const sourceUrl = safeUrl(supplied.url);

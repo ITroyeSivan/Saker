@@ -24,34 +24,28 @@ const setModules = (sid, active) => {
 let failed = 0;
 const test = (name, work) => { try { work(); console.log('ok   ' + name); } catch (error) { failed++; console.log('FAIL ' + name + ': ' + error.message); } };
 try {
-  test('both starting points are recorded, the prompt names the one in force, and auto-recon carries a bounded scan allowance', () => {
-    startTaskPolicy(store, 'materials', { mode: 'regular', startMode: 'materials-first', question: '先用已有材料', budget: { toolCalls: 10 } });
+  test('legacy starting points no longer create stages or hidden scan allowances', () => {
+    startTaskPolicy(store, 'materials', { mode: 'regular', startMode: 'materials-first', question: '先用已有材料', target: 'http://127.0.0.1:9', budget: { toolCalls: 10 } });
     startTaskPolicy(store, 'scope-only', { mode: 'regular', startMode: 'auto-recon', question: '只给范围，补必要入口', target: 'http://127.0.0.1:9', budget: { toolCalls: 10 } });
-    assert.equal(readTaskPolicy(store, 'materials').startMode, 'materials-first');
-    assert.equal(readTaskPolicy(store, 'scope-only').startMode, 'auto-recon');
+    assert.equal(readTaskPolicy(store, 'materials').startMode, 'direct-test');
+    assert.equal(readTaskPolicy(store, 'scope-only').startMode, 'direct-test');
     const autoPrompt = taskPrompt({ configured: true, policy: readTaskPolicy(store, 'scope-only'), stopped: false });
-    assert(autoPrompt.includes('起步方式=自动信息收集'));
-    assert(autoPrompt.includes('先按缺项采集并落盘入口'), 'auto-recon must state the collect-then-check chain');
-    assert(taskPrompt({ configured: true, policy: readTaskPolicy(store, 'materials'), stopped: false }).includes('起步方式=资料优先'));
-    // 选了"自动信息收集"就是明确要采集：给**有界默认额度**，而不是默认拒绝。
-    assert.equal(readTaskPolicy(store, 'scope-only').budget.unmeteredToolCalls, 3, 'auto-recon suggests a bounded scan allowance');
-    assert.equal(readTaskPolicy(store, 'materials').budget.unmeteredToolCalls, 0, 'other starting points still default to zero');
-    // 用户显式改 0 仍然优先。
+    assert(!autoPrompt.includes('起步方式=') && !autoPrompt.includes('自动信息收集'));
+    assert.equal(readTaskPolicy(store, 'scope-only').budget.unmeteredToolCalls, null);
+    assert.equal(readTaskPolicy(store, 'materials').budget.unmeteredToolCalls, null);
     startTaskPolicy(store, 'auto-zero', { mode: 'regular', startMode: 'auto-recon', budget: { toolCalls: 10, unmeteredToolCalls: 0 } });
-    assert.equal(readTaskPolicy(store, 'auto-zero').budget.unmeteredToolCalls, 0, 'an explicit zero overrides the suggestion');
+    assert.equal(readTaskPolicy(store, 'auto-zero').budget.unmeteredToolCalls, 0, 'an explicit zero remains a user hard cap');
   });
-  test('a scan tool with unmeasurable target traffic is refused until the task allows it explicitly', () => {
+  test('an active scan proceeds inside the user scope without a default allowance', () => {
     const before = readTaskPolicy(store, 'materials');
-    const denial = taskExecutionGuard(store, 'materials', 'httpx_probe');
-    assert.match(denial, /unmetered_target_traffic/);
-    assert.match(denial, /unmeteredToolCalls=N/, 'the refusal must name the concrete fix');
+    assert.equal(taskExecutionGuard(store, 'materials', 'httpx_probe'), undefined);
     const after = readTaskPolicy(store, 'materials');
-    assert.equal(after.used.toolCalls, before.used.toolCalls, 'a refused scan must not consume the tool budget');
-    assert.equal(after.used.unmeteredToolCalls, 0);
+    assert.equal(after.used.toolCalls, before.used.toolCalls + 1);
+    assert.equal(after.used.unmeteredToolCalls, 1);
     assert.equal(taskExecutionGuard(store, 'materials', 'read'), undefined, 'a metered local read is unaffected');
   });
   test('an explicit allowance admits exactly that many unmetered calls and then stops', () => {
-    startTaskPolicy(store, 'allowed', { mode: 'regular', startMode: 'auto-recon', budget: { toolCalls: 10, unmeteredToolCalls: 1 } });
+    startTaskPolicy(store, 'allowed', { mode: 'regular', target: 'http://127.0.0.1:9', startMode: 'auto-recon', budget: { toolCalls: 10, unmeteredToolCalls: 1 } });
     assert.equal(taskExecutionGuard(store, 'allowed', 'ffuf_fuzz'), undefined);
     assert.equal(readTaskPolicy(store, 'allowed').used.unmeteredToolCalls, 1);
     assert.equal(readTaskPolicy(store, 'allowed').used.toolCalls, 1, 'a scan is still one tool call');
@@ -59,7 +53,7 @@ try {
     assert.match(denied, /unmetered_traffic_budget_exhausted/);
     assert.equal(readTaskPolicy(store, 'allowed').used.unmeteredToolCalls, 1, 'the exhausted allowance must not grow');
     assert.equal(readTaskPolicy(store, 'allowed').used.toolCalls, 1);
-    assert(taskPrompt({ configured: true, policy: readTaskPolicy(store, 'allowed'), stopped: false }).includes('未计量目标流量=1/1'));
+    assert(taskPrompt({ configured: true, policy: readTaskPolicy(store, 'allowed'), stopped: false }).includes('未计量通道=1/1'));
     // 实测发现：模型会用宿主 shell 直接发目标请求，绕过执行回执链——提示词必须点明这点。
     assert(taskPrompt({ configured: true, policy: readTaskPolicy(store, 'allowed'), stopped: false }).includes('不会产生宿主执行回执'));
     // 实测 J2–J9：模型宁可翻文件找契约也不猜——工具契约最短路径要写进每轮提示词。
@@ -81,39 +75,30 @@ try {
     assert(hint.includes('redteam_task progress {planComplete:true}') && hint.includes('只等待用户资料或未完成时不要标记'),
       '回合结束前的显式收口与不标记边界要写进每轮提示词');
   });
-  test('shell and unknown network capabilities require quota while explicit offline MCP tools stay local', () => {
-    startTaskPolicy(store, 'shell-gate', { mode: 'regular', question: '只查这个入口', target: 'http://127.0.0.1:3000', budget: { toolCalls: 10, unmeteredToolCalls: 0 } });
-    assert.match(taskExecutionGuard(store, 'shell-gate', 'pwsh', Date.now(), { args: { command: 'Get-ChildItem . | Select-Object -First 3' } }), /unmetered_target_traffic/, '不凭命令文本推断任意脚本没有网络能力');
-    assert.equal(readTaskPolicy(store, 'shell-gate').used.toolCalls, 0, '拒绝的未知能力不计已执行');
-    const denied = taskExecutionGuard(store, 'shell-gate', 'pwsh', Date.now(), { args: { command: 'Invoke-WebRequest http://127.0.0.1:3000/rest/products/search?q=apple' } });
-    assert.match(String(denied), /unmetered_target_traffic/, '命令里带授权范围内 URL 时按未计量目标流量处理');
-    assert.equal(readTaskPolicy(store, 'shell-gate').used.toolCalls, 0, '被拒的 shell 调用不占预算');
-    assert.match(taskExecutionGuard(store, 'shell-gate', 'pwsh', Date.now(), { args: { command: 'curl https://outside.example.org/' } }), /unmetered_target_traffic/, '未匹配当前范围不等于没有网络能力');
-    startTaskPolicy(store, 'shell-gate-ok', { mode: 'regular', question: '只查这个入口', target: 'http://127.0.0.1:3000', budget: { toolCalls: 10, unmeteredToolCalls: 1 } });
-    assert.equal(taskExecutionGuard(store, 'shell-gate-ok', 'pwsh', Date.now(), { args: { command: 'curl http://127.0.0.1:3000/rest/products/search?q=apple' } }), undefined);
-    assert.equal(readTaskPolicy(store, 'shell-gate-ok').used.unmeteredToolCalls, 1, 'shell 目标流量计入未计量额度');
-    // 2026-10-18 完整任务实测：MCP 通道原先既不占未计量额度也不受范围/停止约束
-    // （模型用 Yakit batch_do_http_request 向目标发了 68 次请求，只留下 3 条回执）。
+  test('opaque shell and MCP traffic follows scope without a default quota', () => {
+    startTaskPolicy(store, 'shell-open', { mode: 'regular', question: '只查这个入口', target: 'http://127.0.0.1:3000', budget: { toolCalls: 10 } });
+    assert.equal(taskExecutionGuard(store, 'shell-open', 'pwsh', Date.now(), { args: { command: 'Get-ChildItem . | Select-Object -First 3' } }), undefined);
+    assert.equal(taskExecutionGuard(store, 'shell-open', 'pwsh', Date.now(), { args: { command: 'Invoke-WebRequest http://127.0.0.1:3000/rest/products/search?q=apple' } }), undefined);
+    assert.equal(readTaskPolicy(store, 'shell-open').used.unmeteredToolCalls, 1, 'explicit URLs are still counted as opaque target traffic');
+    const outside = taskExecutionGuard(store, 'shell-open', 'pwsh', Date.now(), { args: { command: 'curl https://outside.example.org/' } });
+    assert.match(String(outside), /outside_scope/);
+    assert.equal(readTaskPolicy(store, 'shell-open').used.toolCalls, 2, 'a rejected out-of-scope call is not counted');
+
+    startTaskPolicy(store, 'shell-cap', { mode: 'regular', question: '只查这个入口', target: 'http://127.0.0.1:3000', budget: { toolCalls: 10, unmeteredToolCalls: 1 } });
+    assert.equal(taskExecutionGuard(store, 'shell-cap', 'pwsh', Date.now(), { args: { command: 'curl http://127.0.0.1:3000/rest/products/search?q=apple' } }), undefined);
+    assert.equal(readTaskPolicy(store, 'shell-cap').used.unmeteredToolCalls, 1, 'optional cap counts opaque calls');
     const mcpArgs = { server: 'yakit', tool: 'batch_do_http_request', args: { 'base-url': 'http://127.0.0.1:3000', method: 'GET', paths: '/a\n/b' } };
-    assert.match(String(taskExecutionGuard(store, 'shell-gate', 'mcp_call', Date.now(), { args: mcpArgs })), /unmetered_target_traffic/,
-      'MCP 批量请求带授权范围 URL 时同样按未计量目标流量处理');
+    assert.match(String(taskExecutionGuard(store, 'shell-cap', 'mcp_call', Date.now(), { args: mcpArgs })), /unmetered_traffic_budget_exhausted/,
+      'the optional cap is shared across shell and MCP channels');
     const splitHostArgs = { server: 'yakit', tool: 'do_http_request', args: { host: '127.0.0.1', port: 3000, path: '/a', isHttps: false } };
-    assert.match(String(taskExecutionGuard(store, 'shell-gate', 'mcp_call', Date.now(), { args: splitHostArgs })), /unmetered_target_traffic/,
-      'MCP 的 host/port/path 分离参数也必须按目标流量处理');
+    assert.match(String(taskExecutionGuard(store, 'shell-cap', 'mcp_call', Date.now(), { args: splitHostArgs })), /unmetered_traffic_budget_exhausted/);
     const rawHttpArgs = { server: 'yakit', tool: 'do_http_request', args: { request: 'GET /a HTTP/1.1\r\nHost: 127.0.0.1:3000\r\n\r\n' } };
-    assert.match(String(taskExecutionGuard(store, 'shell-gate', 'mcp_call', Date.now(), { args: rawHttpArgs })), /unmetered_target_traffic/,
-      '原始 HTTP 报文也必须按目标流量处理');
-    assert.equal(taskExecutionGuard(store, 'shell-gate', 'mcp_call', Date.now(), { args: { server: 'burp', tool: 'base64_encode', args: { content: 'saker' } } }), undefined,
-      '不含目标 URL 的 MCP 调用不受这条闸门影响');
-    // shell 已经用掉唯一一次额度：同一任务的 MCP 目标流量必须被拒（不能因为换了通道就免费）
-    assert.match(String(taskExecutionGuard(store, 'shell-gate-ok', 'mcp_call', Date.now(), { args: mcpArgs })), /unmetered_traffic_budget_exhausted/,
-      '同一额度跨通道共用，换 MCP 不能绕过');
-    assert.equal(readTaskPolicy(store, 'shell-gate-ok').used.unmeteredToolCalls, 1, '被拒的 MCP 调用不占额度');
-    startTaskPolicy(store, 'mcp-gate-ok', { mode: 'regular', question: '只查这个入口', target: 'http://127.0.0.1:3000', budget: { toolCalls: 10, unmeteredToolCalls: 1 } });
-    assert.equal(taskExecutionGuard(store, 'mcp-gate-ok', 'mcp_call', Date.now(), { args: mcpArgs }), undefined);
-    assert.equal(readTaskPolicy(store, 'mcp-gate-ok').used.unmeteredToolCalls, 1, 'MCP 目标流量也计入未计量额度');
-    // 一次调用 = 一个可审计请求的受控入口（本地效果基准的 exercise_request）不能被当成未计量扫描器，
-    // 否则基准的引用契约整体判死：2026-10-18 实测 h1 的 7 次 exercise_request 全被拒、requests=0。
+    assert.match(String(taskExecutionGuard(store, 'shell-cap', 'mcp_call', Date.now(), { args: rawHttpArgs })), /unmetered_traffic_budget_exhausted/);
+    assert.equal(taskExecutionGuard(store, 'shell-cap', 'mcp_call', Date.now(), { args: { server: 'burp', tool: 'base64_encode', args: { content: 'saker' } } }), undefined);
+
+    startTaskPolicy(store, 'mcp-open', { mode: 'regular', question: '只查这个入口', target: 'http://127.0.0.1:3000', budget: { toolCalls: 10 } });
+    assert.equal(taskExecutionGuard(store, 'mcp-open', 'mcp_call', Date.now(), { args: mcpArgs }), undefined);
+    assert.equal(readTaskPolicy(store, 'mcp-open').used.unmeteredToolCalls, 1);
     startTaskPolicy(store, 'metered-gate', { mode: 'regular', question: '受控接口', target: 'http://127.0.0.1:3000', budget: { toolCalls: 10, unmeteredToolCalls: 0 } });
     assert.equal(taskExecutionGuard(store, 'metered-gate', 'exercise_request', Date.now(),
       { args: { url: 'http://127.0.0.1:3000/document?id=1', method: 'GET' } }), undefined,
@@ -128,13 +113,10 @@ try {
     assert.equal(policy.used.toolCalls, 0, '本地工具不占目标预算');
     assert.equal(policy.used.localToolCalls, 3, '但必须如实计数');
   });
-  test('closing a collection module blocks that collection tool while existing material stays readable', () => {
-    startTaskPolicy(store, 'closed-collection', { mode: 'regular', startMode: 'auto-recon', budget: { toolCalls: 10, unmeteredToolCalls: 5 } });
+  test('the retired test-content catalog no longer blocks existing scanner or local tools', () => {
+    startTaskPolicy(store, 'closed-collection', { mode: 'regular', target: 'http://127.0.0.1:9', startMode: 'auto-recon', budget: { toolCalls: 10, unmeteredToolCalls: 5 } });
     setModules('closed-collection', ALL.filter(key => key !== 'fingerprint'));
-    const denial = taskExecutionGuard(store, 'closed-collection', 'httpx_probe');
-    assert.match(denial, /collection_module_disabled/);
-    assert.match(denial, /fingerprint/);
-    assert.equal(readTaskPolicy(store, 'closed-collection').used.unmeteredToolCalls, 0, 'a blocked collection action must not spend the allowance');
+    assert.equal(taskExecutionGuard(store, 'closed-collection', 'httpx_probe'), undefined);
     assert.equal(taskExecutionGuard(store, 'closed-collection', 'read'), undefined, 'reading existing material is still allowed');
     assert.equal(taskExecutionGuard(store, 'closed-collection', 'redteam_context'), undefined);
     assert.equal(taskExecutionGuard(store, 'closed-collection', 'ffuf_fuzz'), undefined, 'a different module keeps working');

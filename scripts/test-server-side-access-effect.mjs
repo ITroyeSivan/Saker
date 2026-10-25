@@ -61,7 +61,7 @@ const row = (id, request) => ({ id, revision: 'v1', endpoint, authContext: 'fixt
   inputs: [{ name: 'url', location: 'query', evidenceIds: [id] }] });
 
 async function prepare(sid, callbackHost = CALLBACK_HOST) {
-  startTaskPolicy(store, sid, { mode: 'regular', budget: { toolCalls: 20 } });
+  startTaskPolicy(store, sid, { mode: 'regular', target: endpoint, budget: { toolCalls: 20 } });
   const active = { ...method, effectSpec: { ...method.effectSpec, callbackHost } };
   saveTaskContext(store, sid, { assets: [{ id: 'asset', url: endpoint, inScope: true, reachable: true }], methods: [active],
     requests: [row('trigger', packet(callbackHost))] });

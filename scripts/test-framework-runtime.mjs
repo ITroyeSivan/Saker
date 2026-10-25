@@ -27,7 +27,7 @@ const ctx={agents:{get:id=>live.get(id)},on:(name,fn)=>hooks.set(name,fn),logger
 }};
 const root=id=>({session:{id,header:{agentPreset:'pentest',cwd:home}},ctx:{tools:{schemas:scope=>{assert.equal(scope.session.id,id,'inventory must use the actual parent scope');return ['subagent_spawn','send_message','read','redteam_execution','nday_catalog','nday_match','nday_policy_get'].map(name=>({name}));}}}});
 const site='https://fixture.test', assets=[{id:'a',url:site,inScope:true,reachable:true},{id:'b',url:'https://second.test',inScope:true,reachable:true}];
-function parent(id,workers=1,target,workflow='single'){const agent=root(id);live.set(id,agent);startTaskPolicy(store,id,{mode:'regular',workflow,question:'Only the controlled document permission',...(target?{target}:{}),budget:{toolCalls:20,workers,minutes:10}});saveTaskContext(store,id,{assets});return agent;}
+function parent(id,workers=1,target,workflow='single'){const agent=root(id);live.set(id,agent);startTaskPolicy(store,id,{mode:'regular',workflow,question:'Only the controlled document permission',target:target||assets.map(asset=>asset.url).join('\n'),budget:{toolCalls:20,workers,minutes:10}});saveTaskContext(store,id,{assets});return agent;}
 const delegate={site,question:'Inspect related controlled document calls',need:'large-site-materials',reason:'Separate a substantial selected bundle and its request paths'};
 const settle=()=>new Promise(resolve=>setTimeout(resolve,30));
 /** 轮询等待某个条件成立；返回是否在期限内成立，并给出实际耗时。 */
@@ -64,8 +64,9 @@ try{
     const id='action-limits'; parent(id,1,site);
     let policy=readTaskPolicy(store,id);
     assert.equal(policy.allowTargetNetwork,true,'默认允许访问网站');assert.equal(policy.readOnly,false,'默认不改动网站数据');
-    // 默认：未计量扫描器仍按原额度规则拒绝（不是被网络开关拦下）
-    assert.match(taskExecutionGuard(store,id,'httpx_probe'),/unmetered_target_traffic/);
+    // 默认：范围内扫描器不再被“额度 0”隐藏门禁拦下
+    assert.equal(taskExecutionGuard(store,id,'httpx_probe'),undefined);
+    assert.equal(readTaskPolicy(store,id).used.unmeteredToolCalls,1);
     // 关闭“允许访问网站”：目标流量工具一律拒绝，本地读取与规划类不受影响
     setTaskActionLimits(store,id,{allowTargetNetwork:false},'desktop-user');
     assert.equal(readTaskPolicy(store,id).allowTargetNetwork,false);
@@ -74,6 +75,7 @@ try{
     assert.match(taskExecutionGuard(store,id,'pwsh',Date.now(),{args:{command:'curl https://fixture.test/document'}}),/target_network_disabled/);
     assert.equal(taskExecutionGuard(store,id,'read'),undefined,'本地读取不受网络限制');
     // redteam_execution 是本地入口（真正目标请求走执行适配器）：关闭网站访问后由适配器拒绝
+    setTaskActionLimits(store,id,{target:endpoint},'desktop-user');
     const get=row('readonly-get','own');
     saveTaskContext(store,id,{assets:[{id:'asset',url:endpoint,inScope:true,reachable:true}],requests:[get],methods:[]});
     await assert.rejects(executeRecordedRequest(store,id,{requestId:'readonly-get',requestRevision:'v1',hypothesisId:'x'}),/target_network_disabled/);
@@ -88,10 +90,11 @@ try{
       response:'HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nok',inputs:[]};
     saveTaskContext(store,id,{assets:[{id:'asset',url:endpoint,inScope:true,reachable:true}],requests:[write],methods:[]});
     await assert.rejects(executeRecordedRequest(store,id,{requestId:'write',requestRevision:'v1',hypothesisId:'x'}),/read_only_target/);
-    // 只读限制不影响 GET：仍然走到“缺研究方向”这类后续校验，而不是被动作限制拦下
+    // 只读限制不影响 GET：没有研究方向也可作为 exploration 执行
     saveTaskContext(store,id,{assets:[{id:'asset',url:endpoint,inScope:true,reachable:true}],requests:[get],methods:[]});
-    await assert.rejects(executeRecordedRequest(store,id,{requestId:'readonly-get',requestRevision:'v1',hypothesisId:'x'}),
-      error=>!/read_only_target/.test(error.message));
+    const explored=await executeRecordedRequest(store,id,{requestId:'readonly-get',requestRevision:'v1'});
+    assert.equal(explored.outcome,'response');
+    assert.equal(explored.hypothesisId,'exploration');
     // 排除路径：规范化、按路径前缀带边界匹配、命中即在适配器拒绝
     assert.deepEqual(normalizeExcludedPaths('payment\n/api/delete\nhttps://other.test/keep'),['/payment','/api/delete','https://other.test/keep']);
     assert.deepEqual(normalizeExcludedPaths(['/a','/a','  ','/b']),['/a','/b']);
@@ -110,13 +113,14 @@ try{
   await test('MCP calls carrying an authorized-scope URL obey the same traffic admission as scanners and shell',async()=>{
     const mcpArgs={server:'yakit',tool:'batch_do_http_request',args:{'base-url':site,method:'GET',paths:'/a\n/b',concurrent:8}};
     // 不带目标 URL 的 MCP 调用（编解码之类）照常放行
-    const id='mcp-blocked';
-    startTaskPolicy(store,id,{mode:'regular',question:'MCP traffic admission',target:site,budget:{toolCalls:20,unmeteredToolCalls:0}});
+    const id='mcp-default';
+    startTaskPolicy(store,id,{mode:'regular',question:'MCP traffic admission',target:site,budget:{toolCalls:20}});
     saveTaskContext(store,id,{assets:[{id:'asset',url:site,inScope:true,reachable:true}],requests:[],methods:[]});
     assert.equal(taskExecutionGuard(store,id,'mcp_call',Date.now(),{args:{server:'burp',tool:'base64_encode',args:{content:'saker'}}}),undefined,
       '不含目标 URL 的 MCP 调用不该被目标流量闸拦下');
-    assert.match(taskExecutionGuard(store,id,'mcp_call',Date.now(),{args:mcpArgs}),/unmetered_target_traffic/,
-      '带授权范围 URL 的 MCP 批量请求必须先有显式未计量额度');
+    assert.equal(taskExecutionGuard(store,id,'mcp_call',Date.now(),{args:mcpArgs}),undefined,
+      '带授权范围 URL 的 MCP 批量请求不要求先解锁默认额度');
+    assert.equal(readTaskPolicy(store,id).used.unmeteredToolCalls,1);
     // 显式允许一次：第一次放行并计入未计量用量，第二次额度用完拒绝
     const allowed='mcp-allowed';
     startTaskPolicy(store,allowed,{mode:'regular',question:'MCP traffic admission with allowance',target:site,budget:{toolCalls:20,unmeteredToolCalls:1}});
@@ -128,7 +132,7 @@ try{
     setTaskActionLimits(store,allowed,{allowTargetNetwork:false},'desktop-user');
     assert.match(taskExecutionGuard(store,allowed,'mcp_call',Date.now(),{args:mcpArgs}),/target_network_disabled/);
     // 授权范围之外的 URL 不属于本任务目标流量
-    assert.match(taskExecutionGuard(store,id,'mcp_call',Date.now(),{args:{server:'yakit',tool:'batch_do_http_request',args:{'base-url':'https://outside.example.invalid',paths:'/a'}}}),/unmetered_target_traffic/);
+    assert.match(taskExecutionGuard(store,id,'mcp_call',Date.now(),{args:{server:'yakit',tool:'batch_do_http_request',args:{'base-url':'https://outside.example.invalid',paths:'/a'}}}),/outside_scope/);
   });
   await test('request pacing throttles target requests only when the user sets a limit',async()=>{
     const id='pacing'; parent(id,1,site);
@@ -406,6 +410,7 @@ try{
     const p=parent('three-workers',3);setTaskInteraction(store,'three-workers','guided','desktop-user','milestone');
     const sites=['https://first.test','https://second.test','https://third.test','https://fourth.test'];
     saveTaskContext(store,'three-workers',{assets:sites.map((url,n)=>({id:'fixture-'+n,url,inScope:true,reachable:true}))});
+    setTaskActionLimits(store,'three-workers',{target:sites.join('\n')},'desktop-user');
     saveChatDefaults(store,{interaction:'continuous',reporting:'summary',workers:16});
     try{
       const children=[];

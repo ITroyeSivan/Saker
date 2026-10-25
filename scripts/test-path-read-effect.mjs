@@ -41,7 +41,7 @@ const row = (id, file) => ({ id, revision: 'v1', endpoint, authContext: 'fixture
   request: packet(file), response: 'HTTP/1.1 200 OK\r\n\r\nnormal fixture baseline', inputs: [{ name: 'file', location: 'query', evidenceIds: [id] }] });
 
 function prepare(sid, rows) {
-  startTaskPolicy(store, sid, { mode: 'regular', budget: { toolCalls: 20 } });
+  startTaskPolicy(store, sid, { mode: 'regular', target: endpoint, budget: { toolCalls: 20 } });
   saveTaskContext(store, sid, { assets: [{ id: 'asset', url: endpoint, inScope: true, reachable: true }], methods: [method], requests: rows });
   createResearch(store, sid, { id: 'direction', requestId: 'normal', requestRevision: 'v1', controlledInputs: [{ name: 'file', location: 'query' }],
     title: 'Controlled file read comparison', serverPath: 'Local file fixture', boundary: 'Reviewed normal read vs out-of-bounds read',

@@ -39,7 +39,7 @@ const doc = (id, patch = {}) => ({ id, requestId: 'baseline', requestRevision: '
   nextInformation: 'Compare own and other owner fixture objects', knownCheck: { outcome: 'none-found', rationale: 'Only a synthetic fixture; this is a local search result, no novelty claim.',
     sources: [{ reference: 'local-fixture:source-v1', observation: 'No real product vulnerability is represented by the synthetic handler.' }] }, ...patch });
 function start(id, mode = '0day', current = context) {
-  startTaskPolicy(store, id, { mode, budget: { toolCalls: 30, discoveryCalls: 3, unmeteredToolCalls: 30 } });
+  startTaskPolicy(store, id, { mode, target: endpoint, budget: { toolCalls: 30, discoveryCalls: 3, unmeteredToolCalls: 30 } });
   saveTaskContext(store, id, current);
 }
 async function observation(id, outcome = 'support', patch = {}) {
@@ -56,13 +56,15 @@ async function test(name, fn) { try { await fn(); console.log('ok   ' + name); }
 try {
   await test('registered research tool binds seven falsifiable fields and observed inputs to current baseline only', async () => {
     start('actual');
-    assert.match(guards[0]({ ...exec('actual'), name: 'fetch' }), /research_hypothesis_missing/);
-    assert.equal(readTaskPolicy(store, 'actual').used.toolCalls, 0);
+    const beforeExploration = readTaskPolicy(store, 'actual').used.toolCalls;
+    assert.equal(guards[0]({ ...exec('actual'), name: 'fetch' }), undefined, 'first exploration is not blocked before any direction exists');
+    const afterExploration = readTaskPolicy(store, 'actual').used.toolCalls;
+    assert(afterExploration > beforeExploration, 'an allowed exploration is still metered');
     const result = await call('actual', { action: 'create', document: JSON.stringify(doc('h1')) });
     assert.equal(result.ok, true, result.error); assert.equal(result.binding.authContext, 'fixture-user'); assert.equal(result.binding.requestRevision, 'v1');
     assert.equal(result.noveltyProven, false); assert.equal(result.classification, 'unconfirmed-anomaly');
     assert.equal(guards[0]({ ...exec('actual'), name: 'fetch' }), undefined);
-    assert.equal(readTaskPolicy(store, 'actual').used.toolCalls, 1);
+    assert(readTaskPolicy(store, 'actual').used.toolCalls > afterExploration, 'creating a direction is metered');
     assert.equal((await call('other', { action: 'detail', id: 'h1' })).ok, false);
     const missingId = await call('actual', { action: 'observe', document: JSON.stringify({ id: 'observation-not-hypothesis' }) });
     assert.equal(missingId.ok, false); assert.match(missingId.error, /outer id=<hypothesis ID>/); assert(!missingId.error.includes('SQLite'));
@@ -96,7 +98,7 @@ try {
     assert.equal(researchDetail(store, 'refute', 'h').attempts, 0);
     const result = observeResearch(store, 'refute', 'h', input);
     assert.equal(result.state, 'refuted'); assert.equal(result.reason, 'falsifier_observed');
-    assert.match(taskExecutionGuard(store, 'refute', 'pwsh'), /research_hypothesis_missing/);
+    assert.equal(taskExecutionGuard(store, 'refute', 'pwsh'), undefined, 'a closed direction does not block ordinary exploration');
   });
   await test('policy interruption persists separately without fabricated executions or negative coverage', async () => {
     start('restricted', 'regular'); createResearch(store, 'restricted', doc('h'));
@@ -107,7 +109,7 @@ try {
     assert.equal(result.attempts, 0); assert.equal(result.noInformation, 0); assert.equal(result.observations.length, 0);
     assert.equal(result.restriction.coverage, 'not-executed'); assert.equal(result.restriction.source, 'submitted-interruption-report');
     assert.equal(readTaskPolicy(store, 'restricted').used.toolCalls, 0);
-    assert.match(taskExecutionGuard(store, 'restricted', 'fetch'), /research_hypothesis_missing/);
+    assert.equal(taskExecutionGuard(store, 'restricted', 'fetch'), undefined, 'an interrupted direction does not block ordinary exploration');
     assert.throws(() => createResearch(store, 'restricted', doc('retry')), /same research direction/);
     assert.throws(() => observeResearch(store, 'restricted', 'h', {}), /closed/);
     assert.equal(researchNext(store, 'restricted').restrictedDirections, 1);
@@ -131,7 +133,7 @@ try {
     observeResearch(store, 'stalled', 'h', await observation('nothing-1', 'no-information'));
     const result = observeResearch(store, 'stalled', 'h', await observation('nothing-2', 'no-information'));
     assert.equal(result.state, 'stopped'); assert.equal(result.reason, 'no_new_information'); assert.equal(result.attempts, 2);
-    assert.match(taskExecutionGuard(store, 'stalled', 'fetch'), /research_hypothesis_missing/);
+    assert.equal(taskExecutionGuard(store, 'stalled', 'fetch'), undefined, 'a stalled direction does not block ordinary exploration');
     assert.throws(() => createResearch(store, 'stalled', doc('reset', { maxAttempts: 10, nextInformation: 'Try the same thing again' })), /same research direction/);
     const retry = await observation('retry', 'no-information');
     assert.throws(() => observeResearch(store, 'stalled', 'h', retry), /closed/);
@@ -143,7 +145,7 @@ try {
     for (const changed of [{ ...context, requests: [{ ...context.requests[0], valid: false }] }, { ...context, assets: [{ ...context.assets[0], inScope: false }] },
       { ...context, requests: [{ ...context.requests[0], revision: 'v2' }] }]) {
       saveTaskContext(store, 'stale', changed); assert.equal(researchDetail(store, 'stale', 'h').current, false);
-      assert.match(taskExecutionGuard(store, 'stale', 'fetch'), /research_hypothesis_missing/);
+      assert.equal(taskExecutionGuard(store, 'stale', 'fetch'), undefined, 'a stale baseline blocks research evidence, not ordinary exploration');
       assert.throws(() => observeResearch(store, 'stale', 'h', {}), /baseline missing/);
     }
     saveTaskContext(store, 'stale', { ...context, requests: [{ ...context.requests[0], inputs: [...context.requests[0].inputs, { name: 'other', location: 'query', evidenceIds: ['baseline'] }] }] });
@@ -155,7 +157,7 @@ try {
     assert.throws(() => observeResearch(store, 'stale', 'h', wrongPath), /endpoint boundary/);
   });
   await test('functional grouping needs confirmed input and permission evidence and never transfers results across members', () => {
-    startTaskPolicy(store, 'groups', { mode: '0day', budget: { toolCalls: 30, discoveryCalls: 3, unmeteredToolCalls: 30 } });
+    startTaskPolicy(store, 'groups', { mode: '0day', target: endpoint, budget: { toolCalls: 30, discoveryCalls: 3, unmeteredToolCalls: 30 } });
     const second = { ...context.requests[0], id: 'second', inputs: [{ name: 'object', location: 'query', evidenceIds: ['second'] }] };
     saveTaskContext(store, 'groups', { ...context, requests: [context.requests[0], second] }); assert.equal(researchGroups(store, 'groups').total, 2);
     const group = { verified: true, function: 'Object lookup', inputStructure: 'object=query:string', permissionBoundary: 'same fixture owner check', evidenceIds: ['handler-observation', 'permission-control'] };
@@ -178,7 +180,7 @@ try {
       assert.equal(readTaskPolicy(store, sid).used.toolCalls, 5, 'operation counters survive a restart');
       assert.equal(guards[0]({ ...exec(sid), name: 'fetch' }), undefined, 'a restarted session keeps probing under the same budget');
       assert(readTaskPolicy(store, sid).used.toolCalls <= readTaskPolicy(store, sid).budget.toolCalls, 'the task budget remains the bound');
-      assert.equal((await tools.get('redteam_task').execute({ action: 'next' }, exec(sid))).next.action, 'record-observation-or-close', 'the hint still suggests recording after repeated probes');
+      assert.equal((await tools.get('redteam_task').execute({ action: 'next' }, exec(sid))).next.action, 'minimal-check-with-control', 'the hint asks for the minimum controlled check without a hard probe count');
       observeResearch(store, sid, 'first', await observation('valid-negative', 'counterevidence'));
       const next = researchNext(store, sid);
       assert.equal(next.action, 'create-direction-on-observed-input'); assert.equal(next.requests.length, 1);
@@ -188,7 +190,7 @@ try {
       assert.equal(researchDetail(store, sid, 'first').state, 'refuted');
     }
     closeResearch(store, 'actual', 'h1', 'Independent impact validation unavailable; retain only an unconfirmed lead');
-    assert.match(taskExecutionGuard(store, 'actual', 'fetch'), /research_hypothesis_missing/);
+    assert.equal(taskExecutionGuard(store, 'actual', 'fetch'), undefined, 'closing a direction does not make the whole target untestable');
   });
   await test('closing one input does not discard a different actual request on the same endpoint and identity', async () => {
     const second = { ...context.requests[0], id: 'same-route-new-input', ...await capture('object=own&view=summary'),

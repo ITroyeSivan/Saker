@@ -44,7 +44,7 @@ try {
   await test('并发 8 路（含 4 路限流）：实际请求数 = 回执数 = 预算计数，限流后任务停住', async () => {
     const sid = 'concurrent';
     const rows = [0, 1, 2, 3].map(i => row('ok' + i, 'ok')).concat([4, 5, 6, 7].map(i => row('rate' + i, 'rate')));
-    startTaskPolicy(store, sid, { mode: 'regular', budget: { toolCalls: 20 } });
+    startTaskPolicy(store, sid, { mode: 'regular', target: endpoint, budget: { toolCalls: 20 } });
     saveTaskContext(store, sid, { assets: [{ id: 'a', url: endpoint, inScope: true, reachable: true }], requests: rows, methods: [fixtureMethod] });
     createResearch(store, sid, { id: 'direction', requestId: 'ok0', requestRevision: 'v1', controlledInputs: [{ name: 'mode', location: 'query' }],
       title: 'Concurrent fixture', serverPath: 'Local fixture', boundary: 'Synthetic', normalBehavior: 'Fixture own response',
@@ -73,7 +73,7 @@ try {
   await test('并发不重复计费：同一批请求不会因为并发而多记预算', async () => {
     const sid = 'no-double-count';
     const rows = [0, 1, 2, 3, 4, 5, 6, 7].map(i => row('r' + i, 'ok'));
-    startTaskPolicy(store, sid, { mode: 'regular', budget: { toolCalls: 20 } });
+    startTaskPolicy(store, sid, { mode: 'regular', target: endpoint, budget: { toolCalls: 20 } });
     saveTaskContext(store, sid, { assets: [{ id: 'a', url: endpoint, inScope: true, reachable: true }], requests: rows, methods: [fixtureMethod] });
     createResearch(store, sid, { id: 'direction', requestId: 'r0', requestRevision: 'v1', controlledInputs: [{ name: 'mode', location: 'query' }],
       title: 'Concurrent fixture', serverPath: 'Local fixture', boundary: 'Synthetic', normalBehavior: 'Fixture own response',

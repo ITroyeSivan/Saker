@@ -40,7 +40,7 @@ async function pair(sid, { pathname = '/api/object', authContext = 'fixture-user
     request: packet(pathname, rowId), response: 'HTTP/1.1 200 OK\r\n\r\nold baseline',
     inputs: [{ name: 'mode', location: 'query', evidenceIds: [rowId] }],
   }));
-  startTaskPolicy(store, sid, { mode: 'regular', budget: { toolCalls: 40 } });
+  startTaskPolicy(store, sid, { mode: 'regular', target: origin, budget: { toolCalls: 40 } });
   saveTaskContext(store, sid, { assets: [{ id: 'a', url: endpoint, inScope: true, reachable: true }], requests: rows, methods: [fixtureMethod] });
   createResearch(store, sid, {
     id: 'direction', requestId: 'target', requestRevision: 'v1', controlledInputs: [{ name: 'mode', location: 'query' }],

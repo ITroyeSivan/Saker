@@ -59,9 +59,11 @@ const SETTING_LABELS = {
   mode: '方向', interaction: '什么时候问我', reporting: '什么时候汇报', explain: '解释原理',
   workerLimit: '助手上限', allowTargetNetwork: '允许访问网站', readOnly: '不改动网站数据',
   excludedPaths: '排除路径', requestRatePerMinute: '扫描速率', requestConcurrency: '并发上限',
-  startMode: '起步方式', workerModel: '助手模型',
+  startMode: '起步方式', workerModel: '助手模型', target: '测试范围', primaryTarget: '主入口',
+  scope: '范围规则', pendingChange: '待确认变更',
   // 预算也算「设置」（v6 第 4.2 节）：聊天里只能收紧，但收紧同样是用户要看懂的变更。
   'budget.toolCalls': '工具调用上限', 'budget.deadline': '时间上限',
+  'budget.unmeteredToolCalls': '未计量通道上限',
 };
 /** 支持 `budget.toolCalls` 这类嵌套字段；取不到按 null 处理，与"未设置"一致。 */
 function fieldValue(record, field) {

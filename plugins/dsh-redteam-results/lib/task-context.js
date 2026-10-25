@@ -4,6 +4,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { checkedKey, normalizeCheck } from './checked.js';
 import { activeMethodPackage } from './method-packages.js';
+import { taskScopeAllowsAsset } from './task-scope.js';
 const required = (value, label) => {
   if (typeof value !== 'string' || !value.trim() || value.length > 2000 || /[\u0000-\u001f]/.test(value)) throw new Error(label + ' must be a bounded nonempty string');
   return value.trim();
@@ -63,11 +64,11 @@ function composeRequestPacket(row) {
   if (body && !lower.has('content-length')) headers.push(['Content-Length', String(Buffer.byteLength(body))]);
   return method + ' ' + target + ' HTTP/1.1\r\n' + headers.map(([key, value]) => key + ': ' + value).join('\r\n') + '\r\n\r\n' + body;
 }
-export function normalizeTaskContext(input, { legacyRead = false, methodStore, scopeOrigin = '', receiptLookup } = {}) {
+export function normalizeTaskContext(input, { legacyRead = false, methodStore, scopeOrigin = '', scopePolicy, receiptLookup } = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('task context must be an object');
   const context = { assets: input.assets ?? [], checks: input.checks ?? [], requests: input.requests ?? [], methods: input.methods ?? [], maxSupplementAttempts: input.maxSupplementAttempts ?? 2 };
   for (const field of ['assets', 'checks', 'requests', 'methods']) {
-    if (!Array.isArray(context[field]) || context[field].length > 2000) throw new Error(field + ' must be an array of at most 2000 items');
+    if (!Array.isArray(context[field]) || context[field].length > 10000) throw new Error(field + ' must be an array of at most 10000 items');
   }
   if (!Number.isInteger(context.maxSupplementAttempts) || context.maxSupplementAttempts < 0 || context.maxSupplementAttempts > 10) throw new Error('invalid supplement budget');
   const assets = new Map();
@@ -79,7 +80,8 @@ export function normalizeTaskContext(input, { legacyRead = false, methodStore, s
     const row = { ...asset, id, url };
     // 用户在建任务时写的 target 就是本次授权范围：origin 与它一致的资产默认算在范围内，
     // 省掉一次布尔字段猜测；范围外的资产**不**自动标记（不自行扩大范围）。
-    if (row.inScope === undefined && scopeOrigin && new URL(url).origin === scopeOrigin) row.inScope = true;
+    if (scopePolicy && row.inScope !== false) row.inScope = taskScopeAllowsAsset(scopePolicy, { url, host: new URL(url).hostname });
+    else if (row.inScope === undefined && scopeOrigin && new URL(url).origin === scopeOrigin) row.inScope = true;
     assets.set(id, row); return row;
   });
   const requestKeys = new Set(), methodKeys = new Set();
@@ -158,7 +160,7 @@ export function normalizeTaskContext(input, { legacyRead = false, methodStore, s
     }
     return row;
   });
-  if (JSON.stringify(context).length > 1024 * 1024) throw new Error('task context exceeds 1MB');
+  if (JSON.stringify(context).length > 8 * 1024 * 1024) throw new Error('task context exceeds 8MB');
   return context;
 }
 export function taskContextView(context, selector = {}) {
@@ -176,7 +178,7 @@ export function taskContextView(context, selector = {}) {
   }
   if (selector.id !== undefined || selector.version !== undefined) throw new Error('detail lookup requires kind and id');
   const offset = selector.offset ?? 0;
-  if (!Number.isInteger(offset) || offset < 0 || offset > 2000) throw new Error('invalid index offset');
+  if (!Number.isInteger(offset) || offset < 0 || offset > 10000) throw new Error('invalid index offset');
   const lines = [`资产 ${context.assets.length}；入口检查 ${context.checks.length}；请求 ${context.requests.length}；方法 ${context.methods.length}；索引offset=${offset}`];
   for (const [field, kind] of [['assets', 'asset'], ['requests', 'request'], ['methods', 'method']]) {
     lines.push(`${kind}索引（最多20条；详情用kind/id/version读取）：`);
@@ -203,10 +205,11 @@ export function saveTaskContext(store, sessionId, input) {
     }) };
   }
   // 直接读策略表拿用户设定的 target（不从 task-policy.js import，避免循环依赖）。
-  let scopeOrigin = '';
+  let scopeOrigin = '', scopePolicy = null;
   try {
     const row = store.db.prepare('SELECT record FROM task_policy WHERE session_id=?').get(sessionId);
-    const target = row ? JSON.parse(row.record)?.target : '';
+    scopePolicy = row ? JSON.parse(row.record) : null;
+    const target = scopePolicy?.primaryTarget || '';
     if (target) scopeOrigin = new URL(target).origin;
   } catch { scopeOrigin = ''; }
   const receiptLookup = id => {
@@ -214,7 +217,7 @@ export function saveTaskContext(store, sessionId, input) {
     if (!row) throw new Error('responseReceiptId 指向的执行回执不存在：' + id);
     return JSON.parse(row.record);
   };
-  const context = normalizeTaskContext(input, { methodStore: store, scopeOrigin, receiptLookup });
+  const context = normalizeTaskContext(input, { methodStore: store, scopeOrigin, scopePolicy, receiptLookup });
   store.db.exec('BEGIN IMMEDIATE');
   try {
   const previous = readTaskContext(store, sessionId);

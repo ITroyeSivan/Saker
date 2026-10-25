@@ -18,12 +18,63 @@ const LEGACY_TABLES = Object.freeze([
   'task_rounds', 'knowledge_usage', 'task_knowledge',
   'project_runs', 'project_sources', 'project_checks', 'project_actions',
 ]);
+// Extracted from v0.4.113 knowledge-usage.js / knowledge-switch.js. Retired
+// sections are still validated against this fixed schema before they are ignored.
+const LEGACY_SECTION_SCHEMAS = Object.freeze({
+  knowledge_usage: Object.freeze({
+    columns: ['session_id', 'id', 'at', 'record'],
+    text: ['session_id', 'id', 'record'],
+    integer: ['at'],
+  }),
+  task_knowledge: Object.freeze({
+    columns: ['session_id', 'enabled', 'source', 'updated_at'],
+    text: ['session_id', 'source', 'updated_at'],
+    integer: ['enabled'],
+  }),
+});
 const PROJECT_ACTIVE_STATES = new Set(['preparing', 'running', 'waiting', 'paused']);
 const sha = value => createHash('sha256').update(value).digest('hex');
 const scalar = value => value === null || ['string', 'number'].includes(typeof value);
 const hasColumn = (store, table, column) => store.db.prepare(`PRAGMA table_info(${table})`).all().some(row => row.name === column);
 const archiveTables = store => TABLES.filter(table => hasColumn(store, table, 'session_id'));
 const rowsOf = (store, table, sessionId) => store.db.prepare(`SELECT * FROM ${table} WHERE session_id=?`).all(sessionId);
+
+function validateLegacySection(table, rows, sourceSession, problems) {
+  const schema = LEGACY_SECTION_SCHEMAS[table];
+  if (!schema) return;
+  const expected = [...schema.columns].sort();
+  if (rows.length > 1 && table === 'task_knowledge') problems.push(table + ' 只能有一条任务级记录');
+  for (const row of rows) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) {
+      problems.push(table + ' 含非对象行');
+      continue;
+    }
+    const keys = Object.keys(row).sort();
+    const missing = expected.filter(key => !keys.includes(key));
+    const unknown = keys.filter(key => !expected.includes(key));
+    if (missing.length) problems.push(table + ' 缺少旧版必需列：' + missing.join(','));
+    if (unknown.length) problems.push(table + ' 含旧版 schema 未知列：' + unknown.join(','));
+    if (missing.length || unknown.length) continue;
+    if (row.session_id !== sourceSession) problems.push(table + ' 引用来源不属于归档任务');
+    for (const key of schema.text) if (typeof row[key] !== 'string') problems.push(table + ' 列 ' + key + ' 类型错误');
+    for (const key of schema.integer) if (!Number.isSafeInteger(row[key])) problems.push(table + ' 列 ' + key + ' 类型错误');
+    if (table === 'task_knowledge') {
+      if (![0, 1].includes(row.enabled)) problems.push(table + ' enabled 只能是 0/1');
+      if (!row.source) problems.push(table + ' source 不能为空');
+      if (typeof row.updated_at === 'string' && !Number.isFinite(Date.parse(row.updated_at)))
+        problems.push(table + ' updated_at 不是有效时间');
+    } else {
+      if (!row.id) problems.push(table + ' id 不能为空');
+      let record;
+      try { record = JSON.parse(row.record); } catch { problems.push(table + ' record 不是 JSON'); continue; }
+      if (!record || typeof record !== 'object' || Array.isArray(record)) {
+        problems.push(table + ' record 不是对象'); continue;
+      }
+      if (record.id !== row.id) problems.push(table + ' record.id 与行引用不一致');
+      if (record.at !== row.at) problems.push(table + ' record.at 与行时间不一致');
+    }
+  }
+}
 
 function hydrateMaterialFiles(sections) {
   const files = [];
@@ -128,6 +179,7 @@ export function verifyTaskArchive(archive) {
     if (!expectedTables.includes(table)) { problems.push('归档包含未知表：' + table); continue; }
     const rows = sections[table];
     if (!Array.isArray(rows)) { problems.push(table + ' 不是行数组'); continue; }
+    if (manifest.schema === LEGACY_TASK_ARCHIVE_SCHEMA) validateLegacySection(table, rows, manifest.sourceSession, problems);
     if (!Number.isInteger(manifest.sections[table]) || manifest.sections[table] !== rows.length)
       problems.push(table + ' 行数不一致');
     const expectedDigest = manifest.digests?.[table];
@@ -135,7 +187,10 @@ export function verifyTaskArchive(archive) {
       problems.push(table + ' 摘要不一致');
     let keys = null;
     for (const row of rows) {
-      if (!row || typeof row !== 'object' || Array.isArray(row)) { problems.push(table + ' 含非对象行'); break; }
+      if (!row || typeof row !== 'object' || Array.isArray(row)) {
+        if (!problems.includes(table + ' 含非对象行')) problems.push(table + ' 含非对象行');
+        break;
+      }
       const rowKeys = Object.keys(row).sort();
       if (keys === null) keys = rowKeys;
       else if (JSON.stringify(rowKeys) !== JSON.stringify(keys)) { problems.push(table + ' 同行结构不一致'); break; }

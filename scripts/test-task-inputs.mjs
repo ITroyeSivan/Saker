@@ -15,7 +15,7 @@ try {
   await test('registered task starts once from explicit fields without a policy JSON or mode/workflow guessing', async () => {
     const result = await task.execute(fields, exec('typed-task'));
     assert.equal(result.ok, true, result.error); assert.equal(result.configured, true);
-    assert.equal(result.policy.mode, 'regular');assert.equal(result.policy.target,fields.target);
+    assert.equal(result.policy.mode, 'regular');assert.equal(new URL(result.policy.target).origin,new URL(fields.target).origin);
     assert.equal(result.policy.budget.toolCalls, 8);assert.equal(result.policy.workerLimit,0);assert.equal(result.policy.flow.kind,'single');
     const reset=await task.execute({...fields,toolCalls:1000},exec('typed-task'));
     assert.equal(reset.ok,false); assert.match(reset.error,/already started/);
@@ -42,11 +42,12 @@ try {
   });
   await test('bad start exposes precise allowed fields and leaves no running task or widened scope', async () => {
     const invalid=await task.execute({...fields,mode:'pentest-regular'},exec('invalid-task'));
-    assert.equal(invalid.ok,false);assert.match(invalid.recovery,/regular\/nday\/0day/);
+    assert.equal(invalid.ok,false);assert.match(invalid.recovery,/当前研究重点/);
     assert.match(task.output.render({},invalid)[0].text,/错误/);
     assert.equal((await task.execute({action:'status'},exec('invalid-task'))).configured,false);
-    const badFlow=await task.execute({...fields,workflow:'pentest-regular'},exec('invalid-task'));assert.equal(badFlow.ok,false);
-    assert.deepEqual(task.parameters.workflow.enum,['single','regular-to-nday','regular-with-nday']);
+    const legacyFlow=await task.execute({...fields,workflow:'pentest-regular'},exec('invalid-task'));
+    assert.equal(legacyFlow.ok,true,legacyFlow.error);
+    assert.equal(legacyFlow.policy.flow.kind,'single');
     assert.deepEqual(task.parameters.mode.enum,['regular','nday','0day']);
   });
   await test('finding format failure exposes the complete method contract in one tool response without accepting malformed evidence', async () => {

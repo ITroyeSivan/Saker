@@ -32,7 +32,7 @@ async function test(name, fn) { try { await fn(); console.log('ok   ' + name); }
 try {
   await test('budget reservation and durable dispatch marker commit together and failed reservations roll back both', () => {
     store.db.exec('CREATE TABLE reservation_fixture (id TEXT PRIMARY KEY)');
-    startTaskPolicy(store, 'reservation', { mode: 'regular', budget: { toolCalls: 1 } });
+    startTaskPolicy(store, 'reservation', { mode: 'regular', target: 'https://fixture.test', budget: { toolCalls: 1 } });
     assert.throws(() => taskExecutionGuard(store, 'reservation', 'recorded-http-execution', Date.now(), { onReserve: () => {
       store.db.prepare('INSERT INTO reservation_fixture (id) VALUES (?)').run('rollback');
       throw new Error('simulated durable marker failure');
@@ -49,7 +49,7 @@ try {
     assert.equal(reserved, false, 'denied dispatch cannot create an in-flight marker');
   });
   await test('actual registered task tool and monotonic guard stop extra target operations while keeping delivery available', async () => {
-    const started = await call('actual', { action: 'start', policy: JSON.stringify({ mode: 'regular', budget: { toolCalls: 2, unmeteredToolCalls: 2 } }) });
+    const started = await call('actual', { action: 'start', policy: JSON.stringify({ mode: 'regular', target: 'https://fixture.test', budget: { toolCalls: 2, unmeteredToolCalls: 2 } }) });
     assert.equal(started.ok, true, started.error); assert.equal(started.enforcementAvailable, true);
     assert.equal(guards[0]({ ...exec('actual'), name: 'fetch' }), undefined);
     assert.equal(guards[0]({ ...exec('actual'), name: 'pwsh' }), undefined);
@@ -82,7 +82,7 @@ try {
       ['low-reviewed', {}, { secondRating: 'low' }, ''],
       ['confirmed', {}, {}, '']
     ]) {
-      startTaskPolicy(store, id, { mode: 'nday', budget: { toolCalls: 20, unmeteredToolCalls: 20 } }); finding(id, patch, reviewPatch);
+      startTaskPolicy(store, id, { mode: 'nday', target: 'https://fixture.test', budget: { toolCalls: 20, unmeteredToolCalls: 20 } }); finding(id, patch, reviewPatch);
       assert.equal(taskPolicyStatus(store, id).reason, reason, id);
     }
     assert.equal(taskExecutionGuard(store, 'confirmed', 'fetch'), undefined);
@@ -100,17 +100,22 @@ try {
     assert.throws(() => updateTaskProgress(store, 'queue', { queueComplete: false }), /cannot be reopened/);
   });
   await test('time deadline cancellation malformed progress and unsupported hosts cannot silently reset or evade task limits', async () => {
-    startTaskPolicy(store, 'deadline', { mode: 'regular', budget: { toolCalls: 5, minutes: 1 } }, 1000);
+    startTaskPolicy(store, 'deadline', { mode: 'regular', target: 'https://fixture.test', budget: { toolCalls: 5, minutes: 1 } }, 1000);
     assert.equal(taskPolicyStatus(store, 'deadline', 60999).stopped, false);
     assert.match(taskExecutionGuard(store, 'deadline', 'fetch', 61000), /time_budget_exhausted/);
     assert.throws(() => updateTaskProgress(store, 'deadline', { budget: { toolCalls: 99 } }));
     assert.equal((await call('regular', { action: 'cancel' })).reason, 'cancelled');
     assert.equal((await call('actual', { action: 'status', sessionId: 'other' })).reason, 'tool_budget_exhausted');
     assert.equal((await tools.get('redteam_task').execute({ action: 'status' }, { agent: { session: { id: 'actual', header: { agentPreset: 'code-audit' } } } })).ok, false);
-    for (const budget of [{ toolCalls: -1 }, { toolCalls: 10, discoveryCalls: 11 }, { toolCalls: 10.5, discoveryCalls: 1 }]) {
+    for (const budget of [{ toolCalls: -1 }, { toolCalls: 10.5 }]) {
       assert.throws(() => startTaskPolicy(store, 'bad', { mode: '0day', budget }));
       assert.equal(readTaskPolicy(store, 'bad'), null);
     }
+    const legacyDiscovery = startTaskPolicy(store, 'legacy-discovery', {
+      mode: '0day', budget: { toolCalls: 10, discoveryCalls: 11 },
+    });
+    assert.equal(legacyDiscovery.budget.discoveryCalls, 0, 'retired discovery field is compatibility-only');
+    assert.equal(legacyDiscovery.budget.toolCalls, 10);
     const oldTools = new Map();
     results.apply({ tools: { register: tool => oldTools.set(tool.name, tool) }, effect: () => {}, webServer: {} });
     assert.equal((await oldTools.get('redteam_task').execute({ action: 'start', policy: JSON.stringify({ mode: 'regular', budget: { toolCalls: 10 } }) }, exec('old-host'))).ok, false);

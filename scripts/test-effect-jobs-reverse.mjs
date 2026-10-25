@@ -8,7 +8,7 @@ const root = fileURLToPath(new URL('..', import.meta.url)), boundary = path.reso
 assert.equal(path.resolve(os.tmpdir()), boundary);
 const copy = fs.mkdtempSync(path.join(boundary, 'effect-jobs-reverse-'));
 try {
-  for (const file of ['package.json', 'lib', 'plugins/dsh-method-stack/lib', 'plugins/dsh-redteam-results/lib', 'plugins/dsh-nday-hunter/lib',
+  for (const file of ['package.json', 'lib', 'plugins/dsh-method-stack/lib', 'plugins/dsh-redteam-results/lib',
     'scripts/test-effect-verifications.mjs', 'scripts/fixture-effect-job-worker.mjs', 'scripts/test-home-isolation.mjs',
     'scripts/test-stub-loader.mjs', 'scripts/test-stub-register.mjs']) {
     fs.mkdirSync(path.dirname(path.join(copy, file)), { recursive: true }); fs.cpSync(path.join(root, file), path.join(copy, file), { recursive: true });

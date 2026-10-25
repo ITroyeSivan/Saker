@@ -161,8 +161,9 @@ try {
   test('旧 v2 归档先完整校验知识分节，再安全忽略退役表恢复其余数据', () => {
     const current = exportTaskArchive(store, 'src');
     const legacy = structuredClone(current);
+    const legacyAt = Date.parse('2026-10-22T00:00:00.000Z');
     legacy.manifest.schema = LEGACY_TASK_ARCHIVE_SCHEMA;
-    legacy.sections.knowledge_usage = [{ session_id: 'src', id: 'k-1', at: '2026-10-22T00:00:00.000Z', record: JSON.stringify({ id: 'k-1', query: 'old' }) }];
+    legacy.sections.knowledge_usage = [{ session_id: 'src', id: 'k-1', at: legacyAt, record: JSON.stringify({ id: 'k-1', at: legacyAt, query: 'old' }) }];
     legacy.sections.task_knowledge = [{ session_id: 'src', enabled: 1, source: 'desktop-user', updated_at: '2026-10-22T00:00:00.000Z' }];
     legacy.manifest.sections.knowledge_usage = 1;
     legacy.manifest.sections.task_knowledge = 1;
@@ -176,9 +177,64 @@ try {
     assert.deepEqual(restored.retiredSectionsIgnored, ['knowledge_usage', 'task_knowledge']);
     assert.equal(store.db.prepare('SELECT count(*) AS n FROM findings WHERE session_id=?').get('restored-v2').n, 1);
     assert(!store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='knowledge_usage'").get());
+    assert.throws(() => importTaskArchive(store, legacy, { sessionId: 'restored-v2' }), /不要在已有数据上覆盖/);
+
+    const unknownRetiredColumn = structuredClone(legacy);
+    unknownRetiredColumn.sections.knowledge_usage[0].invented_unknown_column = 'x';
+    unknownRetiredColumn.manifest.digests.knowledge_usage = digest(unknownRetiredColumn.sections.knowledge_usage);
+    unknownRetiredColumn.manifest.columns.knowledge_usage = Object.keys(unknownRetiredColumn.sections.knowledge_usage[0]).sort();
+    const unknownVerdict = verifyTaskArchive(unknownRetiredColumn);
+    assert.equal(unknownVerdict.ok, false);
+    assert(unknownVerdict.problems.some(problem => /knowledge_usage.*未知列/.test(problem)));
+    assert.throws(() => importTaskArchive(store, unknownRetiredColumn, { sessionId: 'restored-v2-unknown-column' }), /归档校验失败/);
+    assert.equal(store.db.prepare('SELECT count(*) AS n FROM task_policy WHERE session_id=?').get('restored-v2-unknown-column').n, 0);
+
+    const invalidRows = [null, [], 'not-an-object', 42];
+    for (const table of ['knowledge_usage', 'task_knowledge']) {
+      for (let index = 0; index < invalidRows.length; index += 1) {
+        const invalid = structuredClone(legacy);
+        invalid.sections[table] = [invalidRows[index]];
+        invalid.manifest.sections[table] = 1;
+        invalid.manifest.digests[table] = digest(invalid.sections[table]);
+        invalid.manifest.columns[table] = [];
+        const verdict = verifyTaskArchive(invalid);
+        assert.equal(verdict.ok, false, table + ' 非对象行必须被拒绝');
+        assert(verdict.problems.some(problem => problem.includes(table) && problem.includes('非对象行')),
+          table + ' 非对象行应返回明确问题：' + JSON.stringify(verdict.problems));
+        const restoredId = 'restored-v2-invalid-' + table + '-' + index;
+        assert.throws(() => importTaskArchive(store, invalid, { sessionId: restoredId }), /归档校验失败/);
+        assert.equal(store.db.prepare('SELECT count(*) AS n FROM task_policy WHERE session_id=?').get(restoredId).n, 0);
+      }
+    }
+
+    const missingRequired = structuredClone(legacy);
+    delete missingRequired.sections.task_knowledge[0].source;
+    missingRequired.manifest.digests.task_knowledge = digest(missingRequired.sections.task_knowledge);
+    missingRequired.manifest.columns.task_knowledge = Object.keys(missingRequired.sections.task_knowledge[0]).sort();
+    assert.equal(verifyTaskArchive(missingRequired).ok, false);
+    assert(verifyTaskArchive(missingRequired).problems.some(problem => /task_knowledge.*必需列/.test(problem)));
+
+    const wrongType = structuredClone(legacy);
+    wrongType.sections.task_knowledge[0].enabled = 'yes';
+    wrongType.manifest.digests.task_knowledge = digest(wrongType.sections.task_knowledge);
+    assert.equal(verifyTaskArchive(wrongType).ok, false);
+
+    const badReference = structuredClone(legacy);
+    const badRecord = JSON.parse(badReference.sections.knowledge_usage[0].record);
+    badRecord.id = 'other';
+    badReference.sections.knowledge_usage[0].record = JSON.stringify(badRecord);
+    badReference.manifest.digests.knowledge_usage = digest(badReference.sections.knowledge_usage);
+    assert.equal(verifyTaskArchive(badReference).ok, false);
+
+    const crossSource = structuredClone(legacy);
+    crossSource.sections.knowledge_usage[0].session_id = 'other';
+    crossSource.manifest.digests.knowledge_usage = digest(crossSource.sections.knowledge_usage);
+    assert.equal(verifyTaskArchive(crossSource).ok, false);
 
     const tampered = structuredClone(legacy);
-    tampered.sections.knowledge_usage[0].record = JSON.stringify({ id: 'k-1', query: 'changed' });
+    const changed = JSON.parse(tampered.sections.knowledge_usage[0].record);
+    changed.query = 'changed';
+    tampered.sections.knowledge_usage[0].record = JSON.stringify(changed);
     assert.equal(verifyTaskArchive(tampered).ok, false);
     assert(verifyTaskArchive(tampered).problems.some(problem => problem.includes('knowledge_usage') && problem.includes('摘要不一致')));
     assert.throws(() => importTaskArchive(store, tampered, { sessionId: 'restored-v2-tampered' }), /归档校验失败/);

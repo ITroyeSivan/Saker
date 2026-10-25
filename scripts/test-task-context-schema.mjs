@@ -46,7 +46,7 @@ try {
     ] });
     const byId = Object.fromEntries(saved.assets.map(item => [item.id, item]));
     assert.equal(byId.in.inScope, true, '与用户 target 同 origin 的资产默认在范围内');
-    assert.equal(byId.out.inScope, undefined, '范围外资产不自动标记（不自行扩大范围）');
+    assert.equal(byId.out.inScope, false, '范围外资产显式标为不在范围（不自行扩大范围）');
     assert.equal(byId.explicit.inScope, false, '显式 false 不被覆盖');
   });
   test('标了 valid 但没有真实响应时，报错点名请求并给出三步顺序；不带 valid 可以先存', () => {

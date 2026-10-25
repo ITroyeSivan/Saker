@@ -63,9 +63,13 @@ const guideVersion = /当前版本：Saker\s*\*\*([0-9][^*]*)\*\*/.exec(readFile
 assert.equal(guideVersion, rootVersion, 'getting-started 的“当前版本”必须与 package.json 一致')
 for (const file of ['README.md', 'docs/getting-started.md']) {
   const text = readFileSync(join(root, file), 'utf8')
-  assert.doesNotMatch(text, /写提示词/, file + ' 不应再使用旧按钮名“写提示词”')
   assert.doesNotMatch(text, /redteam 成果/, file + ' 不应再使用旧入口名“redteam 成果”')
 }
+const gettingStarted = readFileSync(join(root, 'docs/getting-started.md'), 'utf8')
+const features = readFileSync(join(root, 'docs/features.md'), 'utf8')
+assert.match(gettingStarted, /添加文件 \/ 写提示词 \/ 设置/, 'getting-started 必须描述当前聊天工具栏')
+assert.match(features, /\| 写提示词 \|/, 'features 必须保留当前“写提示词”入口')
+assert.doesNotMatch(gettingStarted, /提示词模板 \/ 添加测试资料 \/ 测试设置/, '不得恢复旧工具栏名称')
 console.log('ok   published version and entry names match the shipped product')
 const docFixture = mkdtempSync(join(resolve(root, '../_ref/tmp'), 'product-doc-check-'))
 try {

@@ -74,17 +74,19 @@ const known = [
     "whatweb_fingerprint", "wafw00f_detect", "asset_search", "tool_pack",
   ];
   const deferred = deferredPackTools("pentest", tools, PACKS);
-  ok("pentest defers webshell, scanners and fingerprint tools",
-    ["webshell_exec", "nmap_portscan", "nuclei_scan", "whatweb_fingerprint"].every((name) => deferred.includes(name)));
+  ok("pentest defers current scanner and fingerprint packs",
+    ["nmap_portscan", "nuclei_scan", "whatweb_fingerprint"].every((name) => deferred.includes(name)));
+  ok("retired WebShell tools are hidden by the defensive rule, not a product pack",
+    !deferred.includes("webshell_exec") && computeDeny("pentest", known, RULES).includes("webshell_exec"));
   ok("pentest keeps the pack entry visible", !deferred.includes("tool_pack"));
   ok("code-audit gets no pentest pack filtering", deferredPackTools("code-audit", tools, PACKS).length === 0);
   ok("PACKS contains only supported product packs",
-    PACKS.map((pack) => pack.id).join(",") === "task-workflow,asset-discovery,active-scan,webshell");
-  ok("packs are scoped to pentest", packsForMode("pentest", PACKS).length === 4 && packsForMode("code-audit", PACKS).length === 0);
-  ok("packs can be disabled by id", enabledPacks({ webshell: false }).length === PACKS.length - 1);
-  ok("findPack rejects unknown ids", findPack("webshell", PACKS)?.id === "webshell" && findPack("nday", PACKS) === null);
-  ok("webshell pack only matches webshell tools",
-    JSON.stringify(packTools(tools, findPack("webshell", PACKS))) === JSON.stringify(["webshell_connect", "webshell_exec"]));
+    PACKS.map((pack) => pack.id).join(",") === "task-workflow,asset-discovery,active-scan");
+  ok("packs are scoped to pentest", packsForMode("pentest", PACKS).length === 3 && packsForMode("code-audit", PACKS).length === 0);
+  ok("packs can be disabled by id", enabledPacks({ "active-scan": false }).length === PACKS.length - 1);
+  ok("findPack rejects retired and unknown ids", findPack("webshell", PACKS) === null && findPack("nday", PACKS) === null);
+  ok("retired WebShell installs still have a defensive hidden rule",
+    RULES.find((rule) => rule.id === "webshell")?.modes.length === 1);
   ok("active-scan excludes fingerprint and asset tools",
     JSON.stringify(packTools(tools, findPack("active-scan", PACKS))) ===
       JSON.stringify(["afrog_scan", "dirsearch_dirs", "ffuf_fuzz", "gau_urls", "katana_crawl", "nmap_portscan", "nuclei_scan", "sqlmap_inject"]));
@@ -181,8 +183,9 @@ const known = [
   const scansLoaded = await toolPack.execute({ action: "load", pack: "active-scan" }, { agent });
   ok("active scan restores scanner tools", scansLoaded.ok && !denied("nmap_portscan") && !denied("nuclei_scan"));
   const list = await toolPack.execute({ action: "list" }, { agent });
-  ok("list reports supported packs and no retired Nday pack",
-    list.ok && list.packs.some((pack) => pack.id === "active-scan" && pack.loaded) && !list.packs.some((pack) => pack.id === "nday"));
+  ok("list reports supported packs and no retired Nday or WebShell pack",
+    list.ok && list.packs.some((pack) => pack.id === "active-scan" && pack.loaded)
+      && !list.packs.some((pack) => ["nday", "webshell"].includes(pack.id)));
   handlers["agent/disposed"]({ agent });
   ok("agent disposal releases every filter", layers.size === 0);
 }

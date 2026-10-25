@@ -45,7 +45,7 @@ const row = (id, request) => ({ id, revision: 'v1', endpoint, authContext: 'fixt
   inputs: [{ name: 'mode', location: 'query', evidenceIds: [id] }] });
 
 async function collect(sid, { query = '', referenceCredential = true, anonymousQuery = '' } = {}) {
-  startTaskPolicy(store, sid, { mode: 'regular', budget: { toolCalls: 20 } });
+  startTaskPolicy(store, sid, { mode: 'regular', target: endpoint, budget: { toolCalls: 20 } });
   saveTaskContext(store, sid, { assets: [{ id: 'asset', url: endpoint, inScope: true, reachable: true }], methods: [method],
     requests: [row('reference', packet(query, referenceCredential)), row('anonymous', packet(anonymousQuery, false))] });
   createResearch(store, sid, { id: 'direction', requestId: 'reference', requestRevision: 'v1', controlledInputs: [{ name: 'mode', location: 'query' }],

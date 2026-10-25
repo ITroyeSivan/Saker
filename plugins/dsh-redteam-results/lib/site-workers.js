@@ -2,25 +2,27 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { writeTaskPolicy, ownedPurposeTasks, childAllowedTools } from './task-policy-record.js';
 import { readTaskContext, saveTaskContext } from './task-context.js';
-import { startTaskPolicy, taskPolicyStatus, readTaskPolicy, archiveTaskRound } from './task-policy.js';
+import { startTaskPolicy, taskPolicyStatus, readTaskPolicy, archiveTaskRound, effectivePolicy } from './task-policy.js';
 import { normalizeTaskFlow } from './task-flow.js';
 import { copySiteMaterials } from './business-materials.js';
 import { parseRowRecord } from './row-record.js';
 import { MAX_SITE_WORKERS } from './interaction.js';
 import { reserveWorkerSlot, releaseWorkerSlot } from './worker-admission.js';
+import { normalizeTaskScope, taskTermAllowsUrl, taskTermInPolicy, taskScopeAllowsAsset, taskScopeSummary } from './task-scope.js';
 export const SITE_WORKER_SCHEMA = `CREATE TABLE IF NOT EXISTS site_workers (
  parent_session TEXT NOT NULL, child_id TEXT PRIMARY KEY, site TEXT NOT NULL,
- record TEXT NOT NULL, UNIQUE(parent_session,site));`;
+ work_key TEXT NOT NULL DEFAULT '', record TEXT NOT NULL,
+ UNIQUE(parent_session,site,work_key));`;
 const activeStates = new Set(['starting', 'running', 'idle', 'closing', 'cleanup-failed']);
 import { workKey, claimWork, completeWork, releaseWork } from './work-lease.js';
 const text = (value, label, max = 1000) => {
   if (typeof value !== 'string' || !value.trim() || value.length > max) throw new Error(label + ' must be bounded nonempty text');
   return value.trim();
 };
-const origin = value => {
-  const url = new URL(value);
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('plain HTTP site required');
-  return url.origin;
+const workerScope = value => {
+  const normalized = normalizeTaskScope({ target: value })
+  if (normalized.terms.include.length !== 1) throw new Error('worker scope requires one URL, domain, wildcard, IP or CIDR')
+  return normalized.target
 };
 export function siteWorkerRows(store, parentId) {
   return store.db.prepare('SELECT record FROM site_workers WHERE parent_session=? ORDER BY rowid').all(parentId)
@@ -39,8 +41,8 @@ export function hostWorkerLimit(ctx) {
   return MAX_SITE_WORKERS;
 }
 function save(store, row) {
-  store.db.prepare('INSERT INTO site_workers(parent_session,child_id,site,record) VALUES(?,?,?,?) ON CONFLICT(child_id) DO UPDATE SET record=excluded.record')
-    .run(row.parentId, row.childId, row.site, JSON.stringify(row));
+  store.db.prepare('INSERT INTO site_workers(parent_session,child_id,site,work_key,record) VALUES(?,?,?,?,?) ON CONFLICT(child_id) DO UPDATE SET site=excluded.site,work_key=excluded.work_key,record=excluded.record')
+    .run(row.parentId, row.childId, row.site, row.workKey || '', JSON.stringify(row));
 }
 export function siteWorkerView(store, parentId) {
   const rows = [...siteWorkerRows(store, parentId), ...ownedPurposeTasks(store, parentId).map(row => ({
@@ -125,17 +127,81 @@ export function createSiteWorkers(ctx, getStore) {
       const { subagents, agents, api } = runtime(), store = getStore(), state = taskPolicyStatus(store, parentId);
       if (!state.configured || state.stopped) throw new Error('an active bounded task is required');
       const focus = input.focus ?? state.policy.mode;
-      if (focus !== state.policy.mode && !(state.policy.flow?.kind === 'regular-with-nday' && ['regular', 'nday'].includes(focus))) throw new Error('子代理方向必须属于当前已选择流程');
-      const site = origin(input.site), question = text(input.question, 'question', 600), reason = text(input.reason, 'necessity', 600);
+      if (!['regular', 'nday', '0day'].includes(focus)) throw new Error('invalid worker focus')
+      const materialOnly = !input.site || String(input.site).trim() === 'task-materials'
+      let site = materialOnly ? 'task-materials' : workerScope(input.site)
+      const question = text(input.question, 'question', 4000), reason = text(input.reason, 'necessity', 2000);
       if (!['large-site-materials', 'independent-site-research'].includes(input.need)) throw new Error('specific delegation need required');
       const context = readTaskContext(store, parentId);
-      if (!context?.assets.some(asset => asset.inScope && origin(asset.url) === site)) throw new Error('site must be in the authorized task context');
-      if (state.policy.target && origin(state.policy.target) !== site) throw new Error('delegation cannot expand the current site');
-      const inventory = await reconcile(agent, signal), previous = siteWorkerRows(store, parentId).find(row => row.site === site);
-      if (previous) return { reused: true, childId: previous.childId, ...siteWorkerView(store, parentId), note: 'same site retained; use send for an explicit continuation, no duplicate worker created' };
+      const effective = effectivePolicy(store, state.policy);
+      const selectedAssetIds = Array.isArray(input.assetIds) ? [...new Set(input.assetIds.map(String).filter(Boolean))].slice(0, 50) : []
+      let selectedAssets = selectedAssetIds.length
+        ? (context?.assets || []).filter(asset => selectedAssetIds.includes(asset.id))
+        : (context?.assets || [])
+      if (selectedAssetIds.length && selectedAssets.length !== selectedAssetIds.length)
+        throw new Error('selected worker assets are missing from the task context')
+      const scopedSelectedAssets = selectedAssets.filter(asset => taskScopeAllowsAsset(effective, asset))
+      if (selectedAssetIds.length && scopedSelectedAssets.length !== selectedAssets.length)
+        throw new Error('selected worker assets are outside the current task scope')
+      selectedAssets = scopedSelectedAssets
+      if (!materialOnly && !taskTermInPolicy(state.policy, site)) {
+        const requested = normalizeTaskScope({ target: site }).terms.include[0]
+        const candidates = ['domain', 'ip'].includes(requested?.kind)
+          ? selectedAssets.filter(asset => taskTermAllowsUrl(site, asset.url)
+            && taskTermInPolicy(state.policy, asset.url))
+          : []
+        const narrowedSites = [...new Set(candidates.map(asset => asset.url))]
+        if (narrowedSites.length !== 1) {
+          const allowed = taskScopeSummary(state.policy).includePreview.join('、')
+          throw new Error('delegation cannot expand the current task scope; use an allowed exact entry'
+            + (allowed ? ': ' + allowed : ''))
+        }
+        site = workerScope(narrowedSites[0])
+      }
+      const scopedAssets = materialOnly
+        ? selectedAssets
+        : selectedAssets.filter(asset => taskTermAllowsUrl(site, asset.url))
+      const assetOrigins = new Set(scopedAssets.map(asset => { try { return new URL(asset.url).origin } catch { return '' } }).filter(Boolean))
+      const selectedMaterialIds = Array.isArray(input.materialIds)
+        ? [...new Set(input.materialIds.map(String).filter(Boolean))].slice(0, 100) : []
+      const selectedMaterialIdSet = new Set(selectedMaterialIds)
+      const materialRecords = (() => {
+        try {
+          return store.db.prepare('SELECT record FROM business_materials WHERE session_id=? ORDER BY rowid').all(parentId)
+            .map(row => { try { return JSON.parse(row.record); } catch { return null; } })
+            .filter(record => {
+              if (!record?.id) return false
+              if (materialOnly && selectedMaterialIdSet.size) return selectedMaterialIdSet.has(String(record.id))
+              if (materialOnly) return !record.site || assetOrigins.has(String(record.site))
+              return !record.site || record.site === site
+            })
+        } catch { return [] }
+      })()
+      if (materialOnly && selectedMaterialIdSet.size
+        && materialRecords.length !== selectedMaterialIdSet.size)
+        throw new Error('selected worker materials are missing from the task context')
+      if (!materialOnly && !selectedAssets.some(asset => taskTermAllowsUrl(site, asset.url)))
+        throw new Error('worker scope has no saved asset in the current task context')
+      // Reuse is decided by the work identity (site + question + selected
+      // material revision), before occupancy, so asking the same question again
+      // does not hit the worker ceiling and get reported as a new-work failure.
+      const relevantRequests = context.requests.filter(request => {
+        try { return assetOrigins.has(new URL(request.endpoint).origin) } catch { return false }
+      })
+      const materialRevision = createHash('sha256').update(JSON.stringify([
+        ...relevantRequests.map(request => 'request:' + String(request.id) + ':' + String(request.revision)).sort(),
+        ...scopedAssets.map(asset => 'asset:' + String(asset.id) + ':' + String(asset.url)).sort(),
+        ...materialRecords.map(record => 'material:' + String(record.id) + ':' + String(record.digest || '')).sort(),
+      ])).digest('hex').slice(0, 32);
+      const leaseKey = workKey({ endpoint: site, question, identity: 'site-worker', materialRevision });
+      const previous = siteWorkerRows(store, parentId).find(row => row.site === site
+        && (row.workKey === leaseKey || row.workKey === parentId + ':' + leaseKey));
+      if (previous) return { reused: true, childId: previous.childId, ...siteWorkerView(store, parentId), note: 'same site and question are already assigned; use send for an explicit continuation, no duplicate work created' };
+      const inventory = await reconcile(agent, signal);
       const workerLimit = Math.min(state.policy.workerLimit ?? 1, hostWorkerLimit(ctx));
       if (inventory.count >= workerLimit) throw new Error('worker limit reached, including idle and failed-cleanup workers');
-      const remaining = state.policy.budget.toolCalls - state.policy.used.toolCalls;
+      const remaining = state.policy.budget.toolCalls === null
+        ? null : state.policy.budget.toolCalls - state.policy.used.toolCalls;
       const available = agent.ctx.tools.schemas(agent).map(row => row.name);
       const nested = name => /^(?:subagent(?:_|$)|send_message$|interrupt_agent$|list_agents$|list_subagent_models$|workflow$)/.test(name);
       const deny = available.filter(nested);
@@ -147,23 +213,11 @@ export function createSiteWorkers(ctx, getStore) {
       // 旧工作者的迟到报告只作历史。
       // 必要资料版本（v6 第 8.3 节）：用资料的 (id, revision) 摘要，而不是条数 ——
       // 同一条请求被修订（条数不变）时工作键必须跟着变，否则会被当成同一份工作复用。
-      const materialRevision = createHash('sha256').update(JSON.stringify([
-        ...context.requests.map(request => 'request:' + String(request.id) + ':' + String(request.revision)).sort(),
-        ...context.assets.map(asset => 'asset:' + String(asset.id) + ':' + String(asset.url)).sort(),
-      ])).digest('hex').slice(0, 32);
-      const leaseKey = workKey({ endpoint: site, question, identity: 'site-worker', materialRevision });
       // 依赖的资料（v6 第 8.3 节）：这个子代理会用到的请求记录与父任务文件材料，资料更新时按 ID 唤醒它，
       // 不做全局广播。ID 与资料列表/已读标记同源（request 用 `id:revision`，文件用 `file:<id>`）。
       const materialIds = [
-        ...context.requests.map(request => String(request.id) + ':' + String(request.revision)),
-        ...(() => { try {
-          return store.db.prepare('SELECT record FROM business_materials WHERE session_id=?').all(parentId)
-            .map(row => { try { return JSON.parse(row.record); } catch { return null; } })
-            // 只声明与本子代理同站点的材料（以及站点无关的粘贴材料）：否则别的站点换了材料
-            // 也会把这个子代理叫醒，违背第 8.3 节「只唤醒依赖该资料的工作」。
-            .filter(record => record && record.id && (!record.site || record.site === site))
-            .map(record => 'file:' + record.id);
-        } catch { return []; } })(),
+        ...relevantRequests.map(request => String(request.id) + ':' + String(request.revision)),
+        ...materialRecords.map(record => 'file:' + record.id),
       ];
       const lease = claimWork(store, parentId, { workKey: leaseKey, worker: childId, ttlMs: 15 * 60 * 1000, materialIds });
       if (!reserveWorkerSlot(parentId, workerLimit, inventory.count, childId)) {
@@ -182,15 +236,29 @@ export function createSiteWorkers(ctx, getStore) {
       parents.set(parentId, agent);
       releaseWorkerSlot(parentId, childId);
       try {
-      const belongs = endpoint => { try { return origin(endpoint) === site; } catch { return false; } };
-      saveTaskContext(store, childId, { ...context, assets: context.assets.filter(asset => belongs(asset.url)), requests: context.requests.filter(request => belongs(request.endpoint)), checks: context.checks.filter(check => belongs(check.endpoint)) });
-      copySiteMaterials(store, parentId, childId, site);
-      startTaskPolicy(store, childId, { mode: focus, question, target: site, stop: 'budget', parentSession: parentId,
-        budget: { toolCalls: remaining, minutes: 15, discoveryCalls: Math.min(remaining, Math.max(0, state.policy.budget.discoveryCalls - state.policy.used.discoveryCalls)), workers: 0 } });
+      const childAssets = scopedAssets
+      const belongs = endpoint => { try { return assetOrigins.has(new URL(endpoint).origin) } catch { return false } };
+      saveTaskContext(store, childId, { ...context, assets: childAssets, requests: context.requests.filter(request => belongs(request.endpoint)), checks: context.checks.filter(check => belongs(check.endpoint)) });
+      if (!materialOnly) copySiteMaterials(store, parentId, childId, site);
+      if (materialOnly) {
+        for (const record of materialRecords) {
+          store.db.prepare('INSERT OR REPLACE INTO business_materials(session_id,id,source_url,digest,record) VALUES(?,?,?,?,?)')
+            .run(childId, record.id, record.sourceUrl || '', record.digest || '', JSON.stringify(record));
+        }
+      }
+      const fileOnly = materialOnly && childAssets.length === 0
+      const childTarget = materialOnly ? childAssets.map(asset => asset.url).join('\n') : site
+      startTaskPolicy(store, childId, { mode: focus, question, target: childTarget, fileOnly, stop: 'budget', parentSession: parentId,
+        budget: { toolCalls: remaining,
+          discoveryCalls: remaining === null ? 0 : Math.min(remaining, Math.max(0, state.policy.budget.discoveryCalls - state.policy.used.discoveryCalls)),
+          workers: 0 } });
       const childPolicy = readTaskPolicy(store, childId);
-      childPolicy.budget.deadline = Math.min(childPolicy.budget.deadline, state.policy.budget.deadline ?? Infinity);
+      if (state.policy.budget.deadline !== null && state.policy.budget.deadline !== undefined)
+        childPolicy.budget.deadline = childPolicy.budget.deadline === null
+          ? state.policy.budget.deadline
+          : Math.min(childPolicy.budget.deadline, state.policy.budget.deadline);
       writeTaskPolicy(store, childId, childPolicy, 'worker-deadline-set', { workId: childId });
-      const prompt = `Work only on ${site}. Focus: ${focus}. Question: ${question}. Need: ${reason}. Reuse saved redteam_context and task policy; never start/reset budgets or delegate. Follow relevant evidence continuously; save unrelated leads without expanding. IP blocking or broken normal access: stop affected requests and report, no repeated workarounds. Before ending/waiting call redteam_task report with document {state:"completed"|"blocked"|"needs-user",summary:"facts, effects, missing conditions, next step"}. Evidence stays in this child session. HTTP 200 and callbacks alone do not prove impact.`;
+      const prompt = `Work on ${materialOnly ? 'the selected task assets/materials' : site}. Focus: ${focus}. Question: ${question}. Need: ${reason}. Reuse saved redteam_context and task policy; never start/reset budgets or delegate. Follow relevant evidence continuously; save unrelated leads without expanding. IP blocking or broken normal access: stop affected requests and report, no repeated workarounds. Before ending/waiting call redteam_task report with document {state:"completed"|"blocked"|"needs-user",summary:"facts, effects, missing conditions, next step"}. Evidence stays in this child session. HTTP 200 and callbacks alone do not prove impact.`;
         // v6 5.5：用户给站点子代理选了模型时覆盖 provider/model；未选则沿用当前会话模型。
         const workerModel = state.policy?.workerModel;
         if (api === 'activation') {
@@ -242,15 +310,23 @@ export function createSiteWorkers(ctx, getStore) {
     const previousPolicy = readTaskPolicy(store, row.childId);
     if (previousPolicy?.parentRound !== state.policy.startedAt) {
       if (row.state !== 'released' || agents.get(row.childId)) throw new Error('previous round worker must be released before continuation');
-      const context = readTaskContext(store, parentId), belongs = endpoint => { try { return origin(endpoint) === row.site; } catch { return false; } };
-      if ((state.policy.target && state.policy.target !== row.site) || !context?.assets.some(asset => asset.inScope && belongs(asset.url))) throw new Error('continuation site must remain in the current authorized task');
+      const context = readTaskContext(store, parentId)
+      const belongs = endpoint => row.site === 'task-materials'
+        ? (context?.assets || []).some(asset => { try { return new URL(asset.url).origin === new URL(endpoint).origin } catch { return false } })
+        : taskTermAllowsUrl(row.site, endpoint);
+      if (row.site !== 'task-materials' && (!taskTermInPolicy(state.policy, row.site) || !context?.assets.some(asset => belongs(asset.url))))
+        throw new Error('continuation scope must remain in the current authorized task');
       archiveTaskRound(store, row.childId, 'parent-round-continuation');
       saveTaskContext(store, row.childId, { ...context, assets: context.assets.filter(asset => belongs(asset.url)), requests: context.requests.filter(request => belongs(request.endpoint)), checks: context.checks.filter(check => belongs(check.endpoint)) });
       copySiteMaterials(store, parentId, row.childId, row.site);
       row.focus = state.policy.flow?.kind === 'regular-with-nday' ? (row.focus || state.policy.mode) : state.policy.mode;
+      const remaining = state.policy.budget.toolCalls === null ? null
+        : state.policy.budget.toolCalls - state.policy.used.toolCalls;
       startTaskPolicy(store, row.childId, { mode: row.focus, question: text(input.message, 'continuation', 4000).slice(0,600), target: row.site, stop: 'budget', parentSession: parentId,
-        budget: { toolCalls: state.policy.budget.toolCalls-state.policy.used.toolCalls, minutes: 15, discoveryCalls: Math.min(state.policy.budget.toolCalls-state.policy.used.toolCalls, Math.max(0, state.policy.budget.discoveryCalls-state.policy.used.discoveryCalls)), workers: 0 } });
-      const next = readTaskPolicy(store, row.childId); next.budget.deadline = Math.min(next.budget.deadline, state.policy.budget.deadline ?? Infinity);
+        budget: { toolCalls: remaining, minutes: 15,
+          discoveryCalls: remaining === null ? 0 : Math.min(remaining, Math.max(0, state.policy.budget.discoveryCalls-state.policy.used.discoveryCalls)), workers: 0 } });
+      const next = readTaskPolicy(store, row.childId);
+      if (state.policy.budget.deadline !== null) next.budget.deadline = Math.min(next.budget.deadline ?? Infinity, state.policy.budget.deadline);
       writeTaskPolicy(store, row.childId, next, 'worker-deadline-set', { workId: row.childId });
     }
     if (previousPolicy?.parentRound === state.policy.startedAt && previousPolicy.mode !== state.policy.mode && state.policy.flow?.kind === 'regular-to-nday' && state.policy.flow.phase === 'nday') {

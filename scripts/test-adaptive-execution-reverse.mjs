@@ -15,7 +15,7 @@ try {
   for (const file of files) { fs.mkdirSync(path.dirname(path.join(copy, file)), { recursive: true }); fs.cpSync(path.join(root, file), path.join(copy, file), { recursive: true }); }
   const cases = [
     ['research.js', "record.state = restriction ? 'restricted' : 'stopped';", "record.state = 'stopped';", 'policy interruption persists separately without fabricated executions or negative coverage'],
-    ['research.js', "return 'research_hypothesis_missing：用redteam_research登记当前请求的可证伪假设；已停止、被反证或基线失效的方向不能继续操作。';", "return '';",
+    ['research.js', "if (!row.inputs.some(observed => observed.name === item.name && observed.location === item.location && observed.evidenceIds?.includes(row.id))) throw new Error('controlled input must be observed in selected baseline');", "if (false) throw new Error('controlled input must be observed in selected baseline');",
       'registered research tool binds seven falsifiable fields and observed inputs to current baseline only'],
     ['task-policy.js', "if (/^(?:subagent(?:_|$)|workflow$|send_message$)/.test(name))", 'if (false)', 'subagent dispatch and relabelled baseline cannot reset deterministic task limits'],
     ['research.js', 'hash([row.endpoint, row.authContext, row.request, row.response, controlledInputs,', 'hash([row.id, row.revision, row.endpoint, row.authContext, row.request, row.response, controlledInputs,', 'subagent dispatch and relabelled baseline cannot reset deterministic task limits'],

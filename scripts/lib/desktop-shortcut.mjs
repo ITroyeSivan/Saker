@@ -4,8 +4,21 @@ import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
+const moduleDirectory = dirname(fileURLToPath(import.meta.url))
+const root = resolve(moduleDirectory, '../..')
 const defaultWorkspace = existsSync(join(root, '..', '_ref', 'tools')) ? resolve(root, '..') : root
+
+export function deployDesktopLauncherAssets({ toolsDirectory, config }) {
+  mkdirSync(toolsDirectory, { recursive: true })
+  const launcher = join(toolsDirectory, 'Start-SakerDesktop.ps1')
+  const cookiePruner = join(toolsDirectory, 'prune-desktop-auth-cookies.mjs')
+  const configPath = join(toolsDirectory, 'saker-desktop-launch.json')
+  copyFileSync(join(moduleDirectory, 'desktop-launch.ps1'), launcher)
+  copyFileSync(join(moduleDirectory, 'desktop-prune-auth-cookies.mjs'), cookiePruner)
+  // BOM permits Windows PowerShell 5.1 to read Chinese paths reliably.
+  writeFileSync(configPath, '\uFEFF' + JSON.stringify(config, null, 2) + '\n')
+  return { launcher, cookiePruner, configPath }
+}
 
 export function refreshDesktopShortcut({ desktopDirectory, workspace, userDataDirectory, home = process.env.DSH_HOME || join(homedir(), '.dsh') }) {
   if (process.platform !== 'win32') throw new Error('Desktop shortcut maintenance currently supports Windows only.')
@@ -31,19 +44,17 @@ export function refreshDesktopShortcut({ desktopDirectory, workspace, userDataDi
     userDataDirectory: resolve(userDataDirectory || old.userDataDirectory || persistent.userDataDirectory || join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), '@deepseek-ai', 'dsh-desktop')),
     home: resolve(home), workspace: launchWorkspace,
     tempDirectory: join(launchWorkspace, '_ref', 'tmp'),
+    nodeExecutable: resolve(process.execPath),
   }
   const cftPath = old.cftPath || persistent.cftPath || ''
   if (cftPath) config.cftPath = cftPath
-  const launcher = join(toolsDirectory, 'Start-SakerDesktop.ps1')
-  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), 'desktop-launch.ps1'), launcher)
-  // BOM permits Windows PowerShell 5.1 to read Chinese paths reliably.
-  writeFileSync(configPath, '\uFEFF' + JSON.stringify(config, null, 2) + '\n')
+  const assets = deployDesktopLauncherAssets({ toolsDirectory, config })
   const quote = value => "'" + value.replaceAll("'", "''") + "'"
-  const script = `$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); $desktop=[Environment]::GetFolderPath('Desktop'); if(-not $desktop){throw 'Windows Desktop folder unavailable'}; $shell=New-Object -ComObject WScript.Shell; $link=$shell.CreateShortcut((Join-Path $desktop 'Saker (dsh Desktop).lnk')); $link.TargetPath=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'; $link.Arguments=${quote('-NoLogo -NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -File "' + launcher + '"')}; $link.WorkingDirectory=${quote(config.workspace)}; $link.IconLocation=${quote(executable + ',0')}; $link.Description='Saker / dsh Desktop'; $link.Save(); $check=$shell.CreateShortcut($link.FullName); if($check.TargetPath -ne $link.TargetPath -or $check.Arguments -ne $link.Arguments){throw 'Shortcut verification failed'}; Write-Output $link.FullName`
+  const script = `$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); $desktop=[Environment]::GetFolderPath('Desktop'); if(-not $desktop){throw 'Windows Desktop folder unavailable'}; $shell=New-Object -ComObject WScript.Shell; $link=$shell.CreateShortcut((Join-Path $desktop 'Saker (dsh Desktop).lnk')); $link.TargetPath=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'; $link.Arguments=${quote('-NoLogo -NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -File "' + assets.launcher + '"')}; $link.WorkingDirectory=${quote(config.workspace)}; $link.IconLocation=${quote(executable + ',0')}; $link.Description='Saker / dsh Desktop'; $link.Save(); $check=$shell.CreateShortcut($link.FullName); if($check.TargetPath -ne $link.TargetPath -or $check.Arguments -ne $link.Arguments){throw 'Shortcut verification failed'}; Write-Output $link.FullName`
   const result = spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
     encoding: 'utf8', windowsHide: true,
     env: { ...process.env, TEMP: config.tempDirectory, TMP: config.tempDirectory, TMPDIR: config.tempDirectory },
   })
   if (result.error || result.status !== 0) throw result.error || new Error(result.stderr || 'Desktop shortcut update failed.')
-  return { shortcut: result.stdout.trim(), launcher, configPath, ...config }
+  return { shortcut: result.stdout.trim(), ...assets, ...config }
 }

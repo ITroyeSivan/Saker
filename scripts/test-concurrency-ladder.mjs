@@ -41,7 +41,7 @@ const row = (id, mode) => ({ id, revision: 'v1', endpoint, authContext: 'fixture
 
 function setup(sid, count, mode) {
   const rows = Array.from({ length: count }, (_, index) => row('r' + index, mode));
-  startTaskPolicy(store, sid, { mode: 'regular', budget: { toolCalls: count + 4 } });
+  startTaskPolicy(store, sid, { mode: 'regular', target: endpoint, budget: { toolCalls: count + 4 } });
   saveTaskContext(store, sid, { assets: [{ id: 'a', url: endpoint, inScope: true, reachable: true }], requests: rows, methods: [method] });
   createResearch(store, sid, { id: 'direction', requestId: 'r0', requestRevision: 'v1', controlledInputs: [{ name: 'mode', location: 'query' }],
     title: 'Concurrency ladder fixture', serverPath: 'Local fixture', boundary: 'Synthetic', normalBehavior: 'Fixture own response',

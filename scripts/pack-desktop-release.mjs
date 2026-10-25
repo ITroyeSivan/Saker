@@ -36,7 +36,7 @@ const media = readdirSync(join(root, 'docs', 'media'), { withFileTypes: true })
   .filter(entry => entry.isFile())
   .map(entry => `docs/media/${entry.name}`)
   .sort()
-for (const file of ['scripts/install-desktop.mjs', 'scripts/restore-desktop.mjs', 'scripts/update-desktop-shortcut.mjs', 'scripts/lib/product-plugins.mjs', 'scripts/lib/desktop-artifacts.mjs', 'scripts/lib/desktop-backup.mjs', 'scripts/lib/desktop-shortcut.mjs', 'scripts/lib/desktop-launch.ps1', 'docs/getting-started.md', 'docs/plugin-list.md', 'docs/features.md', 'docs/boundaries.md', 'docs/development.md', 'docs/release-format.md', ...media, 'benchmarks/task-effects/README.md', `docs/release-v${version}.md`]) {
+for (const file of ['scripts/install-desktop.mjs', 'scripts/restore-desktop.mjs', 'scripts/update-desktop-shortcut.mjs', 'scripts/lib/product-plugins.mjs', 'scripts/lib/desktop-artifacts.mjs', 'scripts/lib/desktop-backup.mjs', 'scripts/lib/desktop-shortcut.mjs', 'scripts/lib/desktop-launch.ps1', 'scripts/lib/desktop-prune-auth-cookies.mjs', 'docs/getting-started.md', 'docs/plugin-list.md', 'docs/features.md', 'docs/boundaries.md', 'docs/development.md', 'docs/release-format.md', ...media, 'benchmarks/task-effects/README.md', `docs/release-v${version}.md`]) {
   const destination = join(payload, file)
   mkdirSync(dirname(destination), { recursive: true })
   copyFileSync(join(root, file), destination)

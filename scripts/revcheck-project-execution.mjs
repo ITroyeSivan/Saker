@@ -14,7 +14,7 @@ const storeFile = 'plugins/dsh-redteam-results/lib/project-store.js';
 const variants = [
   ['limit-denial', "  const denial = targetTrafficDenial(limits, { method }) || excludedPathDenial(limits, { url: url.href })\n    || targetScopeDenial(store, sessionId, limits, url);\n  if (denial) throw new Error(denial);", '',
     '只读任务拒绝写方法'],
-  ['scope-check', "  return origins.size && !origins.has(url.origin) ? 'request is outside the current task site or explicitly allowed associated assets' : undefined;", '  return undefined;',
+  ['scope-check', "  return !taskScopeIncludesUrl(limits, url)\n    ? 'request is outside the current task site or user-allowed associated sites' : undefined;", '  return undefined;',
     '范围外 URL 被拒绝'],
   ['unknown-write', "    const sideEffectUnknown = dispatched && !['GET', 'HEAD', 'OPTIONS'].includes(method);", '    const sideEffectUnknown = false;',
     '写方法超时保留 sideEffectUnknown'],
@@ -30,9 +30,9 @@ const variants = [
       + "      });",
     '',
     '响应中途断开在期限内收尾并保留未知副作用'],
-  ['summary-secret-redaction', "const bodyText = textual ? redactText(result.body.toString('utf8'))", "const bodyText = textual ? result.body.toString('utf8')",
+  ['summary-secret-redaction', 'const bodyText = redactText(decoded.text);', 'const bodyText = decoded.text;',
     '项目工具摘要与响应头遮蔽合成凭据并保留业务正文'],
-  ['associated-api-scope', "    try { origins.add(new URL(asset.url).origin); } catch { /* 忽略无效资产 */ }", "    try { } catch { /* 忽略无效资产 */ }",
+  ['associated-api-scope', '  if (!authContext) return undefined;', '  return undefined;',
     '明确关联 API 可通过，身份只在显式绑定后套用'],
 ];
 

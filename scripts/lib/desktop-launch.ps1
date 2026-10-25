@@ -60,6 +60,66 @@ Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
 # explicit HTTP(S) proxies and remove only the unsupported alias.
 Remove-Item Env:ALL_PROXY -ErrorAction SilentlyContinue
 Remove-Item Env:all_proxy -ErrorAction SilentlyContinue
+# Desktop Host issues a new loopback launch cookie on every start. Old cookies
+# accumulate in the shared 127.0.0.1 jar and eventually make a fresh Host fail
+# authentication. This point is reached only when no daily instance is running.
+$cookieDb = Join-Path $settings.userDataDirectory 'Network\Cookies'
+$cookieHelper = Join-Path $PSScriptRoot 'prune-desktop-auth-cookies.mjs'
+if (-not $settings.nodeExecutable -or -not (Test-Path -LiteralPath ([string]$settings.nodeExecutable))) {
+  Write-Warning 'Desktop launch-cookie pruning skipped: configured Node runtime is missing; continuing startup.'
+} elseif (-not (Test-Path -LiteralPath $cookieHelper)) {
+  Write-Warning 'Desktop launch-cookie pruning skipped: helper is missing; refresh the Saker desktop shortcut.'
+} else {
+  try {
+    & ([string]$settings.nodeExecutable) $cookieHelper $cookieDb
+    if ($LASTEXITCODE -ne 0) { Write-Warning 'Desktop launch-cookie pruning failed; continuing startup.' }
+  } catch {
+    Write-Warning ('Desktop launch-cookie pruning failed; continuing startup: ' + $_.Exception.Message)
+  }
+}
 $launchArguments = @('--user-data-dir="' + $settings.userDataDirectory + '"')
 if ($DebugPort -gt 0) { $launchArguments += '--remote-debugging-port=' + $DebugPort }
-Start-Process -FilePath $executable -ArgumentList $launchArguments -WorkingDirectory $settings.workspace -WindowStyle Normal | Out-Null
+$launched = Start-Process -FilePath $executable -ArgumentList $launchArguments -WorkingDirectory $settings.workspace -WindowStyle Normal -PassThru
+
+# The shortcut itself runs hidden. On Windows the Electron window can inherit
+# that startup visibility even though Start-Process requests a normal window.
+# Find the main Electron window and explicitly restore/focus it so double-clicking
+# the shortcut always produces a visible workspace.
+Add-Type @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class SakerDesktopWindow {
+  private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+  [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+  [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetClassName(IntPtr hWnd, StringBuilder text, int count);
+  [DllImport("user32.dll")] private static extern bool ShowWindowAsync(IntPtr hWnd, int command);
+  [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
+  public static bool ShowMain(uint processId) {
+    bool shown = false;
+    EnumWindows((window, unused) => {
+      uint owner;
+      GetWindowThreadProcessId(window, out owner);
+      if (owner != processId) return true;
+      var title = new StringBuilder(512);
+      var className = new StringBuilder(128);
+      GetWindowText(window, title, title.Capacity);
+      GetClassName(window, className, className.Capacity);
+      if (title.Length == 0 || !className.ToString().StartsWith("Chrome_WidgetWin_1")) return true;
+      ShowWindowAsync(window, 9);
+      SetForegroundWindow(window);
+      shown = true;
+      return false;
+    }, IntPtr.Zero);
+    return shown;
+  }
+}
+'@
+$shown = $false
+for ($attempt = 0; $attempt -lt 50; $attempt++) {
+  if ([SakerDesktopWindow]::ShowMain([uint32]$launched.Id)) { $shown = $true; break }
+  Start-Sleep -Milliseconds 200
+}
+if (-not $shown) { Write-Warning 'Desktop started, but its main window was not ready to show automatically.' }

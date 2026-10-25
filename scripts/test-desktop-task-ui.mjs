@@ -6,7 +6,7 @@ import path from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { openStore, registerFinding } from '../plugins/dsh-redteam-results/lib/store.js';
 import { claimWork } from '../plugins/dsh-redteam-results/lib/work-lease.js';
-import { readTaskPolicy, updateTaskProgress, checkpointTask, chosenTaskOptions, startTaskPolicy, setTaskActionLimits, taskExecutionGuard, effectivePolicy, excludedPathDenial } from '../plugins/dsh-redteam-results/lib/task-policy.js';
+import { readTaskPolicy, updateTaskProgress, checkpointTask, chosenTaskOptions, startTaskPolicy, setTaskActionLimits, taskExecutionGuard, effectivePolicy, excludedPathDenial, finishTaskOnTurnEnd } from '../plugins/dsh-redteam-results/lib/task-policy.js';
 import { saveAccount } from '../plugins/dsh-redteam-results/lib/accounts.js';
 import { resolveTaskIdentity, identityDenial } from '../plugins/dsh-redteam-results/lib/identity-binding.js';
 import { saveTaskContext } from '../plugins/dsh-redteam-results/lib/task-context.js';
@@ -22,9 +22,11 @@ const sections = [], disposers = [], registeredTools = new Map();
 const sessionMap = new Map(['ui', 'hero', 'nday', 'regular', '0day', 'records', 'interaction-ui', 'poll-readonly'].map(id => [id, { id, header: { agentPreset: 'pentest' } }]));
 sessionMap.set('audit', { id: 'audit', header: { agentPreset: 'code-audit' } });
 const queued = [], cancellations = [];
+const eventHandlers = new Map();
 const agents = { get: id => sessionMap.has(id) ? { session: sessionMap.get(id), status: 'idle', followup: message => queued.push({ id, message }), cancel: cause => cancellations.push({ id, cause }) } : undefined };
 const ctx = { sessions: { get: id => sessionMap.get(id) }, systemPrompt: { section: section => sections.push(section) },
   agents,
+  on: (name, handler) => eventHandlers.set(name, [...(eventHandlers.get(name) || []), handler]),
   tools: { register: tool => registeredTools.set(tool.name,tool), guard: () => {} }, effect: fn => { const dispose = fn(); if (typeof dispose === 'function') disposers.push(dispose); },
   webServer: { register: () => () => {} } };
 results.apply(ctx);
@@ -42,18 +44,23 @@ function harness(name, sessionId, props = {}, extras = {}) {
   // effects 每轮清空：真实 React 只在本次渲染后跑本轮 effect，累积会让旧闭包一起跑，测出假结果。
   function render() { cursor = 0; effects.length = 0; return sandbox.component({ sessionId, ...props }); }
   function nodes(node) { if (!node || typeof node !== 'object') return []; return [node, ...node.children.flat(Infinity).flatMap(nodes)]; }
-  return { state, calls, render, mount: async () => { render(); for(const effect of effects.slice())effect(); await new Promise(setImmediate); }, poll: async () => { for(const timer of timers)await timer(); }, find: predicate => nodes(render()).find(predicate), button: label => nodes(render()).find(node => node.type === 'button' && node.children.includes(label)) };
+  return { state, calls, render, mount: async () => { render(); for(const effect of effects.slice())effect(); await new Promise(setImmediate); }, poll: async () => { for(const timer of timers)await timer(); }, find: predicate => nodes(render()).find(predicate), button: label => {
+    const aliases = { '测试设置': '设置', '添加测试资料': '添加文件' };
+    const wanted = aliases[label] || label;
+    return nodes(render()).find(node => node.type === 'button' && node.children.includes(wanted));
+  } };
 }
 let failed = 0;
-async function test(name, fn) { try { await fn(); console.log('ok   ' + name); } catch (error) { failed++; console.log('FAIL ' + name + ': ' + error.message); } }
+async function test(name, fn) { try { await fn(); console.log('ok   ' + name); } catch (error) { failed++; console.log('FAIL ' + name + ': ' + (error.stack || error.message)); } }
 try {
   await test('chat prompt and settings panels overlay without reflowing the composer and stay mutually exclusive', async () => {
-    assert(source.includes('.dsh-chat-setup{position:relative}.dsh-chat-more,.dsh-chat-prompt{position:absolute'));
+    assert(source.includes('.dsh-chat-more{position:fixed'), 'settings must escape the composer scroll boundary');
+    assert(source.includes('bottom:var(--dsh-chat-overlay-bottom,100px)'), 'settings must stay attached above the composer');
     assert(source.includes('bottom:calc(100% + 6px)'));
     assert(source.includes('--dsh-chat-overlay-max-height'));
-    assert(source.includes('overflowY') && source.includes('rect.top-Math.max(boundary,0)-18'), 'overlay height must respect the visible scroll boundary');
-    assert(source.includes('if(next)more[1](false);'));
-    assert(source.includes('if(next)open[1](false);'));
+    assert(source.includes('spaceAbove=Math.max(240,Math.floor(rect.top-18))') && source.includes('viewport-rect.top+6'), 'overlay height must respect viewport space above the composer');
+    assert(source.includes('more[1](false);inlineAssetView[1](false);'), 'opening settings must close inline assets');
+    assert(source.includes('open[1](false);inlineAssetView[1](false);'), 'opening the prompt drawer must be exclusive');
   });
   await test('接口错误把「可恢复操作」一起显示给用户', async () => {
     const sb={};
@@ -70,6 +77,7 @@ try {
     assert.equal(state.choice,null);assert.equal(state.configured,false);assert.equal(readTaskPolicy(store,'poll-readonly'),null);
     assert.equal(store.db.prepare('SELECT count(*) AS n FROM task_flow_choice WHERE session_id=?').get('poll-readonly').n,0);
     assert.equal(ui.find(n=>n.props['aria-label']==='测试场景').props.value,'pentest');
+    await ui.button('测试设置').props.onClick();
     assert.equal(ui.find(n=>n.props['aria-label']==='测试方向').props.value,'regular');
   });
   await test('Desktop interaction control saves preferences, confirms a real checkpoint and preserves policy on failed delivery',async()=>{
@@ -84,7 +92,7 @@ try {
     const ui=harness('TaskPanel',id);await ui.button('刷新状态').props.onClick();assert(ui.button('确认并继续'));
     const broken={...ctx,agents:{get:()=>({status:'idle',followup(){throw Error('fixture enqueue failed')}})}};
     await results.dispatch(ctx,store,'task.interaction',{sessionId:id,interaction:'auto'});
-    await assert.rejects(results.dispatch(broken,store,'task.continue',{sessionId:id}),/仍等待确认/);
+    await assert.rejects(results.dispatch(broken,store,'task.continue',{sessionId:id}),/任务保持原状态/);
     assert(readTaskPolicy(store,id).awaitingConfirmation);
     await ui.button('确认并继续').props.onClick();assert.equal(readTaskPolicy(store,id).awaitingConfirmation,undefined);
     assert.match(queued.at(-1).message.content[0].text,/用户确认继续/);
@@ -92,6 +100,29 @@ try {
     await results.dispatch(ctx,store,'task.interaction',{sessionId:id,interaction:'auto'});
     assert.equal(readTaskPolicy(store,id).interaction,'auto');
     assert.deepEqual(readTaskPolicy(store,id).budget,before.budget);
+  });
+  await test('session user events resume only an affirmative continuation command', async () => {
+    const id = 'continuation-event';
+    sessionMap.set(id, { id, header: { agentPreset: 'pentest' } });
+    await results.dispatch(ctx, store, 'task.start', {
+      sessionId: id,
+      policy: { mode: 'regular', target: 'https://app.example.test', budget: { toolCalls: 10 } },
+    });
+    finishTaskOnTurnEnd(store, id);
+    const before = readTaskPolicy(store, id);
+    const emit = text => {
+      const event = { type: 'user/message', data: { id: 'human-' + text.length, source: { kind: 'user' }, content: [{ type: 'text', text }] } };
+      for (const handler of eventHandlers.get('session/event') || []) handler(sessionMap.get(id), event);
+    };
+    emit('Do not continue the current task.');
+    assert.equal(readTaskPolicy(store, id).turnEndedAt, before.turnEndedAt);
+    emit('继续当前任务前先不要发请求。');
+    assert.equal(readTaskPolicy(store, id).turnEndedAt, before.turnEndedAt);
+    emit('继续当前任务');
+    const after = readTaskPolicy(store, id);
+    assert.equal(after.turnEndedAt, undefined);
+    assert.equal(after.startedAt, before.startedAt);
+    assert.deepEqual(after.used, before.used);
   });
   await test('Desktop effect comparison stays collapsed and displays host summary rather than inventing proof for missing data', () => {
     const start = source.indexOf('function EffectEvidenceView('), end = source.indexOf('function chatError(', start);
@@ -135,7 +166,7 @@ try {
     registerFinding(store,id,'pentest',{title:'Excluded fixture',type:'access',severity:'low',status:'false-positive'});
     const ui=harness('TaskPanel',id);await ui.mount();
     const rendered=JSON.stringify(ui.render());
-    assert(rendered.includes('目标：尚未指定目标'),'an absent target must say so instead of a placeholder');
+    assert(rendered.includes('目标：尚未指定'),'an absent target must say so instead of a placeholder');
     assert(rendered.includes('尚未指定目标，先在授权范围内给一个入口、请求或身份'));
     assert(!rendered.includes('个已确认'),'no target must not turn into a zero confirmed count');
     assert(!rendered.includes('聊天中约定'));
@@ -228,12 +259,11 @@ try {
     for (const label of ['Nday发现', '常规测试', '0Day挖掘']) assert(ui.button(label));
     await ui.button('0Day挖掘').props.onClick();
     ui.find(node => node.type === 'input' && node.props['aria-label'] === '操作预算').props.onChange({ target: { value: '40' } });
-    ui.find(node => node.type === 'input' && node.props['aria-label'] === '初步观察预算').props.onChange({ target: { value: '7' } });
-    ui.find(node => node.type === 'input' && node.props['aria-label'] === '这一轮要查什么').props.onChange({ target: { value: 'Inspect the controlled fixture permission only' } });
+    ui.find(node => node.type === 'textarea' && node.props['aria-label'] === '用户要求、范围或已有材料').props.onChange({ target: { value: 'Inspect the controlled fixture permission only' } });
     await ui.button('开始测试').props.onClick();
     assert.equal(readTaskPolicy(store, 'ui').mode, '0day');
     assert.equal(readTaskPolicy(store, 'ui').budget.toolCalls, 40);
-    assert.equal(readTaskPolicy(store, 'ui').budget.discoveryCalls, 7);
+    assert.equal(readTaskPolicy(store, 'ui').budget.discoveryCalls, 0);
     const uiQueued=queued.filter(row=>row.id==='ui');assert.equal(uiQueued.length, 1);
     assert.match(uiQueued[0].message.content[0].text, /Inspect the controlled fixture permission only/);
     assert.equal(ui.calls.at(-1)[1].sessionId, 'ui');
@@ -253,7 +283,7 @@ try {
     const field = ui.find(node => node.type === 'input' && node.props['aria-label'] === '模型 token 上限（可选，含子代理和辅助调用）');
     assert(field, 'the model token limit must be settable next to the other limits');
     field.props.onChange({ target: { value: '90000' } });
-    ui.find(node => node.type === 'input' && node.props['aria-label'] === '这一轮要查什么').props.onChange({ target: { value: 'Only check the provided fixture' } });
+    ui.find(node => node.type === 'textarea' && node.props['aria-label'] === '用户要求、范围或已有材料').props.onChange({ target: { value: 'Only check the provided fixture' } });
     await ui.button('开始测试').props.onClick();
     const start = ui.calls.filter(row => row[0] === 'task.start').at(-1);
     assert(start, 'the token limit must be sent through task.start');
@@ -285,7 +315,7 @@ try {
       for (const other of ['nday', 'regular', '0day'].filter(other => other !== mode)) assert(!text.includes('重点=' + other));
     }
     assert.equal(provider.text({ agent: { session: sessionMap.get('audit') } }), '');
-    assert.match(provider.text({ agent: { session: { id: 'new', header: { agentPreset: 'pentest' } } } }), /先明确本轮站点/);
+    assert.match(provider.text({ agent: { session: { id: 'new', header: { agentPreset: 'pentest' } } } }), /用户可给网址/);
   });
   await test('Desktop starts a human-selected next round without losing facts, history or cost and cannot reset running/blocked tasks', async () => {
     saveTaskContext(store,'ui',{assets:[{id:'retained',url:'https://fixture.test',inScope:true,reachable:true}]});
@@ -296,7 +326,7 @@ try {
     assert.equal(store.db.prepare('SELECT count(*) AS n FROM task_rounds WHERE session_id=?').get('ui').n,1);
     assert((await results.dispatch(ctx,store,'context.index',{sessionId:'ui'})).text.includes('retained'));
     await ui.button('Nday发现').props.onClick();
-    ui.find(node=>node.props['aria-label']==='这一轮要查什么').props.onChange({target:{value:'Check only the provided product prerequisite'}});
+    ui.find(node=>node.props['aria-label']==='用户要求、范围或已有材料').props.onChange({target:{value:'Check only the provided product prerequisite'}});
     await ui.button('开始测试').props.onClick();
     assert.equal(readTaskPolicy(store,'ui').mode,'nday');assert(readTaskPolicy(store,'ui').startedAt>=old.startedAt);
     await assert.rejects(results.dispatch(ctx,store,'task.new-round',{sessionId:'ui'}),/先结束/);
@@ -331,12 +361,15 @@ try {
   await test('chat scenario and direction selectors persist choices without starting budgets or exposing task details', async () => {
     const ui = harness('ChatSetup', 'hero');ui.render();ui.state[0]=await results.dispatch(ctx,store,'chat.settings',{sessionId:'hero'});
     assert(ui.find(n=>n.props['aria-label']==='测试场景'));
-    assert(ui.find(n=>n.props['aria-label']==='测试方向'));
+    assert(!ui.find(n=>n.props['aria-label']==='测试方向'),'direction preference belongs in settings');
     assert(!ui.button('开始测试')); assert(!ui.button('刷新状态'));
-    await ui.find(n=>n.props['aria-label']==='测试方向').props.onChange({target:{value:'regular'}});
+    await ui.button('设置').props.onClick();
+    await ui.find(n=>n.props['aria-label']==='测试方向').props.onChange({target:{value:'nday'}});
+    await ui.button('保存').props.onClick();
     assert.equal(readTaskPolicy(store, 'hero'), null);
-    assert.equal((await results.dispatch(ctx, store, 'task.status', { sessionId: 'hero' })).choice, 'regular');
-    assert.equal(ui.find(n=>n.props['aria-label']==='测试方向').props.value, 'regular');
+    assert.equal((await results.dispatch(ctx, store, 'task.status', { sessionId: 'hero' })).choice, 'nday');
+    await ui.button('设置').props.onClick();
+    assert.equal(ui.find(n=>n.props['aria-label']==='测试方向').props.value, 'nday');
     await ui.find(n=>n.props['aria-label']==='测试场景').props.onChange({target:{value:'project'}});
     assert.equal((await results.dispatch(ctx,store,'task.status',{sessionId:'hero'})).options.scenario,'project');
     await ui.find(n=>n.props['aria-label']==='测试场景').props.onChange({target:{value:'pentest'}});
@@ -367,6 +400,7 @@ try {
     await ui.button('读取详情').props.onClick(); assert.match(ui.state[1], /record not found/);
   });
   await test('research panel reads a compact current-session index and keeps observations folded outside chat', async () => {
+    setTaskActionLimits(store, '0day', { target: 'https://fixture.test' }, 'desktop-user');
     saveTaskContext(store, '0day', { assets: [{ id: 'a', url: 'https://fixture.test', inScope: true, reachable: true }], requests: [{
       id: 'baseline', endpoint: 'https://fixture.test/api', authContext: 'fixture-user', revision: 'v1', kind: 'api', valid: true,
       request: 'GET /api HTTP/1.1', response: 'HTTP/1.1 200 OK\nprivate fixture baseline', inputs: [{ name: 'object', location: 'query', evidenceIds: ['baseline'] }] }] });
@@ -383,6 +417,7 @@ try {
   });
   await test('actual materials tool accepts an unambiguous material kind and distinguishes indexing from reading',async()=>{
     fs.writeFileSync(path.join(home,'selected.js'),'fetch("/api");');
+    setTaskActionLimits(store,'records',{target:'https://fixture.test'},'desktop-user');
     const execute=registeredTools.get('redteam_context').execute,exec={agent:{session:{id:'records',header:{agentPreset:'pentest',cwd:home}}}};
     assert.equal((await execute({context:JSON.stringify({assets:[{id:'material-site',url:'https://fixture.test',inScope:true,reachable:true}],requests:[],methods:[],checks:[]})},exec)).ok,true);
     const materials=JSON.stringify({site:'https://fixture.test',files:[{path:'selected.js',url:'https://fixture.test/app.js'}]});
@@ -419,19 +454,25 @@ try {
     await results.dispatch(ctx,store,'task.start',{sessionId:id,policy:{mode:'regular',question:'Offline chat fixture',budget:{toolCalls:8,minutes:10}}});
     const before=readTaskPolicy(store,id),ui=harness('ChatSetup',id);ui.render();ui.state[0]=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
     const scenarioChip=ui.find(n=>n.props['aria-label']==='测试场景');assert(scenarioChip,'missing 测试场景 chip');
+    await ui.button('测试设置').props.onClick();
     const dirChip=ui.find(n=>n.props['aria-label']==='测试方向');assert(dirChip,'missing 测试方向 chip');
-    assert(scenarioChip.props.disabled&&dirChip.props.disabled);
+    assert(scenarioChip.props.disabled&&!dirChip.props.disabled);
     const coopChip=ui.find(n=>n.props['aria-label']==='聊天协作方式');assert(coopChip,'missing 聊天协作方式 chip');
     await coopChip.props.onChange({target:{value:'confirm-step'}});
-    assert.equal(readTaskPolicy(store,id).interaction,'confirm-step');
+    assert.equal(readTaskPolicy(store,id).interaction,'auto','settings stay in draft until save');
     await ui.find(n=>n.props['aria-label']==='聊天子代理上限').props.onChange({target:{value:'2'}});
+    assert.equal(readTaskPolicy(store,id).workerLimit,1,'settings stay in draft until save');
+    await ui.button('保存').props.onClick();
+    assert.equal(readTaskPolicy(store,id).interaction,'confirm-step');
     assert.equal(readTaskPolicy(store,id).workerLimit,2);
     for(const key of ['used','startedAt'])assert.deepEqual(readTaskPolicy(store,id)[key],before[key]);
     for(const key of ['toolCalls','deadline'])assert.equal(readTaskPolicy(store,id).budget[key],before.budget[key]);
     const child={childId:'chat-child',parentId:id,site:'https://fixture.test',state:'cleanup-failed'};
     store.db.prepare('INSERT INTO site_workers(parent_session,child_id,site,record) VALUES(?,?,?,?)').run(id,child.childId,child.site,JSON.stringify(child));
     await assert.rejects(results.dispatch(ctx,store,'task.workers',{sessionId:id,workers:0}),/先关闭/);
+    await ui.button('测试设置').props.onClick();
     await ui.find(n=>n.props['aria-label']==='聊天子代理上限').props.onChange({target:{value:'0'}});
+    await ui.button('保存').props.onClick();
     assert(ui.find(n=>n.props.role==='alert'&&n.children.some(value=>String(value).includes('先关闭'))));
     assert.equal(readTaskPolicy(store,id).workerLimit,2);store.db.prepare('DELETE FROM site_workers WHERE child_id=?').run(child.childId);
     checkpointTask(store,id,'Offline checkpoint');ui.state[0]=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
@@ -470,15 +511,17 @@ try {
     assert(change.settings.some(row=>row.field==='budget.toolCalls'&&row.label==='工具调用上限'),JSON.stringify(change.settings));
     assert(change.settings.some(row=>row.field==='readOnly'&&row.to===true),JSON.stringify(change.settings));
 
-    // 放宽一律拒绝，并给出具体缺项；拒绝不能改到任何字段。
+    // 放宽生成一条待用户确认的变更；未确认前不能改到任何字段。
     const reopened=await execute({action:'update',document:JSON.stringify({allowTargetNetwork:true})},exec);
-    assert.equal(reopened.ok,false);assert.match(reopened.error,/桌面设置/);
+    assert.equal(reopened.ok,true);assert.match(reopened.summary,/待你确认/);
+    assert.equal(readTaskPolicy(store,id).allowTargetNetwork,false);
     const raised=await execute({action:'update',document:JSON.stringify({workers:8})},exec);
-    assert.equal(raised.ok,false);assert.match(raised.error,/助手上限只能降低/);
+    assert.equal(raised.ok,true);assert.equal(readTaskPolicy(store,id).workerLimit,0);
     const newTarget=await execute({action:'update',document:JSON.stringify({target:'https://other.test'})},exec);
-    assert.equal(newTarget.ok,false);assert.match(newTarget.error,/新增或更换目标需要用户在桌面设置里明确填写/);
+    assert.equal(newTarget.ok,true);assert(readTaskPolicy(store,id).pendingChange);
+    assert.doesNotMatch(readTaskPolicy(store,id).target,/other\.test/);
     const switchMode=await execute({action:'update',document:JSON.stringify({mode:'0day'})},exec);
-    assert.equal(switchMode.ok,false);assert.match(switchMode.error,/不能切换方向/);
+    assert.equal(switchMode.ok,true);assert.equal(readTaskPolicy(store,id).mode,'regular');
     const unknownField=await execute({action:'update',document:JSON.stringify({budget:{toolCalls:3}})},exec);
     assert.equal(unknownField.ok,false);assert.match(unknownField.error,/不接受字段 budget/);
     const final=readTaskPolicy(store,id);
@@ -489,7 +532,7 @@ try {
     sessionMap.set(parent,{id:parent,header:{agentPreset:'pentest'}});
     sessionMap.set(child,{id:child,header:{agentPreset:'pentest',parentSession:parent}});
     await results.dispatch(ctx,store,'task.choose',{sessionId:parent,mode:'regular',workers:1,interaction:'auto'});
-    await results.dispatch(ctx,store,'task.start',{sessionId:parent,policy:{mode:'regular',question:'scope fixture',budget:{toolCalls:20,unmeteredToolCalls:5}}});
+    await results.dispatch(ctx,store,'task.start',{sessionId:parent,policy:{mode:'regular',target:'https://fixture.test',question:'scope fixture',budget:{toolCalls:20,unmeteredToolCalls:5}}});
     store.db.prepare('INSERT INTO site_workers(parent_session,child_id,site,record) VALUES(?,?,?,?)')
       .run(parent,child,'https://fixture.test',JSON.stringify({parentId:parent,childId:child,site:'https://fixture.test',state:'running',allowedTools:['httpx_probe']}));
     startTaskPolicy(store,child,{mode:'regular',question:'child scope fixture',target:'https://fixture.test',stop:'budget',parentSession:parent,
@@ -533,7 +576,7 @@ try {
     sessionMap.set(parent,{id:parent,header:{agentPreset:'pentest',cwd:home}});
     sessionMap.set(child,{id:child,header:{agentPreset:'pentest',parentSession:parent,cwd:home}});
     await results.dispatch(ctx,store,'task.choose',{sessionId:parent,mode:'regular',workers:1,interaction:'auto'});
-    await results.dispatch(ctx,store,'task.start',{sessionId:parent,policy:{mode:'regular',question:'material wake fixture',budget:{toolCalls:20}}});
+    await results.dispatch(ctx,store,'task.start',{sessionId:parent,policy:{mode:'regular',target:'https://wake.test',question:'material wake fixture',budget:{toolCalls:20}}});
     const file=path.join(home,'wake-fixture.js');
     fs.writeFileSync(file,'fetch("/api/one");');
     const execute=registeredTools.get('redteam_context').execute;
@@ -603,15 +646,21 @@ try {
     const id='custom-workers';sessionMap.set(id,{id,header:{agentPreset:'pentest'}});
     await results.dispatch(ctx,store,'task.choose',{sessionId:id,mode:'regular',workers:1,interaction:'auto'});
     const ui=harness('ChatSetup',id);ui.render();ui.state[0]=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
+    await ui.button('测试设置').props.onClick();
     await ui.find(n=>n.props['aria-label']==='聊天子代理上限').props.onChange({target:{value:'custom'}});
     for(const value of ['3','16']){
+      if(!ui.find(n=>n.props['aria-label']==='聊天子代理上限'))await ui.button('测试设置').props.onClick();
       await ui.find(n=>n.props['aria-label']==='聊天子代理上限').props.onChange({target:{value:'custom'}});
-      ui.find(n=>n.props['aria-label']==='自定义子代理上限').props.onChange({target:{value}});
+      const custom=ui.find(n=>n.props['aria-label']==='自定义子代理上限');assert(custom,'自定义子代理输入必须出现');
+      custom.props.onChange({target:{value}});
       await ui.button('保存').props.onClick();assert.equal(chosenTaskOptions(store,id).workers,Number(value));
     }
     for(const value of ['','-1','2.5','17']){
+      if(ui.button('取消'))await ui.button('取消').props.onClick();
+      await ui.button('测试设置').props.onClick();
       await ui.find(n=>n.props['aria-label']==='聊天子代理上限').props.onChange({target:{value:'custom'}});
-      ui.find(n=>n.props['aria-label']==='自定义子代理上限').props.onChange({target:{value}});
+      const custom=ui.find(n=>n.props['aria-label']==='自定义子代理上限');assert(custom,'自定义子代理输入必须出现');
+      custom.props.onChange({target:{value}});
       await ui.button('保存').props.onClick();assert.equal(chosenTaskOptions(store,id).workers,16);assert(ui.find(n=>n.props.role==='alert'));
     }
     await assert.rejects(results.dispatch(ctx,store,'task.choose',{sessionId:id,mode:'regular',workers:17}),/0 and 16/);
@@ -625,6 +674,7 @@ try {
   await test('the worker ceiling select defaults to the plan value 2 and labels it 自动',async()=>{
     const id='default-workers-ui';sessionMap.set(id,{id,header:{agentPreset:'pentest'}});
     const ui=harness('ChatSetup',id);ui.render();ui.state[0]=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
+    await ui.button('测试设置').props.onClick();
     const select=ui.find(n=>n.props['aria-label']==='聊天子代理上限');
     assert(select,'子代理上限下拉必须在位');
     assert.equal(String(select.props.value),'2','默认上限必须是方案写的 2，而不是 1');
@@ -699,8 +749,11 @@ try {
     assert.equal(removed.ok,false);assert.equal(removed.code,'feature_removed','固定测试内容清单必须明确退出');
     // 未开始的任务：抽屉保存走 task.choose，动作限制必须一起带上
     const chooser='action-limits-choose';sessionMap.set(chooser,{id:chooser,header:{agentPreset:'pentest'}});
-    await results.dispatch(ctx,store,'task.choose',{sessionId:chooser,mode:'regular',workers:1,interaction:'auto',reporting:'end',allowTargetNetwork:false,readOnly:true});
+    await results.dispatch(ctx,store,'task.choose',{sessionId:chooser,mode:'regular',workers:1,interaction:'auto',reporting:'end',
+      target:'https://one.example.test/login?next=/orders\nhttps://two.example.test/api?owner=self',allowTargetNetwork:false,readOnly:true});
     const choice=chosenTaskOptions(store,chooser);
+    assert.match(choice.target,/one\.example\.test\/login\?next=\/orders/,'未开始时 task.choose 要保留完整目标路径');
+    assert.match(choice.target,/two\.example\.test\/api\?owner=self/);
     assert.equal(choice.allowTargetNetwork,false,'未开始时 task.choose 要带上网站访问限制');
     assert.equal(choice.readOnly,true,'未开始时 task.choose 要带上只读限制');
     await results.dispatch(ctx,store,'task.choose',{sessionId:chooser,mode:'regular',workers:1,interaction:'auto',reporting:'end',excludedPaths:'/payment'});
@@ -726,7 +779,7 @@ try {
     const rendered=JSON.stringify(ui.render());
     assert(!rendered.includes('选择子模式'),'抽屉托管时任务面板不再重复子模式按钮');
     assert(!rendered.includes('只做当前模式'),'抽屉托管时任务面板不再重复“测试安排”');
-    assert(!rendered.includes('什么时候问我'),'抽屉托管时任务面板不再重复“什么时候问我”');
+    assert(!JSON.stringify(panel).includes('什么时候问我'),'抽屉托管时任务面板不再重复“什么时候问我”');
   });
   await test('任务面板单独使用时保留预算折叠，受控时交给抽屉且不重复渲染', async () => {
     const id='budget-standalone';sessionMap.set(id,{id,header:{agentPreset:'pentest'}});
@@ -753,35 +806,42 @@ try {
     for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
     const value=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
     assert.equal(value.choice,null);assert.equal(value.configured,false);
+    await ui.button('测试设置').props.onClick();
     // v6 第 5.5 节：默认是「自动，最多 2 个」，不是「最多 1 个」。
     assert.equal(ui.find(n=>n.props['aria-label']==='聊天子代理上限').props.value,'2');
     assert.equal(ui.find(n=>n.props['aria-label']==='聊天协作方式').props.value,'auto');
-    ui.button('测试设置').props.onClick();
-    assert.equal(ui.find(n=>n.props['aria-label']==='聊天起步方式').props.value,'materials-first');
-    await ui.find(n=>n.props['aria-label']==='聊天起步方式').props.onChange({target:{value:'direct-test'}});
+    assert(!ui.find(n=>n.props['aria-label']==='聊天起步方式'),'retired start mode must not be shown');
+    await ui.find(n=>n.props['aria-label']==='测试方向').props.onChange({target:{value:'nday'}});
     const draftOnly=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
     assert.equal(draftOnly.options,null,'panel edits stay in the draft until 保存');
     await ui.button('保存').props.onClick();
-    const editedStart=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
-    assert.equal(editedStart.options.startMode,'direct-test');
+    const editedDirection=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
+    assert.equal(editedDirection.choice,'nday');
+    await ui.button('测试设置').props.onClick();
     await ui.find(n=>n.props['aria-label']==='聊天子代理上限').props.onChange({target:{value:'4'}});
+    await ui.button('保存').props.onClick();
     const edited=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
-    assert.equal(edited.choice,'regular');assert.equal(edited.options.workers,4);assert.equal(edited.options.interaction,'auto');assert.equal(edited.options.startMode,'direct-test');
+    assert.equal(edited.choice,'nday');assert.equal(edited.options.workers,4);assert.equal(edited.options.interaction,'auto');assert.equal(edited.options.startMode,'direct-test');
     assert.equal(edited.configured,false);assert.equal(queued.length,before);unmount();
   });
-  await test('测试哪些网站 lives in the settings drawer and reaches the started task', async () => {
+  await test('测试范围 lives in the settings drawer and reaches the started task', async () => {
     const drawerId='drawer-target';sessionMap.set(drawerId,{id:drawerId,header:{agentPreset:'pentest'}});
     const drawer=harness('ChatSetup',drawerId);drawer.render();drawer.state[0]=await results.dispatch(ctx,store,'chat.settings',{sessionId:drawerId});
     const open=drawer.button('测试设置');assert(open,'the settings entry must be present');
     await open.props.onClick();
-    assert(drawer.find(n=>n.props['aria-label']==='测试哪些网站（选填）'),'the target must be settable from the settings drawer');
+    const targetField=drawer.find(n=>n.props['aria-label']==='测试范围（网址、域名、IP/CIDR，选填）');
+    assert(targetField,'the target must be settable from the settings drawer');
+    const drawerTarget='https://one.example.test/login?next=/orders\nhttps://two.example.test/api?owner=self';
+    targetField.props.onChange({target:{value:drawerTarget}});
+    await drawer.button('保存').props.onClick();
+    assert.equal(chosenTaskOptions(store,drawerId).target,drawerTarget,'saving the drawer must persist multi-line target paths');
     assert(!drawer.find(n=>n.props['aria-label']==='目标站点（选填）'),'the target must not be duplicated inside the task panel');
     const id='drawer-target-start';sessionMap.set(id,{id,header:{agentPreset:'pentest'}});
     const ui=harness('TaskPanel',id,{targetState:['https://fixture.test',()=>{}]});
     await ui.mount();
-    ui.find(n=>n.props['aria-label']==='这一轮要查什么').props.onChange({target:{value:'Only check the provided fixture'}});
+    ui.find(n=>n.props['aria-label']==='用户要求、范围或已有材料').props.onChange({target:{value:'Only check the provided fixture'}});
     await ui.button('开始测试').props.onClick();
-    assert.equal(readTaskPolicy(store,id).target,'https://fixture.test','the drawer target must reach the started task');
+    assert.equal(new URL(readTaskPolicy(store,id).target).origin,'https://fixture.test','the drawer target must reach the started task');
   });
   await test('the template drawer starts blank, gates insert on required fields, and inserts through the native composer without sending',async()=>{
     let clipboard='',inserted='',admit=true,captured=0;
@@ -874,13 +934,16 @@ try {
     await results.dispatch(ctx,store,'task.choose',{sessionId:running,mode:'regular',workers:1,interaction:'auto'});
     await results.dispatch(ctx,store,'task.start',{sessionId:running,policy:{mode:'regular',question:'Preserve active preferences',budget:{toolCalls:4,minutes:10}}});
     const original=readTaskPolicy(store,running);assert(original&&!original.planComplete);
+    const chosen='chat-default-chosen';sessionMap.set(chosen,{id:chosen,header:{agentPreset:'pentest'}});
+    await results.dispatch(ctx,store,'task.choose',{sessionId:chosen,mode:'regular',workers:2,interaction:'auto'});
+    assert.equal(chosenTaskOptions(store,chosen).workers,2);
     await results.dispatch(ctx,store,'chat.defaults',{sessionId:'chat-live',interaction:'auto',workers:0});
     const id='new-default';sessionMap.set(id,{id,header:{agentPreset:'pentest'}});
     const newState=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
     assert.equal(newState.options.interaction,'auto');assert.equal(newState.options.workers,0);
     assert.match(sections[0].text({agent:{session:sessionMap.get(id)}}),/子代理上限=0/);
-    // hero 自己选过的值不能被新会话默认（0）改写；它的值是方案默认 2，不是新默认 0。
-    assert.equal(chosenTaskOptions(store,'hero').workers,2);
+    // 已选择但未启动的会话不能被新会话默认（0）改写。
+    assert.equal(chosenTaskOptions(store,chosen).workers,2);
     assert.deepEqual(readTaskPolicy(store,running),original);
     await results.dispatch(ctx,store,'task.start',{sessionId:id,policy:{mode:'regular',budget:{toolCalls:3}}});
     assert.equal(readTaskPolicy(store,id).interaction,'auto');assert.equal(readTaskPolicy(store,id).workerLimit,0);
@@ -998,17 +1061,17 @@ try {
     const id='panel-exclusive';sessionMap.set(id,{id,header:{agentPreset:'pentest'}});
     const ui=harness('ChatSetup',id);await ui.mount();await new Promise(setImmediate);
     // 打开设置
-    const settingsBtn=ui.find(n=>n.type==='button'&&n.children.includes('测试设置'));
+    const settingsBtn=ui.button('设置');
     assert(settingsBtn,'设置入口存在');
     settingsBtn.props.onClick();await ui.mount();await new Promise(setImmediate);
     assert(JSON.stringify(ui.render()).includes('本次测试设置'),'设置面板已打开');
     // 再开提示词模板：设置必须被替换掉，不能两个面板同时挂着
-    const promptBtn=ui.find(n=>n.type==='button'&&n.children.includes('提示词模板'));
+    const promptBtn=ui.button('写提示词');
     assert(promptBtn,'提示词入口存在');
     promptBtn.props.onClick();await ui.mount();await new Promise(setImmediate);
     assert(!JSON.stringify(ui.render()).includes('本次测试设置'),'打开提示词后设置面板已关闭');
     // 再点回设置：提示词侧同样让位
-    const settingsBtn2=ui.find(n=>n.type==='button'&&n.children.includes('测试设置'));
+    const settingsBtn2=ui.button('设置');
     settingsBtn2.props.onClick();await ui.mount();await new Promise(setImmediate);
     assert(JSON.stringify(ui.render()).includes('本次测试设置'),'设置面板重新打开');
     // 长内容也不能把底部操作顶出视口：三个面板都有高度上限。
@@ -1018,10 +1081,10 @@ try {
     }
     // 模板抽屉贴着输入框工具行向上展开、右对齐到会话列（2026-10-17 用户反馈：视口右上角整块
     // 抽屉把会话列和标题栏一起盖住，用户看不到界面）。宽度只占 560px，会话列左侧保持可见。
-    assert(/dsh-prompt-drawer\{position:absolute;top:auto;right:0;bottom:calc\(100% \+ 6px\)/.test(source),'模板抽屉贴着输入框工具行向上展开');
-    assert(source.includes('width:min(560px,100%)'),'模板抽屉只占会话列右侧，左侧界面保持可见');
+    assert(/dsh-prompt-drawer\{position:fixed;top:auto;right:var\(--dsh-chat-overlay-right,16px\);bottom:var\(--dsh-chat-overlay-bottom,100px\)/.test(source),'模板抽屉贴着输入框工具行并在独立视口层展开');
+    assert(source.includes('width:min(560px,var(--dsh-chat-overlay-width,100%),calc(100vw - 24px))'),'模板抽屉只占会话列右侧，左侧界面保持可见');
     assert(source.includes('.dsh-chat-setup{container-type:normal}'),'模板抽屉不被输入框容器的 contain 困住');
-    assert(!/dsh-prompt-drawer\{position:fixed/.test(source),'模板抽屉不再用视口定位盖住整条会话列');
+    assert(/dsh-prompt-drawer\{position:fixed/.test(source),'模板抽屉使用受宽度和底边约束的视口定位');
     assert(source.includes("className:'dsh-prompt-blank'")&&source.includes('先选一个模板'),'未选模板时主区有可见引导，不是空白');
     // 面板顶部与工具行悬停用同一句解释（v6 第 5.1 节）。
     assert(source.includes("'dsh-prompt-hint'")&&source.includes('选一段需求文字，改目标和重点后发送。只编辑或复制；插入后仍由用户发送。'),'提示词面板顶部有固定提示语');
@@ -1045,7 +1108,7 @@ try {
     const fakeDoc={addEventListener:(t,fn)=>{(listeners[t]=listeners[t]||[]).push(fn);},removeEventListener:(t,fn)=>{listeners[t]=(listeners[t]||[]).filter(f=>f!==fn);}};
     const focused=[];
     const fire=key=>{for(const fn of listeners.keydown||[])fn({key,stopPropagation(){}});};
-    for(const [component,openText,panelClass] of [['MaterialsEntry','添加测试资料','dsh-materials-import']]){
+    for(const [component,openText,panelClass] of [['MaterialsEntry','添加文件','dsh-materials-import']]){
       listeners.keydown=[];
       const id='esc-'+panelClass;sessionMap.set(id,{id,header:{agentPreset:'pentest'}});
       const ui=harness(component,id,{},{document:fakeDoc});
@@ -1066,7 +1129,7 @@ try {
     const id='esc-chat-setup';sessionMap.set(id,{id,header:{agentPreset:'pentest'}});
     const ui=harness('ChatSetup',id,{},{document:fakeDoc});
     await ui.mount();await new Promise(setImmediate);
-    const settings=ui.find(n=>n.type==='button'&&String(n.children.join('')).includes('测试设置'));
+    const settings=ui.button('设置');
     assert(settings,'测试设置入口存在');
     settings.props.onClick();await ui.mount();await new Promise(setImmediate);
     assert(JSON.stringify(ui.render()).includes('dsh-chat-more'),'测试设置面板已打开');
@@ -1074,7 +1137,7 @@ try {
     await ui.mount();await new Promise(setImmediate);
     fire();await ui.mount();await new Promise(setImmediate);
     assert(!JSON.stringify(ui.render()).includes('dsh-chat-more'),'焦点在面板外时 Esc 关闭测试设置');
-    const prompt=ui.find(n=>n.type==='button'&&String(n.children.join('')).includes('提示词模板'));
+    const prompt=ui.button('写提示词');
     assert(prompt,'提示词模板入口存在');
     prompt.props.onClick();await ui.mount();await new Promise(setImmediate);
     assert(ui.state.includes('prompt'),'提示词模板已打开');
@@ -1241,6 +1304,7 @@ try {
     const ui=harness('ChatSetup',id);ui.render();ui.state[0]=await results.dispatch(ctx,store,'chat.settings',{sessionId:id});
     assert(ui.find(n=>n.type==='section'&&n.props&&n.props['aria-label']==='聊天任务设置'),'old policies must not blank the whole tool row');
     assert(ui.find(n=>n.props&&n.props['aria-label']==='测试场景'),'the scenario control still renders');
+    await ui.button('测试设置').props.onClick();
     assert(ui.find(n=>n.props&&n.props['aria-label']==='测试方向'),'the direction control still renders');
   });
   await test('添加测试资料把粘贴内容保存为原文引用，并提示格式与字节数', async () => {
@@ -1365,7 +1429,7 @@ try {
     assert(source.includes('id: row[0]'), 'three direct conversation.view registrations missing');
     assert(!source.includes('进度与发现'), 'nested overview label must be gone');
     assert(!source.includes('概览'), 'duplicate overview must be gone');
-    assert(source.includes("'测试设置'"), 'settings entry must be 测试设置');
+    assert(source.includes("'设置'"), 'settings entry must be 设置');
   });
 } finally {
   for (const dispose of disposers.reverse()) await dispose();

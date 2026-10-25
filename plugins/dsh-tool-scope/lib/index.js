@@ -2,7 +2,7 @@
 //
 // 【解决什么问题】一轮模型请求里**工具定义占 67.8%**（实测 101 个 / 111.5K），
 // 而其中一批工具在**当前模式下本来就调不动** —— 插件自己已经声明了模式门禁
-// （webshell 仅 pentest、ctf 仅 ctf-solver、成果/记忆/留痕/知识库仅三个安全模式），
+// （旧 WebShell 残留、ctf、成果/记忆/留痕等只在对应历史模式可见），
 // 非适用模式下调用会被硬拒绝。这些声明留在上下文里纯属白占。
 //
 // 【做法】用**宿主原生的 per-agent 工具过滤**（`agent.ctx.tools.restrict({deny})`，
@@ -105,14 +105,20 @@ export function apply(ctx, config = {}) {
 
   const refreshScenario = (agent, state) => {
     const scenario = scenarioOf(agent)
-    if (state.scenario === scenario && (state.scenarioDispose || !computeScenarioDeny(scenario, state.toolNames).length)) return
+    const deny = computeScenarioDeny(scenario, state.toolNames)
+    const signature = JSON.stringify([scenario, deny])
+    if (state.scenarioSignature === signature) return
     try { state.scenarioDispose?.() } catch { /* agent scope may already be gone */ }
     state.scenarioDispose = null
     state.scenario = scenario
-    const deny = computeScenarioDeny(scenario, state.toolNames)
-    if (!deny.length) return
+    state.scenarioSignature = ''
+    if (!deny.length) {
+      state.scenarioSignature = signature
+      return
+    }
     try {
       state.scenarioDispose = agent.ctx.tools.restrict({ deny })
+      state.scenarioSignature = signature
       say(`场景 ${scenario} 隐藏 ${deny.length} 个另一场景工具（${deny.join(' ')}）`)
     } catch (error) {
       const msg = `场景工具收窄失败（保持可见）: ${String(error?.message ?? error)}`
@@ -122,9 +128,12 @@ export function apply(ctx, config = {}) {
   }
 
   const installPack = (agent, state, known, pack) => {
-    if (state.packDisposers.has(pack.id)) return false
     const names = packTools(known, pack)
     if (!names.length) return false
+    const current = state.packDisposers.get(pack.id)
+    if (current && JSON.stringify(current.names) === JSON.stringify(names)) return false
+    try { current?.dispose?.() } catch { /* agent scope may already be gone */ }
+    state.packDisposers.delete(pack.id)
     const dispose = agent.ctx.tools.restrict({ deny: names })
     state.packDisposers.set(pack.id, { dispose, names })
     return true
@@ -165,7 +174,7 @@ export function apply(ctx, config = {}) {
     const mode = modeOf(agent)
     const deny = computeDeny(mode, known, rules)
     const agentTools = visibleTools(agent)
-    const state = { baseDispose: null, scenarioDispose: null, scenario: '', packDisposers: new Map(), loadedPacks: new Set(), mode, toolNames: agentTools }
+    const state = { baseDispose: null, scenarioDispose: null, scenario: '', scenarioSignature: '', packDisposers: new Map(), loadedPacks: new Set(), mode, toolNames: agentTools }
     states.set(agent.id, state)
 
     if (deny.length) {
@@ -201,7 +210,7 @@ export function apply(ctx, config = {}) {
       description: '按需加载工具包，action=list/load/unload。asset-discovery 用于有限目标识别；active-scan 用于明确假设的扫描。加载不扩大权限或范围。',
       parameters: {
         action: { type: 'string', enum: ['list', 'load', 'unload'], required: true, description: 'list/load/unload' },
-        pack: { type: 'string', description: 'asset-discovery / active-scan / webshell' },
+        pack: { type: 'string', description: 'asset-discovery / active-scan' },
       },
       output: {
         schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },

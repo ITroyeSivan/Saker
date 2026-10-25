@@ -255,7 +255,7 @@ const MIGRATION_COLUMNS = [
 ];
 
 /** 库结构版本。写入 `PRAGMA user_version`，供后续迁移按版本排序与回退。 */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 /**
  * 库比本构建新时的拒绝错误。
@@ -378,6 +378,24 @@ export function openStore(dbPath) {
 		throw new SchemaTooNewError(dbPath, storedVersion, SCHEMA_VERSION);
 	}
 	db.exec(schema());
+	// Work identity, not site identity, is the worker uniqueness key. Existing
+	// databases still carry UNIQUE(parent_session,site), so rebuild that one table
+	// while preserving every row and its serialized record.
+	const siteWorkerSql = String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='site_workers'").get()?.sql ?? '');
+	if (/UNIQUE\s*\(\s*parent_session\s*,\s*site\s*\)/i.test(siteWorkerSql)
+		&& !/work_key/i.test(siteWorkerSql)) {
+		db.exec('BEGIN IMMEDIATE');
+		try {
+			db.exec('ALTER TABLE site_workers RENAME TO site_workers_workkey_legacy');
+			db.exec(SITE_WORKER_SCHEMA);
+			db.exec("INSERT INTO site_workers(parent_session,child_id,site,work_key,record) SELECT parent_session,child_id,site,COALESCE(json_extract(record,'$.workKey'),''),record FROM site_workers_workkey_legacy");
+			db.exec('DROP TABLE site_workers_workkey_legacy');
+			db.exec('COMMIT');
+		} catch (error) {
+			db.exec('ROLLBACK');
+			throw new Error('site_workers 工作键迁移失败：' + String(error?.message || error));
+		}
+	}
 	applyColumnMigration(db, 'task_policy', 'parent_session');
 	applyColumnMigration(db, 'task_policy', 'task_kind');
 	db.exec("UPDATE task_policy SET parent_session=COALESCE(json_extract(record,'$.parentSession'),''), task_kind=CASE WHEN json_extract(record,'$.purposeTask')=1 THEN 'purpose' ELSE '' END WHERE json_valid(record) AND parent_session=''");

@@ -18,6 +18,8 @@ import { runBrowserExecution, recordBrowserReceipt, findBrowserExecutable } from
 const MARKER = 'browser-probe-marker-42';
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-browser-execution-'));
 process.env.DSH_HOME = home;
+const cft = process.env.SAKER_CFT_PATH || 'E:\\software\\ChromeForTesting\\chrome-win64\\chrome.exe';
+if (fs.existsSync(cft)) process.env.SAKER_CFT_PATH = cft;
 const store = openStore(path.join(home, 'redteam-results', 'results.db'));
 let failed = 0;
 const test = async (name, work) => { try { await work(); console.log('ok   ' + name); } catch (error) { failed++; console.log('FAIL ' + name + ': ' + (error.stack || error.message)); } };
@@ -45,7 +47,7 @@ const row = (id, request) => ({ id, revision: 'v1', endpoint, authContext: 'fixt
   inputs: [{ name: 'payload', location: 'query', evidenceIds: [id] }] });
 
 async function prepare(sid) {
-  startTaskPolicy(store, sid, { mode: 'regular', budget: { toolCalls: 20 } });
+  startTaskPolicy(store, sid, { mode: 'regular', target: endpoint, budget: { toolCalls: 20 } });
   saveTaskContext(store, sid, { assets: [{ id: 'asset', url: endpoint, inScope: true, reachable: true }], methods: [method], requests: [row('trigger', packet)] });
   createResearch(store, sid, { id: 'direction', requestId: 'trigger', requestRevision: 'v1', controlledInputs: [{ name: 'payload', location: 'query' }],
     title: 'Controlled browser execution check', serverPath: 'Local HTML fixture', boundary: 'Reviewed payload on the reviewed HTTP origin',

@@ -84,8 +84,8 @@ export const RULES = [
       'access_confirm', 'memshell_cli',
     ],
     modes: ['code-audit', 'ctf-solver'],
-    source: 'preset/pentest/agent.patch.yml —— 按用户的小问题推进，收起无关流程和后渗透工具',
-    note: '常规测试、Nday发现和0Day挖掘共享证据；小任务直接做，确有必要才分派站点子任务',
+    source: 'preset/pentest/agent.patch.yml —— 按用户目标和范围推进，收起无关后渗透工具',
+    note: '常规测试、Nday发现和0Day挖掘共享证据；按独立问题分派授权资产任务',
   },
   {
     id: 'task-workflow',
@@ -109,7 +109,7 @@ export const RULES = [
     prefixes: ['tool_pack'],
     modes: ['pentest'],
     source: 'dsh-tool-scope/lib/packs.js —— 工具包是三个安全预设的运行期能力',
-    note: '当前仅 Pentest 声明 WebShell 工具包；其他模式下入口不暴露',
+    note: '仅防御旧 profile 残留的 WebShell 工具；当前产品不提供 WebShell 工具包或启用入口',
   },
 ]
 

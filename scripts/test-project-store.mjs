@@ -21,7 +21,7 @@ process.env.DSH_HOME = home;
 let failed = 0;
 const test = (name, work) => { try { work(); console.log('ok   ' + name); } catch (error) { failed++; console.log('FAIL ' + name + ': ' + (error.stack || error.message)); } };
 
-test('旧库迁移到 v5 后旧 finding 仍可读，项目表自动补齐', () => {
+test('旧库迁移到当前 schema 后旧 finding 仍可读，项目表自动补齐', () => {
   const dbPath = path.join(home, 'legacy', 'results.db');
   const legacy = openStore(dbPath);
   const finding = registerFinding(legacy, 'legacy-session', 'pentest', { title: '旧记录', severity: 'high', target: 'http://127.0.0.1/' });
@@ -32,7 +32,7 @@ test('旧库迁移到 v5 后旧 finding 仍可读，项目表自动补齐', () =
   raw.close();
   const migrated = openStore(dbPath);
   try {
-    assert.equal(migrated.schemaVersion, 5);
+    assert.equal(migrated.schemaVersion, SCHEMA_VERSION);
     assert.equal(Number(migrated.db.prepare('PRAGMA user_version').get().user_version), SCHEMA_VERSION);
     assert.equal(getFinding(migrated, 'legacy-session', finding.id).title, '旧记录');
     for (const table of ['project_runs', 'project_sources', 'project_checks', 'project_actions'])
@@ -130,11 +130,11 @@ test('项目启动不要求 mode 或 toolCalls；null 上限不会被当成已�
   } finally { store.close(); }
 });
 
-test('旧实战启动语义不变：mode 与 toolCalls 仍是必填', () => {
+test('旧实战启动仍要求 mode，但 toolCalls 可留空', () => {
   const store = openStore(':memory:');
   try {
     assert.throws(() => startTaskPolicy(store, 's-legacy-missing', { question: 'x', budget: { toolCalls: 5 } }), /invalid task mode/);
-    assert.throws(() => startTaskPolicy(store, 's-legacy-budget', { mode: 'regular', question: 'x' }), /budget\.toolCalls/);
+    assert.equal(startTaskPolicy(store, 's-legacy-budget', { mode: 'regular', question: 'x' }).budget.toolCalls, null);
     const policy = startTaskPolicy(store, 's-legacy', { mode: 'regular', question: 'x', budget: { toolCalls: 5 } });
     assert.equal(policy.scenario, 'pentest');
     assert.equal(policy.mode, 'regular');

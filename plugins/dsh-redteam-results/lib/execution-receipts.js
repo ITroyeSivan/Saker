@@ -2,7 +2,7 @@
 import http from 'node:http';
 import https from 'node:https';
 import { createHash, randomUUID } from 'node:crypto';
-import { readTaskContext } from './task-context.js';
+import { readTaskContext, saveTaskContext } from './task-context.js';
 import { researchDetail, researchNext } from './research.js';
 import { taskExecutionGuard, readTaskPolicy, pauseTaskPolicy, acceptBaselineRecheck, targetTrafficDenial, excludedPathDenial, effectivePolicy } from './task-policy.js';
 import { writeTaskPolicy, taskEvent } from './task-policy-record.js';
@@ -10,12 +10,12 @@ import { moduleGateFor, rootModuleSelection } from './execution-modules.js';
 import { sameEndpointPath } from './endpoint-binding.js';
 import { acquireTargetSlot } from './request-pacing.js';
 import { resolveTaskIdentity, identityDenial, identityRequestHeaders } from './identity-binding.js';
+import { taskScopeIncludesUrl } from './task-scope.js';
 
 export const EXECUTION_RECEIPT_SCHEMA = `CREATE TABLE IF NOT EXISTS execution_receipts (
  session_id TEXT NOT NULL, id TEXT NOT NULL, record TEXT NOT NULL,
  PRIMARY KEY(session_id,id)
 );`;
-const FIRST_CONTACT_LIMIT = 5;
 const digest = value => createHash('sha256').update(value).digest('hex');
 // A receipt is current when it still belongs to the same request revision,
 // identity and integrity-checked response. Age alone never invalidates it:
@@ -58,10 +58,14 @@ function requestRow(store, sessionId, id, revision) {
   const rows = context?.requests.filter(row => row.id === id && row.revision === revision) || [];
   if (rows.length !== 1) throw new Error('one current recorded request revision required');
   const row = rows[0], endpoint = new URL(row.endpoint);
-  if (!context.assets.some(asset => asset.inScope === true && asset.reachable === true && new URL(asset.url).origin === endpoint.origin))
-    throw new Error('recorded request has no reachable authorized asset：需要一个与请求 **同 origin** 的资产，并在快照里显式写 inScope:true、reachable:true。'
-      + '顺序是：先保存带 reachable:true 的资产（此时请求**不要**标 valid）→ redteam_execution run 拿到真实响应 → 再把该请求标 valid:true。'
-      + '（范围与目标一致时 inScope 会自动带上。）');
+  const policy = readTaskPolicy(store, sessionId);
+  const limits = policy ? effectivePolicy(store, policy) : null;
+  // Historical inScope flags are display facts, never a grant. Every read and
+  // dispatch is checked against the latest user scope, including parent rules.
+  if (!limits || !taskScopeIncludesUrl(limits, endpoint))
+    throw new Error('recorded request is outside the current task scope；请在当前用户授权范围或明确关联站点内保存请求。');
+  if (!context.assets.some(asset => new URL(asset.url).origin === endpoint.origin))
+    throw new Error('recorded request has no matching asset：请在 redteam_context 保存该入口资产；reachable 可由实际执行回执补充。');
   return row;
 }
 function parseRequest(row) {
@@ -99,8 +103,9 @@ function parseRequest(row) {
 export function preflightRecordedRequest(store, sessionId, input, { requireMethod = false } = {}) {
   const row = requestRow(store, sessionId, input.requestId, input.requestRevision), parsed = parseRequest(row);
   const policy = readTaskPolicy(store, sessionId);
-  if (policy?.target && new URL(policy.target).origin !== parsed.endpoint.origin) throw new Error('request is outside the current task site');
-  const pathDenial = excludedPathDenial(policy, { url: parsed.target });
+  const limits = policy ? effectivePolicy(store, policy) : null;
+  if (!limits || !taskScopeIncludesUrl(limits, parsed.endpoint)) throw new Error('request is outside the current task scope');
+  const pathDenial = excludedPathDenial(limits, { url: parsed.target });
   if (pathDenial) throw new Error(pathDenial);
   const method = readTaskContext(store, sessionId)?.methods.find(item => item.id === input.methodId && item.version === input.methodVersion && item.reviewed === true);
   if (!method && (requireMethod || input.methodId !== undefined || input.methodVersion !== undefined))
@@ -183,33 +188,21 @@ export async function executeRecordedRequest(store, sessionId, input, jobStep, s
   const outgoing = identityHeaders ? { ...parsed, headers: identityHeaders.headers } : parsed;
   const recheck = input.purpose === 'baseline' && task?.needsBaselineRecheck === true;
   const firstContact = input.purpose === 'first-contact';
+  const exploration = firstContact || (!recheck && (typeof input.hypothesisId !== 'string' || !input.hypothesisId.trim()));
   if (input.purpose !== undefined && !recheck && !firstContact) throw new Error('baseline recheck is only available after user resolution');
   if (recheck && (!['GET', 'HEAD'].includes(parsed.method) || row.valid !== true || !/^HTTP\/\S+\s+2\d\d\b/i.test(row.response || ''))) throw new Error('recorded normal GET/HEAD baseline required');
   if (firstContact) {
     // 首次接触（用例 J7 实测的死锁）：run 要 hypothesis、research create 要 valid 基线，而基线又只能靠 run 拿到。
     // 任务里还**一个 valid 基线都没有**时，允许对"已存 + inScope+reachable"的 GET/HEAD 发一次真实请求，拿回执后再标 valid。
     if (jobStep) throw new Error('first contact cannot run inside an effect job');
-    const context = readTaskContext(store, sessionId);
-    const current = (context?.requests || []).find(item => item.id === row.id && item.revision === row.revision);
-    if (current?.valid === true) throw new Error('first contact is only for an unconfirmed baseline; use the current direction instead');
-    if (!['GET', 'HEAD'].includes(parsed.method)) throw new Error('first contact only allows GET or HEAD');
-    const receipts = store.db.prepare('SELECT record FROM execution_receipts WHERE session_id=?').all(sessionId)
-      .map(item => { try { return JSON.parse(item.record); } catch { return null; } }).filter(Boolean);
-    const alreadyExecuted = receipts.some(item => item.requestId === row.id && item.requestRevision === row.revision);
-    if (alreadyExecuted) throw new Error('this request already has a first-contact receipt; use another unexecuted GET/HEAD or mark the successful baseline valid');
-    if (receipts.filter(item => item.hypothesisId === 'first-contact').length >= FIRST_CONTACT_LIMIT)
-      throw new Error('first contact/material path check limit reached; use a current direction or stop and report the environment gap');
   }
-  if (!recheck && !firstContact && (typeof input.hypothesisId !== 'string' || !input.hypothesisId.trim()))
-    throw new Error('execution requires a current research direction（hypothesisId）；任务里还没有任何有效基线时，'
-      + '先保存带 reachable:true 的资产 + 还没执行过的 GET/HEAD 请求，再用 purpose=first-contact 跑一次拿回执，然后按顺序标 valid:true。');
   const direction = recheck ? { id: 'baseline-recheck', binding: { endpoint: row.endpoint, authContext: row.authContext } }
-    : firstContact ? { id: 'first-contact', binding: { endpoint: row.endpoint, authContext: row.authContext } }
+    : exploration ? { id: 'exploration', binding: { endpoint: row.endpoint, authContext: row.authContext } }
       : researchDetail(store, sessionId, input.hypothesisId);
-  if (!recheck && !firstContact && (!direction.current || !['active', 'supported'].includes(direction.state) || researchNext(store, sessionId).id !== direction.id))
+  if (!recheck && !exploration && (!direction.current || !['active', 'supported'].includes(direction.state) || researchNext(store, sessionId).id !== direction.id))
     throw new Error('execution requires the current active direction'
       + (direction.blockedReason ? '：' + direction.blockedReason + '（方向被阻断时不要改写基线掩盖它；按提示处理或新建研究方向）' : ''));
-  if (task?.target && new URL(task.target).origin !== parsed.endpoint.origin) throw new Error('request is outside the current task site');
+  if (!task || !taskScopeIncludesUrl(limits, parsed.endpoint)) throw new Error('request is outside the current task scope');
   if (!sameEndpointPath(row.endpoint, direction.binding.endpoint) || (row.authContext !== direction.binding.authContext
     && !recordedJobDenial(store, sessionId, input, jobStep, direction, row, parsed)))
     throw new Error('recorded request must stay on the same endpoint path and identity（查询参数可变；路径、来源与身份不能变）：'
@@ -235,9 +228,24 @@ export async function executeRecordedRequest(store, sessionId, input, jobStep, s
     return { modulesRev: selection.rev, policyRev: selection.policyRev, active: selection.active }; })();
   const startedAt = new Date().toISOString(), started = performance.now();
   // 请求节流（PLAN 5.5）：先在每会话闸门里排队，拿到名额才真的发请求；释放放在 finally。
-  const releaseSlot = await acquireTargetSlot(sessionId, task, signal);
+  const releaseSlot = await acquireTargetSlot(sessionId, limits, signal);
   let result;
-  try { result = await exchange(outgoing, timeoutMs, maxBytes, signal); }
+  try {
+    // Scope can change while this request waits for a pacing slot. Re-read the
+    // latest parent/child policy immediately before I/O; a denial releases the
+    // reservation and never reaches the wire.
+    const latestTask = readTaskPolicy(store, sessionId);
+    const latestLimits = latestTask ? effectivePolicy(store, latestTask) : latestTask;
+    const lateDenial = targetTrafficDenial(latestLimits, { method: parsed.method })
+      || excludedPathDenial(latestLimits, { url: parsed.target })
+      || (!latestLimits || !taskScopeIncludesUrl(latestLimits, parsed.endpoint)
+        ? 'request is outside the current task scope（已准入、未派发；没有发出请求）' : undefined);
+    if (lateDenial) {
+      releaseExecutionReservation(store, sessionId);
+      throw new Error(lateDenial);
+    }
+    result = await exchange(outgoing, timeoutMs, maxBytes, signal);
+  }
   finally { releaseSlot(); }
   const record = { id: 'execution-' + randomUUID(), source: 'host-http-execution', hypothesisId: direction.id,
     requestId: row.id, requestRevision: row.revision, endpoint: row.endpoint, authContext: row.authContext,
@@ -285,6 +293,82 @@ export async function executeRecordedRequest(store, sessionId, input, jobStep, s
     else acceptBaselineRecheck(store, sessionId, record.id);
   }
   return { ...executionReceiptSummary(record), ...(code ? { taskPaused: true, blocker: code } : {}) };
+}
+
+/**
+ * Direct exploratory request. The adapter first stores the entry as a real task asset/request,
+ * then reuses the same scope, identity, pacing, read-only and guard path as recorded executions.
+ */
+export async function executeDirectRequest(store, sessionId, input, signal) {
+  const method = String(input?.method || 'GET').toUpperCase()
+  if (!/^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)$/.test(method)) throw new Error('unsupported direct request method')
+  let endpoint
+  try { endpoint = new URL(String(input?.url || '')) } catch { throw new Error('direct request requires a complete HTTP(S) URL') }
+  if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password) throw new Error('direct request requires a plain HTTP(S) URL')
+  endpoint.hash = ''
+  const policy = readTaskPolicy(store, sessionId)
+  if (!policy) throw new Error('start a task before sending a direct request')
+  const limits = effectivePolicy(store, policy)
+  if (!taskScopeIncludesUrl(limits, endpoint)) throw new Error('direct request is outside the current task scope')
+  const directExclusion = excludedPathDenial(limits, { url: endpoint })
+  if (directExclusion) throw new Error(directExclusion)
+  const headers = {}
+  const supplied = input?.headers && typeof input.headers === 'object' && !Array.isArray(input.headers) ? input.headers : {}
+  for (const [name, value] of Object.entries(supplied)) {
+    if (!/^[A-Za-z0-9-]+$/.test(name)) throw new Error('invalid direct request header name')
+    headers[name] = String(value).replace(/[\r\n]+/g, ' ')
+  }
+  const body = input?.body === undefined ? '' : String(input.body)
+  if (body && ['GET', 'HEAD'].includes(method)) throw new Error('GET/HEAD direct requests cannot include a body')
+  const current = readTaskContext(store, sessionId) || { assets: [], checks: [], requests: [], methods: [], maxSupplementAttempts: 2 }
+  const assetId = 'asset-direct-' + digest(endpoint.origin).slice(0, 16)
+  const requestId = 'request-direct-' + randomUUID()
+  const requestRevision = 'r-' + digest(JSON.stringify([method, endpoint.href, headers, body, Date.now(), randomUUID()])).slice(0, 16)
+  const asset = current.assets.find(row => row.id === assetId) || {
+    id: assetId,
+    url: endpoint.origin,
+    reachable: false,
+    source: String(input?.source || 'direct exploratory request'),
+    firstSeen: new Date().toISOString(),
+  }
+  const request = {
+    id: requestId,
+    revision: requestRevision,
+    endpoint: endpoint.href,
+    authContext: String(input?.identityRef || input?.authContext || 'default'),
+    method,
+    headers,
+    body,
+    source: String(input?.source || 'direct exploratory request'),
+  }
+  saveTaskContext(store, sessionId, {
+    ...current,
+    assets: [...current.assets.filter(row => row.id !== assetId), asset],
+    requests: [...current.requests.filter(row => !(row.id === requestId && row.revision === requestRevision)), request],
+  })
+  const receipt = await executeRecordedRequest(store, sessionId, {
+    requestId,
+    requestRevision,
+    timeoutMs: input?.timeoutMs,
+    maxBytes: input?.maxBytes,
+    callId: input?.callId,
+  }, undefined, signal)
+  const after = readTaskContext(store, sessionId) || current
+  const observed = ['response', 'redirect-not-followed'].includes(receipt.outcome)
+  saveTaskContext(store, sessionId, {
+    ...after,
+    assets: after.assets.map(row => row.id === assetId ? { ...row, reachable: row.reachable === true || observed } : row),
+    requests: after.requests.map(row => row.id === requestId && row.revision === requestRevision && observed
+      ? { ...row, valid: true, responseReceiptId: receipt.id }
+      : row),
+  })
+  return {
+    ...receipt,
+    requestId,
+    requestRevision,
+    taskRecorded: true,
+    evidenceLimit: 'Request and response were captured automatically. Status/body alone do not prove vulnerability impact.',
+  }
 }
 export function readExecutionReceipt(store, sessionId, id) {
   const record = store.db.prepare('SELECT record FROM execution_receipts WHERE session_id=? AND id=?').get(sessionId, id);

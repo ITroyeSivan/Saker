@@ -20,6 +20,9 @@ try {
     ['execution-receipts.js', 'target.pathname !== endpoint.pathname', 'false', 'parser rejects endpoint Host framing and identity errors before requests or budget are consumed'],
     ['research.js', 'if (receiptPair && previous.some(row => receiptPair.some', 'if (false && receiptPair && previous.some(row => receiptPair.some', 'research observations derive packets and times from two distinct session-bound host receipts without reusing executions'],
     ['execution-receipts.js', "['ip-blocked', 'normal-access-failed', 'login-expired'].includes(code)", "['ip-blocked', 'normal-access-failed'].includes(code)", '身份失效（login-expired）沿任务树传播到父任务，父任务一并暂停'],
+    ['index.js', 'return { ok: true, ...redactValue({ ...publicReceipt, responseBodyText: responseBodyText(receipt).text }) };',
+      'return { ok: true, ...redactValue({ ...receipt, responseBodyBase64: undefined, responseBodyText: responseBodyText(receipt).text }) };',
+      'registered host execution captures actual wire response without accepting a supplied receipt or impact verdict'],
   ];
   for (const [file, anchor, mutation, label] of cases) {
     const target = path.join(copy, 'plugins/dsh-redteam-results/lib', file), source = fs.readFileSync(target, 'utf8');

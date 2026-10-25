@@ -5,6 +5,8 @@ import path from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
 import { saveChecks, readChecks, renderCheckedTsv } from '../plugins/dsh-redteam-results/lib/checked.js';
+import { saveTaskContext } from '../plugins/dsh-redteam-results/lib/task-context.js';
+import { verificationBasis } from '../lib/verification-basis.mjs';
 let failed = 0;
 async function test(name, fn) {
   try { await fn(); console.log('ok   ' + name); }
@@ -57,6 +59,21 @@ try {
     assert.throws(() => saveChecks(store, 'atomic', [base, base]), /duplicate/);
     assert.throws(() => saveChecks(store, 'atomic', Array(201).fill(base)), /1..200/);
     assert.equal(readChecks(store, 'atomic').length, 0);
+  });
+  await test('verification basis is derived from current context and cannot be chosen by the caller', () => {
+    const bound = { ...base, status: 'blocked', reason: 'fixture identity unavailable', requestValid: true, conditions: [],
+      baselineEvidenceIds: ['request'], methodReviewed: true };
+    const context = {
+      assets: [{ id: 'a', url: 'https://api.example.test/', inScope: true, reachable: true }],
+      requests: [{ id: 'request', endpoint: base.endpoint, authContext: base.authContext, revision: base.requestRevision,
+        kind: 'api', valid: true, request: 'GET /input HTTP/1.1\r\nHost: api.example.test\r\n\r\n',
+        response: 'HTTP/1.1 200 OK\r\n\r\nfixture' }],
+      methods: [{ id: base.entryId, version: base.methodVersion, reviewed: true }],
+      checks: [bound],
+    };
+    saveTaskContext(store, 'basis', context);
+    const saved = saveChecks(store, 'basis', [{ ...bound, verificationBasis: 'saker-verification-basis/1:' + '0'.repeat(64) }])[0];
+    assert.equal(saved.verificationBasis, verificationBasis(bound, context));
   });
   await test('compact exports contain exactly three columns and never leak internal details', async () => {
     const result = await dispatch({}, store, 'checks.export', { sessionId: 'states' });

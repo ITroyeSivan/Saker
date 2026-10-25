@@ -47,6 +47,27 @@ await test('the launcher never focuses a verification instance as the daily wind
     'the shortcut runs hidden, so the refusal must be visible in a dialog');
 });
 
+await test('the launcher prunes only loopback launch cookies with an explicit Node runtime', () => {
+  assert.match(source, /\$settings\.nodeExecutable/,
+    'the launcher must use the Node path captured when the shortcut is refreshed');
+  assert.match(source, /prune-desktop-auth-cookies\.mjs/,
+    'the launcher must invoke the deployed cookie pruner');
+  assert.match(source, /& \(\[string\]\$settings\.nodeExecutable\) \$cookieHelper \$cookieDb/,
+    'the helper must run with an explicit executable and database argument');
+  assert.doesNotMatch(source, /&\s+node\s+/, 'the launcher must not depend on node from PATH');
+});
+
+await test('the launcher restores the Electron window started by a hidden shortcut', () => {
+  assert.match(source, /Start-Process .* -PassThru/,
+    'the launcher must track the process that owns the new window');
+  assert.match(source, /ShowWindowAsync\(window, 9\)/,
+    'the launcher must restore the hidden Electron window');
+  assert.match(source, /SetForegroundWindow\(window\)/,
+    'the restored window must be brought to the foreground');
+  assert.match(source, /Chrome_WidgetWin_1/,
+    'window selection must target the Electron main window, not the hidden message window');
+});
+
 await test('the deployed launcher matches the repo template', () => {
   if (!existsSync(deployed)) { console.log('   （未部署副本，跳过一致性比对）'); return }
   assert.equal(hash(deployed), hash(template),

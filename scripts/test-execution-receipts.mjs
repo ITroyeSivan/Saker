@@ -49,7 +49,7 @@ stageMethodClassification(store, { schema: 'saker.method-classification/1', id: 
   source: { kind: 'manual', version: fixtureMethod.version, position: 'test-execution-receipts fixture' } });
 const context = request => ({ assets: [{ id: 'a', url: endpoint, inScope: true, reachable: true }], requests: [normal, ...(request ? [request] : [])], methods: [fixtureMethod] });
 function setup(sid, request, budget = 20) {
-  startTaskPolicy(store, sid, { mode: 'regular', budget: { toolCalls: budget, discoveryCalls: 3 } });
+  startTaskPolicy(store, sid, { mode: 'regular', target: endpoint, budget: { toolCalls: budget, discoveryCalls: 3 } });
   saveTaskContext(store, sid, context(request));
   createResearch(store, sid, { id: 'direction', requestId: 'normal', requestRevision: 'v1', controlledInputs: [{ name: 'mode', location: 'query' }],
     title: 'Fixture response comparison', serverPath: 'Local fixture', boundary: 'Synthetic comparison', normalBehavior: 'Fixture own response',
@@ -59,6 +59,11 @@ function setup(sid, request, budget = 20) {
 const input = (requestId = 'normal', patch = {}) => ({ hypothesisId: 'direction', requestId, requestRevision: 'v1',
   methodId: fixtureMethod.id, methodVersion: fixtureMethod.version, ...patch });
 const exec = sid => ({ agent: { session: { id: sid, header: { agentPreset: 'pentest' } } } });
+function assertNoUndefined(value, location = 'result') {
+  assert.notEqual(value, undefined, location + ' must not be undefined');
+  if (!value || typeof value !== 'object') return;
+  for (const [key, item] of Object.entries(value)) assertNoUndefined(item, location + '.' + key);
+}
 async function test(label, fn) { try { await fn(); console.log('ok   ' + label); } catch (error) { failed++; console.log('FAIL ' + label + ': ' + error.stack); } }
 try {
   await test('registered host execution captures actual wire response without accepting a supplied receipt or impact verdict', async () => {
@@ -77,6 +82,17 @@ try {
     assert(!rendered.includes('fixture-only')); assert(!rendered.includes('actual fixture response;'));
     assert.equal(readTaskPolicy(store, 'actual').used.toolCalls, 1);
     store.close(); store = openStore(file); assert.equal(readExecutionReceipt(store, 'actual', result.id).requestSha256, result.requestSha256);
+    const detailResult = await tool.execute({ action: 'detail', id: result.id }, exec('actual'));
+    assertNoUndefined(detailResult);
+    assert.equal(detailResult.ok, true, detailResult.error);
+    assert.equal(detailResult.id, result.id);
+    assert.equal(detailResult.responseBodyText, 'actual fixture response; not a submitted success claim');
+    assert(!Object.hasOwn(detailResult, 'responseBodyBase64'), 'detail must not expose duplicate response bytes');
+    assert.match(detailResult.request, /authorization: \[已遮蔽\]/i);
+    assert(!detailResult.request.includes('fixture-only'), 'detail request must remain redacted');
+    const storedDetail = JSON.parse(store.db.prepare('SELECT record FROM execution_receipts WHERE session_id=? AND id=?').get('actual', result.id).record);
+    assert.equal(Buffer.from(storedDetail.responseBodyBase64, 'base64').toString(), detailResult.responseBodyText,
+      'detail must not delete the original response bytes from storage');
     await assert.rejects(tool.execute({ action: 'invalid' }, exec('actual')).then(value => { if (!value.ok) throw Error(value.error); }), /invalid execution|invalid arguments/);
     assert.throws(() => readExecutionReceipt(store, 'other', result.id), /current session/);
     saveTaskContext(store, 'actual', { ...context(), requests: [{ ...normal, revision: 'v2', request: packet('?mode=changed') }] });
@@ -145,8 +161,15 @@ try {
       await assert.rejects(executeRecordedRequest(store, sid, input('probe', name === 'revision' ? { requestRevision: 'missing' } : {})));
       assert.equal(received.length, before); assert.equal(readTaskPolicy(store, sid).used.toolCalls, 0);
     }
-    setup('scope'); saveTaskContext(store, 'scope', { ...context(), assets: [{ ...context().assets[0], inScope: false }] });
-    await assert.rejects(executeRecordedRequest(store, 'scope', input()), /reachable authorized asset/);
+    setup('scope');
+    const outside = 'https://outside.test/api/object';
+    saveTaskContext(store, 'scope', {
+      assets: [{ id: 'outside', url: outside, inScope: true, reachable: true }],
+      requests: [{ ...normal, id: 'outside-request', endpoint: outside,
+        request: 'GET /api/object HTTP/1.1\r\nHost: outside.test\r\n\r\n' }],
+      methods: [fixtureMethod],
+    });
+    await assert.rejects(executeRecordedRequest(store, 'scope', input('outside-request')), /outside the current task scope/);
   });
   await test('redirect blocked identity truncation timeout and transport failure remain execution outcomes, never impact', async () => {
     for (const [mode, outcome] of [['redirect', 'redirect-not-followed'], ['denied', 'response'], ['large', 'response-limit'], ['hang', 'timeout'], ['abort', 'transport-error']]) {
@@ -179,11 +202,11 @@ try {
     const parent = 'parent-login', child = 'child-login';
     // 复查的正常对照在真实目标上返回 403 → 身份失效（login-expired）。
     const probe = { ...normal, id: 'probe', request: packet('?mode=denied'), valid: true, response: 'HTTP/1.1 200 OK\r\n\r\nold normal response' };
-    startTaskPolicy(store, parent, { mode: 'regular', budget: { toolCalls: 20 } });
+    startTaskPolicy(store, parent, { mode: 'regular', target: endpoint, budget: { toolCalls: 20 } });
     // 子任务必须在 site_workers 里挂到父任务下：startTaskPolicy 只认这张表判定父子关系。
     store.db.prepare('INSERT INTO site_workers(parent_session,child_id,site,record) VALUES(?,?,?,?)')
       .run(parent, child, endpoint, JSON.stringify({ parentId: parent, childId: child, site: endpoint, state: 'running', allowedTools: ['redteam_execution'] }));
-    startTaskPolicy(store, child, { mode: 'regular', budget: { toolCalls: 20, discoveryCalls: 3, workers: 0 } });
+    startTaskPolicy(store, child, { mode: 'regular', target: endpoint, budget: { toolCalls: 20, discoveryCalls: 3, workers: 0 } });
     saveTaskContext(store, child, context(probe));
     createResearch(store, child, { id: 'direction', requestId: 'normal', requestRevision: 'v1', controlledInputs: [{ name: 'mode', location: 'query' }],
       title: 'Fixture response comparison', serverPath: 'Local fixture', boundary: 'Synthetic comparison', normalBehavior: 'Fixture own response',
@@ -294,22 +317,19 @@ try {
     assert.equal(getFinding(store, sid, row.id).delivery.executionVerified, false);
     assert.equal(computeStats(store, sid, 'pentest').delivery.ready, 0);
   });
-  await test('first contact: 没有任何研究方向时，已存的 in-scope GET 可以先跑一次拿回执，之后不再放行', async () => {
+  await test('exploration runs recorded requests without a research direction and keeps every receipt', async () => {
     const sid = 'first-contact';
     const request = { ...normal, id: 'fc-1', valid: false, request: packet('?mode=fc') };
-    startTaskPolicy(store, sid, { mode: 'regular', budget: { toolCalls: 10 } });
+    startTaskPolicy(store, sid, { mode: 'regular', target: endpoint, budget: { toolCalls: 10 } });
     saveTaskContext(store, sid, { assets: [{ id: 'a', url: endpoint, inScope: true, reachable: true }], requests: [request], methods: [] });
     const receipt = await executeRecordedRequest(store, sid, { requestId: 'fc-1', requestRevision: 'v1', purpose: 'first-contact' });
     assert.equal(receipt.outcome, 'response');
-    assert.equal(receipt.hypothesisId, 'first-contact');
+    assert.equal(receipt.hypothesisId, 'exploration');
     assert.equal(readExecutionReceipt(store, sid, receipt.id).source, 'host-http-execution');
-    // 同一请求已经拿过回执：不能重复走第一次接触
-    await assert.rejects(executeRecordedRequest(store, sid, { requestId: 'fc-1', requestRevision: 'v1', purpose: 'first-contact' }),
-      /unconfirmed baseline|already has a first-contact receipt/);
-    // 没有 purpose 依然要求研究方向（不许拿它当常开后门）
-    // 没有 purpose 时报错必须可执行：说明该给研究方向，或先用 first-contact 取基线
-    await assert.rejects(executeRecordedRequest(store, sid, { requestId: 'fc-1', requestRevision: 'v1' }),
-      error => /research direction/.test(error.message) && /first-contact/.test(error.message));
+    const repeated = await executeRecordedRequest(store, sid, { requestId: 'fc-1', requestRevision: 'v1', purpose: 'first-contact' });
+    assert.equal(repeated.outcome, 'response', 'exploration has no arbitrary five-call research gate');
+    const explored = await executeRecordedRequest(store, sid, { requestId: 'fc-1', requestRevision: 'v1' });
+    assert.equal(explored.hypothesisId, 'exploration');
     // 拿到回执后：用 responseReceiptId 让宿主回填原文 → 标 valid → 建研究方向（整条链打通）
     const saved = saveTaskContext(store, sid, { assets: [{ id: 'a', url: endpoint, inScope: true, reachable: true }], requests: [{
       ...request, valid: true, kind: 'api', responseReceiptId: receipt.id,
@@ -332,19 +352,19 @@ try {
     assert.equal(direction.id, 'fc-direction');
     assert.deepEqual(direction.controlledInputs, [{ name: 'mode', location: 'query' }]);
   });
-  await test('first contact can skip a 404 and try another unexecuted GET until a 2xx baseline appears', async () => {
+  await test('exploration can keep checking many assets without a first-contact counter', async () => {
     const sid = 'first-contact-404';
     const root = { ...normal, id: 'fc-root', valid: false, request: packet('?mode=missing') };
     const live = { ...normal, id: 'fc-live', valid: false, request: packet('?mode=ok') };
-    startTaskPolicy(store, sid, { mode: 'regular', budget: { toolCalls: 10 } });
+    startTaskPolicy(store, sid, { mode: 'regular', target: endpoint, budget: { toolCalls: 10 } });
     saveTaskContext(store, sid, { assets: [{ id: 'a', url: endpoint, inScope: true, reachable: true }], requests: [root, live], methods: [] });
     const missing = await executeRecordedRequest(store, sid, { requestId: 'fc-root', requestRevision: 'v1', purpose: 'first-contact' });
     assert.equal(missing.status, 404);
-    await assert.rejects(executeRecordedRequest(store, sid, { requestId: 'fc-root', requestRevision: 'v1', purpose: 'first-contact' }),
-      /already has a first-contact receipt/);
+    const repeated = await executeRecordedRequest(store, sid, { requestId: 'fc-root', requestRevision: 'v1', purpose: 'first-contact' });
+    assert.equal(repeated.status, 404);
     const receipt = await executeRecordedRequest(store, sid, { requestId: 'fc-live', requestRevision: 'v1', purpose: 'first-contact' });
     assert.equal(receipt.status, 200);
-    assert.equal(readTaskPolicy(store, sid).used.toolCalls, 2);
+    assert.equal(readTaskPolicy(store, sid).used.toolCalls, 3);
     const third = { ...normal, id: 'fc-third', valid: false, request: packet('?mode=other') };
     saveTaskContext(store, sid, { assets: [{ id: 'a', url: endpoint, inScope: true, reachable: true }], requests: [root, live, third], methods: [] });
     const thirdReceipt = await executeRecordedRequest(store, sid, { requestId: 'fc-third', requestRevision: 'v1', purpose: 'first-contact' });
@@ -356,14 +376,14 @@ try {
     }
     const sixth = { ...normal, id: 'fc-6', valid: false, request: packet('?mode=fc6') };
     saveTaskContext(store, sid, { assets: [{ id: 'a', url: endpoint, inScope: true, reachable: true }], requests: [root, live, third, sixth], methods: [] });
-    await assert.rejects(executeRecordedRequest(store, sid, { requestId: 'fc-6', requestRevision: 'v1', purpose: 'first-contact' }),
-      /limit reached/);
+    const sixthReceipt = await executeRecordedRequest(store, sid, { requestId: 'fc-6', requestRevision: 'v1', purpose: 'first-contact' });
+    assert.equal(sixthReceipt.status, 200, 'the sixth and later exploratory request remains allowed');
   });
   await test('已绑定方向的基线证据被改写后，后续执行/对照给出可执行原因而不是静默失效', async () => {
     const sid = 'bound-baseline';
     const request = { ...normal, id: 'bb-1', valid: false, request: packet('?mode=bb') };
     const assets = [{ id: 'a', url: endpoint, inScope: true, reachable: true }];
-    startTaskPolicy(store, sid, { mode: 'regular', budget: { toolCalls: 10 } });
+    startTaskPolicy(store, sid, { mode: 'regular', target: endpoint, budget: { toolCalls: 10 } });
     saveTaskContext(store, sid, { assets, requests: [request], methods: [] });
     const receipt = await executeRecordedRequest(store, sid, { requestId: 'bb-1', requestRevision: 'v1', purpose: 'first-contact' });
     const base = { ...request, valid: true, kind: 'api', responseReceiptId: receipt.id,

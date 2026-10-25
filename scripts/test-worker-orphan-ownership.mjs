@@ -49,7 +49,7 @@ const insertRow = (parentId, row) => store.db.prepare('INSERT INTO site_workers(
 const rowOf = (parentId, childId) => siteWorkerRows(store, parentId).find(row => row.childId === childId);
 const seedParent = id => {
   live.set(id, parent(id));
-  startTaskPolicy(store, id, { mode: 'regular', workflow: 'single', question: 'Orphan ownership fixture', budget: { toolCalls: 20, workers: 1, minutes: 10 } });
+  startTaskPolicy(store, id, { mode: 'regular', workflow: 'single', target: SITE, question: 'Orphan ownership fixture', budget: { toolCalls: 20, workers: 1, minutes: 10 } });
   saveTaskContext(store, id, { assets: [{ id: 'a', url: SITE, inScope: true, reachable: true }] });
   return parent(id);
 };

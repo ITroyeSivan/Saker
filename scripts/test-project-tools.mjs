@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { openStore, registerFinding, updateFinding } from '../plugins/dsh-redteam-results/lib/store.js';
-import { startTaskPolicy, taskPolicyStatus, readTaskPolicy, finishTaskOnTurnEnd } from '../plugins/dsh-redteam-results/lib/task-policy.js';
+import { startTaskPolicy, taskPolicyStatus, readTaskPolicy, finishTaskOnTurnEnd, setTaskActionLimits } from '../plugins/dsh-redteam-results/lib/task-policy.js';
 import { createProjectRun, transitionProjectRun, defineProjectChecks, upsertProjectSource, readProjectRun, listProjectChecks, listProjectActions, recordProjectCheck, beginProjectAction, finishProjectAction, reconcileProjectAction } from '../plugins/dsh-redteam-results/lib/project-store.js';
 import { projectTurnDecision, completeProjectRun } from '../plugins/dsh-redteam-results/lib/project-runtime.js';
 import { browserProfileName } from '../plugins/dsh-redteam-results/lib/browser-session.js';
@@ -47,6 +47,12 @@ const server = http.createServer((request, response) => {
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const origin = 'http://127.0.0.1:' + server.address().port;
+const secondServer = http.createServer((request, response) => {
+  response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+  response.end('<!doctype html><html><head><title>Saker Second Origin</title></head><body><h1>second origin</h1></body></html>');
+});
+await new Promise(resolve => secondServer.listen(0, '127.0.0.1', resolve));
+const secondOrigin = 'http://127.0.0.1:' + secondServer.address().port;
 
 const tools = new Map();
 const guards = [];
@@ -210,19 +216,22 @@ try {
     assert.deepEqual(policy.excludedPaths, ['/private']);
     assert.equal(policy.requestRatePerMinute, 12);
     assert.equal(policy.requestConcurrency, 1);
-    assert.deepEqual(policy.allowedOrigins, ['https://api.example.test']);
+    assert.deepEqual(policy.allowedOrigins, ['https://api.example.test/']);
     await invoke(sid, 'project_check', { action: 'define', checks: [{ requirement: '不发请求' }] });
     await invoke(sid, 'project_check', { action: 'next' });
     const result = await tools.get('project_request').execute({ method: 'GET', url: origin + '/never-send' }, exec(sid));
     assert.equal(result.ok, false); assert.match(result.error, /target_network_disabled/);
   });
-  await test('文档中只有一个网站时确定主目标，多个网站时要求用户指定', async () => {
+  await test('文档中的一个或多个网站都作为明确范围保留', async () => {
     await dispatch(ctx, store, 'project.import', { sessionId: 'pt-infer-target', name: '环境.md', text: '项目目标：`' + origin + '`，接口 ' + origin + '/api/items。无需登录。' });
     await dispatch(ctx, store, 'project.start', { sessionId: 'pt-infer-target', autoStart: false, policy: { question: '按文档测试' } });
-    assert.equal(readTaskPolicy(store, 'pt-infer-target').target, origin);
+    assert.equal(new URL(readTaskPolicy(store, 'pt-infer-target').target).origin, origin);
     await dispatch(ctx, store, 'project.import', { sessionId: 'pt-ambiguous-target', name: '环境.txt', text: '网站 ' + origin + ' 和 https://second.example.test' });
-    await assert.rejects(() => dispatch(ctx, store, 'project.start', { sessionId: 'pt-ambiguous-target', autoStart: false, policy: { question: '选择主目标' } }), /指定本次测试网站/);
-    assert.equal(readTaskPolicy(store, 'pt-ambiguous-target'), null, '范围不明确时不建立半个任务');
+    await dispatch(ctx, store, 'project.start', { sessionId: 'pt-ambiguous-target', autoStart: false, policy: { question: '检查文档中的两个入口' } });
+    const range = readTaskPolicy(store, 'pt-ambiguous-target');
+    assert.match(range.target, new RegExp(new URL(origin).host));
+    assert.match(range.target, /second\.example\.test/);
+    assert.equal(range.scope.include.includes('https://second.example.test/'), true);
   });
 
   await test('项目工具定义展示结构化检查格式，错误输入不能假报定义成功', async () => {
@@ -681,6 +690,18 @@ try {
       const closed = await tool.execute({ action: 'close' }, exec('pt-browser'));
       assert.equal(closed.ok, true, closed.error);
     });
+    await test('项目浏览器使用同一任务范围访问第二个 origin', async () => {
+      const sid = 'pt-browser-second-origin';
+      const { run } = prepareProject(sid);
+      setTaskActionLimits(store, sid, { allowedOrigins: [secondOrigin] }, 'desktop-user');
+      const tool = tools.get('saker_browser');
+      const opened = await tool.execute({ action: 'open', url: secondOrigin + '/page' }, exec(sid));
+      assert.equal(opened.ok, true, opened.error);
+      assert.equal(opened.page?.url, secondOrigin + '/page');
+      assert.equal(listProjectActions(store, sid, run.runId).at(-1).executionState, 'completed');
+      const closed = await tool.execute({ action: 'close' }, exec(sid));
+      assert.equal(closed.ok, true, closed.error);
+    });
     await test('人工接管保留同一浏览器，人工流量归属清楚，继续前先观察且预算不变', async () => {
       const tool = tools.get('saker_browser');
 
@@ -767,6 +788,8 @@ try {
   for (const dispose of disposers.reverse()) { try { await dispose(); } catch { /* 已关闭 */ } }
   server.closeAllConnections?.();
   await new Promise(resolve => server.close(resolve));
+  secondServer.closeAllConnections?.();
+  await new Promise(resolve => secondServer.close(resolve));
   store.close();
   fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 });
 }

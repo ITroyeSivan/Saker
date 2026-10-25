@@ -22,6 +22,17 @@ try {
     for (const t of list) assert((t.required || []).length <= 2, t.id + ' must keep at most 2 required fields');
     assert.equal(promptFields().version.default, '未知，先根据实际材料核对');
     assert.equal(promptFields().materials.label, '要分析的请求或文件');
+    assert.equal(list.some(t => t.id === 'F06'), false, 'retired knowledge update template must be absent');
+    const p01 = list.find(t => t.id === 'P01');
+    assert(p01, 'document test template must exist');
+    assert.deepEqual(p01.required, ['materials']);
+    assert.match(p01.text, /先读全测试要求/);
+    const n01 = list.find(t => t.id === 'N01');
+    assert.equal(n01.title, '检查指定漏洞或 EXP');
+    assert.match(n01.text, /读取实际公告和必要代码/);
+    assert(promptFields().cve.label.includes('链接'));
+    const a06 = list.find(t => t.id === 'A06');
+    assert.doesNotMatch(a06.text, /知识片段|知识来源|知识更新额度/);
   });
   test('synonym and keyword search covers the plan examples and returns stable ids', () => {
     assert.deepEqual(searchTemplates('SQL').map(t => t.id), ['S04', 'Z06']);
@@ -30,6 +41,9 @@ try {
     assert(searchTemplates('OpenAPI').some(t => t.id === 'A05'), 'OpenAPI must reach the API template');
     assert(searchTemplates('Nday').some(t => t.id === 'N01'), 'Nday must reach the Nday template');
     assert(searchTemplates('继续').some(t => t.id === 'F03'), '继续 must reach the resume template');
+    assert(searchTemplates('EXP').some(t => t.id === 'N01'), 'EXP must reach the direct vulnerability template');
+    assert(searchTemplates('文档').some(t => t.id === 'P01'), '文档 must reach the document test template');
+    assert.equal(searchTemplates('知识').some(t => ['F06', 'A06'].includes(t.id)), false, 'retired knowledge search must not resurface old guidance');
     assert.equal(searchTemplates('').length, 36);
   });
   test('render substitutes provided values, falls back to defaults, and reports missing required fields', () => {

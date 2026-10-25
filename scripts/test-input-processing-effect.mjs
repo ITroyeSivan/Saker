@@ -45,7 +45,7 @@ const row = (id, request) => ({ id, revision: 'v1', endpoint, authContext: 'fixt
   inputs: [{ name: 'name', location: 'query', evidenceIds: [id] }] });
 
 async function collect(sid, { controlQuery = 'name=guest', probeQuery = 'name=' + MARKER, spec = method } = {}) {
-  startTaskPolicy(store, sid, { mode: 'regular', budget: { toolCalls: 20 } });
+  startTaskPolicy(store, sid, { mode: 'regular', target: endpoint, budget: { toolCalls: 20 } });
   const active = { ...spec, effectSpec: spec.effectSpec };
   saveTaskContext(store, sid, { assets: [{ id: 'asset', url: endpoint, inScope: true, reachable: true }], methods: [active],
     requests: [row('control', packet(controlQuery)), row('probe', packet(probeQuery))] });

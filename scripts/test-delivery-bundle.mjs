@@ -39,6 +39,7 @@ try {
   const stored = confirmed('s1'), row = formatterFixture(stored);
   await test('formatter verdict fixture contains script instructions evidence and three-column checks without attesting execution', () => {
     assert.equal(getFinding(store, 's1', stored.id).delivery.ready, false);
+    assert(getFinding(store, 's1', stored.id).delivery.gaps.includes('host-execution-evidence-missing'));
     const bundle = buildDeliveryFiles([row], []);
     assert.equal(bundle.confirmedFindings, 1);
     assert.equal(bundle.files['delivery/repro/finding-1/finding-1.py'], method.code);
@@ -74,11 +75,26 @@ try {
   });
   await test('empty findings yield truthful compact delivery and not-run methods keep their status', () => {
     assert(buildDeliveryFiles([], []).files['delivery/findings.md'].includes('本轮未确认有效漏洞'));
-    const pending = { ...row, reproduction: JSON.stringify({ ...method, verification: { status: 'not-run', evidenceIds: [] } }) };
+    const pending = formatterFixture({ ...stored, reproduction: JSON.stringify({ ...method, verification: { status: 'not-run', evidenceIds: [] } }) });
     const bundle = buildDeliveryFiles([pending], []);
     assert.equal(bundle.confirmedFindings, 0);
     assert.equal(bundle.incompleteRecords, 1);
     assert(!Object.keys(bundle.files).some(name => name.startsWith('delivery/repro/')));
+  });
+  await test('incomplete malformed or cross-entry HTTP evidence never counts as a confirmed effect', () => {
+    for (const patch of [{ requestPkt: '' }, { responsePkt: '' }, { requestPkt: 'I ran the exploit successfully' },
+      { requestPkt: 'POST /another-entry HTTP/1.1\r\nHost: fixture.test\r\n\r\nmarker' },
+      { requestPkt: 'POST /input HTTP/1.1\r\nHost: another.test\r\n\r\nmarker' }]) {
+      const changed = formatterFixture({ ...stored, ...patch });
+      const bundle = buildDeliveryFiles([changed], []);
+      assert.equal(bundle.confirmedFindings, 0, JSON.stringify(patch));
+      assert(!Object.keys(bundle.files).some(name => name.startsWith('delivery/repro/')), JSON.stringify(patch));
+    }
+  });
+  await test('host execution evidence remains mandatory for a ready delivery', () => {
+    assert(getFinding(store, 's1', stored.id).delivery.gaps.includes('host-execution-evidence-missing'));
+    const claimed = { ...stored, executionEvidence: undefined };
+    assert.equal(buildDeliveryFiles([claimed], []).confirmedFindings, 0);
   });
   await test('standard Windows ZIP reader recovers every bundled UTF8 file byte-for-byte', () => {
     const files = buildDeliveryFiles([row], []).files;

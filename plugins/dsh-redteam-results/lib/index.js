@@ -26,7 +26,7 @@ import { buildDeliveryFiles, zipDelivery } from './bundle.js';
 import { saveTaskContext, readTaskContext, readTaskRecord, taskContextView } from './task-context.js';
 import { stageMethodPackage, readMethodPackage, methodPackageState, recordMethodReview, activateMethodPackage, listMethodPackages, activeMethodPackage } from './method-packages.js';
 import { createResearch, observeResearch, assessResearch, closeResearch, researchDetail, researchIndex, researchGroups, researchNext, compactResearchResult } from './research.js';
-import { executeRecordedRequest, readExecutionReceipt, executionReceiptSummary } from './execution-receipts.js';
+import { executeRecordedRequest, executeDirectRequest, readExecutionReceipt, executionReceiptSummary } from './execution-receipts.js';
 import { responseBodyText } from './response-body.js';
 import { resolveTaskIdentity, identityDenial, taskIdentityRevision } from './identity-binding.js';
 import { recordRetest, listRetests, retestSummary, RETEST_VERDICTS, markVerifyStarted, clearVerifyStarted, listVerifyStarted } from './retest.js';
@@ -34,7 +34,7 @@ import { verifyEffect, readEffectVerification } from './effect-verifications.js'
 import { readOobConfig, issueCallbackHost, fetchOobRecords, recordInteraction, readInteractionRecord, interactionSummary } from './server-side-access.js';
 import { runBrowserExecution, recordBrowserReceipt, readBrowserReceipt } from './browser-execution.js';
 import { runEffectJob, readEffectJob } from './effect-jobs.js';
-import { startTaskPolicy, updateTaskProgress, taskPolicyStatus, readTaskPolicy, taskExecutionGuard, taskPrompt, taskPromptStable, taskOverview, chooseTaskMode, pauseTaskPolicy, resumeTaskPolicy, archiveTaskRound, takeTaskContinuation, finishTaskOnTurnEnd, checkpointTask, setTaskInteraction, setTaskWorkers, setTaskExplain, setTaskActionLimits, updateTaskFromChat, targetTrafficDenial, excludedPathDenial, effectivePolicy, confirmTaskCheckpoint } from './task-policy.js';
+import { startTaskPolicy, updateTaskProgress, taskPolicyStatus, readTaskPolicy, taskExecutionGuard, taskPrompt, taskPromptStable, taskOverview, chooseTaskMode, pauseTaskPolicy, resumeTaskPolicy, archiveTaskRound, takeTaskContinuation, finishTaskOnTurnEnd, checkpointTask, setTaskInteraction, setTaskWorkers, setTaskExplain, setTaskActionLimits, setTaskMode, setTaskBudget, updateTaskFromChat, applyPendingTaskChange, cancelPendingTaskChange, targetTrafficDenial, excludedPathDenial, effectivePolicy, confirmTaskCheckpoint, isExplicitTaskContinuation, resumeTurnEndedTask } from './task-policy.js';
 import { projectContinuation, projectTurnDecision, markProjectContinuation, pauseProjectRun, resumeProjectRun, projectExecutableChecks, selectProjectCheck, startProjectTask, setProjectRunState, completeProjectRun, recoverInterruptedProjectRuns, synchronizeStoppedProjectRun } from './project-runtime.js';
 import { activeProjectRun, readProjectRun, listProjectRuns, listProjectChecks, listProjectSources, readProjectSource, listProjectActions, defineProjectChecks, recordProjectCheck, readProjectCheck, upsertProjectSource, beginProjectAction, finishProjectAction, reconcileProjectAction, saveProjectBrowserObservation, projectObservationRefs } from './project-store.js';
 import { zipProjectDelivery, projectCounts, projectCheckView } from './project-delivery.js';
@@ -66,8 +66,10 @@ import { recordImpactReview } from './impact-reviews.js';
 import { PROOF_KINDS, parseReproduction, renderReproduction, renderFindingDelivery } from './delivery.js';
 import { registerTaskPrompt } from './task-prompt.js';
 import { writeTaskPolicy, listTaskEvents, taskTransaction } from './task-policy-record.js';
+import { taskScopeAllowsUrl, taskScopeAllowsAsset, isPassiveBrowserDependency } from './task-scope.js';
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { sessionWorkingDirectory, ensureWorkingDirectory } from 'dsh-saker/working-directory';
+import { readInventory } from 'dsh-saker/asset-inventory';
 import { saveChecks, readChecks, compactChecks, renderCheckedTsv } from './checked.js';
 import { openStore, registerFinding, updateFinding, removeFinding, getFinding, allFindings, listFindings, listFindingsAll, groupByTarget, groupByTargetAll, computeStats, computeStatsAll, modeCounts, modeCountsAll, ledgerOverview, ledgerOverviewAll, getMeta, setMeta, SEVERITIES, STATUSES, REGISTER_STATUSES, MODE_STATUSES, ALL_STATUSES, EVIDENCE_LEVELS, SOURCE_ORIGINS, SECOND_RATINGS, secondReviewError, secondReviewVerdict, statusesOf } from "./store.js";
 
@@ -91,6 +93,16 @@ const workerManagers = new WeakMap();
 const purposeManagers = new WeakMap();
 const modelAdmissions = new WeakMap();
 const projectBrowsers = new Map();
+function modelTokenBudgetAvailable(ctx) {
+  const admission = modelAdmissions.get(ctx);
+  if (!admission?.available) return false;
+  try {
+    const counter = ctx.get?.('sakerInputCounter');
+    return typeof counter?.countInput === 'function';
+  } catch {
+    return false;
+  }
+}
 
 const MODES = ["pentest", "code-audit", "ctf-solver"];
 const MODE_LABELS = {
@@ -580,7 +592,7 @@ export async function dispatch(ctx, st, endpoint, payload) {
     }
     synchronizeStoppedProjectRun(st, sessionId);
     const state = taskPolicyStatus(st, sessionId), workers = siteWorkerView(st, sessionId);
-    return { ok: true, ...state, active: workers.active, hostWorkerLimit: hostWorkerLimit(ctx), defaults: chatDefaults(st),
+    return { ok: true, ...state, overview: taskOverview(st, sessionId), active: workers.active, hostWorkerLimit: hostWorkerLimit(ctx), defaults: chatDefaults(st),
       browserTakeover: browserTakeoverView(projectBrowsers.get(sessionId)),
       attention: taskAttention(st, sessionId),
       currentAction: taskCurrentAction(st, sessionId),
@@ -679,7 +691,7 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
     return { ok: true, configured: overview.configured, elapsedSeconds: policy
         ? Math.max(0, Math.floor((Math.min(Date.now(), policy.finishedAt ?? Infinity, policy.budget.deadline ?? Infinity) - policy.startedAt) / 1000)) : 0,
       operations: policy ? { used: policy.used.toolCalls, budget: policy.budget.toolCalls } : null,
-      unmetered: policy ? { used: policy.used.unmeteredToolCalls ?? 0, budget: policy.budget.unmeteredToolCalls ?? 0 } : null,
+      unmetered: policy ? { used: policy.used.unmeteredToolCalls ?? 0, budget: policy.budget.unmeteredToolCalls ?? null } : null,
       // 网站回执数：宿主真正落库的目标执行回执。工具调用数不等于目标请求数——
       // 用宿主 shell 发的请求不会进这里，这一列让"请求发生了但没证据"看得见（第 8.2 节分列计量）。
       receipts: { total: Number(st.db.prepare('SELECT COUNT(*) AS n FROM execution_receipts WHERE session_id=?').get(sessionId)?.n ?? 0) },
@@ -721,7 +733,7 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
     st.db.prepare('INSERT INTO task_flow_choice(session_id,record) VALUES(?,?) ON CONFLICT(session_id) DO UPDATE SET record=excluded.record').run(sessionId, JSON.stringify(choice));
     return { ok: true, scenario: p.scenario };
   }
-  if (['task.status', 'task.choose', 'task.start', 'task.cancel', 'task.resume', 'task.cleanup', 'task.new-round', 'task.interaction', 'task.workers', 'task.explain', 'task.limits', 'task.continue', 'task.takeover', 'task.takeover-resume'].includes(endpoint)) {
+  if (['task.status', 'task.choose', 'task.start', 'task.cancel', 'task.resume', 'task.cleanup', 'task.new-round', 'task.interaction', 'task.workers', 'task.explain', 'task.limits', 'task.mode', 'task.budget', 'task.pending-apply', 'task.pending-cancel', 'task.continue', 'task.continue-current', 'task.takeover', 'task.takeover-resume'].includes(endpoint)) {
     const sessionId = String(p.sessionId || '');
     if (!sessionId) throw new Error('sessionId required');
     let sessions;
@@ -852,7 +864,8 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
         if (p.workers !== undefined && Number(p.workers) > hostLimit) throw new Error(`worker limit exceeds host maxActiveSubagents (${hostLimit}); allowed 0 and ${hostLimit}`);
         chooseTaskMode(st, sessionId, p.mode, { workflow: p.workflow, workers: p.workers, interaction: p.interaction, reporting: p.reporting, startMode: p.startMode, explain: p.explain,
           workerModel: p.workerModel, reviewModel: p.reviewModel, reportModel: p.reportModel,
-          allowTargetNetwork: p.allowTargetNetwork, readOnly: p.readOnly, excludedPaths: p.excludedPaths, requestRatePerMinute: p.requestRatePerMinute, requestConcurrency: p.requestConcurrency });
+          target: p.target, scope: p.scope, allowedOrigins: p.allowedOrigins, allowTargetNetwork: p.allowTargetNetwork,
+          readOnly: p.readOnly, excludedPaths: p.excludedPaths, requestRatePerMinute: p.requestRatePerMinute, requestConcurrency: p.requestConcurrency });
       }
       else if (endpoint === 'task.interaction') setTaskInteraction(st, sessionId, p.interaction, 'desktop-user', p.reporting);
       else if (endpoint === 'task.workers') {
@@ -862,28 +875,44 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
       }
       else if (endpoint === 'task.explain') setTaskExplain(st, sessionId, p.explain, 'desktop-user');
       else if (endpoint === 'task.limits') setTaskActionLimits(st, sessionId,
-        { allowTargetNetwork: p.allowTargetNetwork, readOnly: p.readOnly, excludedPaths: p.excludedPaths, allowedOrigins: p.allowedOrigins,
+        { target: p.target, scope: p.scope, allowTargetNetwork: p.allowTargetNetwork, readOnly: p.readOnly, excludedPaths: p.excludedPaths, allowedOrigins: p.allowedOrigins,
           requestRatePerMinute: p.requestRatePerMinute, requestConcurrency: p.requestConcurrency }, 'desktop-user');
-      else if (endpoint === 'task.continue') {
+      else if (endpoint === 'task.mode') setTaskMode(st, sessionId, p.mode, 'desktop-user');
+      else if (endpoint === 'task.budget') setTaskBudget(st, sessionId, p, 'desktop-user');
+      else if (endpoint === 'task.pending-apply') applyPendingTaskChange(st, sessionId, 'desktop-user');
+      else if (endpoint === 'task.pending-cancel') cancelPendingTaskChange(st, sessionId, 'desktop-user');
+      else if (endpoint === 'task.continue' || endpoint === 'task.continue-current') {
         if (readTaskPolicy(st, sessionId)?.manualTakeover?.active)
           throw new Error('人工接管进行中，请在状态行点击“继续测试”');
         if (p.note !== undefined && (typeof p.note !== 'string' || p.note.length > 2000)) throw Error('补充思路应为2000字以内文本');
         const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
         if (typeof agent?.followup !== 'function' || agent.status === 'running') throw new Error('请先等待当前回合结束，再确认继续');
-        const before = taskPolicyStatus(st, sessionId).policy;
-        const policy = confirmTaskCheckpoint(st, sessionId, 'desktop-user');
+        const state = taskPolicyStatus(st, sessionId);
+        const before = state.policy;
+        if (before?.pendingChange)
+          throw new Error('还有待确认的任务变更；请先确认或取消该变更');
+        const ordinaryContinuation = state.reason === 'turn_ended';
+        const policy = ordinaryContinuation
+          ? resumeTurnEndedTask(st, sessionId, 'desktop-continue')
+          : confirmTaskCheckpoint(st, sessionId, 'desktop-user');
+        if (!policy) throw new Error('当前任务不能按普通回合继续');
         try {
           // 注入安全：桌面确认 RPC 在空闲代理上追加，不在 Session.append 临界区内。
-          agent.followup({ id: `saker-confirm-${sessionId}-${before.awaitingConfirmation.at}`, role: 'user', source: { kind: 'user' },
-            content: [{ type: 'text', text: '[Saker 用户确认继续] '+taskPrompt(taskPolicyStatus(st, sessionId))+(p.note?.trim()?'\n用户补充思路：'+p.note.trim()+'\n':'')+'沿用户指定的思路继续，保留原预算与资料。' }] });
+          await agent.followup({ id: `saker-continue-${sessionId}-${policy.policyRev}`, role: 'user', source: { kind: 'user' },
+            content: [{ type: 'text', text: `[Saker 用户确认${ordinaryContinuation ? '继续当前任务' : '继续'}] `+taskPrompt(taskPolicyStatus(st, sessionId))+(p.note?.trim()?'\n用户补充思路：'+p.note.trim()+'\n':'')+'沿用户指定的思路继续，保留原任务编号、预算、证据与未完成项。' }] });
         } catch (error) {
-          writeTaskPolicy(st, sessionId, { ...policy, awaitingConfirmation: before.awaitingConfirmation }, 'confirmation-delivery-failed');
-          throw new Error('未能投递继续消息，仍等待确认：'+error.message);
+          if (ordinaryContinuation)
+            writeTaskPolicy(st, sessionId, { ...policy, turnEndedAt: before.turnEndedAt, finishedAt: before.finishedAt }, 'continuation-delivery-failed');
+          else
+            writeTaskPolicy(st, sessionId, { ...policy, awaitingConfirmation: before.awaitingConfirmation }, 'confirmation-delivery-failed');
+          throw new Error('未能投递继续消息，任务保持原状态：'+error.message);
         }
       }
       else if (endpoint === 'task.start') {
         if((p.policy?.budget?.modelCalls!==undefined || p.policy?.budget?.tokens!==undefined) && !modelAdmissions.get(ctx)?.available)
           throw new Error('宿主缺少模型请求准入钩子，不能执行共享模型额度');
+        if(p.policy?.budget?.tokens!==undefined && !modelTokenBudgetAvailable(ctx))
+          throw new Error('宿主缺少可靠的模型输入计数钩子，不能执行严格 token 额度');
         const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
         if (typeof agent?.followup !== 'function') throw new Error('当前代理不可用，任务尚未开始；请打开该会话后重试');
         if (agent.status === 'running') throw new Error('当前模型仍在运行，请先停止或等待完成');
@@ -894,7 +923,7 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
         try {
           // 注入安全：由桌面 task.start RPC 在空闲代理上触发，不在 Session.append 临界区内。
           agent.followup({ id: `saker-task-${sessionId}-${policy.startedAt}`, role: 'user',
-            content: [{ type: 'text', text: `请开始桌面已经设置的小任务：${policy.question}。沿相关路径推进，使用已有资料、范围和预算；不要重复开始任务或重置预算。缺少关键资料、遇到阻碍或当前路径结束时再向用户说明。` }], source: { kind: 'user' } });
+            content: [{ type: 'text', text: `请开始用户已经设置的任务：${policy.requestText || policy.question}。用户决定目标、范围、重点和硬限制；模型自行选择方法、工具与顺序，直接复用已有资料并执行范围内工作；不要重复开始任务或重置预算。缺少关键条件、遇到阻碍或当前路径结束时再向用户说明。` }], source: { kind: 'user' } });
         } catch (error) {
           updateTaskProgress(st, sessionId, { cancelled: true });
           throw new Error(`模型未能开始，已停止本轮，请保留资料后重新选择问题：${error.message}`);
@@ -944,6 +973,49 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
       modelBudget: overview.policy ? modelBudgetOverview(st,sessionId) : null,
       previousRounds: st.db.prepare('SELECT count(*) AS n FROM task_rounds WHERE session_id=?').get(sessionId).n,
       elapsedSeconds: overview.policy ? Math.max(0, Math.floor((Math.min(Date.now(), overview.policy.finishedAt ?? Infinity, overview.policy.budget.deadline ?? Infinity) - overview.policy.startedAt) / 1000)) : 0 };
+  }
+  if (endpoint === 'context.assets') {
+    const sessionId = String(p.sessionId || '');
+    if (!sessionId) throw new Error('sessionId required');
+    const context = readTaskContext(st, sessionId);
+    const policy = readTaskPolicy(st, sessionId);
+    const limits = policy ? effectivePolicy(st, policy) : null;
+    const includeWorkspace = p.source === 'workspace';
+    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    let ledgerAssets = [];
+    if (includeWorkspace) try {
+      const workspace = sessionWorkingDirectory(ctx, session);
+      ledgerAssets = readInventory(workspace).assets.map(asset => ({
+        ...asset,
+        id: 'inventory:' + asset.id,
+        url: asset.target || asset.url,
+        inScope: limits ? taskScopeAllowsAsset(limits, asset) : false,
+        source: 'workspace-asset-inventory',
+      }));
+    } catch { /* session workspace unavailable: keep task references only */ }
+    const identities = new Set();
+    const combined = [...(context?.assets || []), ...ledgerAssets].map(row => ({
+      ...row,
+      inScope: limits ? taskScopeAllowsAsset(limits, row) : false,
+    })).filter(row => {
+      let identity = String(row.url || row.target || row.host || row.ip || row.id);
+      try {
+        const url = new URL(row.url || row.target);
+        url.hash = '';
+        identity = url.href;
+      } catch { /* retain host/IP identity */ }
+      if (identities.has(identity)) return false;
+      identities.add(identity);
+      return true;
+    });
+    const query = String(p.query || '').trim().toLowerCase();
+    const offset = Math.max(0, Number(p.offset) || 0);
+    const limit = Math.max(1, Math.min(100, Number(p.limit) || 30));
+    const rows = combined.filter(row => !query
+      || [row.id, row.url, row.host, row.ip, ...(row.sources || [])].join(' ').toLowerCase().includes(query));
+    const page = rows.slice(offset, offset + limit);
+    return { ok: true, source: includeWorkspace ? 'workspace' : 'task', rows: page, total: rows.length,
+      offset, nextOffset: offset + page.length < rows.length ? offset + page.length : null };
   }
   if (endpoint === 'context.index' || endpoint === 'context.detail') {
     const sessionId = String(p.sessionId || '');
@@ -1086,10 +1158,10 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
             try { const url = new URL(match[0].replace(/[.,;]+$/, '')); if (!url.username && !url.password) origins.add(url.origin); } catch { /* 不把无效地址当目标 */ }
           }
         }
-        if (origins.size === 1) policy.target = [...origins][0];
+        if (origins.size) policy.target = [...origins].join('\n');
         const choiceRow = st.db.prepare('SELECT record FROM task_flow_choice WHERE session_id=?').get(sessionId);
         const allowNetwork = policy.allowTargetNetwork !== false && (!choiceRow || JSON.parse(choiceRow.record).allowTargetNetwork !== false);
-        if (!policy.target && allowNetwork) throw new Error('请在测试设置里指定本次测试网站；文档没有唯一的网站地址。只分析文档时，先关闭“允许访问网站”。');
+        if (!policy.target && allowNetwork) throw new Error('请在测试设置里指定本次测试范围；文档没有可用网址。只分析文档时，先关闭“允许访问网站”。');
       }
       const run = startProjectTask(st, sessionId, { ...p, policy, sourceSnapshot, runtimeId: modelAdmissions.get(ctx)?.runtimeId || '' });
       if (p.autoStart !== false) {
@@ -1416,6 +1488,21 @@ function apply(ctx) {
     try { finishTaskOnTurnEnd(store, session.id); }
     catch (error) { pauseTaskPolicy(store, session.id, { code: 'needs-user', reason: '回合结束收口失败', evidence: String(error.message || error) }, 'host-turn-end-failure'); }
   });
+  // Ordinary end-of-turn is a pause, not a terminal stop. A real human message
+  // that explicitly asks to continue lifts only that pause; status questions and
+  // planning discussion leave target access stopped.
+  ctx.on?.('session/event', (session, event) => {
+    if (event?.type !== 'user/message' || !isExplicitTaskContinuation(event.data)) return;
+    const sessionId = String(session?.id ?? session?.header?.id ?? '');
+    if (!sessionId) return;
+    try {
+      const target = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+      if (target && target.header?.agentPreset !== 'pentest' && target.mode !== 'pentest') return;
+      resumeTurnEndedTask(theStore(), sessionId, 'user-message');
+    } catch (error) {
+      ctx.logger?.warn?.('task continuation: %s', error.message);
+    }
+  });
   const siteWorkers = createSiteWorkers(ctx, theStore);
   workerManagers.set(ctx, siteWorkers);
   const purposeTasks = createPurposeTasks(ctx, theStore);
@@ -1546,7 +1633,7 @@ function apply(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "redteam_finding_update",
-		description: "按 id 更新成果、复核或复测；转 verified 须给二次评级和依据。",
+		description: "按 id 更新成果或复测；verified 须有二次评级和依据。",
 		parameters: {
 			id: { type: "string", required: true, description: "finding id（如 pentest-3）" },
 			status: { type: "string", enum: ALL_STATUSES, description: "新状态；按当前模式终态规则，详见 finding-fields.md" },
@@ -1644,7 +1731,7 @@ function apply(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "redteam_finding_delete",
-		description: "按 id 删除本会话成果页的一条 finding（直接删库行，统计同步更新）。",
+		description: "删除本会话 finding；统计同步更新。",
 		parameters: { id: { type: "string", required: true, description: "finding id" } },
 		output: {
 			schema: { type: "object", additionalProperties: true, properties: { ok: { type: "boolean", required: true } } },
@@ -1685,14 +1772,19 @@ function apply(ctx) {
     name: 'redteam_execution',
     description: '执行已存请求和正常/异常对照；回执不等于漏洞。',
     parameters: {
-      action: { type: 'string', required: true, enum: ['run', 'detail', 'run-pair', 'pair-detail', 'run-effect', 'job-detail', 'verify-effect', 'effect-detail', 'oob-issue', 'oob-check', 'browser-run'] },
-      document: { type: 'string', description: 'JSON：run-pair含hypothesisId与请求引用；run-effect含methodId/version；verify-effect含rounds' },
+      action: { type: 'string', required: true, enum: ['direct', 'run', 'detail', 'run-pair', 'pair-detail', 'run-effect', 'job-detail', 'verify-effect', 'effect-detail', 'oob-issue', 'oob-check', 'browser-run'] },
+      document: { type: 'string', description: 'direct填url/method/headers/body；pair引用请求；effect用method版本；verify用rounds' },
+      url: { type: 'string', description: 'direct：完整HTTP(S) URL；范围内自动保存资产/请求/响应' },
+      method: { type: 'string', description: 'direct：HTTP方法，默认GET' },
+      headers: { type: 'object', additionalProperties: true, description: 'direct：请求头对象' },
+      body: { type: 'string', description: 'direct：请求正文' },
+      identityRef: { type: 'string', description: 'direct/run：身份引用；不填使用default' },
       label: { type: 'string', description: 'oob-check：issue 的 label' },
       host: { type: 'string', description: 'oob-check：载荷回调域名' },
       hypothesisId: { type: 'string', description: 'run：当前验证方向ID' },
       requestId: { type: 'string', description: 'run：redteam_context中已保存的请求ID' },
       requestRevision: { type: 'string', description: 'run：已保存请求版本' },
-      purpose: { type: 'string', enum: ['baseline', 'first-contact'], description: 'baseline复查；first-contact取基线/同级GET（5次）' },
+      purpose: { type: 'string', enum: ['baseline', 'first-contact', 'exploration'], description: 'baseline复查；first-contact/exploration直接执行已存请求，不要求研究方向' },
       methodId: { type: 'string', description: 'run：用于复现绑定时提供当前已审阅方法ID' },
       methodVersion: { type: 'string', description: 'run：与methodId同时提供，绑定当前方法版本' },
       id: { type: 'string', description: 'detail：宿主生成的回执ID' },
@@ -1701,7 +1793,7 @@ function apply(ctx) {
     },
     output: {
       schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
-      render: (args, value) => [{ type: 'text', text: value.ok ? JSON.stringify(args.action === 'run' ? { ok: true, ...executionReceiptSummary(value) } : value) : value.error }]
+      render: (args, value) => [{ type: 'text', text: value.ok ? JSON.stringify(['direct', 'run'].includes(args.action) ? { ok: true, ...executionReceiptSummary(value) } : value) : value.error }]
     },
     async execute(args, exec) {
       const session = sessionOf(ctx, exec);
@@ -1709,6 +1801,11 @@ function apply(ctx) {
       try {
         const store = theStore();
         const readId = purposeReadSessionId(store, session);
+        if (args.action === 'direct') {
+          const doc = args.document ? JSON.parse(args.document) : {};
+          const merged = { ...doc, ...Object.fromEntries(['url', 'method', 'headers', 'body', 'identityRef'].filter(key => args[key] !== undefined).map(key => [key, args[key]])) };
+          return { ok: true, ...await executeDirectRequest(store, session.id, { ...merged, timeoutMs: args.timeoutMs, maxBytes: args.maxBytes, callId: exec.callId }, exec.signal) };
+        }
         if (args.action === 'run') return { ok: true, ...await executeRecordedRequest(store, session.id, { ...args, callId: exec.callId }, undefined, exec.signal) };
         if (args.action === 'run-pair') return { ok: true, ...await runComparisonJob(store, session.id, { ...JSON.parse(args.document), callId: exec.callId }, exec.signal) };
         if (args.action === 'pair-detail') return { ok: true, ...readComparisonJob(store, readId, args.id) };
@@ -1718,7 +1815,9 @@ function apply(ctx) {
           if (id.startsWith('interaction-')) return { ok: true, ...redactValue(readInteractionRecord(store, readId, id)) };
           if (id.startsWith('browser-')) return { ok: true, ...redactValue(readBrowserReceipt(store, readId, id)) };
           const receipt = readExecutionReceipt(store, readId, args.id);
-          return { ok: true, ...redactValue({ ...receipt, responseBodyBase64: undefined, responseBodyText: responseBodyText(receipt).text }) };
+          const publicReceipt = { ...receipt };
+          delete publicReceipt.responseBodyBase64;
+          return { ok: true, ...redactValue({ ...publicReceipt, responseBodyText: responseBodyText(receipt).text }) };
         }
         if (args.action === 'run-effect') return { ok: true, ...await runEffectJob(store, session.id, { ...JSON.parse(args.document), callId: exec.callId }, exec.signal) };
         if (args.action === 'job-detail') return { ok: true, ...readEffectJob(store, readId, args.id) };
@@ -1760,9 +1859,9 @@ function apply(ctx) {
       document: { type: 'string', description: 'create用独立字段；observe绑定回执；close写理由；assess兼容旧JSON。' },
       observationId: { type: 'string', description: 'assess：run-pair返回的观察ID，不重发请求' },
       outcome: { type: 'string', enum: ['support', 'counterevidence', 'no-information'], description: 'assess：支持/反证/无新信息；difference不能作为结论' },
-      interpretation: { type: 'string', description: 'assess：身份、对象和实际效果如何支持或反驳；回执已保存，不另填阴性台账' },
+      interpretation: { type: 'string', description: 'assess：效果如何支持或反驳；不另填阴性台账' },
       nextInformation: { type: 'string', description: 'assess：下一项必要信息或待独立复核' },
-      restriction: { type: 'string', enum: ['safety-policy', 'tool-policy'], description: '仅close：实际被安全或工具策略中断时填写；记录受限未覆盖，不增加尝试或伪造报文' },
+      restriction: { type: 'string', enum: ['safety-policy', 'tool-policy'], description: '仅close：说明安全或工具策略中断；不伪造报文' },
       offset: { type: 'integer', description: 'list索引偏移，每页20条' }
     },
     output: {
@@ -1791,18 +1890,17 @@ function apply(ctx) {
   }));
 	ctx.tools.register(defineTool({
 		name: 'redteam_task',
-		description: 'start用独立字段；progress写完成标记；checkpoint等待；delegate/cleanup管理子代理。',
+		description: 'start用独立字段；progress/checkpoint/delegate/cleanup管理进度与助手。',
 		parameters: {
 			action: { type: 'string', enum: ['start', 'status', 'next', 'progress', 'checkpoint', 'cancel', 'pause', 'delegate', 'workers', 'send', 'report', 'review', 'report-draft', 'cleanup', 'update'], required: true },
 			mode: { type: 'string', enum: ['regular', 'nday', '0day'] },
-			target: { type: 'string' },
-			question: { type: 'string', description: '问题≤600字' },
+			target: { type: 'string', description: '完整 URL、多个 URL/域名/IP/CIDR，每行一条；可含 *.example.com' },
+			question: { type: 'string', description: '用户原始任务和问题，≤64000字符；不要压缩成单站小问题' },
 			toolCalls: { type: 'integer', description: '整轮共享工具上限1–10000' },
-      modelCalls: { type: 'integer', description: '可选：主/子代理、重试、压缩及标题共享模型调用上限1–10000；开始前设置' },
+			modelCalls: { type: 'integer', description: '可选：主/子代理、重试、压缩和标题共享模型调用上限。' },
 			minutes: { type: 'integer', description: '时间上限1–10080分钟' },
-			workers: { type: 'integer', description: '子代理0–16，≤桌面上限；小任务0' },
-			discoveryCalls: { type: 'integer', description: '0day探路额度0至toolCalls' },
-			unmeteredToolCalls: { type: 'integer', description: '未计量扫描额度0–100，默认0拒绝' },
+			workers: { type: 'integer', description: '子代理0–16，≤桌面上限；按独立问题数量决定' },
+			unmeteredToolCalls: { type: 'integer', description: '可选：无法逐条计量的工具调用硬上限0–1000；未填不额外限制' },
 			stop: { type: 'string', enum: ['budget', 'queue', 'first-high', 'first-rce'] },
 			policy: { type: 'string', description: '旧JSON，与独立字段互斥' },
 			progress: { type: 'string', description: '进度JSON：完成标记和note' },
@@ -1826,6 +1924,8 @@ function apply(ctx) {
           const input=taskStartInput(args);
           if((input.budget?.modelCalls!==undefined || input.budget?.tokens!==undefined) && !modelAdmission.available)
             throw new Error('宿主缺少模型请求准入钩子，不能执行共享模型额度');
+          if(input.budget?.tokens!==undefined && !modelTokenBudgetAvailable(ctx))
+            throw new Error('宿主缺少可靠的模型输入计数钩子，不能执行严格 token 额度');
 					startTaskPolicy(theStore(), session.id, input);
 				} else if (args.action === 'progress') {
           updateTaskProgress(theStore(), session.id, taskProgressInput(args));
@@ -1860,13 +1960,13 @@ function apply(ctx) {
 				const state = taskPolicyStatus(theStore(), session.id);
 				return Promise.resolve({ ok: true, enforcementAvailable, ...state, ...(args.action === 'next' && state.configured && !state.stopped ? { next: researchNext(theStore(), session.id) } : {}) });
       } catch (error) { return Promise.resolve({ ok: false, error: error?.message ?? String(error),
-        ...(args.action === 'start' ? { recovery: '使用start独立字段：mode=regular/nday/0day，target=实际URL，question=当前问题，toolCalls=有限额度。已有任务不能重启或重置预算。' } : {}),
-        ...(args.action === 'update' ? { recovery: 'update 只收紧：interaction/reporting/explain/workers/allowTargetNetwork/readOnly/excludedPaths/requestRatePerMinute/requestConcurrency/toolCalls/minutes。放宽（重开网站访问、取消只读、提高速率或助手上限、换目标）必须由用户在桌面设置里操作。' } : {}) }); }
+        ...(args.action === 'start' ? { recovery: '使用start独立字段：mode=当前研究重点，target=完整URL/域名/IP/CIDR/资产清单，question=用户完整要求；预算均可选。已有任务不能重启或重置预算。' } : {}),
+        ...(args.action === 'update' ? { recovery: 'update 可立即应用收紧项；扩大范围、预算或权限会生成一条待用户确认的变更，不会由模型自行生效。' } : {}) }); }
 		}
 	}));
 	ctx.tools.register(defineTool({
 		name: 'redteam_context',
-		description: '保存或读取本会话共享资产、入口条件、请求及方法上下文；供Nday/常规/研究复用。',
+		description: '保存或读取本会话资产、入口条件、请求与方法上下文。',
 		parameters: {
 			context: { type: 'string', description: '旧快照JSON；assets/requests增量；省略读索引' },
       assets: { type: 'array', items: { type: 'object', additionalProperties: true, properties: {
@@ -1879,7 +1979,7 @@ function apply(ctx) {
         method: { type: 'string' }, headers: { type: 'object', additionalProperties: true },
         body: { type: 'string' }, request: { type: 'string' }, valid: { type: 'boolean' }, responseReceiptId: { type: 'string' }
       } } },
-			kind: { type: 'string', description: 'asset/request/method详情；finding无id列索引、有id读详情；material索引或原文' },
+			kind: { type: 'string', description: 'asset/request/method详情；finding按id读详情；material读索引或原文' },
       materials: { type: 'string', description: 'JSON：site、files[{path,url}]；离线索引选定JS，增量摘要不证明接口可用' },
 			id: { type: 'string', description: '详情记录ID，仅本会话' },
 			version: { type: 'string', description: '请求revision或方法version；多版本时必填' },
@@ -1988,7 +2088,7 @@ function apply(ctx) {
     if (policy.scenario === 'project') return projectScopeOf(exec);
     return { scenario: 'pentest', session, policy, store };
   };
-	const projectBrowserGuardOf = (scope, identityRef) => async ({ url, method }) => {
+	const projectBrowserGuardOf = (scope, identityRef) => async ({ url, method, resourceType }) => {
 		const currentRun = readProjectRun(scope.store, scope.session.id, scope.run.runId);
 		const currentPolicy = readTaskPolicy(scope.store, scope.session.id);
 		const manual = currentPolicy?.manualTakeover?.active === true
@@ -2008,18 +2108,14 @@ function apply(ctx) {
 		const denial = targetTrafficDenial(limits, { method })
 			|| excludedPathDenial(limits, { url: parsed.href });
 		if (denial) return { denial };
-		const origins = new Set();
-		if (limits.target) {
-			try { origins.add(new URL(limits.target).origin); } catch { /* 无效目标由其他闸拒绝 */ }
-		}
-		for (const origin of limits.allowedOrigins || []) try { origins.add(new URL(origin).origin); } catch { /* 无效站点 */ }
-		if (!origins.has(parsed.origin)) return { denial: '浏览器请求不在本次授权站点或明确关联资产内' };
+		if (!taskScopeAllowsUrl(limits, parsed) && !isPassiveBrowserDependency({ url: parsed.href, method, resourceType }))
+      return { denial: '浏览器主动请求不在本次授权范围；公开静态依赖可由 GET 正常加载，但不会因此成为测试对象' };
         return { ...(!manual ? { policy: limits } : { manual: true }), revision: crypto.createHash('sha256').update(JSON.stringify([
           currentRun.runId, currentRun.controlRev, currentPolicy.policyRev, limits, taskIdentityRevision(identity),
           manual ? currentPolicy.manualTakeover.startedAt : null,
         ])).digest('hex') };
 	};
-  const freeBrowserGuardOf = (scope, identityRef) => async ({ url, method }) => {
+  const freeBrowserGuardOf = (scope, identityRef) => async ({ url, method, resourceType }) => {
     const currentPolicy = readTaskPolicy(scope.store, scope.session.id);
     const state = taskPolicyStatus(scope.store, scope.session.id);
     const manual = currentPolicy?.manualTakeover?.active === true;
@@ -2033,12 +2129,8 @@ function apply(ctx) {
     const denial = targetTrafficDenial(limits, { method })
       || excludedPathDenial(limits, { url: parsed.href });
     if (denial) return { denial };
-    const origins = new Set();
-    if (limits.target) {
-      try { origins.add(new URL(limits.target).origin); } catch { /* invalid target is rejected elsewhere */ }
-    }
-    for (const origin of limits.allowedOrigins || []) try { origins.add(new URL(origin).origin); } catch { /* invalid origin */ }
-    if (!origins.has(parsed.origin)) return { denial: '浏览器请求不在本次授权站点或明确关联资产内' };
+    if (!taskScopeAllowsUrl(limits, parsed) && !isPassiveBrowserDependency({ url: parsed.href, method, resourceType }))
+      return { denial: '浏览器主动请求不在本次授权范围；公开静态依赖可由 GET 正常加载，但不会因此成为测试对象' };
     return { ...(!manual ? { policy: limits } : { manual: true }), revision: crypto.createHash('sha256').update(JSON.stringify([
       currentPolicy.startedAt, currentPolicy.policyRev, limits, taskIdentityRevision(identity),
       manual ? currentPolicy.manualTakeover.startedAt : null,
@@ -2433,7 +2525,7 @@ function apply(ctx) {
 	ctx.tools.register(defineTool({
 		name: 'redteam_checks',
 		description: '批量保存/读取本会话检查；未命中须有效请求与证据；交付仅三列。',
-		parameters: { records: { type: 'string', description: '省略读取；JSON数组，字段见README（status 只有 not-hit/not-applicable/blocked/not-tested）。' } },
+		parameters: { records: { type: 'string', description: '省略读取；JSON数组，状态见README。' } },
 		output: {
 			schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
 			render: (_args, value) => [{ type: 'text', text: value.ok ? value.text : value.error }]
