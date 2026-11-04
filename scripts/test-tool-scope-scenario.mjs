@@ -8,7 +8,7 @@ assert(RULES.find(rule => rule.id === 'webshell')?.modes.length === 1, 'defensiv
 let known = [
   'read', 'write', 'web_fetch', 'saker_browser', 'redteam_task', 'redteam_context',
   'redteam_execution', 'redteam_research', 'redteam_method', 'redteam_checks',
-  'project_document', 'tool_pack', 'saker_assist',
+  'project_document', 'tool_pack', 'saker_assist', 'run_code',
 ];
 let scenario = 'pentest';
 const events = new Map();
@@ -36,8 +36,10 @@ function agent(id) {
     session: { id, header: { agentPreset: 'pentest' } },
     ctx: {
       tools: {
-        schemas: () => known.filter(name => ![...active].some(deny => deny.has(name))).map(name => ({ name })),
+        schemas: () => [...known, 'scoped_only'].filter(name => ![...active].some(deny => deny.has(name))).map(name => ({ name })),
         restrict({ deny }) {
+          assert(!deny.includes('run_code'), 'reserved PTC transport must not be restricted by name');
+          assert(!deny.includes('scoped_only'), 'restrict receives global names only');
           const set = new Set(deny);
           active.add(set);
           return () => active.delete(set);
@@ -87,6 +89,7 @@ assert(visible(second.id).includes('saker_assist'));
 
 fire('agent/disposed', { agent: first });
 fire('agent/disposed', { agent: second });
+assert(![...restrictions.values()].some(set => set.has('run_code') || set.has('scoped_only')));
 
 scenario = 'pentest';
 const retryEvents = new Map();

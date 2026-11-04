@@ -92,7 +92,9 @@ export function createPurposeTasks(ctx, getStore) {
       } : {}),
       activationState: 'starting', runnerPid: process.pid, modelOptions: childAgentOptions || null,
       allowTargetNetwork: purpose === 'report' ? false : state.policy.allowTargetNetwork !== false,
-      allowedTools: ['run_code', 'read', 'glob', 'grep', 'saker_material', 'competition_challenge',
+      allowedTools: ['pwsh', 'powershell', 'exec_command', 'run_shell', 'run_code',
+        'read', 'write', 'edit', 'glob', 'grep', 'read_image', 'view_image', 'web_fetch', 'web_search',
+        'saker_material', 'competition_challenge',
         'redteam_context', 'redteam_checks',
         'redteam_delivery', 'redteam_execution', 'redteam_research'],
     }, 'purpose-task-starting', { childId, purpose });

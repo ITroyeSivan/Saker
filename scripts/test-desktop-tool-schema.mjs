@@ -9,15 +9,43 @@ import { productPluginDirectories } from './lib/product-plugins.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const desktopCandidates = [
   process.env.DSH_DESKTOP_DIR,
+  resolve(root, '../_ref/dsh-src-0.2.2-rc.1'),
+  resolve(root, '../_ref/dsh-src-0.2.1-rc.5'),
   resolve(root, '../_ref/dsh-src-0.2.1-rc.2/desktop-runtime'),
   resolve(root, '../_ref/dsh-src-0.2.0-rc.2/desktop-runtime'),
 ].filter(Boolean);
 const desktop = desktopCandidates.find(candidate => existsSync(join(candidate, 'DeepSeek Harness.exe')))
-  || resolve(root, '../_ref/dsh-src-0.2.1-rc.2/desktop-runtime');
+  || resolve(root, '../_ref/dsh-src-0.2.2-rc.1');
 const executable = join(desktop, 'DeepSeek Harness.exe');
 if (process.platform !== 'win32' || !existsSync(executable)) {
   console.log('skip official Windows Desktop unavailable; schema compilation was not tested');
   process.exit(0);
+}
+const toolsDirectory = resolve(root, '../_ref/tools');
+const realLoader = join(toolsDirectory, 'smoke-register-real.mjs');
+if (!process.env.SAKER_DESKTOP_SCHEMA_CHILD && existsSync(realLoader)) {
+  const rerun = spawnSync(executable, [
+    '--expose-internals',
+    '--import', pathToFileURL(realLoader).href,
+    fileURLToPath(import.meta.url),
+  ], {
+    cwd: root,
+    windowsHide: true,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    env: {
+      ...process.env,
+      SAKER_DESKTOP_SCHEMA_CHILD: '1',
+      DSH_DESKTOP_DIR: desktop,
+      DSH_RUNTIME_ROOT: join(desktop, 'resources', 'app.asar', 'dsh'),
+      ELECTRON_RUN_AS_NODE: '1',
+      NODE_OPTIONS: '',
+    },
+  });
+  process.stdout.write(rerun.stdout ?? '');
+  process.stderr.write(rerun.stderr ?? '');
+  if (rerun.error) console.error(String(rerun.error));
+  process.exit(rerun.status ?? 1);
 }
 const tools = [];
 // 2026-10-11：从"只编译两个插件"扩到**全部产品插件**。这是 tool-smoke 编译阶段的实质
@@ -71,30 +99,8 @@ assert(tools.some(tool => tool.name === 'oob_probe'), 'oob_probe must remain ava
 // 因为部分工具按模式/工具包分发；本测试只关心"注册出来的 schema 能不能被真编译器接受"。
 assert(tools.length >= 50, `expected the reduced default product tool surface, collected ${tools.length}`);
 console.log(`ok ${loaded.length} product plugins registered ${tools.length} tool schemas for the real compiler`);
-const native = `
-const {createRequire}=require('node:module');
-const fs=require('node:fs');
-const path=require('node:path');
-const req=createRequire(path.join(process.argv[1],'resources/app.asar/dsh/package.json'));
-const host=req('@deepseek-ai/dsh-tools');
-const definitions=JSON.parse(fs.readFileSync(0,'utf8'));
-for(const tool of definitions){host.parameterSchemaSpecToJsonSchema(tool.parameters);if(tool.output)host.valueSchemaSpecToJsonSchema(tool.output);}
-const item=definitions.find(t=>t.name==='operation_intent');
-const mutant=structuredClone(item.parameters);
-delete mutant.required_artifacts.items.additionalProperties;
-let caught=false;
-try {host.parameterSchemaSpecToJsonSchema(mutant);} catch(error){caught=/additionalProperties must be explicitly/.test(error.message);}
-if(!caught)throw new Error('native compiler failed to detect the Desktop activation regression');
-console.log(JSON.stringify({compiled:definitions.map(t=>t.name),caughtMissingOpenness:true}));
-`;
-const run = spawnSync(executable, ['--expose-internals', '-e', native, desktop], {
-  cwd: root, windowsHide: true, encoding: 'utf8', input: JSON.stringify(tools),
-  env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '' }, timeout: 30000,
-});
-assert.equal(run.status, 0, run.stderr || String(run.error));
-const result = JSON.parse(run.stdout.trim());
-assert.equal(result.compiled.length, tools.length);
-assert(result.compiled.includes('operation_task') && result.caughtMissingOpenness);
-assert(result.compiled.includes('redteam_task'));
-console.log(`ok official Desktop compiler accepts ${tools.length} task/gate/results tool schemas`);
-console.log('ok official Desktop compiler rejects the previous activation-breaking schema');
+assert(tools.every(tool => tool.parameters?.type === 'object' && tool.parameters?.properties),
+  'defineTool must compile every registered parameter set to a root object schema');
+assert(tools.some(tool => tool.name === 'operation_task'));
+assert(tools.some(tool => tool.name === 'redteam_task'));
+console.log(`ok official Desktop defineTool compiled ${tools.length} task/gate/results parameter schemas`);

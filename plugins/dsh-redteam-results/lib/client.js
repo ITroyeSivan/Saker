@@ -43,18 +43,21 @@ function csrfOf(base) {
 }
 function detectApiBase() {
 	if (sakerApiBase) return Promise.resolve(sakerApiBase);
-	return Promise.all(SAKER_API_BASES.map(function (base) {
+	var index = 0;
+	function next() {
+		if (index >= SAKER_API_BASES.length) throw Error("Saker 接口不可用：CSRF 获取失败");
+		var base = SAKER_API_BASES[index++];
 		return fetch(base + "/csrf", { credentials: "same-origin" }).then(function (r) {
-			if (!r.ok) return null;
-			return readJsonResponse(r, "探测 Saker 接口").then(function (json) { return json && json.token ? { base: base, token: json.token } : null; });
-		}).catch(function () { return null; });
-	})).then(function (results) {
-		var hit = results.filter(Boolean)[0];
-		if (!hit) throw Error("Saker 接口不可用：CSRF 获取失败");
-		sakerApiBase = hit.base;
-		dshCsrf[hit.base] = Promise.resolve(hit.token);
-		return hit.base;
-	});
+			if (!r.ok) return next();
+			return readJsonResponse(r, "探测 Saker 接口").then(function (json) {
+				if (!json || !json.token) return next();
+				sakerApiBase = base;
+				dshCsrf[base] = Promise.resolve(json.token);
+				return base;
+			});
+		}).catch(function () { return next(); });
+	}
+	return Promise.resolve().then(next);
 }
 function postJson(tok, endpoint, payload) {
 	return fetch((sakerApiBase || SAKER_API_BASES[0]) + "/" + endpoint, {
@@ -1861,6 +1864,7 @@ function UsageRow(props) {
   var request = useRef(0), diagRequest = useRef(0);
   function load() {
     var revision = ++request.current;
+    if (!props.sessionId) return Promise.resolve();
     return api('usage.get', { sessionId: props.sessionId })
       .then(function (result) { if (!result.ok) throw Error(result.error || '读取用量失败'); if (revision !== request.current) return; data[1](result); error[1](''); })
       .catch(function (failure) { if (revision === request.current) error[1](failure.message); });
@@ -2674,7 +2678,7 @@ function ChatSetup(props) {
       React.createElement('span',null,current.attention[0].message),
       React.createElement('button',{type:'button',onClick:function(){more[1](true);}},'重新绑定账号'),
       React.createElement('button',{type:'button',onClick:function(){attentionDismissed[1](true);}},'继续其他检查')):null,
-    React.createElement(UsageRow,{key:props.sessionId+'-usage',sessionId:props.sessionId}),
+    props.preset==='pentest'?React.createElement(UsageRow,{key:props.sessionId+'-usage',sessionId:props.sessionId}):null,
     current?React.createElement(ChatPromptEditor,{key:props.sessionId+'-'+mode,sessionId:props.sessionId,mode:mode,scene:activeScenario,open:open[0],onClose:close,inputActions:props.inputActions,insertion:promptInsertion}):null,
     error[0]||readError[0]?React.createElement('p',{role:'alert'},error[0]||readError[0]):notice[0]?React.createElement('span',{role:'status'},notice[0]):null);
 }
@@ -2683,7 +2687,7 @@ function ChatSetupEntry(props) {
   var blank=props.blank===true||live?.blank===true;
   var sessionId=String(props.sessionId||live?.id||'');
   var preset=props.useProjection('agentPreset')||live?.agentPreset||live?.projectionValues?.agentPreset;
-  return preset==='pentest'||preset==='ctf-solver'?React.createElement(ChatSetup,{key:sessionId+'-'+String(!!blank),sessionId:sessionId,blank:blank,inputActions:props.inputActions}):null;
+  return preset==='pentest'||preset==='ctf-solver'?React.createElement(ChatSetup,{key:sessionId+'-'+String(!!blank),sessionId:sessionId,blank:blank,inputActions:props.inputActions,preset:preset}):null;
 }
 function installChatSetupStyles() {
   var style=document.createElement('style');style.id='saker-chat-setup-style';

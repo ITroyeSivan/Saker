@@ -35,7 +35,7 @@ await test('report policy blocks the real HTTP executor before the loopback serv
       requests: [{ id: 'r', revision: 'v1', endpoint: target + '/private', authContext: 'fixture', kind: 'web', valid: false,
         request: 'GET /private HTTP/1.1\r\nHost: ' + new URL(target).host + '\r\n\r\n', response: 'HTTP/1.1 200 OK\r\n\r\nfixture' }] });
     await assert.rejects(executeRecordedRequest(store, spec.childId, { purpose: 'first-contact', requestId: 'r', requestRevision: 'v1' }), /target_network_disabled|关闭/);
-    assert.match(taskExecutionGuard(store, spec.childId, 'pwsh', Date.now(), { args: {} }), /worker_tool_not_allowed/);
+    assert.match(taskExecutionGuard(store, spec.childId, 'saker_assist', Date.now(), { args: {} }), /worker_tool_not_allowed/);
     return { result: Promise.resolve({ stopReason: 'completed', output: [] }), dispose: async () => {} };
   } } }, () => store);
   try { assert.equal((await tasks.run(agent, 'report')).ok, true); assert.equal(hits, 0); }

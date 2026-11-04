@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-sec-enforce",
-  "version": "1.4.12",
+  "version": "1.4.13",
   "description": "检查操作范围、工作目录和调用限额，阻止超出设置的操作。",
   "files": [
     "lib",
@@ -34,7 +34,7 @@
   },
   "author": "Saker contributors",
   "engines": {
-    "node": "^22.19.0 || >=24.0.0",
-    "dsh": "0.2.0-rc.2 || 0.2.1-rc.2 || 0.2.1-rc.5"
+    "node": ">=24.9.0",
+    "dsh": "0.2.0-rc.2 || 0.2.1-rc.2 || 0.2.1-rc.5 || 0.2.2-rc.1"
   }
 }

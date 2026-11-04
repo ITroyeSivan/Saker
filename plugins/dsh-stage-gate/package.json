@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-stage-gate",
-  "version": "1.10.2",
+  "version": "1.10.3",
   "description": "记录任务进度，检查是否缺少测试材料或完成条件。",
   "files": [
     "lib",
@@ -43,7 +43,7 @@
   },
   "author": "Saker contributors",
   "engines": {
-    "node": "^22.19.0 || >=24.0.0",
-    "dsh": "0.2.0-rc.2 || 0.2.1-rc.2 || 0.2.1-rc.5"
+    "node": ">=24.9.0",
+    "dsh": "0.2.0-rc.2 || 0.2.1-rc.2 || 0.2.1-rc.5 || 0.2.2-rc.1"
   }
 }

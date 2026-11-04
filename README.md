@@ -3,8 +3,8 @@
 <p align="center"><strong>把你的安全测试思路，接到真实的浏览器和工具上。</strong></p>
 
 <p align="center">
-  <a href="https://github.com/ITroyeSivan/Saker/releases/latest"><img alt="Saker v0.6.1" src="https://img.shields.io/badge/Saker-v0.6.1-4f66ee"></a>
-  <img alt="DeepSeek Harness Desktop 0.2.1-rc.5" src="https://img.shields.io/badge/DeepSeek%20Harness-0.2.1--rc.5-18243b">
+  <a href="https://github.com/ITroyeSivan/Saker/releases/latest"><img alt="Saker v0.6.2" src="https://img.shields.io/badge/Saker-v0.6.2-4f66ee"></a>
+  <img alt="DeepSeek Harness Desktop 0.2.2-rc.1" src="https://img.shields.io/badge/DeepSeek%20Harness-0.2.2--rc.1-18243b">
   <img alt="Windows 10 / 11" src="https://img.shields.io/badge/Windows-10%20%2F%2011-2878d7">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-16a085"></a>
 </p>
@@ -14,12 +14,12 @@
   <a href="#三种场景一个聊天入口">使用场景</a> ·
   <a href="#界面与操作">界面预览</a> ·
   <a href="#安装与更新">安装与更新</a> ·
-  <a href="docs/release-v0.6.1.md">更新日志</a>
+  <a href="docs/release-v0.6.2.md">更新日志</a>
 </p>
 
 Saker 是 [DeepSeek Harness Desktop](https://github.com/deepseek-ai/deepseek-harness) 的安全测试插件。你提供目标、材料和想检查的问题，模型选择方法、工具与顺序；Saker 负责浏览器操作、工具接入、按需协作，以及执行过程和结果的保存。
 
-当前版本 **0.6.1**。
+当前版本 **0.6.2**。
 
 从一个网址、整批授权资产、已有报文或源码开始，研究指定 CVE，按项目文档逐项检查，或围绕比赛题目解题，都能在同一界面进行。信息收集按需开展，已有线索可以直接研究，不必先走固定流程。
 
@@ -94,10 +94,10 @@ Saker 是 [DeepSeek Harness Desktop](https://github.com/deepseek-ai/deepseek-har
 
 ## 安装与更新
 
-需要 **Windows 10/11**、官方 DeepSeek Harness Desktop，以及 **Node.js 22.19 及以上的 22.x，或 24 及以上版本**。当前支持 Desktop **0.2.1-rc.5**，保留 **0.2.1-rc.2、0.2.0-rc.2** 兼容。
+需要 **Windows 10/11**、官方 DeepSeek Harness Desktop，以及 **Node.js 24.9 及以上版本**。当前支持 Desktop **0.2.2-rc.1**，保留 **0.2.1-rc.5、0.2.1-rc.2、0.2.0-rc.2** 兼容。
 
-1. 安装并打开 [官方 Desktop](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-rc.5)，完成初始化与模型配置，然后完全退出应用。
-2. 从 [Releases](https://github.com/ITroyeSivan/Saker/releases/latest) 下载 `Saker-0.6.1-desktop.zip` 并解压。
+1. 安装并打开 [官方 Desktop](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.2-rc.1)，完成初始化与模型配置，然后完全退出应用。
+2. 从 [Releases](https://github.com/ITroyeSivan/Saker/releases/latest) 下载 `Saker-0.6.2-desktop.zip` 并解压。
 3. 在解压目录运行，将路径替换成实际应用目录：
 
 ```powershell

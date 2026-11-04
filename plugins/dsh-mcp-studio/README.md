@@ -23,7 +23,7 @@ A one-page MCP server studio for DeepSeek Harness (dsh): live-mount servers, rea
 
 ## 快速开始 / Quick Start
 
-当前验证基线：官方 Windows 桌面端 0.2.1-rc.2（同时兼容 0.2.0-rc.2）。先打开应用初始化配置，再完全退出后安装；插件管理使用桌面端随附 CLI。
+当前验证基线：官方 Windows 桌面端 0.2.2-rc.1，并保留旧版本兼容。Desktop 0.2.2 要求 Node.js 24.9 及以上。先打开应用初始化配置，再完全退出后安装；插件管理使用桌面端随附 CLI。
 
 ```powershell
 # 在 Saker 仓库根目录安装整套插件

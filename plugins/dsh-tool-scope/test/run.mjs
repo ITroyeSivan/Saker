@@ -154,6 +154,7 @@ const known = [
         schemas: (scope) => scope === agent
           ? toolNames.filter((name) => !denied(name) && (scannerToolsReady || !deferredScanners.includes(name))).map((name) => ({ name }))
           : [],
+        view: () => ({ restrictableNames: new Set(toolNames) }),
         restrict(filter) {
           const id = ++layerId;
           layers.set(id, new Set(filter.deny));

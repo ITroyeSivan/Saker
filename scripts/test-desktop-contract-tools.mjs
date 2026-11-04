@@ -23,12 +23,13 @@ const toolsDirectory = process.env.SAKER_CONTRACT_TOOLS_DIR
   : resolve(root, '..', '_ref', 'tools');
 const desktopCandidates = [
   process.env.DSH_DESKTOP_DIR,
+  resolve(root, '../_ref/dsh-src-0.2.2-rc.1'),
   resolve(root, '../_ref/dsh-src-0.2.1-rc.5'),
   resolve(root, '../_ref/dsh-src-0.2.1-rc.2/desktop-runtime'),
   resolve(root, '../_ref/dsh-src-0.2.0-rc.2/desktop-runtime'),
 ].filter(Boolean);
 const desktop = desktopCandidates.find(candidate => existsSync(join(candidate, 'DeepSeek Harness.exe')))
-  || resolve(root, '../_ref/dsh-src-0.2.1-rc.5');
+  || resolve(root, '../_ref/dsh-src-0.2.2-rc.1');
 const executable = join(desktop, 'DeepSeek Harness.exe');
 const runtimeRoot = join(desktop, 'resources', 'app.asar', 'dsh');
 const loader = join(toolsDirectory, 'smoke-register-real.mjs');

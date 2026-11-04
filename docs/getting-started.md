@@ -1,12 +1,12 @@
 # 桌面端安装与首次配置
 
-当前版本：Saker **0.6.1**。宿主：Windows 官方 DeepSeek Harness Desktop **0.2.1-rc.5**（同时兼容 0.2.1-rc.2 与 0.2.0-rc.2）。
+当前版本：Saker **0.6.2**。宿主：Windows 官方 DeepSeek Harness Desktop **0.2.2-rc.1**（同时兼容 0.2.1-rc.5、0.2.1-rc.2 与 0.2.0-rc.2）。
 
-[官方 Desktop](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-rc.5) · [源码仓库](https://github.com/ITroyeSivan/Saker)
+[官方 Desktop](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.2-rc.1) · [源码仓库](https://github.com/ITroyeSivan/Saker)
 
 ## 使用发布包安装
 
-从 [Releases](https://github.com/ITroyeSivan/Saker/releases/latest) 下载并解压 `Saker-0.6.1-desktop.zip`。完成官方 Desktop 的初始化与模型配置，完全退出应用，在解压目录运行：
+从 [Releases](https://github.com/ITroyeSivan/Saker/releases/latest) 下载并解压 `Saker-0.6.2-desktop.zip`。完成官方 Desktop 的初始化与模型配置，完全退出应用，在解压目录运行：
 
 ```powershell
 node scripts/install-desktop.mjs --desktop-dir "C:/实际安装目录/DeepSeek Harness" --check
@@ -34,7 +34,7 @@ node scripts/install-desktop.mjs --desktop-dir "C:/实际安装目录/DeepSeek H
 node scripts/install-desktop.mjs --desktop-dir "C:/实际安装目录/DeepSeek Harness"
 ```
 
-脚本安装需要 Node.js 22.19 及以上的 22.x，或 24 及以上版本；从源码打包还需要 pnpm。它调用指定应用内的官方命令，在一个安装事务中添加 15 个功能插件和根包，并检查已安装文件。当前安装器接受 Desktop 0.2.0-rc.2、0.2.1-rc.2 与 0.2.1-rc.5。
+脚本安装需要 Node.js 24.9 及以上版本；从源码打包还需要 pnpm。它调用指定应用内的官方命令，在一个安装事务中添加 15 个功能插件和根包，并检查已安装文件。当前安装器接受 Desktop 0.2.0-rc.2、0.2.1-rc.2、0.2.1-rc.5 与 0.2.2-rc.1。
 
 安装完成后双击桌面的 **Saker (dsh Desktop)** 快捷方式。脚本每次更新都会刷新它；更换应用目录时保留原来的用户数据目录和 `.dsh` 配置。
 

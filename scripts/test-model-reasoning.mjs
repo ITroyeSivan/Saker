@@ -8,7 +8,12 @@ import { homedir } from 'node:os'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const SCRIPT = join(ROOT, 'scripts', 'configure-model-reasoning.mjs')
-const HOST_SRC = process.env.DSH_SRC || resolve(ROOT, '..', '_ref', 'dsh-src-0.2.0-rc.2')
+const HOST_SRC = process.env.DSH_SRC || [
+  resolve(ROOT, '..', '_ref', 'dsh-src-0.2.2-rc.1'),
+  resolve(ROOT, '..', '_ref', 'dsh-src-0.2.1-rc.5'),
+  resolve(ROOT, '..', '_ref', 'dsh-src-0.2.0-rc.2'),
+].find(candidate => existsSync(join(candidate, 'node_modules', 'js-yaml', 'package.json')))
+  || resolve(ROOT, '..', '_ref', 'dsh-src-0.2.2-rc.1')
 const TEMP_ROOT = resolve(ROOT, '..', '_ref', 'tmp')
 const yamlPkg = [join(HOST_SRC, 'node_modules', 'js-yaml', 'package.json'),
   join(ROOT, 'node_modules', 'js-yaml', 'package.json'),

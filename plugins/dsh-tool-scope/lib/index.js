@@ -72,6 +72,19 @@ export function apply(ctx, config = {}) {
     }
   }
 
+  const restrictableNames = (names, known) => {
+    const globals = known instanceof Set ? known : new Set(known)
+    return [...new Set(names)].filter((name) => name !== 'run_code' && globals.has(name))
+  }
+
+  const restrictableTools = (agent) => {
+    try {
+      const view = agent?.ctx?.tools?.view?.(agent)
+      if (view?.restrictableNames) return new Set(view.restrictableNames)
+    } catch { /* older host has no restrictable-name view */ }
+    return new Set(knownTools())
+  }
+
   // 工具包要看当前 Agent 的完整可见面。Pentest 扫描器由 preset 注入，
   // 不一定出现在插件上下文的全局 schemas() 里；全局清单仍用于原有模式规则。
   const visibleTools = (agent) => {
@@ -107,7 +120,7 @@ export function apply(ctx, config = {}) {
     const scenario = scenarioOf(agent)
     let knowledgeEnabled = false
     try { knowledgeEnabled = ctx.sakerSceneContext?.knowledgeEnabled?.(agent?.session?.id ?? agent?.id) === true; } catch { /* closed */ }
-    const deny = computeScenarioDeny(scenario, state.toolNames, { knowledgeEnabled })
+    const deny = restrictableNames(computeScenarioDeny(scenario, state.toolNames, { knowledgeEnabled }), state.restrictable)
     const signature = JSON.stringify([scenario, deny])
     if (state.scenarioSignature === signature) return
     try { state.scenarioDispose?.() } catch { /* agent scope may already be gone */ }
@@ -130,7 +143,7 @@ export function apply(ctx, config = {}) {
   }
 
   const installPack = (agent, state, known, pack) => {
-    const names = packTools(known, pack)
+    const names = restrictableNames(packTools(known, pack), state.restrictable)
     if (!names.length) return false
     const current = state.packDisposers.get(pack.id)
     if (current && JSON.stringify(current.names) === JSON.stringify(names)) return false
@@ -165,6 +178,7 @@ export function apply(ctx, config = {}) {
       const state = states.get(agent.id)
       const current = visibleTools(agent)
       state.toolNames = [...new Set([...state.toolNames, ...current])]
+      for (const name of restrictableTools(agent)) state.restrictable.add(name)
       refreshScenario(agent, state)
       refreshPacks(agent, state)
       return state
@@ -176,19 +190,21 @@ export function apply(ctx, config = {}) {
     const mode = modeOf(agent)
     const deny = computeDeny(mode, known, rules)
     const agentTools = visibleTools(agent)
-    const state = { baseDispose: null, scenarioDispose: null, scenario: '', scenarioSignature: '', packDisposers: new Map(), loadedPacks: new Set(), mode, toolNames: agentTools }
+    const state = { baseDispose: null, scenarioDispose: null, scenario: '', scenarioSignature: '', packDisposers: new Map(), loadedPacks: new Set(), mode,
+      toolNames: agentTools, restrictable: restrictableTools(agent) }
     states.set(agent.id, state)
 
-    if (deny.length) {
+    const baseDeny = restrictableNames(deny, state.restrictable)
+    if (baseDeny.length) {
       try {
-        state.baseDispose = agent.ctx.tools.restrict({ deny })
+        state.baseDispose = agent.ctx.tools.restrict({ deny: baseDeny })
         const byRule = matchByRule(known, rules)
         const parts = []
         for (const [rid, names] of byRule) {
-          const hit = names.filter((n) => deny.includes(n))
+          const hit = names.filter((n) => baseDeny.includes(n))
           if (hit.length) parts.push(`${rid}×${hit.length}`)
         }
-        say(`模式 ${mode || '(默认)'} 隐藏 ${deny.length} 个工具（${parts.join(' ')}）`)
+        say(`模式 ${mode || '(默认)'} 隐藏 ${baseDeny.length} 个工具（${parts.join(' ')}）`)
       } catch (error) {
         states.delete(agent.id)
         // 不静默：宁可多带工具，也不要把工具面改成半截。
@@ -200,9 +216,9 @@ export function apply(ctx, config = {}) {
     }
 
     refreshScenario(agent, state)
-    const packDeny = deferredPackTools(mode, agentTools, packs)
+    const packDeny = restrictableNames(deferredPackTools(mode, agentTools, packs), state.restrictable)
     refreshPacks(agent, state)
-    if (!deny.length && !packDeny.length) say(`模式 ${mode || '(默认)'} 无需要收窄的工具`)
+    if (!baseDeny.length && !packDeny.length) say(`模式 ${mode || '(默认)'} 无需要收窄的工具`)
     return state
   }
 

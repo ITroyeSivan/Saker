@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-semgrep-audit",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "description": "使用本机 Semgrep 检查代码，支持历史代码审计会话。",
   "files": [
     "lib",
@@ -32,7 +32,7 @@
   },
   "author": "Saker contributors",
   "engines": {
-    "node": "^22.19.0 || >=24.0.0",
-    "dsh": "0.2.0-rc.2 || 0.2.1-rc.2 || 0.2.1-rc.5"
+    "node": ">=24.9.0",
+    "dsh": "0.2.0-rc.2 || 0.2.1-rc.2 || 0.2.1-rc.5 || 0.2.2-rc.1"
   }
 }

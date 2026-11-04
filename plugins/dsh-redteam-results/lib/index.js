@@ -111,6 +111,19 @@ function modelTokenBudgetAvailable(ctx) {
   }
 }
 
+function readTurnBoundary(ctx, agent) {
+  if (!agent) return undefined;
+  try {
+    const agents = ctx.agents || ctx.get?.('agents');
+    if (typeof agents?.turnBoundaryOf === 'function') return agents.turnBoundaryOf(agent.session);
+  } catch { /* host predates the owning-service reader */ }
+  try {
+    return ctx.sessionProjections?.stateOf(agent.session, 'turnBoundary');
+  } catch {
+    return undefined;
+  }
+}
+
 const MODES = ["pentest", "code-audit", "ctf-solver"];
 const MODE_LABELS = {
 	pentest: "渗透测试模式",
@@ -661,14 +674,13 @@ export async function dispatch(ctx, st, endpoint, payload) {
   if (endpoint === 'scene.get') {
     const sessionId = String(p.sessionId || '');
     const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
-    if (!sessionId || !session) throw new Error('current session required');
+    if (!sessionId || !session) return { ok: true, saker: false, scenes: SAKER_SCENES.map(scene => ({ ...scene })) };
     const presetId = presetOfSession(session);
     if (!isSakerPreset(presetId)) return { ok: true, saker: false, scenes: SAKER_SCENES.map(scene => ({ ...scene })) };
     const scene = readSceneContext(st, sessionId, presetId);
     if (!scene) throw new Error('Saker scene context unavailable');
     const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
-    let boundary;
-    try { boundary = agent ? ctx.sessionProjections?.stateOf(agent.session, 'turnBoundary') : undefined; } catch { boundary = undefined; }
+    const boundary = readTurnBoundary(ctx, agent);
     const policy = readTaskPolicy(st, sessionId);
     const project = activeProjectRun(st, sessionId);
     const competition = presetId === 'ctf-solver' ? competitionSummary(st, sessionId) : null;
@@ -751,8 +763,7 @@ export async function dispatch(ctx, st, endpoint, payload) {
     }
     if (endpoint === 'scene.select') {
       const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
-      let boundary;
-      try { boundary = agent ? ctx.sessionProjections?.stateOf(agent.session, 'turnBoundary') : undefined; } catch { boundary = undefined; }
+      const boundary = readTurnBoundary(ctx, agent);
       const hasTurns = Number(boundary?.lastTurn || 0) > 0
         || (boundary?.openTurnStartSeq !== null && boundary?.openTurnStartSeq !== undefined);
       const competitionWork = presetId === 'ctf-solver' && competitionSummary(st, sessionId).challenges > 0
@@ -1047,6 +1058,9 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
   }
   if (endpoint === 'usage.get') {
     const sessionId = String(p.sessionId || '');
+    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    if (!sessionId || (session && presetOfSession(session) !== 'pentest'))
+      return { ok: true, configured: false, unavailable: '当前场景不提供渗透测试用量' };
     await readPentestSession(ctx, sessionId);
     synchronizeStoppedProjectRun(st, sessionId);
     const overview = taskOverview(st, sessionId), cost = taskCostOverview(ctx, st, sessionId);

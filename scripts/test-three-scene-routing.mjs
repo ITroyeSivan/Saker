@@ -17,11 +17,15 @@ const sessions = new Map([
   ['standard', { id: 'standard', header: { agentPreset: 'standard' } }],
 ])
 const followups = [], tools = new Map(), disposers = []
-const agents = { get: id => sessions.has(id) ? { id, session: sessions.get(id), status: 'idle', followup: value => followups.push(value) } : undefined }
+let boundaryReads = 0
+const agents = {
+  get: id => sessions.has(id) ? { id, session: sessions.get(id), status: 'idle', followup: value => followups.push(value) } : undefined,
+  turnBoundaryOf: () => { boundaryReads++; return { lastTurn: 0, openTurnStartSeq: null } },
+}
 const ctx = {
   sessions: { get: id => sessions.get(id) },
   agents,
-  sessionProjections: { stateOf: () => ({ lastTurn: 0, openTurnStartSeq: null }) },
+  sessionProjections: { stateOf: () => { throw new Error('deprecated projection read must not run when the owning service is available') } },
   tools: { register: tool => tools.set(tool.name, tool), guard: () => {}, schemas: () => [...tools.keys()].map(name => ({ name })) },
   systemPrompt: { section: () => {}, context: () => {} },
   webServer: { register: () => () => {} },
@@ -42,9 +46,13 @@ try {
     assert.equal(free.ok, true)
     assert.equal(free.sceneId, 'free')
     assert.equal(free.canSwitchInPlace, true)
+    assert.equal(boundaryReads, 1)
     assert.equal(store.db.prepare('SELECT count(*) AS n FROM scene_contexts').get().n, 0)
     const standard = await results.dispatch(ctx, store, 'scene.get', { sessionId: 'standard' })
     assert.equal(standard.saker, false)
+    const missing = await results.dispatch(ctx, store, 'scene.get', { sessionId: '' })
+    assert.equal(missing.ok, true)
+    assert.equal(missing.saker, false)
   })
 
   await test('scene.select switches free to cases only through the scene contract', async () => {

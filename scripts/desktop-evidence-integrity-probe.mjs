@@ -98,7 +98,10 @@ export function apply(ctx) {
           agentOptions: { provider: payload.provider, model: payload.model, maxTokens: 1024 },
           setup: async (agentCtx, agent) => {
             await ctx.agentPresets.mount(agentCtx, 'standard');
-            agentCtx.tools.restrict({ allow: [] });
+            const builtins = agentCtx.tools.schemas()
+              .map(item => item.name)
+              .filter(name => name !== 'run_code' && name !== 'saker_evidence_integrity_probe');
+            if (builtins.length) agentCtx.tools.restrict({ deny: builtins });
             agentCtx.tools.guard(exec => exec.name === 'saker_evidence_integrity_probe' && exec.agent?.id === agent.id ? undefined : 'only owned verification tool');
             agentCtx.tools.register(defineTool({ name: 'saker_evidence_integrity_probe', description: '在隔离本地练习环境执行已安装证据完整性验证；不访问外部目标或日常数据库。', parameters: {},
               output: { schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },

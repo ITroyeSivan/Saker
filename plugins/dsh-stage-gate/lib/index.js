@@ -555,7 +555,7 @@ export function listGates(mode) {
 //#region plugin
 
 const name = "stage-gate";
-const inject = ["tools", "agentPresets", "webServer", "webRuntime"];
+const inject = ["tools", "agentPresets", "webServer"];
 
 /** Append the verdict line to <workspace>/gate-log.md (audit trail); write failure never flips the verdict. */
 function appendGateLog(workspace, verdict) {

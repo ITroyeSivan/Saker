@@ -18,7 +18,7 @@ import zlib from "node:zlib";
 import { PULSE_MODES, parseTranscript } from "./pulse.js";
 
 const name = "dsh-session-pulse";
-const inject = ["webServer", "webRuntime", "agentPresets"];
+const inject = ["webServer", "agentPresets"];
 
 const ROUTE_PATH = "/dsh-session-pulse";
 /** 进程级 CSRF token：GET <route>/csrf 由同源页取走（跨源响应不可读），POST 须回带 x-dsh-csrf 头。 */

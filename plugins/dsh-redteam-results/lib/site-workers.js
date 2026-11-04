@@ -14,6 +14,7 @@ export const SITE_WORKER_SCHEMA = `CREATE TABLE IF NOT EXISTS site_workers (
  work_key TEXT NOT NULL DEFAULT '', record TEXT NOT NULL,
  UNIQUE(parent_session,site,work_key));`;
 const activeStates = new Set(['starting', 'running', 'idle', 'closing', 'cleanup-failed']);
+const INTERNAL_CAPABILITIES = new Set(['recorded-http-execution', 'recorded-project-execution']);
 import { workKey, claimWork, completeWork, releaseWork } from './work-lease.js';
 const text = (value, label, max = 1000) => {
   if (typeof value !== 'string' || !value.trim() || value.length > max) throw new Error(label + ' must be bounded nonempty text');
@@ -233,8 +234,7 @@ export function createSiteWorkers(ctx, getStore) {
       const needed = name => baseWorkerTool(name) || (!competitionWorker && generalWorkerTool(name));
       // These are host-execution adapters, not model-facing tools. They remain
       // allowed through the dispatch guard while the schema stays hidden.
-      const internalCapabilities = ['recorded-http-execution', 'recorded-project-execution'];
-      const allow = [...new Set([...available.filter(needed), ...internalCapabilities, ...(input.tools || [])])];
+      const allow = [...new Set([...available.filter(needed), ...INTERNAL_CAPABILITIES, ...(input.tools || [])])];
       // 工作键/租约（第 8.3 节）：同一目标+问题+资料版本跨进程唯一；接手提高 generation，
       // 旧工作者的迟到报告只作历史。
       // 必要资料版本（v6 第 8.3 节）：用资料的 (id, revision) 摘要，而不是条数 ——
@@ -326,8 +326,10 @@ export function createSiteWorkers(ctx, getStore) {
             }
           }).catch(error => ctx.logger?.warn?.('worker cleanup: %s', error.message));
         } else {
+          const legacyAllow = allow.filter(name => !INTERNAL_CAPABILITIES.has(name) && !/^recorded-/.test(name));
+          const legacyDeny = deny.filter(name => !INTERNAL_CAPABILITIES.has(name) && !/^recorded-/.test(name));
           await subagents.startContinuable({ provider: 'spawn', childId, label: question.slice(0, 70), signal,
-            request: { parent: agent, maxDepth: 1, toolFilter: { allow, deny }, prompt: [{ type: 'text', text: prompt }],
+            request: { parent: agent, maxDepth: 1, toolFilter: { allow: legacyAllow, deny: legacyDeny }, prompt: [{ type: 'text', text: prompt }],
               ...(workerModel ? { agentOptions: { ...workerModel } } : {}) } });
         }
         const scopeFailure = childScopeFailures.get(childId);
@@ -488,7 +490,16 @@ export function createSiteWorkers(ctx, getStore) {
     let names = [];
     if (typeof agent.ctx?.tools?.schemas !== 'function') throw new Error('worker tool schema service unavailable');
     names = agent.ctx.tools.schemas(agent).map(item => item.name).filter(Boolean);
-    const deny = names.filter(name => !allowed.has(name));
+    // tools.restrict() only accepts global tool names, and 0.2.2 reserves
+    // run_code for the PTC transport. Execution remains guarded either way.
+    let restrictable = new Set();
+    try {
+      const view = agent.ctx.tools.view?.(agent);
+      if (view?.restrictableNames) restrictable = new Set(view.restrictableNames);
+      else restrictable = new Set(ctx.tools.schemas().map(item => item.name).filter(Boolean));
+    } catch { /* leave the execution guard authoritative */ }
+    const deny = names.filter(name => name !== 'run_code' && !INTERNAL_CAPABILITIES.has(name) && !/^recorded-/.test(name)
+      && restrictable.has(name) && !allowed.has(name));
     try { childToolScopes.get(childId)?.(); } catch { /* 旧 scope 随 agent 销毁 */ }
     let guardDispose;
     try {
@@ -503,11 +514,12 @@ export function createSiteWorkers(ctx, getStore) {
       try {
         dispose = deny.length ? agent.ctx.tools.restrict({ deny }) : undefined;
       } catch (error) {
-        const unknown = new Set([...String(error?.message || '').matchAll(/unknown global tool(?:s)? "([^"]+)"/g)].map(match => match[1]));
-        const unsafe = [...unknown].filter(name => /^(?:run_code|operation_|saker_method|route_|workflow$)/.test(name));
+        const message = String(error?.message || error);
+        const listed = message.match(/unknown global tools? (.*?); known global tools:/i)?.[1] || '';
+        const unknown = new Set([...listed.matchAll(/"([^"]+)"/g)].map(match => match[1]));
         const filtered = deny.filter(name => !unknown.has(name));
-        if (!unknown.size || unsafe.length || filtered.length === deny.length) throw error;
-        dispose = agent.ctx.tools.restrict({ deny: filtered });
+        if (!unknown.size || filtered.length === deny.length) throw error;
+        dispose = filtered.length ? agent.ctx.tools.restrict({ deny: filtered }) : undefined;
       }
       childToolScopes.set(childId, () => {
         if (typeof guardDispose === 'function') guardDispose(); else guardDispose?.dispose?.();

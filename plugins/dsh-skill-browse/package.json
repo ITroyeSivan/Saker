@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-skill-browse",
-  "version": "1.1.17",
+  "version": "1.1.18",
   "description": "查看和安装技能包，复制可在聊天中调用的技能名称。",
   "type": "module",
   "main": "./lib/index.js",
@@ -40,7 +40,7 @@
     "access": "public"
   },
   "engines": {
-    "node": "^22.19.0 || >=24.0.0",
-    "dsh": "0.2.0-rc.2 || 0.2.1-rc.2 || 0.2.1-rc.5"
+    "node": ">=24.9.0",
+    "dsh": "0.2.0-rc.2 || 0.2.1-rc.2 || 0.2.1-rc.5 || 0.2.2-rc.1"
   }
 }

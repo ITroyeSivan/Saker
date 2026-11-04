@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-mcp-studio",
-  "version": "1.2.13",
+  "version": "1.2.14",
   "description": "添加 MCP 服务，查看连接状态和可用工具。",
   "type": "module",
   "main": "./lib/index.js",
@@ -24,8 +24,8 @@
   ],
   "license": "MIT",
   "engines": {
-    "node": "^22.19.0 || >=24.0.0",
-    "dsh": "0.2.0-rc.2 || 0.2.1-rc.2 || 0.2.1-rc.5"
+    "node": ">=24.9.0",
+    "dsh": "0.2.0-rc.2 || 0.2.1-rc.2 || 0.2.1-rc.5 || 0.2.2-rc.1"
   },
   "dsh": {
     "bundle": {

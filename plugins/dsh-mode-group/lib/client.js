@@ -301,7 +301,7 @@ function sceneController(remote, sessions, uiWorkspace, workspaceList, currentSe
 		var s = currentSession();
 		var generation = ++refreshGeneration;
 		var sessionId = s && s.id;
-		var sceneRequest = s ? sceneApi("scene.get", { sessionId: s.id, hasDraft: draftOrAttachmentsPresent() }) : Promise.resolve(null);
+		var sceneRequest = sessionId ? sceneApi("scene.get", { sessionId: sessionId, hasDraft: draftOrAttachmentsPresent() }) : Promise.resolve(null);
 		return Promise.all([remote.agentPresets.list(), sceneRequest]).then(function (out) {
 			if (generation !== refreshGeneration || (currentSession() && currentSession().id) !== sessionId) return;
 			var presets = (out[0] && out[0].value && out[0].value.presets || []).filter(function (p) {

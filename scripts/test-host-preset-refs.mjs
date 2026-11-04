@@ -8,6 +8,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { spawnSync } from 'node:child_process'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const REF = resolve(ROOT, '..', '_ref')
@@ -21,7 +22,7 @@ const hostRoot = configured
         .map(entry => join(REF, entry.name))
         .sort()
         .reverse()
-        .find(dir => existsSync(join(dir, 'packages')))
+        .find(dir => existsSync(join(dir, 'packages')) || existsSync(join(dir, 'resources', 'app.asar')))
     })()
 
 if (hostRoot === undefined || !existsSync(hostRoot)) {
@@ -40,11 +41,47 @@ function walkPackageJsons(dir, out = []) {
 }
 
 const hostNames = new Set()
-for (const file of walkPackageJsons(join(hostRoot, 'packages'))) {
-  try {
-    const pkg = JSON.parse(readFileSync(file, 'utf8'))
-    if (typeof pkg.name === 'string') hostNames.add(pkg.name)
-  } catch { /* malformed package.json in a source snapshot is ignored here */ }
+if (existsSync(join(hostRoot, 'packages'))) {
+  for (const file of walkPackageJsons(join(hostRoot, 'packages'))) {
+    try {
+      const pkg = JSON.parse(readFileSync(file, 'utf8'))
+      if (typeof pkg.name === 'string') hostNames.add(pkg.name)
+    } catch { /* malformed package.json in a source snapshot is ignored here */ }
+  }
+} else {
+  const executable = join(hostRoot, 'DeepSeek Harness.exe')
+  const runtime = join(hostRoot, 'resources', 'app.asar', 'dsh')
+  const inspect = spawnSync(executable, ['--expose-internals', '-e', `
+const fs = require('node:fs');
+const path = require('node:path');
+const root = process.argv[1];
+const names = [];
+function walk(dir, depth) {
+  if (!fs.existsSync(dir) || depth < 0) return;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (!entry.isDirectory()) continue;
+    const manifest = path.join(full, 'package.json');
+    if (fs.existsSync(manifest)) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+        if (typeof pkg.name === 'string') names.push(pkg.name);
+      } catch {}
+    }
+    if (entry.name.startsWith('@') && depth > 0) walk(full, depth - 1);
+  }
+}
+walk(path.join(root, 'node_modules'), 1);
+process.stdout.write(JSON.stringify(names));
+`, runtime], {
+    encoding: 'utf8', windowsHide: true, timeout: 30000,
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '' },
+  })
+  if (inspect.status !== 0) {
+    console.log('FAIL cannot inspect the installed host package set: ' + ((inspect.stderr || inspect.stdout || inspect.error) + '').slice(-2000))
+    process.exit(1)
+  }
+  for (const name of JSON.parse(inspect.stdout || '[]')) hostNames.add(name)
 }
 
 function packageNameOf(specifier) {

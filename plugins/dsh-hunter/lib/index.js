@@ -44,7 +44,7 @@ function resolveWorkspaceArg(workspace, exec) {
 }
 
 const name = "dsh-hunter";
-const inject = { webServer: { required: true }, webRuntime: { required: true }, tools: { required: true }, llm: { required: false }, agentDefaultModel: { required: false } };
+const inject = { webServer: { required: true }, tools: { required: true }, llm: { required: false }, agentDefaultModel: { required: false } };
 
 const ROUTE_PATH = "/dsh-hunter";
 /** 进程级 CSRF token：GET <route>/csrf 由同源页取走（跨源响应不可读），POST 须回带 x-dsh-csrf 头。 */

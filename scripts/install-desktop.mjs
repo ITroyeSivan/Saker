@@ -66,7 +66,7 @@ function invoke(args) {
   return result.stdout.trim()
 }
 const version = invoke(['--version'])
-const VERIFIED_DESKTOP_VERSIONS = new Set(['0.2.0-rc.2', '0.2.1-rc.2', '0.2.1-rc.5'])
+const VERIFIED_DESKTOP_VERSIONS = new Set(['0.2.0-rc.2', '0.2.1-rc.2', '0.2.1-rc.5', '0.2.2-rc.1'])
 if (!VERIFIED_DESKTOP_VERSIONS.has(version)) {
   throw new Error(`Desktop ${version} has not been verified by this installer; expected one of ${[...VERIFIED_DESKTOP_VERSIONS].join(', ')}.`)
 }
