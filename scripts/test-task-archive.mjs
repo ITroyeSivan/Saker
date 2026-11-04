@@ -8,7 +8,7 @@ import { openStore, registerFinding } from '../plugins/dsh-redteam-results/lib/s
 import { startTaskPolicy, readTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy.js';
 import { saveTaskContext } from '../plugins/dsh-redteam-results/lib/task-context.js';
 import { createProjectRun, transitionProjectRun, defineProjectChecks, upsertProjectSource } from '../plugins/dsh-redteam-results/lib/project-store.js';
-import { exportTaskArchive, verifyTaskArchive, importTaskArchive, TASK_ARCHIVE_SCHEMA, LEGACY_TASK_ARCHIVE_SCHEMA } from '../plugins/dsh-redteam-results/lib/task-archive.js';
+import { exportTaskArchive, verifyTaskArchive, importTaskArchive, TASK_ARCHIVE_SCHEMA, PREVIOUS_TASK_ARCHIVE_SCHEMA, LEGACY_TASK_ARCHIVE_SCHEMA } from '../plugins/dsh-redteam-results/lib/task-archive.js';
 import { recordObservedProjectCheck } from './lib/project-test-fixtures.mjs';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-task-archive-'));
@@ -27,6 +27,8 @@ try {
       JSON.stringify({ id: 'material-1', file: 'app.js', sourceUrl: 'https://app.example.test/static/app.js', digest: 'a'.repeat(64), original: 'const token = "REDACTED-FIXTURE";' }));
   store.db.prepare('INSERT INTO task_context_records(session_id,kind,record_id,version,record) VALUES(?,?,?,?,?)')
     .run('src', 'request', 'r1', 'v1', JSON.stringify({ id: 'r1', version: 'v1', request: 'GET /api/orders HTTP/1.1\r\nHost: app.example.test\r\n\r\n', response: 'HTTP/1.1 200 OK\r\n\r\n[]' }));
+  store.db.prepare('INSERT INTO task_cost_events(session_id,seq,at,kind,record) VALUES(?,?,?,?,?)')
+    .run('src', 1, Date.now(), 'assistant/message', JSON.stringify({ text: '可见分析结论', totalTokens: 12 }));
 
   test('an archive is a consistent snapshot with schema version, counts and per-section digests', () => {
     const archive = exportTaskArchive(store, 'src');
@@ -40,6 +42,7 @@ try {
     assert.equal(archive.manifest.sections.task_knowledge, undefined);
     assert(archive.manifest.sections.business_materials >= 1, '必要原文进归档');
     assert(archive.manifest.sections.task_context_records >= 1, '引用/请求原文进归档');
+    assert.equal(archive.manifest.sections.task_cost_events, 1, '自动保存的可见答复随任务归档');
     assert.equal(Object.keys(archive.manifest.digests).length, Object.keys(archive.sections).length);
     assert.equal(verifyTaskArchive(archive).ok, true);
   });
@@ -67,6 +70,7 @@ try {
     assert.equal(JSON.parse(material.record).original, 'const token = "REDACTED-FIXTURE";');
     const record = store.db.prepare('SELECT record FROM task_context_records WHERE session_id=? AND record_id=?').get('restored-1', 'r1');
     assert(record && JSON.parse(record.record).request.includes('GET /api/orders'), '请求原文恢复到新任务');
+    assert.match(store.db.prepare('SELECT record FROM task_cost_events WHERE session_id=?').get('restored-1').record, /可见分析结论/);
     // 源任务不受影响
     assert.equal(readTaskPolicy(store, 'src').restored, undefined);
     assert.equal(store.db.prepare('SELECT count(*) AS n FROM findings WHERE session_id=?').get('src').n, 1);
@@ -95,6 +99,21 @@ try {
     assert.equal(runRecord.sessionId, 'restored-project', 'run JSON 归属必须随新任务重写');
     const restoredCheck = store.db.prepare('SELECT record FROM project_checks WHERE session_id=? AND check_id=?').get('restored-project', 'check-1');
     assert(restoredCheck && JSON.parse(restoredCheck.record).sessionId === 'restored-project');
+  });
+  test('v3 archives restore all prior sections while v4 adds automatic visible facts', () => {
+    const current = exportTaskArchive(store, 'src');
+    const previous = structuredClone(current);
+    previous.manifest.schema = PREVIOUS_TASK_ARCHIVE_SCHEMA;
+    delete previous.sections.task_cost_events;
+    delete previous.manifest.sections.task_cost_events;
+    delete previous.manifest.digests.task_cost_events;
+    delete previous.manifest.columns.task_cost_events;
+    previous.manifest.tables = Object.keys(previous.sections).sort();
+    assert.equal(verifyTaskArchive(previous).ok, true, JSON.stringify(verifyTaskArchive(previous).problems));
+    const restored = importTaskArchive(store, previous, { sessionId: 'restored-v3' });
+    assert.equal(restored.sessionId, 'restored-v3');
+    assert.equal(store.db.prepare('SELECT count(*) AS n FROM task_cost_events WHERE session_id=?').get('restored-v3').n, 0);
+    assert.equal(store.db.prepare('SELECT count(*) AS n FROM findings WHERE session_id=?').get('restored-v3').n, 1);
   });
   test('restoring never overwrites an existing task and refuses an invalid archive', () => {
     const archive = exportTaskArchive(store, 'src');
@@ -163,6 +182,10 @@ try {
     const legacy = structuredClone(current);
     const legacyAt = Date.parse('2026-10-22T00:00:00.000Z');
     legacy.manifest.schema = LEGACY_TASK_ARCHIVE_SCHEMA;
+    delete legacy.sections.task_cost_events;
+    delete legacy.manifest.sections.task_cost_events;
+    delete legacy.manifest.digests.task_cost_events;
+    delete legacy.manifest.columns.task_cost_events;
     legacy.sections.knowledge_usage = [{ session_id: 'src', id: 'k-1', at: legacyAt, record: JSON.stringify({ id: 'k-1', at: legacyAt, query: 'old' }) }];
     legacy.sections.task_knowledge = [{ session_id: 'src', enabled: 1, source: 'desktop-user', updated_at: '2026-10-22T00:00:00.000Z' }];
     legacy.manifest.sections.knowledge_usage = 1;

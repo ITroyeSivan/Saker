@@ -8,7 +8,7 @@ assert(RULES.find(rule => rule.id === 'webshell')?.modes.length === 1, 'defensiv
 let known = [
   'read', 'write', 'web_fetch', 'saker_browser', 'redteam_task', 'redteam_context',
   'redteam_execution', 'redteam_research', 'redteam_method', 'redteam_checks',
-  'project_document', 'tool_pack',
+  'project_document', 'tool_pack', 'saker_assist',
 ];
 let scenario = 'pentest';
 const events = new Map();
@@ -57,6 +57,7 @@ const first = agent('scenario-free');
 fire('agent/created', { agent: first });
 assert(!visible(first.id).includes('project_document'));
 assert(visible(first.id).includes('redteam_execution'));
+assert(visible(first.id).includes('saker_assist'), 'the single collaboration entry must remain visible in every Saker scene');
 
 known.push('project_check', 'project_request');
 fire('agent/inbox/inserted', { agent: first });
@@ -66,10 +67,11 @@ assert(!visible(first.id).includes('project_request'));
 scenario = 'project';
 fire('agent/inbox/inserted', { agent: first });
 assert(visible(first.id).includes('project_document'));
-assert(visible(first.id).includes('project_check'));
 assert(visible(first.id).includes('project_request'));
+assert(!visible(first.id).includes('project_check'));
 assert(!visible(first.id).includes('redteam_execution'));
 assert(!visible(first.id).includes('redteam_research'));
+assert(visible(first.id).includes('saker_assist'));
 
 scenario = 'pentest';
 fire('agent/inbox/inserted', { agent: first });
@@ -79,8 +81,9 @@ assert(visible(first.id).includes('redteam_execution'));
 scenario = 'project';
 const second = agent('scenario-project-new');
 fire('agent/created', { agent: second });
-assert(visible(second.id).includes('project_check'));
+assert(!visible(second.id).includes('project_check'));
 assert(!visible(second.id).includes('redteam_execution'));
+assert(visible(second.id).includes('saker_assist'));
 
 fire('agent/disposed', { agent: first });
 fire('agent/disposed', { agent: second });

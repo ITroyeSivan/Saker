@@ -46,6 +46,13 @@ const variants = [
     failure: /FAIL wire model mismatch fails closed/,
   },
   {
+    id: 'child-tool-filter-open',
+    file: 'model-transport.js',
+    from: "if(typeof scope?.filterTools==='function'){",
+    to: 'if(false){',
+    failure: /FAIL child provider request uses the same persisted allow-list/,
+  },
+  {
     id: 'prior-wire-zero',
     file: 'model-budget.js',
     from: '{runtimeId,priorWireAttempts:wireAttempts}',

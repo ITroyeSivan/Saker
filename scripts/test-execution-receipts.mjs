@@ -8,7 +8,7 @@ import { openStore, registerFinding, updateFinding, getFinding, computeStats, li
 import { saveTaskContext, readTaskContext } from '../plugins/dsh-redteam-results/lib/task-context.js';
 import { createResearch, closeResearch, observeResearch, researchDetail } from '../plugins/dsh-redteam-results/lib/research.js';
 import { startTaskPolicy, readTaskPolicy, pauseTaskPolicy, resumeTaskPolicy, setTaskActionLimits } from '../plugins/dsh-redteam-results/lib/task-policy.js';
-import { executeRecordedRequest, readExecutionReceipt } from '../plugins/dsh-redteam-results/lib/execution-receipts.js';
+import { executeDirectRequest, executeRecordedRequest, readExecutionReceipt } from '../plugins/dsh-redteam-results/lib/execution-receipts.js';
 import { stageMethodClassification } from '../plugins/dsh-redteam-results/lib/method-classification.js';
 import { saveAccount } from '../plugins/dsh-redteam-results/lib/accounts.js';
 import { listTaskEvents } from '../plugins/dsh-redteam-results/lib/task-policy-record.js';
@@ -104,13 +104,24 @@ try {
     setup('identity', bare);
     const tool = tools.get('redteam_execution');
     saveAccount(store, 'identity', { id: 'acct-1', name: 'fixture-user', status: 'valid', secret: 'Cookie: sid=task-account' });
+    startTaskPolicy(store, 'identity-purpose', {
+      mode: 'regular', question: '读取父任务已绑定身份', target: endpoint, purposeTask: true,
+      parentSession: 'identity', budget: { toolCalls: 2 },
+    });
+    const inheritedPurpose = (await import('../plugins/dsh-redteam-results/lib/identity-binding.js'))
+      .resolveTaskIdentity(store, 'identity-purpose', 'fixture-user');
+    assert.equal(inheritedPurpose.matched, true, '用途子任务要沿 task_policy.parentSession 继承真实身份');
+    assert.equal(inheritedPurpose.accountId, 'acct-1');
     const before = received.length;
     const result = await tool.execute({ action: 'run', ...input('bare') }, exec('identity'));
     assert.equal(result.ok, true, result.error);
     assert.equal(received.length, before + 1);
     assert.equal(received.at(-1).headers.cookie, 'sid=task-account', '有效账号的秘密要套到没带认证头的请求上');
     assert.equal(result.identitySecretApplied, 'cookie');
-    assert.deepEqual(result.identity, { name: 'fixture-user', status: 'valid' });
+    assert.equal(result.identity.accountId, 'acct-1');
+    assert.equal(result.identity.name, 'fixture-user');
+    assert.equal(result.identity.status, 'valid');
+    assert.equal(result.identitySource, 'account');
     assert(!JSON.stringify(result).includes('sid=task-account'), '工具输出不能带秘密');
     const stored = JSON.parse(store.db.prepare('SELECT record FROM execution_receipts WHERE session_id=? AND id=?').get('identity', result.id).record);
     assert(!JSON.stringify(stored).includes('sid=task-account'), '库里回执也不能带秘密');
@@ -121,11 +132,19 @@ try {
     assert.equal(recorded.length, 1, '执行回执要写一条带 executionId 的任务事件');
     assert.equal(recorded[0].refs.task, 'identity', '事件要指回任务');
     assert.equal(recorded[0].refs.work, 'identity', '事件要指回工作');
-    // 请求自己带了认证头时不被覆盖
-    const kept = await tool.execute({ action: 'run', ...input('normal') }, exec('identity'));
+    // 请求自带认证头时先返回冲突；用户明确选择原请求后才按原身份派发。
+    const conflict = await tool.execute({ action: 'run', ...input('normal') }, exec('identity'));
+    assert.equal(conflict.ok, false);
+    assert.match(conflict.error, /identity_header_conflict/);
+    const kept = await tool.execute({ action: 'run', authSource: 'request', ...input('normal') }, exec('identity'));
     assert.equal(kept.ok, true, kept.error);
     assert.equal(received.at(-1).headers.authorization, 'fixture-only', '请求自带的认证头不被覆盖');
     assert.equal(kept.identitySecretApplied, undefined);
+    assert.equal(kept.identitySource, 'request');
+    const replaced = await tool.execute({ action: 'run', authSource: 'account', ...input('normal') }, exec('identity'));
+    assert.equal(replaced.ok, true, replaced.error);
+    assert.equal(received.at(-1).headers.cookie, 'sid=task-account');
+    assert.equal(replaced.identitySource, 'account');
     // 待确认 / 已失效都不被当成有效
     saveAccount(store, 'identity', { id: 'acct-1', name: 'fixture-user', status: 'unconfirmed', secret: '' });
     const pending = await tool.execute({ action: 'run', ...input('bare') }, exec('identity'));
@@ -133,6 +152,43 @@ try {
     saveAccount(store, 'identity', { id: 'acct-1', name: 'fixture-user', status: 'expired', secret: '' });
     const expired = await tool.execute({ action: 'run', ...input('bare') }, exec('identity'));
     assert.equal(expired.ok, false); assert.match(expired.error, /identity_expired/);
+  });
+  await test('显式不存在的身份在落库和联网前被拒绝，未填写身份仍可匿名派发', async () => {
+    setup('direct-identity-guard');
+    const tool = tools.get('redteam_execution');
+    const before = received.length;
+    const beforeContext = readTaskContext(store, 'direct-identity-guard');
+    const beforeBudget = readTaskPolicy(store, 'direct-identity-guard').used.toolCalls;
+    const rejected = await tool.execute({ action: 'direct', url: endpoint, identityRef: 'account-a-typo' }, exec('direct-identity-guard'));
+    assert.equal(rejected.ok, false);
+    assert.match(rejected.error, /identity_not_found/);
+    assert.equal(received.length, before, '身份不存在时不能静默匿名发出请求');
+    assert.deepEqual(readTaskContext(store, 'direct-identity-guard'), beforeContext, '失败身份不能留下错误请求记录');
+    assert.equal(readTaskPolicy(store, 'direct-identity-guard').used.toolCalls, beforeBudget, '失败身份不能消耗执行额度');
+    const anonymous = await tool.execute({ action: 'direct', url: endpoint, headers: { accept: 'text/plain' } }, exec('direct-identity-guard'));
+    assert.equal(anonymous.ok, true, anonymous.error);
+    assert.equal(anonymous.identitySource, 'anonymous');
+    assert.equal(received.length, before + 1, '未提供身份时才允许匿名请求');
+  });
+
+  await test('首次自由测试直接请求只按显式 URL 建立最小任务范围', async () => {
+    const sid = 'direct-auto-task';
+    assert.equal(readTaskPolicy(store, sid), null);
+    const before = received.length;
+    const result = await executeDirectRequest(store, sid, {
+      url: endpoint,
+      method: 'GET',
+      headers: { accept: 'text/plain' },
+    });
+    assert.equal(result.outcome, 'response');
+    assert.equal(result.status, 200);
+    assert.equal(received.length, before + 1);
+    const policy = readTaskPolicy(store, sid);
+    assert.equal(policy.mode, 'regular');
+    assert.equal(policy.primaryTarget, new URL(endpoint).origin + '/');
+    assert.deepEqual(policy.scope.include, [new URL(endpoint).origin + '/']);
+    assert.equal(policy.used.toolCalls, 1);
+    assert.equal(readTaskContext(store, sid).requests.length, 1);
   });
   await test('关闭“允许访问网站”后浏览器执行在启动浏览器前被拒绝', async () => {
     setup('browser-guard');

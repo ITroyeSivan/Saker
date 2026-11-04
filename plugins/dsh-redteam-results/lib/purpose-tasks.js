@@ -85,9 +85,15 @@ export function createPurposeTasks(ctx, getStore) {
       budget: { toolCalls: spec.toolCalls, minutes: spec.minutes, workers: 0 },
     });
     writeTaskPolicy(store, childId, { ...readTaskPolicy(store, childId), purpose,
+      ...(state.policy.sceneRootSession ? {
+        sceneRootSession: state.policy.sceneRootSession, sceneId: state.policy.sceneId,
+        sceneRevision: state.policy.sceneRevision, competitionChallengeId: state.policy.competitionChallengeId || '',
+        competitionChallengeRevision: state.policy.competitionChallengeRevision || 0,
+      } : {}),
       activationState: 'starting', runnerPid: process.pid, modelOptions: childAgentOptions || null,
       allowTargetNetwork: purpose === 'report' ? false : state.policy.allowTargetNetwork !== false,
-      allowedTools: ['run_code', 'read', 'glob', 'grep', 'redteam_context', 'redteam_checks',
+      allowedTools: ['run_code', 'read', 'glob', 'grep', 'saker_material', 'competition_challenge',
+        'redteam_context', 'redteam_checks',
         'redteam_delivery', 'redteam_execution', 'redteam_research'],
     }, 'purpose-task-starting', { childId, purpose });
     // Persisted ownership takes over the reservation without an asynchronous gap.

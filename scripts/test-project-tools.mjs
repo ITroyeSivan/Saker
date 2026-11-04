@@ -1,16 +1,21 @@
 // W06：模型侧项目工具（project_document / project_check / project_request / saker_browser）。
 import './test-home-isolation.mjs';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { openStore, registerFinding, updateFinding } from '../plugins/dsh-redteam-results/lib/store.js';
 import { startTaskPolicy, taskPolicyStatus, readTaskPolicy, finishTaskOnTurnEnd, setTaskActionLimits } from '../plugins/dsh-redteam-results/lib/task-policy.js';
-import { createProjectRun, transitionProjectRun, defineProjectChecks, upsertProjectSource, readProjectRun, listProjectChecks, listProjectActions, recordProjectCheck, beginProjectAction, finishProjectAction, reconcileProjectAction } from '../plugins/dsh-redteam-results/lib/project-store.js';
-import { projectTurnDecision, completeProjectRun } from '../plugins/dsh-redteam-results/lib/project-runtime.js';
+import { createProjectRun, transitionProjectRun, defineProjectChecks, upsertProjectSource, readProjectRun, readProjectCheck, listProjectChecks, listProjectActions, recordProjectCheck, reopenProjectCheck, beginProjectAction, finishProjectAction, reconcileProjectAction } from '../plugins/dsh-redteam-results/lib/project-store.js';
+import { buildProjectDeliveryFiles } from '../plugins/dsh-redteam-results/lib/project-delivery.js';
+import { projectTurnDecision, completeProjectRun, captureProjectNativeEvent } from '../plugins/dsh-redteam-results/lib/project-runtime.js';
+import { projectSourceProgress } from '../plugins/dsh-redteam-results/lib/project-progress.js';
 import { browserProfileName } from '../plugins/dsh-redteam-results/lib/browser-session.js';
 import { registerVerifiedProjectFinding } from './lib/project-test-fixtures.mjs';
+import { createCompetitionChallenge, setCurrentCompetitionChallenge } from '../plugins/dsh-redteam-results/lib/competition-store.js';
+import { setCompetitionPreferences, writeSceneContext } from '../plugins/dsh-redteam-results/lib/scene-context.js';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-project-tools-'));
 process.env.DSH_HOME = home;
@@ -18,6 +23,21 @@ const store = openStore(path.join(home, 'redteam-results', 'results.db'));
 const disposers = [];
 let failed = 0;
 const test = async (name, work) => { try { await work(); console.log('ok   ' + name); } catch (error) { failed++; console.log('FAIL ' + name + ': ' + (error.stack || error.message)); } };
+const browserUnsafePorts = new Set([1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95,
+  101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465, 512, 513,
+  514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723, 2049,
+  3659, 4045, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080]);
+async function listenOnBrowserSafePort(server) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    if (!browserUnsafePorts.has(server.address().port)) return;
+    await new Promise(resolve => server.close(resolve));
+  }
+  throw new Error('could not allocate a browser-safe fixture port');
+}
 
 const server = http.createServer((request, response) => {
   if (request.url === '/page') {
@@ -45,13 +65,13 @@ const server = http.createServer((request, response) => {
   response.writeHead(200, { 'content-type': 'application/json' });
   response.end(JSON.stringify({ ok: true, marker: 'SAKER_PROJECT_TOOL' }));
 });
-await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+await listenOnBrowserSafePort(server);
 const origin = 'http://127.0.0.1:' + server.address().port;
 const secondServer = http.createServer((request, response) => {
   response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
   response.end('<!doctype html><html><head><title>Saker Second Origin</title></head><body><h1>second origin</h1></body></html>');
 });
-await new Promise(resolve => secondServer.listen(0, '127.0.0.1', resolve));
+await listenOnBrowserSafePort(secondServer);
 const secondOrigin = 'http://127.0.0.1:' + secondServer.address().port;
 
 const tools = new Map();
@@ -76,7 +96,7 @@ const ctx = {
 };
 const { apply, dispatch } = await import('../plugins/dsh-redteam-results/lib/index.js');
 apply(ctx);
-const exec = sid => ({ agent: { session: { id: sid, header: { agentPreset: 'pentest' } } } });
+const exec = sid => ({ agent: { session: { id: sid, header: { agentPreset: 'pentest', cwd: home } } } });
 async function invoke(sid, name, args) {
   const scope = { ...exec(sid), name, arguments: args };
   for (const guard of guards) {
@@ -133,8 +153,8 @@ async function clickInManagedBrowser(sessionId, selector) {
   }
 }
 
-function prepareProject(sid) {
-  startTaskPolicy(store, sid, { scenario: 'project', question: '按文档测试', target: origin, budget: { minutes: 30 } });
+function prepareProject(sid, budget = { minutes: 30 }) {
+  startTaskPolicy(store, sid, { scenario: 'project', question: '按文档测试', target: origin, budget });
   const run = createProjectRun(store, sid, { question: '按文档测试' });
   const running = transitionProjectRun(store, sid, run.runId, 'running', run.controlRev);
   const [check] = defineProjectChecks(store, sid, run.runId, [{ requirement: '检查员工资料权限', sourceLocation: '表1 第2行' }]);
@@ -150,14 +170,89 @@ function verifiedFinding(sid, title) {
 }
 
 try {
+  await test('案例工具首次调用从已导入来源建立项目，不降级为自由测试', async () => {
+    const sid = 'pt-auto-case-bootstrap';
+    writeSceneContext(store, sid, 'cases', { presetId: 'pentest' });
+    upsertProjectSource(store, sid, {
+      sourceId: 'auto-case-doc', sourceRevision: 'r1', displayName: '自动案例.xlsx',
+      kind: 'xlsx', parseState: 'ready', sourceRole: 'requirements',
+      sections: [
+        { sectionId: 'header', location: { kind: 'row', sheet: '案例', sheetIndex: 0, row: 1 }, kind: 'row',
+          cells: [{ ref: 'A1', value: '编号' }, { ref: 'B1', value: '测试项' }] },
+        { sectionId: 'data', location: { kind: 'row', sheet: '案例', sheetIndex: 0, row: 2 }, kind: 'row',
+          cells: [{ ref: 'A2', value: 'C1' }, { ref: 'B2', value: 'GET ' + origin + '/auto-bootstrap' }] },
+      ],
+    });
+    const response = await invoke(sid, 'project_request', { method: 'GET', url: origin + '/auto-bootstrap' });
+    assert.equal(response.ok, true, response.error);
+    assert(response.summary.includes('SAKER_PROJECT_TOOL'));
+    const policy = readTaskPolicy(store, sid);
+    assert.equal(policy.scenario, 'project');
+    const run = readProjectRun(store, sid, policy.projectRunId);
+    assert.equal(run.state, 'running');
+    assert.equal(listProjectChecks(store, sid, run.runId).length, 1);
+  });
+
+  await test('案例缺少显式身份时保存可交付缺口并结束当前检查', async () => {
+    const sid = 'pt-project-identity-gap';
+    const prepared = prepareProject(sid);
+    const next = await invoke(sid, 'project_check', { action: 'next' });
+    assert.equal(next.ok, true, next.error);
+    const denied = await invoke(sid, 'project_request', {
+      method: 'GET', url: origin + '/private', identityRef: 'account-missing',
+    });
+    assert.equal(denied.ok, false);
+    assert.match(denied.error, /identity_not_found/);
+    const failed = listProjectActions(store, sid, prepared.run.runId)
+      .find(action => action.checkId === next.check.checkId);
+    assert.equal(failed.executionState, 'failed');
+    assert(failed.evidenceRef, '身份缺失也必须留下可导出的失败依据');
+    const delivery = buildProjectDeliveryFiles(store, sid, prepared.run.runId);
+    const exportedEvidence = delivery.files['delivery/evidence/typed/' + failed.evidenceRef + '.json'];
+    assert(exportedEvidence, '失败动作引用的 typed evidence 必须随导出包提供');
+    assert.match(exportedEvidence, /identity_not_found/);
+    captureProjectNativeEvent(store, sid, {
+      type: 'assistant/message', seq: 600, time: Date.now(),
+      data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '缺少 account-missing 身份，记录缺口。' }] } },
+    });
+    const ended = readProjectCheck(store, sid, prepared.run.runId, next.check.checkId);
+    assert.equal(ended.executionState, 'ended');
+    assert.equal(ended.verdict, 'blocked');
+    assert.match(ended.gaps, /原生工具执行失败|身份/);
+  });
+
+  await test('当前检查锁定身份与显式 URL，不能在一轮里提前执行后续项', async () => {
+    const sid = 'pt-current-check-binding';
+    const started = await dispatch(ctx, store, 'project.start', {
+      sessionId: sid, autoStart: false,
+      policy: { question: '当前项绑定', target: origin, allowTargetNetwork: true },
+    });
+    defineProjectChecks(store, sid, started.run.runId, [
+      { checkId: 'current-m1', requirement: 'identityRef=account-missing 请求 ' + origin + '/denied' },
+      { checkId: 'current-i1', requirement: '不使用身份，请求 ' + origin + '/denied' },
+    ]);
+    const next = await invoke(sid, 'project_check', { action: 'next' });
+    assert.equal(next.ok, true, next.error);
+    const anonymous = await invoke(sid, 'project_request', { method: 'GET', url: origin + '/denied' });
+    assert.equal(anonymous.ok, false);
+    assert.match(anonymous.error, /identityRef=account-missing/);
+    const wrongUrl = await invoke(sid, 'project_request', {
+      method: 'GET', url: origin + '/later', authContext: 'account-missing',
+    });
+    assert.equal(wrongUrl.ok, false);
+    assert.match(wrongUrl.error, /不属于当前检查/);
+    assert.equal(listProjectActions(store, sid, started.run.runId).length, 0);
+  });
+
   await test('真实项目快照和宿主守卫接受项目场景，文档读取不套旧方向或扫描额度', async () => {
     const sid = 'pt-guarded-entry';
     const started = await dispatch(ctx, store, 'project.start', { sessionId: sid, policy: { question: '读取本地样本', target: origin, budget: { toolCalls: 1 } } });
     upsertProjectSource(store, sid, { sourceId: 'entry-doc', sourceRevision: 'r1', displayName: '入口样本', kind: 'text', parseState: 'ready',
       sections: [{ sectionId: 'p1', text: '仅检查回环服务是否能响应', kind: 'paragraph' }] });
     const snapshot = contexts.find(context => context.name === 'saker-pentest-task-state').text(exec(sid));
-    assert.match(snapshot, /按文档连续测试/);
-    assert.match(snapshot, /project_document/);
+    assert.match(snapshot, /案例连续测试/);
+    assert(!snapshot.includes('project_check'), 'retired registration instructions must not remain in the model prompt');
+    assert(!snapshot.includes('project_evidence'), 'retired evidence bookkeeping must not remain in the model prompt');
     assert(snapshot.includes(started.run.runId), '稳定提示标明当前运行，避免新轮沿用历史检查编号');
     assert(!snapshot.includes('状态无法读取'), snapshot);
     assert.equal(readTaskPolicy(store, sid).modules, undefined, '项目不能初始化 regular 模块');
@@ -191,6 +286,29 @@ try {
     assert.equal(readProjectRun(store, sid, started.run.runId).state, 'running');
   });
 
+  await test('R01 default cwd resolves before one reserved command and the last allowed call executes once', async () => {
+    const sid = 'pt-command-default-cwd';
+    const { check } = prepareProject(sid, { minutes: 30, toolCalls: 1 });
+    await invoke(sid, 'project_check', { action: 'next' });
+    const counter = path.join(home, 'default-cwd-count.txt');
+    const script = path.join(home, 'default-cwd-once.mjs');
+    fs.writeFileSync(script, "import fs from 'node:fs';fs.appendFileSync(process.argv[2],'once\\n');process.stdout.write('DEFAULT_CWD_OK\\n')\n");
+    const args = {
+      action: 'command',
+      checkId: check.checkId,
+      command: JSON.stringify(process.execPath) + ' ' + JSON.stringify(script) + ' ' + JSON.stringify(counter),
+      timeoutMs: 5000,
+    };
+    const first = await invoke(sid, 'project_evidence', args);
+    assert.equal(first.ok, true, first.error);
+    assert.match(first.observation.stdout, /DEFAULT_CWD_OK/);
+    assert.equal(fs.readFileSync(counter, 'utf8'), 'once\n');
+    assert.equal(readTaskPolicy(store, sid).used.toolCalls, 1, 'the last allowed command is reserved exactly once');
+    const denied = await guards[0]({ ...exec(sid), name: 'project_evidence', arguments: args });
+    assert.match(String(denied), /tool_budget_exhausted/);
+    assert.equal(fs.readFileSync(counter, 'utf8'), 'once\n', 'the rejected call must not execute again');
+  });
+
   await test('项目入口修复保留网络关闭与未知实战方向的拒绝', async () => {
     const sid = 'pt-guarded-disabled';
     const started = await dispatch(ctx, store, 'project.start', { sessionId: sid, policy: { question: '仅离线分析', target: origin, allowTargetNetwork: false } });
@@ -209,7 +327,9 @@ try {
   await test('开始前在桌面保存的网络与请求限制进入真实项目策略', async () => {
     const sid = 'pt-saved-limits';
     await dispatch(ctx, store, 'task.limits', { sessionId: sid, allowTargetNetwork: false, readOnly: true, excludedPaths: '/private', requestRatePerMinute: 12, requestConcurrency: 1, allowedOrigins: ['https://api.example.test'] });
+    const beforeStart = followups.filter(item => item.id === sid).length;
     await dispatch(ctx, store, 'project.start', { sessionId: sid, autoStart: false, policy: { question: '只分析现有文档', target: origin } });
+    assert.equal(followups.filter(item => item.id === sid).length, beforeStart, 'autoStart=false must not enqueue a model request');
     const policy = readTaskPolicy(store, sid);
     assert.equal(policy.allowTargetNetwork, false);
     assert.equal(policy.readOnly, true);
@@ -232,6 +352,392 @@ try {
     assert.match(range.target, new RegExp(new URL(origin).host));
     assert.match(range.target, /second\.example\.test/);
     assert.equal(range.scope.include.includes('https://second.example.test/'), true);
+  });
+
+  await test('structured spreadsheet rows become case checks without a model registration call', async () => {
+    const sid = 'pt-auto-checklist';
+    upsertProjectSource(store, sid, {
+      sourceId: 'sheet-cases', sourceRevision: 'r1', displayName: '用例.xlsx', kind: 'xlsx', parseState: 'ready',
+      sections: [
+        { sectionId: 'sheet-1-row-1', location: { kind: 'row', sheet: '用例', row: 1, hidden: false }, kind: 'row',
+          cells: [{ value: '编号' }, { value: '测试项' }, { value: '预期结果' }] },
+        { sectionId: 'sheet-1-row-2', location: { kind: 'row', sheet: '用例', row: 2, hidden: false }, kind: 'row',
+          cells: [{ value: 'C-01' }, { value: '普通用户登录' }, { value: '登录成功' }] },
+        { sectionId: 'sheet-1-row-3', location: { kind: 'row', sheet: '用例', row: 3, hidden: false }, kind: 'row',
+          cells: [{ value: 'C-02' }, { value: '无权限用户访问管理页' }, { value: '明确拒绝' }] },
+      ],
+    });
+    const started = await dispatch(ctx, store, 'project.start', {
+      sessionId: sid, autoStart: false, policy: { question: '按表格执行', target: origin },
+    });
+    assert.equal(started.autoChecks, 2);
+    const checks = listProjectChecks(store, sid, started.run.runId);
+    assert.equal(checks.length, 2);
+    assert.match(checks[0].requirement, /测试项：普通用户登录/);
+    assert.match(checks[1].sourceLocation, /第3行/);
+    assert.equal(checks[0].sourceRefs.length, 1);
+    assert.equal(checks[0].sourceRefs[0].sectionId, 'sheet-1-row-2');
+    assert.equal(Object.values(readProjectRun(store, sid, started.run.runId).sectionDecisions)
+      .find(item => item.sectionId === 'sheet-1-row-1')?.decision, 'reference');
+    assert.equal(projectSourceProgress(store, sid, started.run.runId).pending, 0);
+  });
+
+  await test('spreadsheet mapping keeps workbook order, per-sheet headers, sparse columns, hidden rows and formula gaps', async () => {
+    const sid = 'pt-auto-checklist-semantics';
+    upsertProjectSource(store, sid, {
+      sourceId: 'sheet-semantics', sourceRevision: 'r1', displayName: '评审表.xlsx', kind: 'xlsx', parseState: 'ready',
+      sections: [
+        { sectionId: 'z-note', location: { kind: 'worksheet', sheet: 'Z表' }, kind: 'worksheet-note',
+          text: '隐藏列：2；合并区域：A1:C1' },
+        { sectionId: 'z-head', location: { kind: 'row', sheet: 'Z表', sheetIndex: 0, row: 1 }, kind: 'row',
+          cells: [{ ref: 'A1', value: '编号' }, { ref: 'C1', value: '测试项' }] },
+        { sectionId: 'z-row', location: { kind: 'row', sheet: 'Z表', sheetIndex: 0, row: 2 }, kind: 'row',
+          cells: [{ ref: 'A2', value: 'Z-1' }, { ref: 'C2', value: '稀疏列测试' }] },
+        { sectionId: 'a-head', location: { kind: 'row', sheet: 'A表', sheetIndex: 1, row: 1 }, kind: 'row',
+          cells: [{ ref: 'A1', value: '要求' }, { ref: 'B1', value: '预期' }] },
+        { sectionId: 'a-row', location: { kind: 'row', sheet: 'A表', sheetIndex: 1, row: 2 }, kind: 'row',
+          cells: [{ ref: 'A2', value: '独立要求' }, { ref: 'B2', value: '明确拒绝' }] },
+        { sectionId: 'a-hidden', location: { kind: 'row', sheet: 'A表', sheetIndex: 1, row: 3, hidden: true }, kind: 'row',
+          cells: [{ ref: 'A3', value: '隐藏要求' }, { ref: 'B3', value: '不应自动执行' }] },
+        { sectionId: 'a-formula', location: { kind: 'row', sheet: 'A表', sheetIndex: 1, row: 4 }, kind: 'row',
+          cells: [{ ref: 'C4', value: '', formulaNoResult: true }], formulasWithoutCache: ['C4'] },
+      ],
+    });
+    const started = await dispatch(ctx, store, 'project.start', {
+      sessionId: sid, autoStart: false, policy: { question: '按稀疏评审表执行', allowTargetNetwork: false },
+    });
+    const checks = listProjectChecks(store, sid, started.run.runId);
+    assert.equal(checks.length, 3);
+    assert.match(checks[0].requirement, /编号：Z-1/);
+    assert.match(checks[0].requirement, /测试项：稀疏列测试/);
+    assert.match(checks[1].requirement, /要求：独立要求/);
+    assert.match(checks[1].requirement, /预期：明确拒绝/);
+    assert.match(checks[2].requirement, /公式无缓存结果，需核对原文件/);
+    assert(!checks.some(check => /隐藏要求/.test(check.requirement)));
+    const hiddenDecision = Object.values(readProjectRun(store, sid, started.run.runId).sectionDecisions)
+      .find(item => item.sectionId === 'a-hidden');
+    const worksheetNoteDecision = Object.values(readProjectRun(store, sid, started.run.runId).sectionDecisions)
+      .find(item => item.sectionId === 'z-note');
+    assert.equal(hiddenDecision.decision, 'excluded');
+    assert.match(hiddenDecision.rationale, /隐藏行默认不进入执行范围/);
+    assert.equal(worksheetNoteDecision.decision, 'reference');
+    assert.match(worksheetNoteDecision.rationale, /不作为独立测试要求/);
+  });
+
+  await test('a headerless spreadsheet keeps its first row and prepared table choices persist into the run', async () => {
+    const sid = 'pt-auto-headerless';
+    upsertProjectSource(store, sid, {
+      sourceId: 'sheet-headerless', sourceRevision: 'r1', displayName: '无表头.xlsx', kind: 'xlsx', parseState: 'ready',
+      sections: [
+        { sectionId: 'h1', location: { kind: 'row', sheet: 'Sheet1', sheetIndex: 0, row: 1, hiddenColumns: [2] }, kind: 'row',
+          cells: [{ ref: 'A1', value: 'A' }, { ref: 'B1', value: 'B' }] },
+        { sectionId: 'h2', location: { kind: 'row', sheet: 'Sheet1', sheetIndex: 0, row: 2 }, kind: 'row',
+          cells: [{ ref: 'A2', value: '普通用户只能查看自己的订单' }, { ref: 'B2', value: '页面只显示当前用户订单' }] },
+        { sectionId: 'h3', location: { kind: 'row', sheet: 'Sheet1', sheetIndex: 0, row: 3, hidden: true }, kind: 'row',
+          cells: [{ ref: 'A3', value: '隐藏用户必须被明确拒绝' }, { ref: 'B3', value: '返回 403' }] },
+      ],
+    });
+    const prepared = await dispatch(ctx, store, 'project.prepare', {
+      sessionId: sid, sourceId: 'sheet-headerless', sourceRevision: 'r1', sourceRole: 'requirements',
+      regions: [{ sheet: 'Sheet1', sheetIndex: 0, fromRow: 1, toRow: 3, headerMode: 'none', includeHidden: true }],
+    });
+    assert.equal(prepared.ok, true, prepared.error);
+    assert.equal(prepared.preview.needsConfirmation, true);
+    const status = await dispatch(ctx, store, 'project.status', { sessionId: sid });
+    assert.equal(status.sources[0].sourceRole, 'requirements');
+    assert.equal(status.sources[0].preparation.regions[0].headerMode, 'none');
+    assert.equal(status.sources[0].preparation.regions[0].includeHidden, true);
+    const started = await dispatch(ctx, store, 'project.start', {
+      sessionId: sid, autoStart: false, policy: { question: '无表头全保留', allowTargetNetwork: false },
+    });
+    assert.equal(started.autoChecks, 3);
+    const checks = listProjectChecks(store, sid, started.run.runId);
+    assert(checks.some(check => /第1列（A列）：A/.test(check.requirement)), 'ambiguous first row must remain a check');
+    assert(checks.some(check => /隐藏用户必须被明确拒绝/.test(check.requirement)), 'explicit includeHidden must include hidden rows');
+
+    const defaultSid = 'pt-auto-headerless-default';
+    upsertProjectSource(store, defaultSid, {
+      sourceId: 'sheet-headerless-default', sourceRevision: 'r1', displayName: '无表头默认.xlsx', kind: 'xlsx', parseState: 'ready',
+      sections: [
+        { sectionId: 'd1', location: { kind: 'row', sheet: 'Sheet1', sheetIndex: 0, row: 1 }, kind: 'row',
+          cells: [{ ref: 'A1', value: 'A' }, { ref: 'B1', value: 'B' }] },
+        { sectionId: 'd2', location: { kind: 'row', sheet: 'Sheet1', sheetIndex: 0, row: 2 }, kind: 'row',
+          cells: [{ ref: 'A2', value: '普通用户只能查看自己的订单' }, { ref: 'B2', value: '页面只显示当前用户订单' }] },
+      ],
+    });
+    const defaultRun = await dispatch(ctx, store, 'project.start', {
+      sessionId: defaultSid, autoStart: false, policy: { question: '默认保留无表头首行', allowTargetNetwork: false },
+    });
+    assert.equal(defaultRun.autoChecks, 2, 'ambiguous first row must default to data without explicit preparation');
+  });
+
+  await test('one worksheet can contain two independently recognized table regions', async () => {
+    const sid = 'pt-two-table-regions';
+    upsertProjectSource(store, sid, {
+      sourceId: 'two-regions', sourceRevision: 'r1', displayName: '双表区.xlsx', kind: 'xlsx', parseState: 'ready',
+      sections: [
+        { sectionId: 'r1-h', location: { kind: 'row', sheet: 'Sheet1', sheetIndex: 0, row: 1 }, kind: 'row',
+          cells: [{ ref: 'A1', value: '编号' }, { ref: 'B1', value: '测试项' }] },
+        { sectionId: 'r1-d', location: { kind: 'row', sheet: 'Sheet1', sheetIndex: 0, row: 2 }, kind: 'row',
+          cells: [{ ref: 'A2', value: 'U-1' }, { ref: 'B2', value: '第一表区要求' }] },
+        { sectionId: 'r2-h', location: { kind: 'row', sheet: 'Sheet1', sheetIndex: 0, row: 4 }, kind: 'row',
+          cells: [{ ref: 'C4', value: '要求' }, { ref: 'D4', value: '预期结果' }] },
+        { sectionId: 'r2-d', location: { kind: 'row', sheet: 'Sheet1', sheetIndex: 0, row: 5 }, kind: 'row',
+          cells: [{ ref: 'C5', value: '第二表区独立要求' }, { ref: 'D5', value: '明确拒绝' }] },
+      ],
+    });
+    const started = await dispatch(ctx, store, 'project.start', {
+      sessionId: sid, autoStart: false, policy: { question: '两个表区', allowTargetNetwork: false },
+    });
+    const checks = listProjectChecks(store, sid, started.run.runId);
+    assert.equal(checks.length, 2);
+    assert.match(checks[0].requirement, /编号：U-1/);
+    assert.match(checks[1].requirement, /要求：第二表区独立要求/);
+    assert.match(checks[1].requirement, /预期结果：明确拒绝/);
+  });
+
+  await test('native read/result/reply bind to the current case check without registration tools', async () => {
+    const sid = 'pt-native-case-fact';
+    const { run, check } = prepareProject(sid, { minutes: 30 });
+    const handler = events.get('session/event')[0];
+    const session = { id: sid, header: { agentPreset: 'pentest' } };
+    await handler(session, {
+      type: 'tool/call', seq: 1, time: Date.now(),
+      data: { name: 'read', callId: 'call-native-read', arguments: { file_path: path.join(home, 'expected.txt') } },
+    });
+    let current = readProjectCheck(store, sid, run.runId, check.checkId);
+    assert.equal(current.executionState, 'running');
+    assert(current.actionRefs.includes('call-native-read'));
+    assert.equal(readProjectRun(store, sid, run.runId).currentCheckId, check.checkId);
+    await handler(session, {
+      type: 'tool/result', seq: 2, time: Date.now(),
+      data: { message: { name: 'read', toolCallId: 'call-native-read', isError: false,
+        content: [{ type: 'text', text: '1: AUTO_CASE_OK' }] } },
+    });
+    current = readProjectCheck(store, sid, run.runId, check.checkId);
+    assert.equal(current.actionRefs.length, 1);
+    assert.equal(current.evidenceRefs.length, 1);
+    const evidenceId = current.evidenceRefs[0];
+    const material = JSON.parse(store.db.prepare('SELECT record FROM business_materials WHERE session_id=? AND id=?')
+      .get(sid, evidenceId).record);
+    assert.equal(material.kind, 'tool');
+    assert.equal(material.sourceType, 'host-native-tool-result');
+    assert.match(material.text, /AUTO_CASE_OK/);
+    await handler(session, {
+      type: 'assistant/message', seq: 3, time: Date.now(),
+      data: { message: { content: [
+        { type: 'reasoning', text: 'HIDDEN_REASONING_MUST_NOT_BE_STORED' },
+        { type: 'text', text: '检查一已读取 expected.txt，实际内容 AUTO_CASE_OK，符合预期。' },
+      ] } },
+    });
+    current = readProjectCheck(store, sid, run.runId, check.checkId);
+    assert.equal(current.executionState, 'ended');
+    assert.equal(current.verdict, 'needs_check');
+    assert.match(current.checkedContent, /AUTO_CASE_OK/);
+    assert.doesNotMatch(current.checkedContent, /HIDDEN_REASONING_MUST_NOT_BE_STORED/);
+    assert.equal(current.gaps, '');
+    assert.deepEqual(listProjectActions(store, sid, run.runId).map(action => action.actionId), ['call-native-read']);
+    assert.equal(projectTurnDecision(store, sid).action, 'completed', 'an executed native fact can finish without an extra registration call');
+  });
+
+  await test('two independent native case facts advance in order and then stop', async () => {
+    const sid = 'pt-native-case-sequence';
+    const { run, check: first } = prepareProject(sid, { minutes: 30 });
+    const [second] = defineProjectChecks(store, sid, run.runId, [{ checkId: 'second', requirement: '读取第二项 expected.txt' }]);
+    const handler = events.get('session/event')[0];
+    const session = { id: sid, header: { agentPreset: 'pentest' } };
+    for (const [turn, [callId, checkId, text]] of [
+      ['call-native-first', first.checkId, '第一项读取完成，结果待核对。'],
+      ['call-native-second', second.checkId, '第二项读取完成，结果待核对。'],
+    ].entries()) {
+      const turnNumber = turn + 1;
+      await handler(session, { type: 'tool/call', seq: turnNumber * 3 + 1, time: Date.now(),
+        data: { turn: turnNumber, step: 1, name: 'read', callId, arguments: { file_path: path.join(home, checkId + '.txt') } } });
+      await handler(session, { type: 'tool/result', seq: turnNumber * 3 + 2, time: Date.now(),
+        data: { turn: turnNumber, step: 1, message: { name: 'read', toolCallId: callId, isError: false,
+          content: [{ type: 'text', text: checkId + ': AUTO_CASE_OK' }] } } });
+      await handler(session, { type: 'assistant/message', seq: turnNumber * 3 + 3, time: Date.now(),
+        data: { turn: turnNumber, step: 1, message: { content: [{ type: 'text', text }] } } });
+      if (turn === 0) {
+        assert.equal(projectTurnDecision(store, sid).action, 'continue');
+        assert.equal(readProjectRun(store, sid, run.runId).currentCheckId, second.checkId,
+          'program continuation must atomically select the next executable check');
+      }
+    }
+    const checks = listProjectChecks(store, sid, run.runId);
+    assert.deepEqual(checks.map(check => [check.checkId, check.executionState, check.verdict]),
+      [[first.checkId, 'ended', 'needs_check'], [second.checkId, 'ended', 'needs_check']]);
+    assert.equal(listProjectActions(store, sid, run.runId).length, 2);
+    assert.equal(projectTurnDecision(store, sid).action, 'completed');
+  });
+
+  await test('native results finish after pause, preserve old attempts after reopen, and ignore duplicate delivery', async () => {
+    const handler = events.get('session/event')[0];
+    const pausedSid = 'pt-native-paused';
+    const paused = prepareProject(pausedSid, { minutes: 30 });
+    const pausedSession = { id: pausedSid, header: { agentPreset: 'pentest' } };
+    await handler(pausedSession, { type: 'tool/call', seq: 1, time: Date.now(),
+      data: { name: 'read', callId: 'pause-read', arguments: { file_path: path.join(home, 'pause.txt') } } });
+    transitionProjectRun(store, pausedSid, paused.run.runId, 'paused', readProjectRun(store, pausedSid, paused.run.runId).controlRev);
+    await handler(pausedSession, { type: 'tool/result', seq: 2, time: Date.now(),
+      data: { message: { name: 'read', toolCallId: 'pause-read', isError: false,
+        content: [{ type: 'text', text: 'PAUSE_RESULT' }] } } });
+    assert.equal(readProjectRun(store, pausedSid, paused.run.runId).state, 'paused');
+    assert.equal(listProjectActions(store, pausedSid, paused.run.runId)[0].executionState, 'completed');
+    assert.equal(readProjectCheck(store, pausedSid, paused.run.runId, paused.check.checkId).evidenceRefs.length, 1);
+
+    const reopenSid = 'pt-native-reopen';
+    const reopened = prepareProject(reopenSid, { minutes: 30 });
+    const reopenSession = { id: reopenSid, header: { agentPreset: 'pentest' } };
+    await handler(reopenSession, { type: 'tool/call', seq: 3, time: Date.now(),
+      data: { name: 'read', callId: 'old-read', arguments: { file_path: path.join(home, 'old.txt') } } });
+    const oldAttempt = readProjectCheck(store, reopenSid, reopened.run.runId, reopened.check.checkId).activeAttempt.attemptId;
+    reopenProjectCheck(store, reopenSid, reopened.run.runId, reopened.check.checkId, { force: true, reason: 'new instance', instanceRevision: 2 });
+    await handler(reopenSession, { type: 'tool/result', seq: 4, time: Date.now(),
+      data: { message: { name: 'read', toolCallId: 'old-read', isError: false,
+        content: [{ type: 'text', text: 'OLD_RESULT' }] } } });
+    await handler(reopenSession, { type: 'tool/result', seq: 5, time: Date.now(),
+      data: { message: { name: 'read', toolCallId: 'old-read', isError: false,
+        content: [{ type: 'text', text: 'OLD_RESULT' }] } } });
+    const current = readProjectCheck(store, reopenSid, reopened.run.runId, reopened.check.checkId);
+    assert.equal(current.executionState, 'pending');
+    assert.deepEqual(current.actionRefs, []);
+    assert.deepEqual(current.evidenceRefs, []);
+    const material = JSON.parse(store.db.prepare("SELECT record FROM business_materials WHERE session_id=? AND json_extract(record,'$.callId')='old-read'").get(reopenSid).record);
+    assert.equal(material.attemptId, oldAttempt);
+    assert.equal(store.db.prepare("SELECT count(*) AS n FROM business_materials WHERE session_id=? AND json_extract(record,'$.callId')='old-read'").get(reopenSid).n, 1);
+  });
+
+  await test('native commentary stays in the same attempt and retry ignores previous failed actions', async () => {
+    const handler = events.get('session/event')[0];
+    const commentarySid = 'pt-native-commentary';
+    const commentary = prepareProject(commentarySid, { minutes: 30 });
+    const [later] = defineProjectChecks(store, commentarySid, commentary.run.runId,
+      [{ checkId: 'later', requirement: '后续独立检查' }]);
+    const commentarySession = { id: commentarySid, header: { agentPreset: 'pentest' } };
+    await handler(commentarySession, { type: 'tool/call', seq: 6, time: Date.now(),
+      data: { turn: 1, step: 1, name: 'read', callId: 'comment-first', arguments: { file_path: path.join(home, 'first.txt') } } });
+    await handler(commentarySession, { type: 'tool/result', seq: 7, time: Date.now(),
+      data: { turn: 1, step: 1, message: { name: 'read', toolCallId: 'comment-first', isError: false,
+        content: [{ type: 'text', text: 'FIRST_OK' }] } } });
+    await handler(commentarySession, { type: 'assistant/message', seq: 8, time: Date.now(),
+      data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '第一份已读，接下来读取第二份。' }] } } });
+    await handler(commentarySession, { type: 'tool/call', seq: 9, time: Date.now(),
+      data: { turn: 1, step: 2, name: 'read', callId: 'comment-second', arguments: { file_path: path.join(home, 'second.txt') } } });
+    await handler(commentarySession, { type: 'tool/result', seq: 10, time: Date.now(),
+      data: { turn: 1, step: 2, message: { name: 'read', toolCallId: 'comment-second', isError: false,
+        content: [{ type: 'text', text: 'SECOND_OK' }] } } });
+    await handler(commentarySession, { type: 'assistant/message', seq: 11, time: Date.now(),
+      data: { turn: 1, step: 2, message: { content: [{ type: 'text', text: '两份资料均已读取并核对。' }] } } });
+    const commentaryCheck = readProjectCheck(store, commentarySid, commentary.run.runId, commentary.check.checkId);
+    assert.deepEqual(commentaryCheck.actionRefs, ['comment-first', 'comment-second']);
+    assert.equal(commentaryCheck.checkedContent, '两份资料均已读取并核对。');
+    const laterCheck = readProjectCheck(store, commentarySid, commentary.run.runId, later.checkId);
+    assert.equal(laterCheck.executionState, 'pending');
+    assert.deepEqual(laterCheck.actionRefs, []);
+
+    const retrySid = 'pt-native-failed-retry';
+    const retry = prepareProject(retrySid, { minutes: 30 });
+    const retrySession = { id: retrySid, header: { agentPreset: 'pentest' } };
+    await handler(retrySession, { type: 'tool/call', seq: 12, time: Date.now(),
+      data: { name: 'read', callId: 'failed-read', arguments: { file_path: path.join(home, 'missing.txt') } } });
+    await handler(retrySession, { type: 'tool/result', seq: 13, time: Date.now(),
+      data: { message: { name: 'read', toolCallId: 'failed-read', isError: true,
+        content: [{ type: 'text', text: 'file missing' }] }, error: { code: 'missing' } } });
+    await handler(retrySession, { type: 'assistant/message', seq: 14, time: Date.now(),
+      data: { message: { content: [{ type: 'text', text: '文件不存在。' }] } } });
+    reopenProjectCheck(store, retrySid, retry.run.runId, retry.check.checkId, { reason: '补齐文件后重试' });
+    await handler(retrySession, { type: 'tool/call', seq: 15, time: Date.now(),
+      data: { name: 'read', callId: 'successful-retry', arguments: { file_path: path.join(home, 'retry.txt') } } });
+    await handler(retrySession, { type: 'tool/result', seq: 16, time: Date.now(),
+      data: { message: { name: 'read', toolCallId: 'successful-retry', isError: false,
+        content: [{ type: 'text', text: 'RETRY_OK' }] } } });
+    await handler(retrySession, { type: 'assistant/message', seq: 17, time: Date.now(),
+      data: { message: { content: [{ type: 'text', text: '补齐后读取成功，结论待核对。' }] } } });
+    const retried = readProjectCheck(store, retrySid, retry.run.runId, retry.check.checkId);
+    assert.equal(retried.verdict, 'needs_check');
+    assert.deepEqual(retried.actionRefs, ['successful-retry']);
+  });
+
+  await test('a later successful action in the same attempt supersedes an earlier failure', async () => {
+    const sid = 'pt-native-failure-then-success';
+    const prepared = prepareProject(sid, { minutes: 30 });
+    const handler = events.get('session/event')[0];
+    const session = { id: sid, header: { agentPreset: 'pentest' } };
+    await handler(session, { type: 'tool/call', seq: 31, time: Date.now(), data: {
+      turn: 1, step: 1, name: 'read', callId: 'same-attempt-fail', arguments: { file_path: path.join(home, 'missing.txt') },
+    } });
+    await handler(session, { type: 'tool/result', seq: 32, time: Date.now(), data: {
+      turn: 1, step: 1, message: { name: 'read', toolCallId: 'same-attempt-fail', isError: true,
+        content: [{ type: 'text', text: 'not found' }] }, error: { code: 'ENOENT' },
+    } });
+    await handler(session, { type: 'assistant/message', seq: 33, time: Date.now(), data: {
+      turn: 1, step: 1, message: { content: [{ type: 'text', text: '第一次读取失败，换用已保存材料。' }] },
+    } });
+    await handler(session, { type: 'tool/call', seq: 34, time: Date.now(), data: {
+      turn: 1, step: 2, name: 'read', callId: 'same-attempt-success', arguments: { file_path: path.join(home, 'expected.txt') },
+    } });
+    await handler(session, { type: 'tool/result', seq: 35, time: Date.now(), data: {
+      turn: 1, step: 2, message: { name: 'read', toolCallId: 'same-attempt-success', isError: false,
+        content: [{ type: 'text', text: 'AUTO_CASE_OK' }] },
+    } });
+    await handler(session, { type: 'assistant/message', seq: 36, time: Date.now(), data: {
+      turn: 1, step: 2, message: { content: [{ type: 'text', text: '改用已保存材料后读取成功，结论待核对。' }] },
+    } });
+    const check = readProjectCheck(store, sid, prepared.run.runId, prepared.check.checkId);
+    assert.equal(check.verdict, 'needs_check');
+    assert.equal(check.gaps, '');
+    assert.deepEqual(check.actionRefs, ['same-attempt-fail', 'same-attempt-success']);
+  });
+
+  await test('parallel native reads route by explicit case targets and keep both actions', async () => {
+    const sid = 'pt-native-parallel';
+    upsertProjectSource(store, sid, {
+      sourceId: 'parallel-cases', sourceRevision: 'r1', displayName: '并行用例.xlsx', kind: 'xlsx', parseState: 'ready',
+      sections: [
+        { sectionId: 'p-1', location: { kind: 'row', sheet: 'Cases', row: 1, hidden: false }, kind: 'row',
+          cells: [{ value: '编号' }, { value: '测试项' }, { value: '预期结果' }] },
+        { sectionId: 'p-2', location: { kind: 'row', sheet: 'Cases', row: 2, hidden: false }, kind: 'row',
+          cells: [{ value: 'C1' }, { value: '读取 first.txt 和 second.txt' }, { value: 'FIRST_OK SECOND_OK' }] },
+        { sectionId: 'p-3', location: { kind: 'row', sheet: 'Cases', row: 3, hidden: false }, kind: 'row',
+          cells: [{ value: 'C2' }, { value: '读取 final.txt' }, { value: 'FINAL_OK' }] },
+      ],
+    });
+    const started = await dispatch(ctx, store, 'project.start', {
+      sessionId: sid, autoStart: false, policy: { question: '并行读取路由', allowTargetNetwork: false },
+    });
+    const checks = listProjectChecks(store, sid, started.run.runId);
+    assert.equal(checks.length, 2);
+    let seq = 20;
+    const capture = (type, data) => captureProjectNativeEvent(store, sid, { type, seq: seq++, time: Date.now(), data });
+    for (const [seq, callId, name] of [
+      [21, 'parallel-first', 'first.txt'],
+      [22, 'parallel-second', 'second.txt'],
+      [23, 'parallel-final', 'final.txt'],
+    ]) {
+      capture('tool/call', {
+        turn: 1, step: 1, name: 'read', callId, arguments: { file_path: path.join(home, name) } });
+    }
+    for (const [seq, callId, text] of [
+      [24, 'parallel-first', 'FIRST_OK'],
+      [25, 'parallel-second', 'SECOND_OK'],
+      [26, 'parallel-final', 'FINAL_OK'],
+    ]) {
+      capture('tool/result', {
+        turn: 1, step: 1, message: { name: 'read', toolCallId: callId, isError: false,
+          content: [{ type: 'text', text }] } });
+    }
+    capture('assistant/message', {
+      turn: 1, step: 1, message: { content: [{ type: 'text', text: '当前项读取完成。' }] } });
+    const current = listProjectChecks(store, sid, started.run.runId);
+    const routeDebug = JSON.stringify(current.map(check => ({ checkId: check.checkId,
+      requirement: check.requirement, state: check.executionState, actions: check.actionRefs })));
+    assert.deepEqual(current[0].actionRefs, ['parallel-first', 'parallel-second'], routeDebug);
+    assert.deepEqual(current[1].actionRefs, ['parallel-final'], routeDebug);
+    assert.equal(current[0].evidenceRefs.length, 2);
+    assert.equal(current[1].evidenceRefs.length, 1);
+    assert.equal(current[1].executionState, 'ended');
+    assert.equal(listProjectActions(store, sid, started.run.runId).length, 3);
   });
 
   await test('项目工具定义展示结构化检查格式，错误输入不能假报定义成功', async () => {
@@ -392,13 +898,13 @@ try {
     const handlers = events.get('agent/turn-stopping');
     assert(handlers?.length);
     for (let index = 0; index < 4; index++) for (const handler of handlers) await handler({ agent });
-    assert.equal(steers.length, 2, '第三次无进展必须停止投递');
+    assert.equal(steers.length, 1, '同一无进展指纹只允许一次接续');
     for (const message of steers) {
       assert.equal(typeof message, 'object', '宿主 inbox 持久化要求消息对象，字符串会导致重启后历史损坏');
       assert(message.id.startsWith('saker-project-continue-'));
       assert.equal(message.role, 'user');
       assert.equal(message.source.kind, 'user');
-      assert.match(message.content[0].text, /继续按文档测试/);
+      assert.match(message.content[0].text, /继续案例测试/);
       assert.deepEqual(JSON.parse(JSON.stringify(message)), message);
     }
     assert.equal(readProjectRun(store, sid, run.runId).state, 'paused');
@@ -406,6 +912,31 @@ try {
     const recorded = await tools.get('project_check').execute({ action: 'record', checkId: check.checkId, verdict: 'not_found', checkedContent: '不应被写入' }, exec(sid));
     assert.equal(recorded.ok, false, '暂停状态不接受迟到结论');
     assert.match(recorded.error, /已暂停/);
+  });
+
+  await test('“只回复收到”不触发程序续接或额外模型请求', async () => {
+    const sid = 'pt-temporary-reply';
+    const { run } = prepareProject(sid);
+    const steers = [];
+    const agent = {
+      ...exec(sid).agent,
+      steer: message => steers.push(message),
+      session: {
+        ...exec(sid).agent.session,
+        events: [{
+          type: 'user/message',
+          data: { source: { kind: 'user', form: 'message' }, content: [{ type: 'text', text: '只回复收到，不要执行任务' }] },
+        }],
+      },
+    };
+    let mainModelRequests = 1;
+    for (const handler of events.get('agent/turn-stopping') || []) await handler({ agent });
+    mainModelRequests += steers.length;
+    assert.equal(mainModelRequests, 1);
+    assert.equal(steers.length, 0);
+    const current = readProjectRun(store, sid, run.runId);
+    assert.equal(current.state, 'running', 'a temporary reply must not cancel the active run');
+    assert.equal(current.continuationPaused, true, 'only automatic continuation is paused');
   });
 
   await test('project_document list / read / search 可用', async () => {
@@ -430,7 +961,7 @@ try {
     assert.equal(page1.nextCursor, 10);
     const page2 = await tool.execute({ action: 'list', cursor: page1.nextCursor, limit: 20 }, exec('pt-doc'));
     assert(page2.entries.some(entry => entry.sectionId === 's11'), '目录分页必须覆盖后续段落');
-    const batch = await invoke('pt-doc', 'project_document', {action:'read',sourceId:'doc-many',sectionIds:['s1','s2','s45'],limit:5});
+    const batch = await invoke('pt-doc', 'project_document', {action:'read',sourceId:'doc-many',sectionIds:['s1','s2','s45'],limit:16});
     assert(batch.ok, batch.error);
     assert.equal(batch.entries.length,2);
     assert.deepEqual(batch.unreadSectionIds,['s45']);
@@ -455,6 +986,108 @@ try {
     const stillUnread=await decide('tail');assert.equal(stillUnread.ok,false);assert.match(stillUnread.error,/尚未完整读取/);
     const tail=await invoke(sid,'project_document',{action:'read',sourceId:'batch-doc',sectionIds:['tail']});assert(tail.ok,tail.error);
     const accepted=await decide('tail');assert(accepted.ok,accepted.error);
+  });
+
+  await test('competition task attachments remain readable with knowledge disabled and UTF-8 prompt paging advances', async () => {
+    const sid = 'pt-competition-material';
+    writeSceneContext(store, sid, 'competition', { presetId: 'ctf-solver' });
+    const prompt = 'HEAD-' + '中文🙂'.repeat(2400) + '-TAIL';
+    const challenge = createCompetitionChallenge(store, sid, {
+      title: '附件与长题面', prompt, environment: { kind: 'host' },
+    });
+    setCurrentCompetitionChallenge(store, sid, challenge.challengeId);
+    const attachmentFile = path.join(home, 'competition-input.txt');
+    fs.writeFileSync(attachmentFile, '附件中的关键说明 COMPETITION_INPUT_OK');
+    const attachmentId = 'competition-attachment-fixture';
+    store.db.prepare('INSERT INTO business_materials(session_id,id,source_url,digest,record) VALUES(?,?,?,?,?)')
+      .run(sid, attachmentId, attachmentFile, 'fixture-digest', JSON.stringify({
+        id: attachmentId, name: 'competition-input.txt', path: attachmentFile, digest: 'fixture-digest',
+        bytes: fs.statSync(attachmentFile).size, source: 'competition-attachment',
+      }));
+    store.db.prepare('INSERT INTO business_materials(session_id,id,source_url,digest,record) VALUES(?,?,?,?,?)')
+      .run(sid, 'knowledge-hidden', '', 'knowledge-digest', JSON.stringify({
+        id: 'knowledge-hidden', name: 'knowledge.txt', file: attachmentFile, digest: 'knowledge-digest',
+        bytes: fs.statSync(attachmentFile).size, source: 'local-knowledge-snapshot',
+      }));
+    const material = tools.get('saker_material');
+    const ctfExec = { agent: { session: { id: sid, header: { agentPreset: 'ctf-solver', cwd: home } } } };
+    const first = await material.execute({ action: 'current' }, ctfExec);
+    assert.equal(first.ok, true, first.error);
+    assert(Buffer.byteLength(first.prompt) <= 8192);
+    assert.doesNotMatch(first.prompt, /\uFFFD/);
+    assert(first.nextOffset > 0);
+    const second = await material.execute({ action: 'current', offset: first.nextOffset }, ctfExec);
+    assert.equal(second.ok, true, second.error);
+    assert.equal(second.range.start, first.nextOffset);
+    assert.notEqual(second.prompt, first.prompt);
+    assert(second.nextOffset === null || second.nextOffset > first.nextOffset);
+    assert.doesNotMatch(second.prompt, /\uFFFD/);
+    const read = await material.execute({ action: 'read', id: attachmentId }, ctfExec);
+    assert.equal(read.ok, true, read.error);
+    assert.match(read.content, /COMPETITION_INPUT_OK/);
+    const listed = await material.execute({ action: 'list', limit: 20 }, ctfExec);
+    assert.equal(listed.ok, true, listed.error);
+    assert(listed.rows.some(row => row.id === attachmentId));
+    assert(!listed.rows.some(row => row.id === 'knowledge-hidden'), 'knowledge snapshots belong to the optional knowledge tool, not task materials');
+  });
+
+  await test('比赛题面读取优先使用会话实际 preset，不因旧 header 或组合缓存误报场景冲突', async () => {
+    const sid = 'ctf-composed-preset-current';
+    writeSceneContext(store, sid, 'competition', { presetId: 'ctf-solver' });
+    const challenge = createCompetitionChallenge(store, sid, {
+      title: '组合 preset 题面', prompt: 'COMPOSED_PRESET_MARKER',
+    });
+    setCurrentCompetitionChallenge(store, sid, challenge.challengeId);
+    const previous = ctx.agentPresets;
+    ctx.agentPresets = { composedPreset: () => 'pentest' };
+    try {
+      const result = await tools.get('saker_material').execute({ action: 'current' }, {
+        agent: { session: { id: sid, mode: 'ctf-solver', header: { agentPreset: 'pentest' } } },
+      });
+      assert.equal(result.ok, true, result.error);
+      assert.match(result.prompt, /COMPOSED_PRESET_MARKER/);
+    } finally {
+      if (previous === undefined) delete ctx.agentPresets;
+      else ctx.agentPresets = previous;
+    }
+  });
+
+  await test('场景 RPC 与比赛控制使用实际组合 preset，不读取过期的 header', async () => {
+    const sid = 'ctf-composed-preset-rpc';
+    const previousSessions = ctx.sessions;
+    ctx.sessions = {
+      get: id => id === sid
+        ? { id, mode: 'ctf-solver', header: { agentPreset: 'pentest' } }
+        : { id, mode: 'pentest', header: { agentPreset: 'pentest' } },
+    };
+    try {
+      const bound = await dispatch(ctx, store, 'scene.bind', {
+        sessionId: sid, scene: 'competition', expectedRevision: 0, requestId: 'composed-preset-rpc-bind',
+      });
+      assert.equal(bound.sceneId, 'competition');
+      const challenge = createCompetitionChallenge(store, sid, {
+        title: '组合 preset 控制题', prompt: 'COMPOSED_RPC_MARKER',
+      });
+      setCurrentCompetitionChallenge(store, sid, challenge.challengeId);
+      const paused = await dispatch(ctx, store, 'scene.task-control', { sessionId: sid, action: 'pause' });
+      assert.equal(paused.ok, true);
+      const current = await dispatch(ctx, store, 'scene.get', { sessionId: sid });
+      assert.equal(current.sceneId, 'competition');
+      assert.equal(current.continuationPaused, true);
+    } finally {
+      ctx.sessions = previousSessions;
+    }
+  });
+
+  await test('disabled competition collaboration is rejected before creating a task policy', async () => {
+    const sid = 'pt-competition-no-workers';
+    writeSceneContext(store, sid, 'competition', { presetId: 'ctf-solver' });
+    setCompetitionPreferences(store, sid, { workers: 0 });
+    const ctfExec = { agent: { session: { id: sid, header: { agentPreset: 'ctf-solver', cwd: home } } } };
+    const result = await tools.get('saker_assist').execute({ goal: '并行检查一个独立问题' }, ctfExec);
+    assert.equal(result.ok, false);
+    assert.match(result.error, /协作人数为0/);
+    assert.equal(readTaskPolicy(store, sid), null, 'a refused collaboration must not create or advance the parent task policy');
   });
 
   await test('project_check next / record / detail 可用', async () => {
@@ -633,7 +1266,104 @@ try {
     const tool = tools.get('project_check');
     const result = await tool.execute({ action: 'next' }, exec('pt-pentest'));
     assert.equal(result.ok, false);
-    assert.match(String(result.error), /按文档测试/);
+    assert.match(String(result.error), /案例测试/);
+  });
+
+  await test('project_evidence records actual file and command evidence for case results', async () => {
+    const sid = 'pt-evidence-tools';
+    const { run, check } = prepareProject(sid);
+    await tools.get('project_check').execute({ action: 'next' }, exec(sid));
+    const file = path.join(home, 'case-evidence.txt');
+    fs.writeFileSync(file, 'expected export fields: id,name\nobserved: id,name\n');
+    const fileResult = await tools.get('project_evidence').execute({ action: 'file', checkId: check.checkId, path: file, limit: 200 }, exec(sid));
+    assert.equal(fileResult.ok, true, fileResult.error);
+    assert(fileResult.evidenceId.startsWith('project-evidence-'));
+    const counter = path.join(home, 'case-command-count.txt');
+    const script = path.join(home, 'case-command-once.mjs');
+    fs.writeFileSync(script, "import fs from 'node:fs';fs.appendFileSync(process.argv[2],'once\\n');process.stdout.write('CASE_EVIDENCE\\n')\n");
+    const commandResult = await tools.get('project_evidence').execute({
+      action: 'command', checkId: check.checkId, command: JSON.stringify(process.execPath) + ' ' + JSON.stringify(script) + ' ' + JSON.stringify(counter),
+      cwd: home, timeoutMs: 5000,
+    }, exec(sid));
+    assert.equal(commandResult.ok, true, commandResult.error);
+    assert.match(commandResult.observation.stdout, /CASE_EVIDENCE/)
+    assert.equal(fs.readFileSync(counter, 'utf8'), 'once\n')
+    assert.match(commandResult.note, /同一 operationId/)
+    const recorded = await tools.get('project_check').execute({
+      action: 'record', checkId: check.checkId, verdict: 'expectation_met',
+      checkedContent: 'The export and local check produced the expected observed fields',
+      evidenceRefs: [fileResult.evidenceId, commandResult.evidenceId],
+    }, exec(sid));
+    assert.equal(recorded.ok, true, recorded.error);
+    assert.equal(recorded.check.findingRefs.length, 0);
+    assert.equal(recorded.check.evidenceRefs.length, 2);
+    assert.equal(listProjectActions(store, sid, run.runId).every(action => action.checkId === check.checkId), true);
+
+    const large = path.join(home, 'case-large.bin');
+    const largeBytes = Buffer.alloc(2 * 1024 * 1024 + 37, 0x61);
+    largeBytes.write('TAIL-EVIDENCE', largeBytes.length - 13, 'utf8');
+    fs.writeFileSync(large, largeBytes);
+    const rangeResult = await tools.get('project_evidence').execute({
+      action: 'file', checkId: check.checkId, path: large, offset: largeBytes.length - 13, limit: 13,
+    }, exec(sid));
+    assert.equal(rangeResult.ok, true, rangeResult.error);
+    const rangeRow = store.db.prepare('SELECT record FROM business_materials WHERE session_id=? AND id=?')
+      .get(sid, rangeResult.evidenceId);
+    const rangeRecord = JSON.parse(rangeRow.record);
+    assert.equal(rangeRecord.text, 'TAIL-EVIDENCE');
+    assert.equal(rangeRecord.complete, true);
+    assert.equal(rangeRecord.sha256, crypto.createHash('sha256').update(largeBytes).digest('hex'));
+  });
+
+  await test('project_evidence source must belong to the run snapshot and have been read', async () => {
+    const sid = 'pt-evidence-source';
+    const imported = await dispatch(ctx, store, 'project.import', {
+      sessionId: sid, name: 'source-evidence.txt', text: 'unused seed',
+    });
+    upsertProjectSource(store, sid, {
+      sourceId: imported.source.sourceId,
+      sourceRevision: imported.source.sourceRevision,
+      displayName: 'source-evidence.txt',
+      kind: 'text',
+      parseState: 'ready',
+      sections: [
+        { sectionId: 'p1', kind: 'paragraph', text: 'READ-ME evidence' },
+        { sectionId: 'p2', kind: 'paragraph', text: 'NOT-READ evidence' },
+      ],
+    });
+    await dispatch(ctx, store, 'project.start', {
+      sessionId: sid, autoStart: false, policy: { question: 'source evidence', allowTargetNetwork: false },
+    });
+    const defined = await invoke(sid, 'project_check', {
+      action: 'define', checks: [{ requirement: 'verify source range' }],
+    });
+    const read = await invoke(sid, 'project_document', {
+      action: 'read', sourceId: imported.source.sourceId, sourceRevision: imported.source.sourceRevision, sectionId: 'p1',
+    });
+    assert.equal(read.ok, true, read.error);
+    const next = await invoke(sid, 'project_check', { action: 'next' });
+    assert.equal(next.ok, true, next.error);
+    const accepted = await invoke(sid, 'project_evidence', {
+      action: 'source', checkId: next.check.checkId, sourceId: imported.source.sourceId,
+      sourceRevision: imported.source.sourceRevision, sectionId: 'p1', text: 'READ-ME evidence',
+    });
+    assert.equal(accepted.ok, true, accepted.error);
+    const unread = await invoke(sid, 'project_evidence', {
+      action: 'source', checkId: next.check.checkId, sourceId: imported.source.sourceId,
+      sourceRevision: imported.source.sourceRevision, sectionId: 'p2', text: 'NOT-READ evidence',
+    });
+    assert.equal(unread.ok, false);
+    assert.match(unread.error, /has not been read/);
+    upsertProjectSource(store, sid, {
+      sourceId: 'outside-snapshot', sourceRevision: 'r1', displayName: 'outside.txt',
+      kind: 'text', parseState: 'ready', sections: [{ sectionId: 'p1', text: 'OUTSIDE evidence' }],
+    });
+    const outside = await invoke(sid, 'project_evidence', {
+      action: 'source', checkId: next.check.checkId, sourceId: 'outside-snapshot',
+      sourceRevision: 'r1', sectionId: 'p1', text: 'OUTSIDE evidence',
+    });
+    assert.equal(outside.ok, false);
+    assert.match(outside.error, /not part of the current project run/);
   });
 
   const cft = process.env.SAKER_SKIP_CFT_TESTS !== '1' && (process.env.SAKER_CFT_PATH

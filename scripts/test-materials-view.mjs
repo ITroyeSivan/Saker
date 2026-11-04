@@ -142,17 +142,16 @@ try {
         JSON.stringify({ id: 'material-big', file, sourceUrl: endpoint + '/big.txt', hints: [], coverage: {} }));
     const read = (offset, limit) => materialsDetail(store, 'mat', { kind: 'file', id: 'material-big', offset, limit });
     const first = read(undefined, undefined);
-    assert.equal(first.offset, 0); assert.equal(first.limit, 6000);
-    assert.equal(first.totalBytes, 20000); assert.equal(first.nextOffset, 6000);
-    assert.equal(first.preview.length, 6000); assert.equal(first.truncated, true);
+    assert.equal(first.offset, 0); assert.equal(first.limit, 8192);
+    assert.equal(first.totalBytes, 20000); assert.equal(first.nextOffset, 8192);
+    assert.equal(first.preview.length, 8192); assert.equal(first.truncated, true);
     const second = read(first.nextOffset, first.limit);
-    const third = read(second.nextOffset, second.limit);
-    const last = read(third.nextOffset, third.limit);
-    assert.equal(second.offset, 6000); assert.equal(third.offset, 12000); assert.equal(last.offset, 18000);
-    assert.equal(last.preview.length, 2000, '最后一段只到文件末尾');
+    const last = read(second.nextOffset, second.limit);
+    assert.equal(second.offset, first.nextOffset); assert.equal(last.offset, second.nextOffset);
+    assert.equal(last.preview.length, 3616, '最后一段只到文件末尾');
     assert.equal(last.nextOffset, null, '读完就没有下一段');
     assert.equal(last.truncated, false);
-    assert.equal(first.preview + second.preview + third.preview + last.preview, body, '分段拼起来就是原文');
+    assert.equal(first.preview + second.preview + last.preview, body, '分段拼起来就是原文');
     assert.equal(read(0, 999999).limit, 16384, '单段上限 16KB');
     assert.equal(read(0, 1).limit, 512, '单段下限 512B');
   });
@@ -287,7 +286,7 @@ try {
     // 「并标近似」是方案原话：口径说明不能被收缩逻辑先丢掉。
     assert.equal(view.unit, 'bytes-approx', '变化通知必须标出 480 是字节近似口径');
   });
-  test('模型读原文：默认 ≤6000 字节、代码 ≤80 行、HTTP 分头/体并标截断位置', () => {
+  test('模型读原文：默认 ≤8192 字节、代码 ≤80 行、HTTP 分头/体并标截断位置', () => {
     const sid = 'excerpt';
     const code = Array.from({ length: 200 }, (_, i) => 'const line' + i + ' = ' + i + ';').join('\n');
     const codeMaterial = importPastedMaterial(store, sid, { name: 'big.js', text: code }, { home });
@@ -298,7 +297,7 @@ try {
     const second = readMaterialExcerpt(store, sid, { id: codeMaterial.id, offset: first.nextOffset });
     assert(second.lines > 0, '用 nextOffset 能续读到下一段');
     assert.notEqual(second.content, first.content, '续读的是不同段落');
-    // 行短、字节先到：每行足够长时 80 行还没到就先撞 6000 字节；此时 note 必须承认还有后续。
+    // 行短、字节先到：每行足够长时 80 行还没到就先撞 8192 字节；此时 note 必须承认还有后续。
     const wide = Array.from({ length: 200 }, (_, i) => 'const wide' + i + ' = "' + 'x'.repeat(160) + '";').join('\n');
     const wideMaterial = importPastedMaterial(store, sid, { name: 'wide.js', text: wide }, { home });
     const wideFirst = readMaterialExcerpt(store, sid, { id: wideMaterial.id });
@@ -315,8 +314,8 @@ try {
     assert.equal(http.body, 'BODY-BYTES');
     assert.equal(http.headTruncated, false);
     assert.equal(http.bodyTruncated, false);
-    // 头本身就超过 6000 字节：只有头被截断，体还没轮到，headTruncated 必须为 true。
-    const bigHead = 'GET /huge HTTP/1.1\r\nHost: app.example.test\r\nX-Pad: ' + 'p'.repeat(7000) + '\r\n\r\nBODY';
+    // 头本身就超过 8192 字节：只有头被截断，体还没轮到，headTruncated 必须为 true。
+    const bigHead = 'GET /huge HTTP/1.1\r\nHost: app.example.test\r\nX-Pad: ' + 'p'.repeat(9000) + '\r\n\r\nBODY';
     const bigHeadMaterial = importPastedMaterial(store, sid, { name: 'huge.txt', text: bigHead }, { home });
     const bigHeadRead = readMaterialExcerpt(store, sid, { id: bigHeadMaterial.id });
     assert.equal(bigHeadRead.kind, 'http');

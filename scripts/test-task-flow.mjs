@@ -89,13 +89,16 @@ try {
     assert.equal(taskPolicyStatus(store, 'checkpoint').reason, 'plan_complete');
   });
 
-  await test('a stopped model turn closes only a single task and does not claim completion', () => {
+  await test('a finished model turn is idle and keeps target permissions on the same task', () => {
     chooseTaskMode(store, 'turn-ended', 'regular', { workers: 0 });
     startTaskPolicy(store, 'turn-ended', { mode: 'regular', budget: { toolCalls: 5, minutes: 10 } });
     const stopped = finishTaskOnTurnEnd(store, 'turn-ended');
     assert.equal(stopped.reason, 'turn_ended');
-    assert.equal(taskPolicyStatus(store, 'turn-ended').reason, 'turn_ended');
-    assert.match(taskExecutionGuard(store, 'turn-ended', 'recorded-http-execution'), /turn_ended/);
+    const idle = taskPolicyStatus(store, 'turn-ended');
+    assert.equal(idle.reason, 'turn_ended');
+    assert.equal(idle.idle, true);
+    assert.equal(idle.stopped, false);
+    assert.equal(taskExecutionGuard(store, 'turn-ended', 'recorded-http-execution'), undefined);
     assert.equal(readTaskPolicy(store, 'turn-ended').planComplete, false);
     assert.equal(finishTaskOnTurnEnd(store, 'turn-ended'), null);
 
@@ -121,11 +124,11 @@ try {
     assert.throws(() => startTaskPolicy(store, 'over-limit', { mode: 'regular', budget: { toolCalls: 5, workers: 17 } }), /0 and 16/);
   });
 
-  await test('default worker ceiling is the plan value 2', () => {
+  await test('default worker ceiling is zero until the user explicitly enables collaboration', () => {
     chooseTaskMode(store, 'default-workers', 'regular');
-    assert.equal(chosenTaskOptions(store, 'default-workers').workers, 2);
+    assert.equal(chosenTaskOptions(store, 'default-workers').workers, 0);
     const policy = startTaskPolicy(store, 'default-workers-direct', { mode: 'regular', budget: { toolCalls: 5 } });
-    assert.equal(policy.workerLimit, 2);
+    assert.equal(policy.workerLimit, 0);
   });
 
   await test('one task keeps one operation budget and does not reset time, question, target or materials', () => {
@@ -197,11 +200,11 @@ try {
     assert.equal(store.db.prepare('SELECT count(*) AS n FROM task_rounds WHERE session_id=?').get('archive-round').n, 1);
   });
 
-  await test('all modes share one 36-template library; copying uses final text without starting a task', async () => {
+  await test('all modes share one template library; copying uses final text without starting a task', async () => {
     const source = fs.readFileSync(new URL('../plugins/dsh-redteam-results/lib/client.js', import.meta.url), 'utf8');
     const { builtinTemplates, promptFields } = await import('../plugins/dsh-redteam-results/lib/prompt-templates.js');
     const catalog = builtinTemplates();
-    assert.equal(catalog.length, 36);
+    assert.equal(catalog.length, 50);
     const snippet = source.slice(source.indexOf('function promptSubstitute('), source.indexOf('function ChatSetup('));
     const clipboard = [], values = [];
     let cursor = 0, fail = false;

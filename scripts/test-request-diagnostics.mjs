@@ -81,7 +81,7 @@ test('RPC diagnostics.request 分项返回，并把已遮蔽的原始记录写�
     const raw = fs.readFileSync(view.rawPath, 'utf8');
     assert(raw.includes('saker-diagnostics') === false, '文件内容是记录本身');
     assert(JSON.parse(raw).breakdown.total === view.total, '私有记录与返回值一致');
-    await assert.rejects(results.dispatch(ctx, store, 'diagnostics.request', { sessionId: 'nope' }), /渗透会话/);
+    await assert.rejects(results.dispatch(ctx, store, 'diagnostics.request', { sessionId: 'nope' }), /Saker 会话/);
   } finally { store.close(); fs.rmSync(home, { recursive: true, force: true }); }
 });
 

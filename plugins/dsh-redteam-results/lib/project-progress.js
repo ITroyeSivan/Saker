@@ -17,7 +17,7 @@ function saveProgress(store, run, patch) {
   return next;
 }
 
-/** 合并实际发给模型的字符区间；重读、重叠片段和相同搜索结果不重复计进展。 */
+/** 合并实际发给模型的 UTF-8 字节区间；重读、重叠片段和相同搜索结果不重复计进展。 */
 export function recordProjectDocumentRead(store, sessionId, runId, input) {
   return taskTransaction(store, () => {
     const run = readProjectRun(store, sessionId, runId);
@@ -27,10 +27,11 @@ export function recordProjectDocumentRead(store, sessionId, runId, input) {
     const source = readProjectSource(store, sessionId, input.sourceId, input.sourceRevision);
     const section = source?.sections?.find(item => item.sectionId === input.sectionId);
     if (!section || !input.text) return false;
-    const text = String(section.text || '');
+    const text = Buffer.from(String(section.text || ''), 'utf8');
     const start = Math.max(0, Math.trunc(Number(input.cursor) || 0));
-    const end = start + input.text.length;
-    if (text.slice(start, end) !== input.text) return false;
+    const actual = Buffer.from(String(input.text || ''), 'utf8');
+    const end = start + actual.length;
+    if (!text.subarray(start, end).equals(actual)) return false;
     const key = projectDocumentKey(input.sourceId, input.sourceRevision, input.sectionId);
     const coverage = { ...(run.progressDocumentCoverage || {}) };
     const previous = coverage[key] || [];
@@ -53,21 +54,21 @@ export function recordProjectDocumentRead(store, sessionId, runId, input) {
 
 function coverageFor(run, source, section) {
   const intervals = run.progressDocumentCoverage?.[projectDocumentKey(source.sourceId, source.sourceRevision, section.sectionId)] || [];
-  const length = String(section.text || '').length;
+  const length = Buffer.byteLength(String(section.text || ''), 'utf8');
   const covered = intervals.reduce((sum, [from, to]) => sum + Math.max(0, to - from), 0);
   return { covered, length, full: length === 0 || covered >= length };
 }
 
 /**
  * 当前 run 对固定来源快照的整理进度。读取不等于整理；只有本 run 的
- * requirements/reference/unreadable 决定才会消掉待处理区域。
+ * requirements/reference/pending/unreadable 决定才会消掉待处理区域。
  */
 export function projectSourceProgress(store, sessionId, runId) {
   const run = readProjectRun(store, sessionId, runId);
   if (!run) return { total: 0, decided: 0, pending: 0, needsRead: 0, needsDecision: 0, unreadable: 0, items: [] };
   const decisions = run.sectionDecisions || {};
   const items = [];
-  let total = 0, decided = 0, unreadable = 0;
+  let total = 0, decided = 0, unreadable = 0, pendingReview = 0;
   for (const snapshot of run.sourceSnapshot || []) {
     const source = readProjectSource(store, sessionId, snapshot.sourceId, snapshot.sourceRevision);
     if (!source) {
@@ -90,6 +91,7 @@ export function projectSourceProgress(store, sessionId, runId) {
       if (decision) {
         decided += 1;
         if (decision.decision === 'unreadable') unreadable += 1;
+        if (decision.decision === 'pending') pendingReview += 1;
         continue;
       }
       const coverage = coverageFor(run, source, section);
@@ -111,7 +113,7 @@ export function projectSourceProgress(store, sessionId, runId) {
   const unreadablePending = items.filter(item => item.state === 'unreadable').length;
   return {
     total, decided, pending: items.length, needsRead, needsDecision,
-    unreadable: unreadable + unreadablePending, items,
+    unreadable: unreadable + unreadablePending, pendingReview, items,
   };
 }
 

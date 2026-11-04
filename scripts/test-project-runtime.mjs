@@ -35,7 +35,8 @@ test('多项要求仍可执行时给出简短接续消息', () => {
   assert(continuation, '应返回接续消息');
   assert.equal(continuation.runId, run.runId);
   assert(continuation.text.includes(checks[0].requirement));
-  assert(continuation.text.includes('project_check record'));
+  assert(continuation.text.includes('程序已绑定当前项'));
+  assert(!continuation.text.includes('project_check record'), 'retired registration wording must not return');
   assert(!continuation.text.includes('完整工具手册'));
 });
 
@@ -61,10 +62,7 @@ test('同一进度重复接续达到阈值后暂停，不再反复发继续', ()
   assert.equal(first.attempts, 0);
   markProjectContinuation(store, 'pr-noprogress', first.runId, first.fingerprint, first.attempts);
   const second = projectContinuation(store, 'pr-noprogress');
-  assert.equal(second.attempts, 1);
-  markProjectContinuation(store, 'pr-noprogress', second.runId, second.fingerprint, second.attempts);
-  const third = projectContinuation(store, 'pr-noprogress');
-  assert.equal(third, null, '重复同一进度不应继续唤醒');
+  assert.equal(second, null, '同一无进展指纹只允许一次接续');
   const paused = readProjectRun(store, 'pr-noprogress', run.runId);
   assert.equal(paused.state, 'paused');
   assert.match(paused.blocker.reason, /自动继续未能推进/);
@@ -97,7 +95,7 @@ test('相同失败动作换新 ID 仍会无进展暂停', () => {
     });
   }
   assert.equal(readProjectRun(store, sid, run.runId).state, 'paused', '失败记录增加不能被当作新进展');
-  assert.deepEqual(attempts, [0, 1]);
+  assert.deepEqual(attempts, [0]);
 });
 
 function observation(sid, run, check, { body = 'same observation', request = 'same request', date = 'now' } = {}) {
@@ -116,11 +114,11 @@ function observation(sid, run, check, { body = 'same observation', request = 'sa
 test('相同成功观测换回执 ID 和响应时间不重复算进展', () => {
   const sid = 'pr-repeat-observation';
   const { run, checks } = prepare(sid);
-  for (let index = 0; index < 3; index++) {
+  for (let index = 0; index < 2; index++) {
     observation(sid, run, checks[0], { date: String(index) });
     const continuation = projectContinuation(store, sid);
-    if (index === 2) { assert.equal(continuation, null, '重复同一观测不能无限接续'); break; }
-    assert.equal(continuation.attempts, index, '只有首次实际观测算新进展');
+    if (index === 1) { assert.equal(continuation, null, '重复同一观测不能继续接续'); break; }
+    assert.equal(continuation.attempts, 0, '只有首次实际观测算新进展');
     markProjectContinuation(store, sid, run.runId, continuation.fingerprint, continuation.attempts);
   }
   assert.equal(readProjectRun(store, sid, run.runId).state, 'paused');
@@ -144,7 +142,7 @@ test('没有真实回执的动作完成标记不制造进展', () => {
   markProjectContinuation(store, sid, run.runId, first.fingerprint, first.attempts);
   const begun = beginProjectAction(store, sid, run.runId, checks[0].checkId, {});
   finishProjectAction(store, sid, run.runId, begun.action.actionId, { executionState: 'completed' });
-  assert.equal(projectContinuation(store, sid).attempts, 1, '只写 completed 不等于取得实际观测');
+  assert.equal(projectContinuation(store, sid), null, '只写 completed 不等于取得实际观测');
 });
 
 test('增加未读取来源不算进展，检查状态往返不反复清零', () => {
@@ -157,13 +155,11 @@ test('增加未读取来源不算进展，检查状态往返不反复清零', ()
   upsertProjectSource(store, sid, { displayName: '尚未读取', sections: [] });
   recordProjectCheck(store, sid, run.runId, checks[0].checkId, { executionState: 'pending' });
   const second = projectContinuation(store, sid);
-  assert.equal(second.attempts, 1, '空来源和退回 pending 不提供新事实');
-  markProjectContinuation(store, sid, run.runId, second.fingerprint, second.attempts);
-  recordProjectCheck(store, sid, run.runId, checks[0].checkId, {
+  assert.equal(second, null, '空来源和退回 pending 不提供新事实');
+  assert.equal(readProjectRun(store, sid, run.runId).state, 'paused');
+  assert.throws(() => recordProjectCheck(store, sid, run.runId, checks[0].checkId, {
     executionState: 'ended', verdict: 'not_found', checkedContent: '已观察正常内容',
-  });
-  const third = projectContinuation(store, sid);
-  assert(third === null || third.attempts >= 1, '重新保存已有结论不能把无进展计数重置为 0');
+  }), /已暂停|不可写入/);
 });
 
 test('迟到的接续标记不能修改已停止运行', () => {
@@ -245,15 +241,17 @@ test('一项检查结束后由项目判定收尾，并同步公共 policy', () =
   assert.equal(readTaskPolicy(store, sid).planComplete, true, '项目完成必须同步公共任务状态');
 });
 
-test('只有缺条件项时进入 waiting，不伪装成 completed', () => {
+test('只有缺条件项时执行可正常收尾，并明确保留缺口', () => {
   const sid = 'pr-waiting-blocked';
   const { run, checks } = prepare(sid, [{ requirement: '需要审批账号' }]);
   recordProjectCheck(store, sid, run.runId, checks[0].checkId, {
     executionState: 'ended', verdict: 'blocked', gaps: '缺少审批账号',
   });
   const decision = projectTurnDecision(store, sid);
-  assert.equal(decision.action, 'waiting');
-  assert.equal(decision.blocker.code, 'waiting-conditions');
+  assert.equal(decision.action, 'completed');
+  assert.equal(decision.summary.executionComplete, true);
+  assert.equal(decision.summary.hasGaps, true);
+  assert.equal(decision.summary.coverageComplete, false);
 });
 
 test('零要求进入 waiting，空计划不能自动完成', () => {
@@ -277,7 +275,7 @@ test('preparing 阶段仍有未读来源时有界接续，不会提前结束', (
   });
   const decision = projectTurnDecision(store, sid);
   assert.equal(decision.action, 'continue');
-  assert.match(decision.continuation.text, /先读取来源/);
+  assert.match(decision.continuation.text, /读取来源/);
 });
 
 test('检查全部结束但来源尚未整理时不能自动完成', () => {

@@ -17,10 +17,25 @@
 /** 宿主内置的默认模式（Saker 三个 preset 之外的那个「标准」）。 */
 export const DEFAULT_MODES = ['pentest', 'code-audit', 'ctf-solver']
 
-// 同一 pentest preset 下还有「自由测试 / 按文档测试」两种产品场景。它们不是
+// 同一 pentest preset 下还有「自由测试 / 案例测试」两种产品场景。它们不是
 // 新 preset，不能用 mode 规则区分；由 redteam-results 提供服务在运行时给出场景。
-export const PROJECT_ONLY_TOOLS = ['project_document', 'project_check', 'project_request']
+export const PROJECT_ONLY_TOOLS = ['project_document', 'project_check', 'project_request', 'project_evidence']
 export const FREE_ONLY_TOOLS = ['redteam_checks', 'redteam_execution', 'redteam_method', 'redteam_research']
+export const COMPETITION_ONLY_TOOLS = ['competition_challenge', 'competition_answer', 'competition_execution', 'competition_knowledge']
+
+// Model-facing bookkeeping is retired from the default catalog. The UI and
+// host event observers persist facts; a model should spend calls on reading,
+// executing and judging, not on calling a second bookkeeping tool.
+export const MANAGEMENT_TOOLS = [
+  'redteam_task', 'redteam_context', 'redteam_method', 'redteam_research',
+  'redteam_finding_register', 'redteam_finding_update', 'redteam_finding_delete',
+  'redteam_checks', 'redteam_delivery', 'project_check', 'project_evidence',
+  'competition_challenge', 'competition_answer',
+]
+export const COMPETITION_REDUNDANT_TOOLS = [
+  'subagent', 'subagent_fork', 'subagent_codex', 'subagent_claude_code',
+  'workflow', 'ralph', 'interrupt_agent', 'list_agents', 'list_subagent_models',
+]
 
 /**
  * 一条规则 = 「某组工具只能在某些模式下可见」。
@@ -46,16 +61,16 @@ export const RULES = [
     label: 'CTF 解题工具面',
     prefixes: ['ctf_'],
     modes: ['ctf-solver'],
-    source: 'dsh-ctf-observer/lib/index.js —— MODE_ID = "ctf-solver"（"只在 ctf-solver 模式生效"）',
+    source: 'dsh-redteam-results competition tools — only the ctf-solver preset mounts competition data and execution',
     note: '工具的准入「只在 ctf-solver 模式、且有工作目录时可用」',
   },
   {
     id: 'security',
     label: '安全作业工具面（成果/记忆/留痕）',
     prefixes: ['redteam_', 'campaign_', 'gates_', 'trace_', 'saker_method'],
-    modes: DEFAULT_MODES,
+    modes: ['pentest', 'code-audit'],
     source: 'dsh-redteam-results MODES / dsh-campaign-memory·dsh-trace-vault 的 MODE_IDS',
-    note: '四个插件的模式清单均为 ["pentest","code-audit","ctf-solver"]；标准模式（宿主默认预设）下它们的注入与入库都不生效',
+    note: '比赛模式使用独立的 competition_* 工具面；这些旧安全作业工具只在自由测试和代码审计中声明',
   },
   {
     id: 'stage-gate',
@@ -99,15 +114,15 @@ export const RULES = [
     id: 'managed-workers',
     label: '子代理数量与退出控制',
     prefixes: ['subagent', 'send_message', 'interrupt_agent', 'list_agents', 'list_subagent_models', 'workflow'],
-    modes: ['code-audit', 'ctf-solver', 'standard', ''],
-    source: 'dsh-redteam-results/lib/site-workers.js —— 原生创建、复用、汇报和资源释放',
-    note: 'Pentest仅通过redteam_task管理子代理，防止绕过数量限制或结束后保留活跃子代理',
+    modes: ['code-audit', 'standard', ''],
+    source: 'dsh-redteam-results/lib/site-workers.js —— saker_assist 原生创建、自动交回和资源释放',
+    note: 'Pentest仅通过 saker_assist 使用程序管理的子任务，防止绕过数量限制或结束后保留活跃子代理',
   },
   {
     id: 'toolPack',
     label: '按需工具包入口',
     prefixes: ['tool_pack'],
-    modes: ['pentest'],
+    modes: ['pentest', 'ctf-solver'],
     source: 'dsh-tool-scope/lib/packs.js —— 工具包是三个安全预设的运行期能力',
     note: '仅防御旧 profile 残留的 WebShell 工具；当前产品不提供 WebShell 工具包或启用入口',
   },
@@ -137,9 +152,15 @@ export function computeDeny(mode, known, rules) {
   return [...deny].sort()
 }
 
-/** 按产品场景隐藏只属于另一场景的工具；未知/缺省场景按自由测试处理。 */
-export function computeScenarioDeny(scenario, known) {
-  const hidden = scenario === 'project' ? FREE_ONLY_TOOLS : PROJECT_ONLY_TOOLS
+/** 按产品场景隐藏只属于另一场景的工具；未知/非 Saker 场景不静默按自由测试处理。 */
+export function computeScenarioDeny(scenario, known, { knowledgeEnabled = false } = {}) {
+  let hidden
+  if (scenario === 'free' || scenario === 'pentest') hidden = [...PROJECT_ONLY_TOOLS, ...COMPETITION_ONLY_TOOLS, ...MANAGEMENT_TOOLS]
+  else if (scenario === 'cases' || scenario === 'project') hidden = [...FREE_ONLY_TOOLS, ...COMPETITION_ONLY_TOOLS, ...MANAGEMENT_TOOLS]
+  else if (scenario === 'competition' || scenario === 'ctf-solver') {
+    hidden = [...FREE_ONLY_TOOLS, ...PROJECT_ONLY_TOOLS, ...MANAGEMENT_TOOLS, ...COMPETITION_REDUNDANT_TOOLS,
+      ...(knowledgeEnabled ? [] : ['competition_knowledge'])]
+  } else return []
   return known.filter((name) => hidden.includes(name)).sort()
 }
 

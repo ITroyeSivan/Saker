@@ -17,7 +17,13 @@ test('批量读取共享长度上限，保留逐段游标与未读项，不放�
   assert.throws(()=>readDocumentSections(parsed, ['a','a']), /不重复/);
   assert.throws(()=>readDocumentSections(parsed, Array(21).fill('a')), /1–20/);
   const large = { sections: [{sectionId:'large',text:'x'.repeat(10000)}] };
-  assert.equal(readDocumentSections(large,['large'],{limit:1e8}).entries[0].text.length,8000);
+  assert.equal(readDocumentSections(large,['large'],{limit:1e8}).entries[0].text.length,8192);
+  const unicode = readDocumentSection({ sections: [{ sectionId: 'unicode', text: 'A中B' }] }, 'unicode', { cursor: 0, limit: 4 });
+  assert.equal(unicode.text, 'A中');
+  assert.equal(unicode.bytes, 4);
+  assert.equal(unicode.nextCursor, 4);
+  assert.equal(readDocumentSection({ sections: [{ sectionId: 'unicode', text: 'A中B' }] }, 'unicode',
+    { cursor: unicode.nextCursor }).text, 'B');
 });
 
 function crc32(buffer) {
@@ -132,12 +138,13 @@ test('文本按行范围分段，长内容可继续读取且不一次返回全�
   assert.equal(parsed.sections.length, 3);
   assert.deepEqual(parsed.sections[0].location, { kind: 'line-range', from: 1, to: 200 });
   const first = readDocumentSection(parsed, parsed.sections[0].sectionId, { cursor: 0, limit: 30 });
-  assert.equal(first.text.length, 30);
+  assert.equal(first.bytes, 30);
+  assert(first.text.length > 0);
   assert.equal(first.more, true);
   const second = readDocumentSection(parsed, parsed.sections[0].sectionId, { cursor: first.nextCursor, limit: 30 });
   assert.notEqual(second.text, first.text);
   const clamped = readDocumentSection({ sections: [{ sectionId: 'long', text: 'x'.repeat(10000) }] }, 'long', { cursor: 0, limit: 999999 });
-  assert.equal(clamped.text.length, 8000, '单次读取必须硬限制 8000 字符');
+  assert.equal(clamped.text.length, 8192, '单次读取必须硬限制 8192 个 UTF-8 字节');
   assert.throws(() => readDocumentSection(parsed, 'missing-section'), /未找到该文档段落/);
 });
 

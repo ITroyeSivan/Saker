@@ -18,7 +18,7 @@
 export const name = 'dsh-tool-scope'
 
 /** 需要 tools 服务（读全局工具清单 + 在 agent scope 下挂过滤）。 */
-export const inject = { tools: { required: true }, sakerTaskScenario: { required: false } }
+export const inject = { tools: { required: true }, sakerTaskScenario: { required: false }, sakerSceneContext: { required: false } }
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { computeDeny, computeScenarioDeny, enabledRules, matchByRule, RULES } from './rules.js'
@@ -97,15 +97,17 @@ export function apply(ctx, config = {}) {
   const scenarioOf = (agent) => {
     try {
       const value = ctx.sakerTaskScenario?.get?.(agent?.session?.id ?? agent?.id)
-      return value === 'project' ? 'project' : 'pentest'
+      return String(value || '')
     } catch {
-      return 'pentest'
+      return ''
     }
   }
 
   const refreshScenario = (agent, state) => {
     const scenario = scenarioOf(agent)
-    const deny = computeScenarioDeny(scenario, state.toolNames)
+    let knowledgeEnabled = false
+    try { knowledgeEnabled = ctx.sakerSceneContext?.knowledgeEnabled?.(agent?.session?.id ?? agent?.id) === true; } catch { /* closed */ }
+    const deny = computeScenarioDeny(scenario, state.toolNames, { knowledgeEnabled })
     const signature = JSON.stringify([scenario, deny])
     if (state.scenarioSignature === signature) return
     try { state.scenarioDispose?.() } catch { /* agent scope may already be gone */ }
@@ -284,6 +286,20 @@ export function apply(ctx, config = {}) {
     }
     try { state.scenarioDispose?.() } catch { /* 同上 */ }
     try { state.baseDispose?.() } catch { /* 同上 */ }
+  })
+
+  ctx.on('tools/change', () => {
+    for (const agentId of states.keys()) {
+      try {
+        const agent = ctx.agents?.get?.(agentId) || ctx.get?.('agents')?.get?.(agentId)
+        if (!agent) continue
+        const state = states.get(agentId)
+        const current = visibleTools(agent)
+        state.toolNames = [...new Set([...state.toolNames, ...current])]
+        refreshScenario(agent, state)
+        refreshPacks(agent, state)
+      } catch { /* agent/fiber may be retiring */ }
+    }
   })
 
   say(

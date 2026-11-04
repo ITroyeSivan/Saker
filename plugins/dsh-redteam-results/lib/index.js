@@ -21,6 +21,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import os from "node:os";
 import fs from "node:fs";
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { buildDeliveryFiles, zipDelivery } from './bundle.js';
 import { saveTaskContext, readTaskContext, readTaskRecord, taskContextView } from './task-context.js';
@@ -34,13 +35,13 @@ import { verifyEffect, readEffectVerification } from './effect-verifications.js'
 import { readOobConfig, issueCallbackHost, fetchOobRecords, recordInteraction, readInteractionRecord, interactionSummary } from './server-side-access.js';
 import { runBrowserExecution, recordBrowserReceipt, readBrowserReceipt } from './browser-execution.js';
 import { runEffectJob, readEffectJob } from './effect-jobs.js';
-import { startTaskPolicy, updateTaskProgress, taskPolicyStatus, readTaskPolicy, taskExecutionGuard, taskPrompt, taskPromptStable, taskOverview, chooseTaskMode, pauseTaskPolicy, resumeTaskPolicy, archiveTaskRound, takeTaskContinuation, finishTaskOnTurnEnd, checkpointTask, setTaskInteraction, setTaskWorkers, setTaskExplain, setTaskActionLimits, setTaskMode, setTaskBudget, updateTaskFromChat, applyPendingTaskChange, cancelPendingTaskChange, targetTrafficDenial, excludedPathDenial, effectivePolicy, confirmTaskCheckpoint, isExplicitTaskContinuation, resumeTurnEndedTask } from './task-policy.js';
-import { projectContinuation, projectTurnDecision, markProjectContinuation, pauseProjectRun, resumeProjectRun, projectExecutableChecks, selectProjectCheck, startProjectTask, setProjectRunState, completeProjectRun, recoverInterruptedProjectRuns, synchronizeStoppedProjectRun } from './project-runtime.js';
-import { activeProjectRun, readProjectRun, listProjectRuns, listProjectChecks, listProjectSources, readProjectSource, listProjectActions, defineProjectChecks, recordProjectCheck, readProjectCheck, upsertProjectSource, beginProjectAction, finishProjectAction, reconcileProjectAction, saveProjectBrowserObservation, projectObservationRefs } from './project-store.js';
+import { startTaskPolicy, updateTaskProgress, taskPolicyStatus, readTaskPolicy, taskExecutionGuard, taskPrompt, taskPromptStable, taskOverview, chooseTaskMode, pauseTaskPolicy, resumeTaskPolicy, archiveTaskRound, takeTaskContinuation, finishTaskOnTurnEnd, checkpointTask, setTaskInteraction, setTaskWorkers, setTaskExplain, setTaskActionLimits, setTaskMode, setTaskBudget, updateTaskFromChat, applyPendingTaskChange, cancelPendingTaskChange, targetTrafficDenial, excludedPathDenial, effectivePolicy, confirmTaskCheckpoint, isHumanUserMessage, resumeTurnEndedTask } from './task-policy.js';
+import { projectContinuation, projectTurnDecision, markProjectContinuation, pauseProjectRun, resumeProjectRun, projectExecutableChecks, selectProjectCheck, startProjectTask, startProjectRetest, setProjectRunState, completeProjectRun, recoverInterruptedProjectRuns, synchronizeStoppedProjectRun, pauseProjectContinuation, resumeProjectContinuation, captureProjectNativeEvent } from './project-runtime.js';
+import { activeProjectRun, readProjectRun, listProjectRuns, listProjectChecks, listProjectSources, readProjectSource, listProjectActions, defineProjectChecks, recordProjectCheck, readProjectCheck, upsertProjectSource, beginProjectAction, finishProjectAction, reconcileProjectAction, saveProjectBrowserObservation, projectObservationRefs, saveProjectEvidence, reopenProjectCheck, projectDocumentKey } from './project-store.js';
 import { zipProjectDelivery, projectCounts, projectCheckView } from './project-delivery.js';
 import { startBrowserSession } from './browser-session.js';
 import { executeProjectHttp } from './project-execution.js';
-import { readDocumentSection, readDocumentSections } from './project-documents.js';
+import { columnNumber, readDocumentSection, readDocumentSections } from './project-documents.js';
 import { parseDocumentIsolated } from './project-document-parser.js';
 import { recordProjectDocumentRead } from './project-progress.js';
 import { taskStartInput, taskProgressInput } from './task-inputs.js';
@@ -57,8 +58,9 @@ import { createPurposeTasks } from './purpose-tasks.js';
 import { breakdownFromEvents, maskedRecord, diagnosticsDelta } from './request-diagnostics.js';
 import { redactText, redactValue } from './redaction.js';
 import { recordMaterialRead, recordMaterialView, materialReadKey } from './material-reads.js';
-import { captureTaskCost, taskCostOverview } from './task-cost.js';
+import { captureTaskCost, taskCostOverview, listOrdinaryReports } from './task-cost.js';
 import { registerModelAdmission, recoverModelRuntime, modelBudgetOverview } from './model-budget.js';
+import { readSettingsSection } from 'dsh-saker/settings-compat';
 import { createSiteWorkers, siteWorkerView, siteWorkerRows, siteWorkerParent, hostWorkerLimit } from './site-workers.js';
 import { indexBusinessMaterials, businessMaterialView } from './business-materials.js';
 import { runComparisonJob, readComparisonJob, comparisonFindingInput } from './comparison-jobs.js';
@@ -67,6 +69,11 @@ import { PROOF_KINDS, parseReproduction, renderReproduction, renderFindingDelive
 import { registerTaskPrompt } from './task-prompt.js';
 import { writeTaskPolicy, listTaskEvents, taskTransaction } from './task-policy-record.js';
 import { taskScopeAllowsUrl, taskScopeAllowsAsset, isPassiveBrowserDependency } from './task-scope.js';
+import { SAKER_SCENES, isSakerPreset, normalizeScene, scenePreset } from 'dsh-saker/scene-context';
+import { readSceneContext, reconcileSceneFromTask, setCompetitionKnowledge, setCompetitionPreferences, setSceneContinuation, writeSceneContext } from './scene-context.js';
+import { addCompetitionAnswer, competitionPromptState, competitionSummary, createCompetitionChallenge, listCompetitionAnswers, listCompetitionChallenges, readCompetitionChallenge, readCurrentCompetitionChallenge, setCurrentCompetitionChallenge, updateCompetitionAnswer, updateCompetitionChallenge } from './competition-store.js';
+import { ensureDirs, listCompetitionExecutions, readCompetitionExecution, readCompetitionOutput, recoverCompetitionExecutions, runCompetitionExecution, stopAllCompetitionExecutions, stopCompetitionExecution, writeCompetitionInput } from './competition-execution.js';
+import { deleteKnowledgeSource, importKnowledgeBuffer, importKnowledgePath, importKnowledgeText, listKnowledgeSources, readKnowledge, searchKnowledge } from './competition-knowledge.js';
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { sessionWorkingDirectory, ensureWorkingDirectory } from 'dsh-saker/working-directory';
 import { readInventory } from 'dsh-saker/asset-inventory';
@@ -78,7 +85,7 @@ const name = "dsh-redteam-results";
 // 不把它们放进硬 inject，否则整个插件会因缺少一个可选路由服务而不激活。
 const inject = { tools: { required: true }, agentPresets: { required: true }, systemPrompt: { required: true },
   sessions: { required: true }, agents: { required: true }, subagents: { required: true }, llm: { required: true },
-  sessionQuery: { required: false } };
+  sessionQuery: { required: false }, settings: { required: false } };
 
 const ROUTE_PATH = "/dsh-redteam-results";
 /** 进程级 CSRF token：GET <route>/csrf 由同源页取走（跨源响应不可读），POST 须回带 x-dsh-csrf 头。 */
@@ -112,11 +119,42 @@ const MODE_LABELS = {
 const DB_PATH = path.join(DSH_HOME, "redteam-results", "results.db");
 const MAX_BODY = 5 * 1024 * 1024;
 
+function hashFileInChunks(file) {
+  const hash = crypto.createHash('sha256')
+  const buffer = Buffer.allocUnsafe(1024 * 1024)
+  const descriptor = fs.openSync(file, 'r')
+  let bytes = 0
+  try {
+    let read
+    while ((read = fs.readSync(descriptor, buffer, 0, buffer.length, null)) > 0) {
+      hash.update(buffer.subarray(0, read))
+      bytes += read
+    }
+  } finally {
+    fs.closeSync(descriptor)
+  }
+  return { sha256: hash.digest('hex'), bytes }
+}
+
+function readFileRange(file, offset, limit) {
+  const descriptor = fs.openSync(file, 'r')
+  try {
+    const stat = fs.fstatSync(descriptor)
+    const start = Math.max(0, Math.min(stat.size, offset))
+    const length = Math.max(0, Math.min(limit, stat.size - start))
+    const buffer = Buffer.allocUnsafe(length)
+    if (length) fs.readSync(descriptor, buffer, 0, length, start)
+    return { buffer, totalBytes: stat.size, complete: start + length >= stat.size }
+  } finally {
+    fs.closeSync(descriptor)
+  }
+}
+
 let store; // 进程级单句柄（DatabaseSync 同步 API，SQLite 自带串行化）
 function theStore() {
 	if (store === undefined) {
 		const opened = openStore(DB_PATH);
-		try { recoverInterruptedProjectRuns(opened); store = opened; }
+		try { recoverInterruptedProjectRuns(opened); recoverCompetitionExecutions(opened); store = opened; }
 		catch (error) { opened.close(); throw error; }
 	}
 	return store;
@@ -157,6 +195,78 @@ function projectActionSummary(action) {
     pageRef: textOrNull(action?.pageRef),
     reconciliation,
   };
+}
+
+function latestExplicitUserText(agent) {
+  try {
+    const events = agent?.session?.events || []
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index]
+      if (event?.type !== 'user/message') continue
+      const data = event.data || {}
+      if (data.source?.kind !== 'user' || data.source?.form === 'snapshot') continue
+      const content = Array.isArray(data.content) ? data.content : []
+      return content.filter(item => item?.type === 'text').map(item => String(item.text || '')).join('\n')
+    }
+  } catch { /* session may be closing */ }
+  return ''
+}
+
+function runManagedEvidenceCommand(command, cwd, timeoutMs, signal) {
+  return new Promise(resolve => {
+    const stdout = []
+    const stderr = []
+    let stdoutBytes = 0
+    let stderrBytes = 0
+    let timedOut = false
+    let cancelled = false
+    let settled = false
+    let timer
+    const child = process.platform === 'win32'
+      ? spawn(command, { cwd, windowsHide: true, shell: process.env.ComSpec || 'cmd.exe', stdio: ['ignore', 'pipe', 'pipe'] })
+      : spawn(command, { cwd, windowsHide: true, shell: process.env.SHELL || '/bin/sh', stdio: ['ignore', 'pipe', 'pipe'] })
+    const stopChild = () => {
+      if (!child.pid) return
+      if (process.platform === 'win32') {
+        spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', 'taskkill', '/PID', String(child.pid), '/T', '/F'],
+          { windowsHide: true, timeout: 5000, encoding: 'utf8' })
+      } else {
+        try { process.kill(-child.pid, 'SIGTERM') } catch { try { child.kill('SIGTERM') } catch { /* gone */ } }
+      }
+    }
+    const collect = (target, chunk, stream) => {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk))
+      const used = stream === 'stdout' ? stdoutBytes : stderrBytes
+      const remaining = Math.max(0, 2 * 1024 * 1024 - used)
+      if (remaining > 0) target.push(bytes.subarray(0, remaining))
+      if (stream === 'stdout') stdoutBytes += Math.min(bytes.length, remaining)
+      else stderrBytes += Math.min(bytes.length, remaining)
+    }
+    const finish = (value) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      signal?.removeEventListener?.('abort', onAbort)
+      resolve({
+        stdout: Buffer.concat(stdout).toString('utf8'),
+        stderr: Buffer.concat(stderr).toString('utf8'),
+        stdoutBytes, stderrBytes, timedOut, cancelled, ...value,
+      })
+    }
+    const onAbort = () => { cancelled = true; stopChild() }
+    child.stdout.on('data', chunk => collect(stdout, chunk, 'stdout'))
+    child.stderr.on('data', chunk => collect(stderr, chunk, 'stderr'))
+    child.once('error', error => finish({ outcome: 'failed', exitCode: null, error: error.message }))
+    child.once('close', (code, terminatedBy) => finish({
+      outcome: cancelled ? 'cancelled' : timedOut ? 'timeout' : code === 0 ? 'completed' : 'failed',
+      exitCode: code, signal: terminatedBy,
+    }))
+    timer = setTimeout(() => { timedOut = true; stopChild() }, timeoutMs)
+    if (signal) {
+      if (signal.aborted) onAbort()
+      else signal.addEventListener('abort', onAbort, { once: true })
+    }
+  })
 }
 
 function saveFreeBrowserRecord(store, sessionId, kind, displayName, payload) {
@@ -276,43 +386,43 @@ export function verifyMessage(finding) {
 	if (finding.timelineAt) lines.push(`攻击时间：${finding.timelineAt}`);
 	if (finding.entry || finding.identity || finding.permission || finding.resource) lines.push(`攻击路径四要素：入口=${finding.entry || "缺"} ｜ 身份=${finding.identity || "缺"} ｜ 权限=${finding.permission || "缺"} ｜ 资源=${finding.resource || "缺"}`);
 	const statusGuide = finding.mode === "code-audit"
-		? ["请按代审验证纪律复核（双链一致/扫描对账），复核后调 redteam_finding_update 回写 status / verifyNote / secondRating+secondRatingNote（首次转 verified 须成对给齐，缺一被拒）：",
+		? ["请按代审自动验证纪律核对（双链一致/扫描对账）；自动验证成立可单独回写 verified，只有确实开展独立复核时才成对填写 secondRating+secondRatingNote。依据如下：",
 			"- 静态审计：复核通过只能回写 code-reviewed（代码侧已复核）——代码级推理不得标 verified；",
 			"- verified 仅限动态验证成功：EXP 本地复现真实生效，或在线授权环境实测 L1 通过；",
 			"- 动态审计复现不成立 → false-positive；验证未完成/环境性失败保持 pending。"].join("\n")
 		: finding.mode === "attack-defense"
-		? ["请按攻防评估验证纪律复核（确定性信号按战果类型择一：对照文件字节一致 / victim 侧标记数据被读到 / OOB 回调命中；入口/注入类战果仍用对照三件套：基线/差分/marker 逐字回显），复核后调 redteam_finding_update 回写 status / verifyNote / secondRating+secondRatingNote（首次转 verified 须成对给齐，缺一被拒）：",
+		? ["请按攻防评估自动验证纪律核对（确定性信号按战果类型择一：对照文件字节一致 / victim 侧标记数据被读到 / OOB 回调命中；入口/注入类战果仍用对照三件套：基线/差分/marker 逐字回显）；自动验证成立可单独回写 verified，独立复核不是前置。依据如下：",
 			"- verified=战果真实有效（上述信号至少其一成立，L 链级如实）；",
 			"- 验证未完成或环境性失败（目标不可达/WAF 拦截/超时）→ 保持 pending，不得因此判 false-positive；",
 			"- false-positive=复核后确认战果不成立或误记；",
 			"- fixed=已交付（仅当此前已 verified）。"].join("\n")
 		: finding.mode === "binary-analysis"
-		? ["请按二进制分析验证纪律复核（静态优先：独立重读关键反汇编段/重跑分析脚本比对一致性；多视角结论一致=更高可信、分歧=对比结论如实写；动态验证仅在必要时建议用户指定干净隔离 VM——本次复核默认静态），复核后调 redteam_finding_update 回写 status / verifyNote / secondRating+secondRatingNote（首次转 verified 须成对给齐，缺一被拒）：",
+		? ["请按二进制分析自动验证纪律核对（静态优先：重读关键反汇编段/重跑分析脚本比对一致性；动态验证仅在必要时建议用户指定干净隔离 VM）；自动验证成立可单独回写 verified，独立复核不是前置。依据如下：",
 			"- verified=已定论（字节/指令级证据支撑，结论可独立复核复现）；",
 			"- suspect=疑似（静态线索成立但未到定论强度，或还原三验未全过）——合法中间态，不强行升格；",
 			"- pending=分析中（复核未完成或需补充证据）；",
 			"- 复核推翻原结论 → 更新 description/chain 如实记录矛盾证据，不删行。"].join("\n")
 		: finding.mode === "cloud-security"
-		? ["请按云安全攻防验证纪律复核（三重证据：云 API 响应+策略文档+权限清单至少其二；只读 Describe/Get/List 验证优先、限速、账单意识；四要素闭环核对：入口/身份/权限/资源逐项对证据），复核后调 redteam_finding_update 回写 status / verifyNote / secondRating+secondRatingNote（首次转 verified 须成对给齐，缺一被拒）：",
+		? ["请按云安全攻防自动验证纪律核对（云 API 响应+策略文档+权限清单至少其二；只读 Describe/Get/List 优先并核对入口/身份/权限/资源）；自动验证成立可单独回写 verified，独立复核不是前置。依据如下：",
 			"- verified=已证实（路径可到达性有真实云证据支撑，四要素无悬空）；",
 			"- 验证未完成或环境性失败（API 不可达/权限不足/限速）→ 保持 pending，不得因此判 false-positive；",
 			"- false-positive=复核后确认路径不成立或误判；",
 			"- fixed=已修复（仅当此前已 verified、修复后复测不成功才可标记）。"].join("\n")
 		: finding.mode === "ctf-solver"
-		? ["请按 CTF 解题验证纪律复核（flag 真实性主线：flag 原文+平台回执/得分变动+解题脚本可重放，至少其二可追溯；web 题可附请求-响应对），复核后调 redteam_finding_update 回写 status / verifyNote / secondRating+secondRatingNote（首次转 verified 须成对给齐，缺一被拒）：",
+		? ["请按 CTF 解题自动验证纪律核对（flag 原文+平台回执/得分变动+解题脚本可重放，至少其二可追溯；web 题可附请求-响应对）；自动验证成立可单独回写 verified，独立复核不是前置。依据如下：",
 			"- verified=已解（flag 已提交且平台确认得分，证据可追溯）；",
 			"- stuck=卡点（思路断/技术堵点/环境问题）——写明卡在哪一步、已试过什么；",
 			"- pending=未解（尚未出 flag 或验证未完成）；",
 			"- 复核推翻原结论（flag 无效/非本题 flag）→ 如实更新 description 与验证记录，不删行。"].join("\n")
 		: finding.mode === "incident-response"
-		? ["请按应急溯源验证纪律复核（证据链交叉：日志/样本/时间戳/网络记录多源一致，时间线逐节点闭合；单条日志不构成结论），复核后调 redteam_finding_update 回写 status / verifyNote / secondRating+secondRatingNote（首次转 verified 须成对给齐，缺一被拒）：",
+		? ["请按应急溯源自动验证纪律核对（日志/样本/时间戳/网络记录多源一致，时间线逐节点闭合；单条日志不构成结论）；自动验证成立可单独回写 verified，独立复核不是前置。依据如下：",
 			"- verified=已证实（多源证据交叉确凿，证据编号可追溯）；",
 			"- code-reviewed=复核通过（证据链形式复核完成，未到已证实强度不升格）；",
 			"- 复核未完成或证据不足（日志缺失/时间窗未定）→ 保持 pending；",
 			"- false-positive=排除（误报或与失陷无关的正常业务现象）；",
 			"- fixed=已处置（处置清单执行完成并复测无再生即标——与渗透「修复后复测不成功」语义不同）；",
 			"- 复核推翻原结论 → 如实更新 description 与验证记录，不删行。"].join("\n")
-		: ["请按本模式验证纪律复核（渗透模式=对照三件套：基线/差分/marker 逐字回显），复核后调 redteam_finding_update 回写 status / verifyNote / secondRating+secondRatingNote（首次转 verified 须成对给齐，缺一被拒）：",
+		: ["请按本模式自动验证纪律核对（渗透模式=对照三件套：基线/差分/marker 逐字回显）；自动验证成立可单独回写 verified，独立复核不是前置。依据如下：",
 			"- verified=验证完成且真实可再复现；",
 			"- suspect=疑似未定论（静态线索/侧信道现象成立，但影响链未闭环或复核只能部分复现）——合法中间态，报告按未验证项处理；",
 			"- 验证未完成或环境性失败（WAF 拦截/目标不可达/超时）→ 保持 pending，不得因此判 suspect/false-positive；",
@@ -355,10 +465,16 @@ function sessionOf(ctx, exec) {
 	const agent = exec?.agent;
 	const id = agent?.session?.id;
 	if (!id) return undefined;
-	let preset;
-	try { preset = ctx.agentPresets?.composedPreset?.(agent.ctx); } catch { /* 组合未就绪 */ }
-	if (typeof preset !== "string") preset = agent?.session?.header?.agentPreset;
+	let preset = presetOfSession(agent?.session);
+	if (!preset) {
+		try { preset = ctx.agentPresets?.composedPreset?.(agent.ctx); } catch { /* 组合未就绪 */ }
+	}
 	return { id: String(id), mode: MODES.includes(preset) ? preset : "" };
+}
+
+function presetOfSession(session) {
+	const preset = session?.mode || session?.header?.agentPreset;
+	return typeof preset === 'string' ? preset : '';
 }
 
 // A purpose task owns a bounded child policy but reads the parent task's
@@ -542,6 +658,243 @@ function requestDiagnosticsView(session, sessionId) {
 /** 通道端点分发（纯逻辑，供路由与测试复用）。 */
 export async function dispatch(ctx, st, endpoint, payload) {
   const p = payload ?? {};
+  if (endpoint === 'scene.get') {
+    const sessionId = String(p.sessionId || '');
+    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    if (!sessionId || !session) throw new Error('current session required');
+    const presetId = presetOfSession(session);
+    if (!isSakerPreset(presetId)) return { ok: true, saker: false, scenes: SAKER_SCENES.map(scene => ({ ...scene })) };
+    const scene = readSceneContext(st, sessionId, presetId);
+    if (!scene) throw new Error('Saker scene context unavailable');
+    const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
+    let boundary;
+    try { boundary = agent ? ctx.sessionProjections?.stateOf(agent.session, 'turnBoundary') : undefined; } catch { boundary = undefined; }
+    const policy = readTaskPolicy(st, sessionId);
+    const project = activeProjectRun(st, sessionId);
+    const competition = presetId === 'ctf-solver' ? competitionSummary(st, sessionId) : null;
+    const competitionImported = Number(competition?.challenges || 0) > 0
+      || !!readCurrentCompetitionChallenge(st, sessionId);
+    const content = [
+      p.hasDraft === true,
+      !!policy,
+      !!project,
+      competitionImported,
+      Number(boundary?.lastTurn || 0) > 0,
+      boundary?.openTurnStartSeq !== null && boundary?.openTurnStartSeq !== undefined,
+      !!readTaskContext(st, sessionId),
+    ].some(Boolean);
+    return { ok: true, saker: true, ...scene, canSwitchInPlace: !content, boundary: boundary || null,
+      task: policy ? {
+        active: true, agentRunning: agent?.status === 'running', scenario: policy.scenario,
+        cancelled: policy.cancelled === true, paused: !!policy.blocker,
+        projectRunId: project?.runId || '', projectState: project?.state || '',
+      } : { active: competitionImported, agentRunning: agent?.status === 'running',
+        scenario: competitionImported ? 'competition' : '', competitionChallenges: Number(competition?.challenges || 0) } };
+  }
+  if (endpoint === 'scene.task-control') {
+    const sessionId = String(p.sessionId || '');
+    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    if (!session || !isSakerPreset(presetOfSession(session))) throw new Error('Saker scene required');
+    const action = String(p.action || '')
+    if (!['continue', 'pause', 'cancel'].includes(action)) throw new Error('scene task action must be continue, pause or cancel')
+    if (action === 'continue') {
+      try { setSceneContinuation(st, sessionId, false) } catch { /* no stored competition scene */ }
+      return { ok: true, action }
+    }
+    const policy = readTaskPolicy(st, sessionId)
+    const competition = presetOfSession(session) === 'ctf-solver'
+      ? competitionSummary(st, sessionId) : { challenges: 0 };
+    const competitionWork = Number(competition.challenges || 0) > 0
+      || !!readCurrentCompetitionChallenge(st, sessionId)
+    if (!policy && !competitionWork) return { ok: true, action, noActiveTask: true }
+    const project = activeProjectRun(st, sessionId)
+    if (project) {
+      const next = action === 'pause'
+        ? pauseProjectRun(st, sessionId, project.runId, { code: 'needs-user', reason: '用户切换场景前暂停' }, project.controlRev)
+        : setProjectRunState(st, sessionId, project.runId, 'cancelled', project.controlRev,
+          { blocker: { code: 'cancelled', reason: '用户切换场景前取消' } })
+      if (action === 'cancel' && !next) throw new Error('project task stop was not confirmed')
+    }
+    if (action === 'pause' && policy) pauseTaskPolicy(st, sessionId, {
+      code: 'needs-user', reason: '用户切换场景前暂停', evidence: 'Desktop scene switch',
+    }, 'desktop-user')
+    else if (action === 'cancel' && policy) updateTaskProgress(st, sessionId, { cancelled: true })
+    const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId)
+    if (competitionWork && presetOfSession(session) === 'ctf-solver') {
+      setSceneContinuation(st, sessionId, true, action === 'cancel' ? '用户切换场景前取消' : '用户切换场景前暂停')
+      if (action === 'cancel') {
+        if (agent?.status === 'running' && typeof agent.cancel !== 'function')
+          throw new Error('旧任务无法确认停止；已阻止新场景导航')
+        if (agent?.status === 'running') await agent.cancel({ kind: 'user' })
+        stopAllCompetitionExecutions(st, sessionId)
+        const running = st.db.prepare("SELECT record FROM competition_executions WHERE session_id=? AND state IN ('starting','running','stopping')")
+          .all(sessionId).map(row => { try { return JSON.parse(row.record) } catch { return null } }).filter(Boolean)
+        if (running.length) throw new Error('比赛进程停止未确认；已保持当前状态')
+      }
+    } else if (agent?.status === 'running') {
+      if (typeof agent.cancel !== 'function') throw new Error('旧任务无法确认停止；已阻止新场景导航')
+      await agent.cancel({ kind: 'user' })
+    }
+    return { ok: true, action }
+  }
+  if (endpoint === 'scene.select' || endpoint === 'scene.bind') {
+    const sessionId = String(p.sessionId || '');
+    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    if (!sessionId || !session) throw new Error('current session required');
+    const presetId = presetOfSession(session);
+    const targetScene = normalizeScene(p.scene);
+    if (scenePreset(targetScene) !== presetId) {
+      throw Object.assign(new Error('target scene preset does not match the current Agent'), {
+        code: 'new-session-required',
+        details: { presetId, targetPreset: scenePreset(targetScene) },
+      });
+    }
+    if (endpoint === 'scene.select') {
+      const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
+      let boundary;
+      try { boundary = agent ? ctx.sessionProjections?.stateOf(agent.session, 'turnBoundary') : undefined; } catch { boundary = undefined; }
+      const hasTurns = Number(boundary?.lastTurn || 0) > 0
+        || (boundary?.openTurnStartSeq !== null && boundary?.openTurnStartSeq !== undefined);
+      const competitionWork = presetId === 'ctf-solver' && competitionSummary(st, sessionId).challenges > 0
+      if (p.hasDraft === true || hasTurns || competitionWork || readTaskPolicy(st, sessionId) || activeProjectRun(st, sessionId) || readTaskContext(st, sessionId)) {
+        throw Object.assign(new Error('current session has content; create a new scene session'), { code: 'new-session-required' });
+      }
+    }
+    const value = writeSceneContext(st, sessionId, targetScene, {
+      presetId, expectedRevision: p.expectedRevision, requestId: p.requestId,
+    });
+    return { ok: true, ...value };
+  }
+  if (endpoint === 'scene.knowledge') {
+    const sessionId = String(p.sessionId || '');
+    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    if (!session || presetOfSession(session) !== 'ctf-solver') throw new Error('competition scene required');
+    const value = setCompetitionKnowledge(st, sessionId, p.enabled === true, { expectedRevision: p.expectedRevision })
+    try { ctx.emit?.('tools/change') } catch { /* next inbox insertion still refreshes */ }
+    return { ok: true, scene: value };
+  }
+  if (endpoint === 'scene.continuation') {
+    const sessionId = String(p.sessionId || '');
+    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    if (!session || !isSakerPreset(presetOfSession(session))) throw new Error('Saker scene required');
+    return { ok: true, scene: setSceneContinuation(st, sessionId, p.paused === true, p.reason) };
+  }
+  if (String(endpoint).startsWith('competition.') || String(endpoint).startsWith('knowledge.')) {
+    const sessionId = String(p.sessionId || '');
+    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    if (String(endpoint).startsWith('knowledge.') && (!session || presetOfSession(session) !== 'ctf-solver'))
+      return { ok: false, code: 'feature_removed', error: '知识库功能已移除；比赛模式只按需读取用户导入的本地资料。' };
+    if (!session || presetOfSession(session) !== 'ctf-solver') throw new Error('competition scene required');
+    const scene = readSceneContext(st, sessionId, 'ctf-solver');
+    if (!scene || scene.sceneId !== 'competition') throw new Error('competition scene context required');
+    if (endpoint === 'competition.status') {
+      const currentChallenge = readCurrentCompetitionChallenge(st, sessionId)
+      return { ok: true, scene, summary: competitionSummary(st, sessionId),
+        currentChallengeId: currentChallenge?.challengeId || '',
+        challenges: listCompetitionChallenges(st, sessionId, p),
+        knowledge: listKnowledgeSources(st, sessionId, {
+          limit: p.knowledgeLimit ?? 20, offset: p.knowledgeOffset ?? 0, query: p.knowledgeQuery || '',
+        }) };
+    }
+    if (endpoint === 'competition.create') {
+      const challenge = createCompetitionChallenge(st, sessionId, p);
+      setCurrentCompetitionChallenge(st, sessionId, challenge.challengeId);
+      return { ok: true, challenge };
+    }
+    if (endpoint === 'competition.update') {
+      const challenge = updateCompetitionChallenge(st, sessionId, String(p.challengeId || ''), p);
+      return { ok: true, challenge };
+    }
+    if (endpoint === 'competition.detail') {
+      const challenge = readCompetitionChallenge(st, sessionId, String(p.challengeId || ''));
+      if (!challenge) throw new Error('competition challenge not found');
+      return { ok: true, challenge, answers: listCompetitionAnswers(st, sessionId, challenge.challengeId),
+        executions: listCompetitionExecutions(st, sessionId, challenge.challengeId) };
+    }
+    if (endpoint === 'competition.attachment') {
+      const challenge = readCompetitionChallenge(st, sessionId, String(p.challengeId || ''));
+      if (!challenge) throw new Error('competition challenge not found');
+      const name = path.basename(String(p.name || p.path || 'attachment.bin'));
+      let buffer
+      if (typeof p.base64 === 'string' && p.base64) buffer = Buffer.from(p.base64, 'base64')
+      else if (p.path) buffer = fs.readFileSync(path.resolve(String(p.path)))
+      else throw new Error('attachment content required')
+      if (buffer.length > 20 * 1024 * 1024) throw new Error('attachment exceeds 20MiB')
+      const digest = crypto.createHash('sha256').update(buffer).digest('hex')
+      const dirs = ensureDirs(sessionId, challenge.challengeId)
+      const target = path.join(dirs.input, digest.slice(0, 12) + '-' + name.replace(/[^A-Za-z0-9._-]/g, '_'))
+      fs.writeFileSync(target, buffer)
+      const materialId = 'competition-attachment-' + crypto.createHash('sha256')
+        .update(JSON.stringify([sessionId, challenge.challengeId, digest])).digest('hex').slice(0, 32)
+      st.db.prepare('INSERT INTO business_materials(session_id,id,source_url,digest,record) VALUES(?,?,?,?,?) '
+        + 'ON CONFLICT(session_id,id) DO UPDATE SET record=excluded.record,digest=excluded.digest')
+        .run(sessionId, materialId, target, digest, JSON.stringify({ id: materialId, name, path: target, digest, bytes: buffer.length,
+          originalBase64: buffer.toString('base64'), role: 'input', source: 'competition-attachment' }))
+      const attachment = { id: materialId, name, role: 'input', digest, bytes: buffer.length, materialId, readonly: true }
+      const next = updateCompetitionChallenge(st, sessionId, challenge.challengeId, {
+        expectedRevision: challenge.revision,
+        attachments: undefined,
+      })
+      next.attachments = [...(next.attachments || []).filter(item => item.id !== materialId), attachment]
+      st.db.prepare('UPDATE competition_challenges SET record=?,updated_at=? WHERE session_id=? AND challenge_id=?')
+        .run(JSON.stringify(next), new Date().toISOString(), sessionId, next.challengeId)
+      return { ok: true, challenge: next, attachment }
+    }
+    if (endpoint === 'competition.answer-add') {
+      const challengeId = String(p.challengeId || '');
+      const answer = addCompetitionAnswer(st, sessionId, challengeId,
+        p.status === 'accepted' ? { ...p, confirmedBy: 'user' } : p);
+      if (answer.status === 'accepted') updateCompetitionChallenge(st, sessionId, challengeId, { state: 'solved', confirmedBy: 'user' });
+      return { ok: true, answer };
+    }
+    if (endpoint === 'competition.answer-update') {
+      const challengeId = String(p.challengeId || '');
+      const answer = updateCompetitionAnswer(st, sessionId, challengeId, String(p.answerId || ''),
+        p.status === 'accepted' ? { ...p, confirmedBy: 'user' } : p);
+      if (answer.status === 'accepted') updateCompetitionChallenge(st, sessionId, challengeId, { state: 'solved', confirmedBy: 'user' });
+      return { ok: true, answer };
+    }
+    if (endpoint === 'competition.execution-run') {
+      return { ok: true, execution: runCompetitionExecution(st, sessionId, String(p.challengeId || ''), p) };
+    }
+    if (endpoint === 'competition.execution-read') {
+      return { ok: true, ...readCompetitionOutput(st, sessionId, String(p.challengeId || ''), String(p.executionId || ''), p) };
+    }
+    if (endpoint === 'competition.execution-write') {
+      return { ok: true, ...writeCompetitionInput(st, sessionId, String(p.challengeId || ''), String(p.executionId || ''), p) };
+    }
+    if (endpoint === 'competition.execution-stop') {
+      return stopCompetitionExecution(st, sessionId, String(p.challengeId || ''), String(p.executionId || ''));
+    }
+    if (endpoint === 'knowledge.import-path') {
+      return { ok: true, source: await importKnowledgePath(st, sessionId, p) };
+    }
+    if (endpoint === 'knowledge.import-text') {
+      return { ok: true, source: await importKnowledgeText(st, sessionId, p) };
+    }
+    if (endpoint === 'knowledge.import-base64') {
+      const buffer = Buffer.from(String(p.base64 || ''), 'base64')
+      if (!buffer.length) throw new Error('knowledge content is empty')
+      return { ok: true, source: await importKnowledgeBuffer(st, sessionId, { ...p,
+        buffer, path: String(p.name || ''), title: p.title || p.name || '导入的资料' }) };
+    }
+    if (endpoint === 'knowledge.list') {
+      return { ok: true, ...listKnowledgeSources(st, sessionId, p) };
+    }
+    if (endpoint === 'knowledge.search') {
+      return { ok: true, ...searchKnowledge(st, sessionId, p) };
+    }
+    if (endpoint === 'knowledge.read') {
+      return { ok: true, ...readKnowledge(st, sessionId, p) };
+    }
+    if (endpoint === 'knowledge.delete') {
+      return { ok: true, ...deleteKnowledgeSource(st, sessionId, String(p.sourceId || '')) };
+    }
+    if (endpoint === 'knowledge.toggle') {
+      return { ok: true, scene: setCompetitionKnowledge(st, sessionId, p.enabled === true, { expectedRevision: p.expectedRevision }) };
+    }
+    throw new Error('unknown competition endpoint: ' + endpoint);
+  }
   if (endpoint === 'finding.impact-review') {
     const sid = String(p.sessionId || ''), finding = getFinding(st, sid, String(p.id || ''));
     if (!finding || finding.mode !== 'pentest') throw new Error('current pentest finding required');
@@ -566,13 +919,15 @@ export async function dispatch(ctx, st, endpoint, payload) {
   if (endpoint === 'methods.action') {
     const sessionId = String(p.sessionId || '');
     const session = ctx.sessions?.get(sessionId);
-    if (!session || session.header?.agentPreset !== 'pentest') throw new Error('请选择当前可用的渗透会话');
+    if (!session || presetOfSession(session) !== 'pentest') throw new Error('请选择当前可用的Saker 会话');
     return { ok: true, ...methodAction(st, p, 'desktop-user') };
   }
   if (['chat.settings', 'chat.defaults', 'chat.draft', 'chat.templates', 'chat.models'].includes(endpoint)) {
     const sessionId = String(p.sessionId || '');
     const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
-    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
+    if (!session || !isSakerPreset(presetOfSession(session))) throw Error('请选择当前可用的 Saker 会话');
+    const presetId = presetOfSession(session);
+    const scene = readSceneContext(st, sessionId, presetId);
     if (endpoint === 'chat.draft') return { ok: true, draft: promptDraft(st, sessionId, p.mode, p.draft) };
     if (endpoint === 'chat.templates') return { ok: true, templates: promptTemplates(st, p.template) };
     if (endpoint === 'chat.defaults') return { ok: true, defaults: saveChatDefaults(st, p) };
@@ -592,7 +947,8 @@ export async function dispatch(ctx, st, endpoint, payload) {
     }
     synchronizeStoppedProjectRun(st, sessionId);
     const state = taskPolicyStatus(st, sessionId), workers = siteWorkerView(st, sessionId);
-    return { ok: true, ...state, overview: taskOverview(st, sessionId), active: workers.active, hostWorkerLimit: hostWorkerLimit(ctx), defaults: chatDefaults(st),
+    const competitionPreferences = scene?.sceneId === 'competition' ? scene.preferences || null : null;
+    return { ok: true, ...state, scene, ...(competitionPreferences ? { options: competitionPreferences, policy: null } : {}), overview: taskOverview(st, sessionId), active: workers.active, hostWorkerLimit: hostWorkerLimit(ctx), defaults: chatDefaults(st),
       browserTakeover: browserTakeoverView(projectBrowsers.get(sessionId)),
       attention: taskAttention(st, sessionId),
       currentAction: taskCurrentAction(st, sessionId),
@@ -604,7 +960,7 @@ export async function dispatch(ctx, st, endpoint, payload) {
   if (['account.list', 'account.save', 'account.remove'].includes(endpoint)) {
     const sessionId = String(p.sessionId || '');
     const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
-    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
+    if (!session || presetOfSession(session) !== 'pentest') throw Error('请选择当前可用的Saker 会话');
     if (endpoint === 'account.list') return { ok: true, accounts: listAccounts(st, sessionId), statuses: ACCOUNT_STATUSES };
     if (endpoint === 'account.save') return { ok: true, account: saveAccount(st, sessionId, p), accounts: listAccounts(st, sessionId) };
     return { ok: true, accounts: removeAccount(st, sessionId, p.id) };
@@ -612,12 +968,19 @@ export async function dispatch(ctx, st, endpoint, payload) {
   if (['prompt.library', 'prompt.draft', 'prompt.render'].includes(endpoint)) {
     const sessionId = String(p.sessionId || '');
     if (endpoint !== 'prompt.render' && !sessionId) throw new Error('sessionId required');
+    const promptSession = sessionId ? (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId) : null
+    if (sessionId && (!promptSession || !isSakerPreset(presetOfSession(promptSession)))) throw new Error('请选择当前可用的 Saker 会话')
+    const sceneId = sessionId ? readSceneContext(st, sessionId, presetOfSession(promptSession))?.sceneId || '' : String(p.scene || '')
     const action = p.action || 'list';
     if (endpoint === 'prompt.library') {
       const user = listUserTemplates(st, { offset: p.offset, limit: p.limit });
-      if (action === 'list') return { ok: true, builtin: builtinTemplates(), fields: promptFields(), user };
+      const userForScene = {
+        ...user,
+        templates: user.templates.filter(t => !t.scene?.length || t.scene.includes('all') || t.scene.includes(sceneId)),
+      }
+      if (action === 'list') return { ok: true, scene: sceneId, builtin: builtinTemplates({ scene: sceneId }), fields: promptFields(), user: userForScene };
       if (action === 'search') {
-        const all = [...builtinTemplates(), ...user.templates];
+        const all = [...builtinTemplates({ scene: sceneId }), ...userForScene.templates];
         return { ok: true, query: String(p.query ?? ''), results: searchTemplates(p.query, all) };
       }
       if (action === 'upsert') return { ok: true, template: upsertUserTemplate(st, p.template) };
@@ -628,7 +991,7 @@ export async function dispatch(ctx, st, endpoint, payload) {
       throw new Error('未知 prompt.library 动作：' + action);
     }
     if (endpoint === 'prompt.render') {
-      const template = builtinTemplates().find(t => t.id === p.templateId) || listUserTemplates(st, { offset: 0, limit: 200 }).templates.find(t => t.id === p.templateId);
+      const template = builtinTemplates({ scene: String(p.scene || '') }).find(t => t.id === p.templateId) || listUserTemplates(st, { offset: 0, limit: 200 }).templates.find(t => t.id === p.templateId);
       if (!template) throw new Error('模板不存在：' + (p.templateId ?? ''));
       const values = p.values && typeof p.values === 'object' ? p.values : {};
       return { ok: true, ...renderTemplate(template, values), missing: missingRequired(template, values) };
@@ -655,7 +1018,7 @@ export async function dispatch(ctx, st, endpoint, payload) {
   if (endpoint === 'materials.import') {
     const sessionId = String(p.sessionId || '');
     const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
-    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
+    if (!session || presetOfSession(session) !== 'pentest') throw Error('请选择当前可用的Saker 会话');
     const material = importPastedMaterial(st, sessionId, { name: p.name, text: p.text });
     // 资料更新后按 ID 唤醒依赖它的工作（v6 第 8.3 节）：只叫声明过这条资料的工作，不广播。
 // 完全相同原文只是「合并来源」（第 5.4 节），不是新版本 —— 不能假称「有新版本」去唤醒工作。
@@ -665,7 +1028,7 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
   if (endpoint === 'materials.remove') {
     const sessionId = String(p.sessionId || '');
     const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
-    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
+    if (!session || presetOfSession(session) !== 'pentest') throw Error('请选择当前可用的Saker 会话');
     return { ok: true, ...removeMaterial(st, sessionId, { id: p.id }) };
   }
   if (endpoint === 'materials.viewed') {
@@ -711,7 +1074,7 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
   if (endpoint === 'diagnostics.request') {
     const sessionId = String(p.sessionId || '');
     const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
-    if (!session || session.header?.agentPreset !== 'pentest') throw Error('请选择当前可用的渗透会话');
+    if (!session || presetOfSession(session) !== 'pentest') throw Error('请选择当前可用的Saker 会话');
     return { ok: true, ...requestDiagnosticsView(session, sessionId) };
   }
   if (endpoint === 'task.events') {
@@ -725,23 +1088,58 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
   if (endpoint === 'task.scenario') {
     const sessionId = String(p.sessionId || '');
     const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
-    if (!session || session.header?.agentPreset !== 'pentest') throw new Error('请选择当前可用的渗透会话');
+    if (!session || presetOfSession(session) !== 'pentest') throw new Error('请选择当前可用的Saker 会话');
     if (readTaskPolicy(st, sessionId)) throw new Error('任务已开始，不能切换场景');
-    if (!['pentest', 'project'].includes(p.scenario)) throw new Error('请选择安全测试或按文档测试');
+    let sceneId
+    try { sceneId = normalizeScene(p.scenario, 'pentest') } catch { throw new Error('请选择自由测试或案例测试'); }
+    if (!['free', 'cases'].includes(sceneId)) throw new Error('请选择自由测试或案例测试');
+    const legacyScenario = sceneId === 'cases' ? 'project' : 'pentest'
     const row = st.db.prepare('SELECT record FROM task_flow_choice WHERE session_id=?').get(sessionId);
-    const choice = { ...(row ? JSON.parse(row.record) : {}), scenario: p.scenario };
+    const choice = { ...(row ? JSON.parse(row.record) : {}), scenario: legacyScenario, sceneId };
     st.db.prepare('INSERT INTO task_flow_choice(session_id,record) VALUES(?,?) ON CONFLICT(session_id) DO UPDATE SET record=excluded.record').run(sessionId, JSON.stringify(choice));
-    return { ok: true, scenario: p.scenario };
+    writeSceneContext(st, sessionId, sceneId, { presetId: 'pentest', expectedRevision: p.expectedSceneRevision, requestId: p.requestId })
+    return { ok: true, scenario: sceneId, legacyScenario };
   }
-  if (['task.status', 'task.choose', 'task.start', 'task.cancel', 'task.resume', 'task.cleanup', 'task.new-round', 'task.interaction', 'task.workers', 'task.explain', 'task.limits', 'task.mode', 'task.budget', 'task.pending-apply', 'task.pending-cancel', 'task.continue', 'task.continue-current', 'task.takeover', 'task.takeover-resume'].includes(endpoint)) {
+  if (['task.status', 'task.choose', 'task.settings', 'task.start', 'task.cancel', 'task.resume', 'task.cleanup', 'task.new-round', 'task.interaction', 'task.workers', 'task.explain', 'task.limits', 'task.mode', 'task.budget', 'task.pending-apply', 'task.pending-cancel', 'task.continue', 'task.continue-current', 'task.takeover', 'task.takeover-resume'].includes(endpoint)) {
     const sessionId = String(p.sessionId || '');
     if (!sessionId) throw new Error('sessionId required');
     let sessions;
     try { sessions = ctx.sessions || ctx.get?.('sessions'); } catch { /* unavailable */ }
     const session = sessions?.get(sessionId);
+    if (endpoint === 'task.status' && session?.header?.agentPreset === 'ctf-solver') {
+      const scene = readSceneContext(st, sessionId, 'ctf-solver')
+      return { ok: true, configured: true, phase: 'ready', policy: null, options: scene?.preferences || {},
+        scene, overview: null, active: false, hostWorkerLimit: hostWorkerLimit(ctx) }
+    }
     if (endpoint !== 'task.status') {
-      if (!session || session.header?.agentPreset !== 'pentest') throw new Error('请选择当前可用的渗透会话');
+      const competitionSession = session?.header?.agentPreset === 'ctf-solver';
+      if (!session || (!competitionSession && presetOfSession(session) !== 'pentest')) throw new Error('请选择当前可用的Saker 会话');
       if (typeof ctx.tools?.guard !== 'function') throw new Error('桌面宿主缺少任务预算守卫');
+      if (competitionSession && ['task.choose', 'task.settings', 'task.interaction', 'task.workers', 'task.explain', 'task.budget'].includes(endpoint)) {
+        if (!['task.choose', 'task.settings', 'task.interaction', 'task.workers', 'task.explain', 'task.budget'].includes(endpoint))
+          throw new Error('该任务控制不适用于比赛模式');
+        const unsupported = ['target', 'allowTargetNetwork', 'readOnly', 'excludedPaths', 'allowedOrigins',
+          'requestRatePerMinute', 'requestConcurrency'].filter(key => p[key] !== undefined)
+        if (unsupported.length) return {
+          ok: false, code: 'competition-setting-unsupported',
+          error: '比赛模式不适用这些网站访问设置：' + unsupported.join('、'), unsupported,
+        }
+        const scene = readSceneContext(st, sessionId, 'ctf-solver')
+        const sceneRevision = scene?.sceneRevision
+        const updatedScene = setCompetitionPreferences(st, sessionId, {
+          expectedRevision: p.expectedRevision ?? sceneRevision,
+          workers: p.workers, interaction: p.interaction, reporting: p.reporting,
+          explain: p.explain, minutes: p.minutes ?? p.budget?.minutes,
+          toolCalls: p.toolCalls ?? p.budget?.toolCalls,
+          modelCalls: p.modelCalls ?? p.budget?.modelCalls,
+          tokens: p.tokens ?? p.budget?.tokens,
+          workerModel: p.workerModel,
+          reviewModel: p.reviewModel,
+          reportModel: p.reportModel,
+          modelConcurrency: p.modelConcurrency,
+        })
+        return { ok: true, scene: updatedScene, preferences: updatedScene.preferences }
+      }
       if (endpoint === 'task.takeover') {
         const policy = readTaskPolicy(st, sessionId);
         if (!policy?.startedAt) throw new Error('当前没有可接管的测试任务');
@@ -833,6 +1231,7 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
           const text = policy.scenario === 'project'
             ? `继续当前文档测试。人工接管已结束，程序已重新观察${target}，观察引用 ${observationRef}。先核对最新页面和身份状态，再继续未完成项；不要重放人工已完成的业务动作，不重建运行、不重置额度。`
             : `继续当前自由测试。人工接管已结束，程序已重新观察${target}，观察引用 ${observationRef}。先核对最新页面和身份状态，再继续原任务；不要重放人工已完成的业务动作，不重置额度。`;
+          // 注入安全：由同源 Desktop RPC 在人工接管结束后恢复空闲代理，不在 Session.append 临界区。
           await agent.followup({ id: `saker-takeover-resume-${sessionId}-${policy.policyRev}`,
             role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text }] });
         } catch (error) {
@@ -866,6 +1265,39 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
           workerModel: p.workerModel, reviewModel: p.reviewModel, reportModel: p.reportModel,
           target: p.target, scope: p.scope, allowedOrigins: p.allowedOrigins, allowTargetNetwork: p.allowTargetNetwork,
           readOnly: p.readOnly, excludedPaths: p.excludedPaths, requestRatePerMinute: p.requestRatePerMinute, requestConcurrency: p.requestConcurrency });
+      }
+      else if (endpoint === 'task.settings') {
+        const before = readTaskPolicy(st, sessionId)
+        if (!before) throw new Error('task not started')
+        if (Number(p.expectedRevision) !== before.policyRev)
+          throw Object.assign(new Error('设置已发生变化，请刷新后重新编辑'), {
+            code: 'task-settings-conflict', details: { expectedRevision: p.expectedRevision, actualRevision: before.policyRev },
+          })
+        taskTransaction(st, () => {
+          if (p.interaction !== undefined || p.reporting !== undefined)
+            setTaskInteraction(st, sessionId, p.interaction ?? before.interaction, 'desktop-user', p.reporting ?? before.reporting)
+          if (p.workers !== undefined) {
+            const hostLimit = hostWorkerLimit(ctx)
+            if (Number(p.workers) > hostLimit) throw new Error(`worker limit exceeds host maxActiveSubagents (${hostLimit}); allowed 0 and ${hostLimit}`)
+            setTaskWorkers(st, sessionId, p.workers, 'desktop-user')
+          }
+          if (p.explain !== undefined) setTaskExplain(st, sessionId, p.explain === true, 'desktop-user')
+          if (p.direction !== undefined) setTaskMode(st, sessionId, p.direction, 'desktop-user')
+          const modelPatch = Object.fromEntries(['workerModel', 'reviewModel', 'reportModel']
+            .filter(key => p[key] !== undefined).map(key => [key, p[key]]))
+          if (Object.keys(modelPatch).length) updateTaskFromChat(st, sessionId, modelPatch, 'desktop-user')
+          if (p.target !== undefined || p.allowedOrigins !== undefined || p.allowTargetNetwork !== undefined
+            || p.readOnly !== undefined || p.excludedPaths !== undefined || p.requestRatePerMinute !== undefined
+            || p.requestConcurrency !== undefined)
+            setTaskActionLimits(st, sessionId, {
+              target: p.target, allowedOrigins: p.allowedOrigins, allowTargetNetwork: p.allowTargetNetwork,
+              readOnly: p.readOnly, excludedPaths: p.excludedPaths,
+              requestRatePerMinute: p.requestRatePerMinute, requestConcurrency: p.requestConcurrency,
+            }, 'desktop-user')
+          const budgetPatch = Object.fromEntries(['minutes', 'toolCalls', 'unmeteredToolCalls', 'modelCalls', 'tokens']
+            .filter(key => p[key] !== undefined).map(key => [key, p[key]]))
+          if (Object.keys(budgetPatch).length) setTaskBudget(st, sessionId, budgetPatch, 'desktop-user')
+        })
       }
       else if (endpoint === 'task.interaction') setTaskInteraction(st, sessionId, p.interaction, 'desktop-user', p.reporting);
       else if (endpoint === 'task.workers') {
@@ -920,6 +1352,7 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
         if (policyInput.budget && policyInput.budget.workers !== undefined && Number(policyInput.budget.workers) > hostWorkerLimit(ctx))
           throw new Error(`worker limit exceeds host maxActiveSubagents (${hostWorkerLimit(ctx)}); allowed 0 and ${hostWorkerLimit(ctx)}`);
         const policy = startTaskPolicy(st, sessionId, policyInput);
+        reconcileSceneFromTask(st, sessionId, 'free', 'pentest')
         try {
           // 注入安全：由桌面 task.start RPC 在空闲代理上触发，不在 Session.append 临界区内。
           agent.followup({ id: `saker-task-${sessionId}-${policy.startedAt}`, role: 'user',
@@ -1034,9 +1467,11 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
 	if (endpoint === 'delivery.bundle') {
 		const sessionId = String(p.sessionId ?? '');
 		if (!sessionId) throw new Error('sessionId required');
-		const bundle = buildDeliveryFiles(allFindings(st, sessionId, 'pentest'), readChecks(st, sessionId));
+		const reports = listOrdinaryReports(st, sessionId, { limit: 50 });
+		const bundle = buildDeliveryFiles(allFindings(st, sessionId, 'pentest'), readChecks(st, sessionId), reports);
 		return { ok: true, filename: 'saker-delivery.zip', archive: zipDelivery(bundle.files).toString('base64'),
-			confirmedFindings: bundle.confirmedFindings, incompleteRecords: bundle.incompleteRecords, checkedCount: bundle.checkedCount };
+			confirmedFindings: bundle.confirmedFindings, incompleteRecords: bundle.incompleteRecords,
+			checkedCount: bundle.checkedCount, ordinaryReports: bundle.ordinaryReportCount };
 	}
 	if (endpoint === 'checks.list' || endpoint === 'checks.export') {
 		const rows = readChecks(st, String(p.sessionId ?? ''));
@@ -1062,7 +1497,9 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
 		}
 		const sessionId = String(p.sessionId ?? "");
 		if (!sessionId) throw new Error("sessionId required");
-		return { list: attachRetests(sessionId, listFindings(st, sessionId, mode, p)), stats: computeStats(st, sessionId, mode), counts: modeCounts(st, sessionId), meta: getMeta(st, sessionId) };
+		return { list: attachRetests(sessionId, listFindings(st, sessionId, mode, p)), stats: computeStats(st, sessionId, mode),
+			counts: modeCounts(st, sessionId), meta: getMeta(st, sessionId),
+			ordinaryReports: listOrdinaryReports(st, sessionId, { limit: 20 }) };
 	}
 	if (endpoint === "findings.groups") {
 		const mode = String(p.mode ?? "redteam");
@@ -1074,7 +1511,8 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
 		}
 		const sessionId = String(p.sessionId ?? "");
 		if (!sessionId) throw new Error("sessionId required");
-		return { groups: groupByTarget(st, sessionId, mode, p), stats: computeStats(st, sessionId, mode), meta: getMeta(st, sessionId) };
+		return { groups: groupByTarget(st, sessionId, mode, p), stats: computeStats(st, sessionId, mode), meta: getMeta(st, sessionId),
+			ordinaryReports: listOrdinaryReports(st, sessionId, { limit: 20 }) };
 	}
 	if (endpoint === "counts.all") {
 		return { counts: modeCountsAll(st) };
@@ -1101,37 +1539,82 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
   if (String(endpoint).startsWith('project.')) {
     const sessionId = String(p.sessionId || '');
     if (!sessionId) throw new Error('sessionId required');
-    let sessions;
-    try { sessions = ctx.sessions || ctx.get?.('sessions'); } catch { /* unavailable */ }
-    const session = ['project.status', 'project.check-detail', 'project.export'].includes(endpoint)
-      ? await readPentestSession(ctx, sessionId) : sessions?.get(sessionId);
-    if (!session || session.header?.agentPreset !== 'pentest') throw new Error('请选择当前可用的渗透会话');
+    const projectReadOnlyEndpoints = new Set(['project.status', 'project.check-detail', 'project.export']);
+    const liveSession = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    if (!projectReadOnlyEndpoints.has(endpoint) && !liveSession)
+      throw new Error('请选择当前可用的Saker 会话');
+    const session = await readPentestSession(ctx, sessionId);
+    if (!session || presetOfSession(session) !== 'pentest') throw new Error('请选择当前可用的Saker 会话');
     const requestedRunId = String(p.runId || '');
     if (endpoint === 'project.status') {
       synchronizeStoppedProjectRun(st, sessionId);
       const run = requestedRunId ? readProjectRun(st, sessionId, requestedRunId)
         : activeProjectRun(st, sessionId) || listProjectRuns(st, sessionId, { limit: 1 })[0] || null;
       if (requestedRunId && !run) return { ok: false, error: '未找到该项目运行' };
-      const checks = run ? listProjectChecks(st, sessionId, run.runId) : [];
-      const sources = (run?.sourceSnapshot || []).map(snapshot => readProjectSource(st, sessionId, snapshot.sourceId, snapshot.sourceRevision))
-        .filter(Boolean).map(source => ({
+      const allChecks = run ? listProjectChecks(st, sessionId, run.runId) : [];
+      const runActions = run ? listProjectActions(st, sessionId, run.runId) : [];
+      const allCheckViews = allChecks.map(check => projectCheckView(check, { runState: run?.state, actions: runActions }));
+      const checkOffset = Math.max(0, Number(p.checkOffset) || 0)
+      const checkLimit = Math.max(1, Math.min(50, Number(p.checkLimit) || 50))
+      const checks = allCheckViews.slice(checkOffset, checkOffset + checkLimit)
+      const listedSources = run
+        ? (run.sourceSnapshot || []).map(snapshot => readProjectSource(st, sessionId, snapshot.sourceId, snapshot.sourceRevision))
+        : listProjectSources(st, sessionId);
+      const latestSources = new Map();
+      for (const source of listedSources.filter(Boolean)) if (!latestSources.has(source.sourceId)) latestSources.set(source.sourceId, source);
+      const sources = [...latestSources.values()].map(source => ({
         sourceId: source.sourceId, sourceRevision: source.sourceRevision,
         displayName: source.displayName || '', kind: source.kind || 'text',
         parseState: source.parseState, sectionCount: (source.sections || []).length,
         unreadCount: (source.unread || []).length,
+        preview: projectSourcePreview(source), sourceRole: source.sourceRole || '',
+        preparation: source.preparation || null,
       }));
+      const sourceDecisions = Object.values(run?.sectionDecisions || {});
+      const sourceDecisionCounts = sourceDecisions.reduce((out, decision) => {
+        const key = String(decision?.decision || 'pending');
+        out[key] = (out[key] || 0) + 1;
+        return out;
+      }, {});
       return {
-        ok: true, configured: !!run, run, checks: checks.map(projectCheckView), sources, counts: projectCounts(checks),
+        ok: true, configured: !!run, run, checks, checkTotal: allChecks.length,
+        checkOffset, nextCheckOffset: checkOffset + checks.length < allChecks.length ? checkOffset + checks.length : null,
+        sources, sourceDecisionCounts, sourceDecisions: sourceDecisions.slice(-500), counts: projectCounts(allCheckViews),
         manualTakeover: readTaskPolicy(st, sessionId)?.manualTakeover || null,
         browserTakeover: browserTakeoverView(projectBrowsers.get(sessionId)),
-        unknownActions: run ? listProjectActions(st, sessionId, run.runId).filter(action => action.sideEffectUnknown === true)
-          .map(action => ({ actionId: action.actionId, checkId: action.checkId, method: action.method || '', targetUrl: redactText(action.targetUrl || ''), error: redactText(action.error || ''), startedAt: action.startedAt })) : [],
+        unknownActions: runActions.filter(action => action.sideEffectUnknown === true)
+          .map(action => ({ actionId: action.actionId, checkId: action.checkId, method: action.method || '', targetUrl: redactText(action.targetUrl || ''), error: redactText(action.error || ''), startedAt: action.startedAt })),
         runs: listProjectRuns(st, sessionId, { limit: 50 }).map(item => ({
           runId: item.runId, state: item.state, updatedAt: item.updatedAt, question: item.question || '',
         })),
       };
     }
+    if (endpoint === 'project.prepare') {
+      if (activeProjectRun(st, sessionId)) throw new Error('本次运行已开始，来源准备结果已固定；请在下一轮重新添加文档');
+      const source = readProjectSource(st, sessionId, p.sourceId, p.sourceRevision);
+      if (!source) throw new Error('未找到该项目来源');
+      const sourceRole = ['requirements', 'environment'].includes(p.sourceRole)
+        ? p.sourceRole : (source.sourceRole || (source.kind === 'xlsx' ? 'requirements' : 'environment'));
+      const regions = Array.isArray(p.regions) ? p.regions.slice(0, 20).map(region => ({
+        sheet: String(region?.sheet || '').slice(0, 200),
+        sheetIndex: Number.isSafeInteger(region?.sheetIndex) ? region.sheetIndex : undefined,
+        fromRow: Number.isSafeInteger(region?.fromRow) ? region.fromRow : undefined,
+        toRow: Number.isSafeInteger(region?.toRow) ? region.toRow : undefined,
+        headerMode: ['auto', 'header', 'none'].includes(region?.headerMode) ? region.headerMode : 'auto',
+        headerRow: Number.isSafeInteger(region?.headerRow) ? region.headerRow : undefined,
+        includeHidden: region?.includeHidden === true,
+      })) : [];
+      if (regions.some(region => region.fromRow && region.toRow && region.fromRow > region.toRow))
+        throw new Error('来源表区起始行不能大于结束行');
+      const updated = upsertProjectSource(st, sessionId, {
+        sourceId: source.sourceId, sourceRevision: source.sourceRevision,
+        sourceRole, preparation: { sourceRole, regions, preparationRevision: (source.preparation?.preparationRevision || 0) + 1 },
+      });
+      return { ok: true, source: { sourceId: updated.sourceId, sourceRevision: updated.sourceRevision,
+        sourceRole: updated.sourceRole, preparation: updated.preparation }, preview: projectSourcePreview(updated) };
+    }
     if (endpoint === 'project.import') {
+      reconcileSceneFromTask(st, sessionId, 'cases', 'pentest')
       const existingPolicy = readTaskPolicy(st, sessionId);
       if (existingPolicy && existingPolicy.scenario !== 'project') throw new Error('当前会话已有安全测试任务，请新建会话后添加项目文档');
       if (activeProjectRun(st, sessionId)) throw new Error('本次运行已开始，来源快照已固定；请在下一轮重新添加文档');
@@ -1139,31 +1622,14 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
       return { ok: true, ...imported };
     }
     if (endpoint === 'project.start') {
-      const existing = activeProjectRun(st, sessionId);
-      if (existing) return { ok: true, existing: true, run: existing, counts: projectCounts(listProjectChecks(st, sessionId, existing.runId)) };
-      const latestSources = new Map();
-      for (const source of listProjectSources(st, sessionId)) if (!latestSources.has(source.sourceId)) latestSources.set(source.sourceId, source);
-      const sourceSnapshot = [...latestSources.values()].map(source => ({
-        sourceId: source.sourceId,
-        sourceRevision: source.sourceRevision,
-        displayName: source.displayName || '',
-        snapshotRef: source.snapshotRef || '',
-        snapshotMaterialId: source.snapshotMaterialId || '',
-      }));
-      const policy = { ...p.policy };
-      if (!policy.target) {
-        const origins = new Set();
-        for (const source of latestSources.values()) for (const section of source.sections || []) {
-          for (const match of String(section.text || '').matchAll(/https?:\/\/[^\s<>"'`，。；）)\]]+/gi)) {
-            try { const url = new URL(match[0].replace(/[.,;]+$/, '')); if (!url.username && !url.password) origins.add(url.origin); } catch { /* 不把无效地址当目标 */ }
-          }
-        }
-        if (origins.size) policy.target = [...origins].join('\n');
-        const choiceRow = st.db.prepare('SELECT record FROM task_flow_choice WHERE session_id=?').get(sessionId);
-        const allowNetwork = policy.allowTargetNetwork !== false && (!choiceRow || JSON.parse(choiceRow.record).allowTargetNetwork !== false);
-        if (!policy.target && allowNetwork) throw new Error('请在测试设置里指定本次测试范围；文档没有可用网址。只分析文档时，先关闭“允许访问网站”。');
+      const started = startProjectFromSources(st, sessionId, {
+        ...p,
+        runtimeId: modelAdmissions.get(ctx)?.runtimeId || '',
+      });
+      const run = started.run;
+      if (started.existing) {
+        return { ok: true, existing: true, run, counts: projectCounts(listProjectChecks(st, sessionId, run.runId)) };
       }
-      const run = startProjectTask(st, sessionId, { ...p, policy, sourceSnapshot, runtimeId: modelAdmissions.get(ctx)?.runtimeId || '' });
       if (p.autoStart !== false) {
         const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
         if (typeof agent?.followup !== 'function' || agent.status === 'running') {
@@ -1171,22 +1637,29 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
           throw new Error('当前代理不可用或仍在运行，任务尚未开始');
         }
         try {
+          const firstCheck = projectExecutableChecks(st, sessionId, run.runId)[0];
           // 注入安全：由同源 Desktop RPC 触发，不在 Session.append 发布临界区内。
           await agent.followup({ id: `saker-project-${sessionId}-${run.runId}`, role: 'user', source: { kind: 'user' },
-            content: [{ type: 'text', text: '请开始按文档测试：先读取本次添加的来源和用户说明；用 project_check define 同批提交 checks 的 sourceRefs 与 sectionDecisions（requirements/reference/unreadable），然后逐项执行。缺条件的项写清缺口并继续独立项。不要重复开始任务或重置预算。' }] });
+            content: [{ type: 'text', text: '请开始按案例测试：'
+              + (firstCheck ? '当前检查「' + firstCheck.requirement + '」。只完成这一项列出的实际读取或执行，在正常答复中说明观察、结论和缺口，不要提前处理后续检查。' : '直接读取当前项并执行。')
+              + '不要为登记、领取或补录另调用管理工具；缺条件的项写清原因并继续独立项。不要重复开始任务或重置预算。' }] });
         } catch (error) {
           setProjectRunState(st, sessionId, run.runId, 'failed', run.controlRev, { blocker: { code: 'needs-user', reason: '模型未能开始', evidence: String(error.message || error) } });
           throw new Error('模型未能开始，已停止本次运行：' + error.message);
         }
       }
-      return { ok: true, existing: false, run, counts: projectCounts([]) };
+      return { ok: true, existing: false, run, counts: projectCounts(listProjectChecks(st, sessionId, run.runId)),
+        autoChecks: started.autoChecks, ...(started.autoCheckError ? { autoCheckError: started.autoCheckError } : {}) };
     }
     const run = requestedRunId ? readProjectRun(st, sessionId, requestedRunId) : activeProjectRun(st, sessionId);
     if (!run) return { ok: false, error: '没有活动的项目运行' };
     if (endpoint === 'project.pause' || endpoint === 'project.stop') {
       const next = endpoint === 'project.pause'
         ? pauseProjectRun(st, sessionId, run.runId, { code: 'needs-user', reason: '用户暂停', at: new Date().toISOString() }, p.expectedControlRev)
-        : setProjectRunState(st, sessionId, run.runId, 'cancelled', p.expectedControlRev ?? run.controlRev, { blocker: { code: 'cancelled', reason: '用户停止' } });
+        : setProjectRunState(st, sessionId, run.runId, 'cancelled', p.expectedControlRev ?? run.controlRev, {
+          blocker: { code: 'cancelled', reason: '用户停止' },
+          completedSummary: { ...(run.completedSummary || {}), coverageComplete: false, endedByUser: true },
+        });
       const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
       let controlError = null;
       if (agent?.status === 'running') {
@@ -1219,7 +1692,12 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
     if (endpoint === 'project.check-detail') {
       const check = readProjectCheck(st, sessionId, run.runId, String(p.checkId || ''));
       if (!check) return { ok: false, error: '未找到该检查' };
-      return { ok: true, run, check, actions: listProjectActions(st, sessionId, run.runId).filter(action => (check.actionRefs || []).includes(action.actionId)) };
+      const actions = listProjectActions(st, sessionId, run.runId).filter(action => (check.actionRefs || []).includes(action.actionId));
+      const evidence = (check.evidenceRefs || []).map(id => {
+        const row = st.db.prepare('SELECT record FROM business_materials WHERE session_id=? AND id=?').get(sessionId, id);
+        try { return row ? { id, ...JSON.parse(row.record) } : null; } catch { return null; }
+      }).filter(Boolean);
+      return { ok: true, run, check: projectCheckView(check, { runState: run.state, actions }), evidence, actions };
     }
     if (endpoint === 'project.action-reconcile') {
       if (p.expectedControlRev !== run.controlRev) throw new Error('项目状态已变化，请刷新后重新核对');
@@ -1229,6 +1707,48 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
     if (endpoint === 'project.define-checks') {
       const checks = defineProjectChecks(st, sessionId, run.runId, Array.isArray(p.checks) ? p.checks : []);
       return { ok: true, checks, counts: projectCounts(listProjectChecks(st, sessionId, run.runId)) };
+    }
+    if (endpoint === 'project.retry') {
+      const check = reopenProjectCheck(st, sessionId, run.runId, String(p.checkId || ''), p);
+      return { ok: true, check, counts: projectCounts(listProjectChecks(st, sessionId, run.runId)) };
+    }
+    if (endpoint === 'project.continuation') {
+      const updated = p.paused === false
+        ? resumeProjectContinuation(st, sessionId, p.expectedControlRev)
+        : pauseProjectContinuation(st, sessionId, p.reason, p.expectedControlRev);
+      setSceneContinuation(st, sessionId, p.paused !== false, p.reason);
+      return { ok: true, run: updated };
+    }
+    if (endpoint === 'project.retest') {
+      if (p.expectedControlRev !== undefined && Number(p.expectedControlRev) !== run.controlRev)
+        throw new Error('项目状态已变化，请刷新后重新选择');
+      const value = startProjectRetest(st, sessionId, { ...p, parentRunId: run.runId });
+      reconcileSceneFromTask(st, sessionId, 'cases', 'pentest');
+      const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
+      if (!value.needsStart || typeof agent?.followup !== 'function' || agent.status === 'running') {
+        const latest = readProjectRun(st, sessionId, value.run.runId);
+        if (latest && ['preparing', 'running'].includes(latest.state)) {
+          setProjectRunState(st, sessionId, latest.runId, 'paused', latest.controlRev, {
+            blocker: { code: 'needs-user', reason: '重测已建立但当前代理不可用或仍在运行，请确认后继续' },
+          });
+        }
+        throw new Error('重测已建立但当前代理不可用；请先确认正在运行的任务，再点击继续');
+      }
+      try {
+        // 注入安全：由同源 Desktop RPC 启动新重测，并已确认代理空闲，不在 Session.append 临界区。
+        await agent.followup({ id: `saker-project-retest-${value.run.runId}-${Date.now()}`, role: 'user', source: { kind: 'user' },
+          content: [{ type: 'text', text: '请只重测用户刚选择的检查项：' + value.checks.map(check => check.checkId).join('、')
+            + '。使用当前活动尝试的新 attemptId，重新读取所需事实并执行；旧依据只能作为参考，不能冒充本次观察。不要重建或改写父运行的其他检查。' }] });
+      } catch (error) {
+        const latest = readProjectRun(st, sessionId, value.run.runId);
+        if (latest && ['preparing', 'running'].includes(latest.state)) {
+          await setProjectRunState(st, sessionId, latest.runId, 'paused', latest.controlRev, {
+            blocker: { code: 'needs-user', reason: '重测模型未能开始', evidence: String(error.message || error) },
+          });
+        }
+        throw new Error('模型未能开始重测，已保留选择：' + error.message);
+      }
+      return { ok: true, ...value, counts: projectCounts(value.checks) };
     }
     if (endpoint === 'project.export') {
       const bundle = zipProjectDelivery(st, sessionId, run.runId);
@@ -1353,6 +1873,70 @@ function wakeWorkersForMaterial(ctx, store, sessionId, materialId) {
   return woken;
 }
 
+function projectSourcePreview(source) {
+  const kind = String(source?.kind || 'text');
+  const sourceRole = ['requirements', 'environment'].includes(source?.sourceRole)
+    ? source.sourceRole : ['requirements', 'environment'].includes(source?.preparation?.sourceRole)
+      ? source.preparation.sourceRole : kind === 'xlsx' ? 'requirements' : 'environment';
+  const workbook = new Map();
+  for (const section of source?.sections || []) {
+    const location = section.location || {};
+    if (location.kind !== 'row' || !Array.isArray(section.cells)) continue;
+    const key = [location.sheetIndex ?? '', location.sheet || ''].join('|');
+    if (!workbook.has(key)) workbook.set(key, {
+      sheet: location.sheet || '', sheetIndex: Number.isSafeInteger(location.sheetIndex) ? location.sheetIndex : workbook.size,
+      hiddenSheet: location.sheetState && location.sheetState !== 'visible', rows: [], hiddenRows: new Set(), hiddenColumns: new Set(),
+    });
+    const sheet = workbook.get(key);
+    if (location.hidden) sheet.hiddenRows.add(Number(location.row) || 0);
+    for (const column of location.hiddenColumns || []) sheet.hiddenColumns.add(Number(column) || column);
+    sheet.rows.push({
+      row: Number(location.row) || 0, hidden: location.hidden === true,
+      values: section.cells.map(cell => String(cell?.value || '').trim()).filter(Boolean),
+    });
+  }
+  const headerWords = new Set(['编号', '序号', '检查项', '测试项', '测试内容', '验证项', '用例', '用例编号',
+    '要求', '预期', '预期结果', '检查内容', 'case', 'case id', 'test', 'test case', 'expected',
+    'expected result', 'requirement', 'check', 'id']);
+  const sheets = [...workbook.values()].sort((left, right) => left.sheetIndex - right.sheetIndex).map(sheet => {
+    const rows = sheet.rows.sort((left, right) => left.row - right.row);
+    const first = rows.find(row => row.values.length);
+    const headerKnown = !!first && first.values.some(value => headerWords.has(String(value).trim().toLowerCase()));
+    return {
+      sheet: sheet.sheet, sheetIndex: sheet.sheetIndex, rows: rows.length,
+      fromRow: rows[0]?.row || null, toRow: rows.at(-1)?.row || null,
+      hiddenRows: sheet.hiddenRows.size, hiddenColumns: [...sheet.hiddenColumns],
+      hiddenSheet: sheet.hiddenSheet, firstNonEmptyRow: first?.row || null, firstValues: first?.values.slice(0, 12) || [],
+      headerMode: 'auto', headerRow: headerKnown ? first.row : null,
+      headerAmbiguous: !!first && !headerKnown, includeHidden: false,
+    };
+  });
+  const preparedRegions = Array.isArray(source?.preparation?.regions) ? source.preparation.regions : [];
+  const regions = sheets.map((sheet, index) => {
+    const stored = preparedRegions.find(region => String(region?.sheet || '') === sheet.sheet && Number(region?.sheetIndex ?? index) === sheet.sheetIndex)
+      || preparedRegions[index] || {};
+    return {
+      sheet: sheet.sheet, sheetIndex: sheet.sheetIndex,
+      fromRow: Number(regionApplies(stored) ? stored.fromRow : sheet.fromRow) || sheet.fromRow,
+      toRow: Number(stored.toRow ?? sheet.toRow) || sheet.toRow,
+      headerMode: ['auto', 'header', 'none'].includes(stored.headerMode) ? stored.headerMode : sheet.headerMode,
+      headerRow: Number(stored.headerRow ?? sheet.headerRow) || sheet.headerRow,
+      includeHidden: stored.includeHidden === true,
+    };
+  });
+  return {
+    sourceId: source?.sourceId || '', sourceRevision: source?.sourceRevision || '',
+    displayName: source?.displayName || '', kind, sourceRole,
+    format: kind, sheets, regions,
+    needsConfirmation: kind === 'xlsx' && sheets.some(sheet => sheet.headerAmbiguous),
+    note: sourceRole === 'environment' ? '环境说明只作为背景，不自动生成测试项。' : '测试要求会按所选工作表、表头和隐藏区生成执行项。',
+  };
+}
+
+function regionApplies(region) {
+  return region && typeof region === 'object' && !Array.isArray(region);
+}
+
 async function importProjectSource(store, sessionId, input = {}) {
   const displayName = String(input.name || input.displayName || '未命名文档').trim().slice(0, 300) || '未命名文档';
   const base64 = String(input.base64 || '').trim();
@@ -1398,17 +1982,334 @@ async function importProjectSource(store, sessionId, input = {}) {
     store.db.prepare('INSERT INTO business_materials(session_id,id,source_url,digest,record) VALUES(?,?,?,?,?) '
       + 'ON CONFLICT(session_id,id) DO UPDATE SET record=excluded.record,digest=excluded.digest')
       .run(sessionId, snapshotMaterialId, 'https://project-source.invalid/' + digest, digest, JSON.stringify(material));
+    const safeSource = {
+      sourceId: source.sourceId, sourceRevision: source.sourceRevision,
+      displayName: source.displayName, kind: source.kind, parseState: source.parseState,
+      sourceRole: source.sourceRole, preparation: source.preparation,
+      snapshotMaterialId,
+    };
     return {
       source: {
         sourceId: source.sourceId, sourceRevision: source.sourceRevision,
         displayName: source.displayName, kind: source.kind, parseState: source.parseState,
+        sourceRole: source.sourceRole,
         snapshotMaterialId,
       },
       sections: (source.sections || []).length,
       unread: (source.unread || []).length,
       parseState: source.parseState,
+      preview: projectSourcePreview(safeSource),
     };
   });
+}
+
+function autoChecksFromStructuredSources(sources) {
+  const headerWords = new Set(['编号', '序号', '检查项', '测试项', '测试内容', '验证项', '用例', '用例编号',
+    '要求', '预期', '预期结果', '检查内容', 'case', 'case id', 'test', 'test case', 'expected',
+    'expected result', 'requirement', 'check', 'id']);
+  const metadataWords = new Set(['项目名称', '系统名称', '联系人', '负责人', '测试人员', '分组说明',
+    '测试说明', '版本', '日期', '客户名称', '单位名称']);
+  const checks = [];
+  const sourceDecisions = [];
+  const columnReference = index => {
+    let value = Math.max(1, Number(index) || 1), result = '';
+    while (value) {
+      value -= 1;
+      result = String.fromCharCode(65 + value % 26) + result;
+      value = Math.floor(value / 26);
+    }
+    return result;
+  };
+  const normalizedText = value => String(value || '').trim().toLowerCase();
+  const fieldLike = item => {
+    const text = String(item.value || '').trim();
+    if (!text || text.length > 40 || /[\r\n]/.test(text)) return false;
+    if (/[。！？!?；;]/.test(text)) return false;
+    if (/^(?:https?:\/\/|\\\\|[A-Za-z]:[\\/]|\.{0,2}\/)/i.test(text)) return false;
+    return true;
+  };
+  const headerSignature = values => values.filter(item => item.value)
+    .map(item => item.column + ':' + normalizedText(item.value)).join('|');
+  const looksLikeHeader = (values, rows, rowPosition, headerByColumn) => {
+    const populated = values.filter(item => item.value);
+    if (!populated.length) return false;
+    const exact = populated.filter(item => headerWords.has(normalizedText(item.value)));
+    if (headerByColumn.size) {
+      const sameColumns = [...headerByColumn].every(([column, text]) =>
+        populated.some(item => item.column === column && normalizedText(item.value) === normalizedText(text)));
+      if (sameColumns && populated.every(item => headerByColumn.has(item.column) && fieldLike(item))) return true;
+      return exact.length > 0 && populated.every(fieldLike);
+    }
+    if (populated.length === 1) return exact.length === 1 && rows.slice(rowPosition + 1).some(row => row.cells.length);
+    if (!populated.every(fieldLike)) return false;
+    const later = rows.slice(rowPosition + 1).find(row => row.cells.length);
+    if (!later) return false;
+    const sameShape = later.cells.filter(cell => populated.some(item => item.column === cell.column)).length
+      >= Math.min(populated.length, later.cells.length);
+    if (!sameShape) return false;
+    if (exact.length) return true;
+    // 没有明确字段词就是歧义，不凭“短行 + 下一行更长”删除首行；
+    // 用户可在导入预览明确选择“首行是表头”。
+    return false;
+  };
+  const isMetadata = values => {
+    const populated = values.filter(item => item.value);
+    if (!populated.length) return false;
+    const first = String(populated[0].value).trim();
+    const keyValue = /^([^：:]{1,20})[：:]\s*\S/.exec(first);
+    if (keyValue && metadataWords.has(normalizedText(keyValue[1]))) return true;
+    if (populated.length < 2 || populated.length > 4) return false;
+    let keyIndex = 0;
+    while (keyIndex < populated.length && fieldLike(populated[keyIndex])
+      && metadataWords.has(normalizedText(populated[keyIndex].value).replace(/[：:]$/, ''))) {
+      if (!populated[keyIndex + 1]) return false;
+      keyIndex += 2;
+    }
+    return keyIndex > 0 && keyIndex >= populated.length;
+  };
+  for (const source of sources) {
+    const preparation = source.preparation && typeof source.preparation === 'object' ? source.preparation : {};
+    const sourceRole = ['requirements', 'environment'].includes(preparation.sourceRole)
+      ? preparation.sourceRole : ['requirements', 'environment'].includes(source.sourceRole)
+        ? source.sourceRole : source.kind === 'xlsx' ? 'requirements' : 'environment';
+    if (sourceRole === 'environment') {
+      for (const section of source.sections || []) sourceDecisions.push({
+        sourceId: source.sourceId, sourceRevision: source.sourceRevision, sectionId: section.sectionId,
+        decision: 'reference', rationale: '用户将来源标记为环境说明，仅保留背景，不生成执行项。', checkIds: [],
+      });
+      continue;
+    }
+    const groups = new Map();
+    for (const [sectionIndex, section] of (source.sections || []).entries()) {
+      const location = section.location || {};
+      if (source.kind === 'xlsx' && (location.kind === 'worksheet' || section.kind === 'worksheet-note')) {
+        sourceDecisions.push({
+          sourceId: source.sourceId, sourceRevision: source.sourceRevision, sectionId: section.sectionId,
+          decision: 'reference',
+          rationale: '程序保留工作表、隐藏区域、筛选或合并范围等元信息，用作原表核对；不作为独立测试要求。',
+          checkIds: [],
+        });
+        continue;
+      }
+      if (location.kind === 'row' && Array.isArray(section.cells)) {
+        const groupKey = [location.sheetIndex ?? '', location.sheet || ''].join('|');
+        if (!groups.has(groupKey)) groups.set(groupKey, {
+          sheet: location.sheet || '', sheetIndex: Number.isSafeInteger(location.sheetIndex) ? location.sheetIndex : groups.size,
+          hiddenSheet: location.sheetState && location.sheetState !== 'visible', rows: [],
+        });
+        const cells = section.cells
+          .map((cell, cellIndex) => ({
+            ref: String(cell?.ref || ''),
+            column: columnNumber(cell?.ref) || cellIndex + 1,
+            value: String(cell?.value || '').trim(),
+            formulaNoResult: cell?.formulaNoResult === true,
+            hiddenColumn: (location.hiddenColumns || []).map(Number)
+              .includes(columnNumber(cell?.ref) || cellIndex + 1),
+          }))
+          .filter(cell => cell.value || cell.formulaNoResult)
+          .sort((left, right) => left.column - right.column);
+        groups.get(groupKey).rows.push({
+          sheet: location.sheet || '', row: location.row || 0, hidden: location.hidden === true,
+          cells, sectionIds: [section.sectionId], sectionIndex,
+          mergedRanges: Array.isArray(section.mergedRanges) ? section.mergedRanges : [],
+        });
+      } else if (location.kind === 'table-cell') {
+        const table = location.table || '';
+        if (!groups.has(table)) groups.set(table, {
+          sheet: location.table ? '表格 ' + location.table : '表格',
+          sheetIndex: groups.size, rows: [],
+        });
+        const group = groups.get(table);
+        let row = group.rows.find(item => item.row === (location.row || 0));
+        if (!row) {
+          row = { sheet: group.sheet, row: location.row || 0, hidden: false, cells: [],
+            sectionIds: [], sectionIndex };
+          group.rows.push(row);
+        }
+        const column = Math.max(1, Number(location.column) || 1);
+        row.cells = row.cells.filter(cell => cell.column !== column);
+        row.cells.push({ ref: columnReference(column) + row.row, column,
+          value: String(section.text || '').trim(), formulaNoResult: false });
+        row.cells.sort((left, right) => left.column - right.column);
+        row.sectionIds.push(section.sectionId);
+      }
+    }
+    const orderedGroups = [...groups.values()].sort((left, right) =>
+      left.sheetIndex - right.sheetIndex || left.rows[0]?.sectionIndex - right.rows[0]?.sectionIndex);
+    for (const group of orderedGroups) {
+      const storedRegions = Array.isArray(preparation.regions) ? preparation.regions : [];
+      const matchingRegions = storedRegions.filter(region =>
+        String(region?.sheet || '') === group.sheet
+        && (region?.sheetIndex === undefined || Number(region.sheetIndex) === group.sheetIndex));
+      const regions = (matchingRegions.length ? matchingRegions : [{}]).map(region => ({
+        fromRow: Number.isSafeInteger(region.fromRow) ? region.fromRow : null,
+        toRow: Number.isSafeInteger(region.toRow) ? region.toRow : null,
+        headerMode: ['auto', 'header', 'none'].includes(region.headerMode) ? region.headerMode : 'auto',
+        headerRow: Number.isSafeInteger(region.headerRow) ? region.headerRow : null,
+        includeHidden: region.includeHidden === true,
+      }));
+      const headerMaps = new Map(regions.map((_, index) => [index, new Map()]));
+      const firstEligibleSeen = new Set();
+      const regionForRow = row => regions.findIndex(region =>
+        (region.fromRow === null || row.row >= region.fromRow) && (region.toRow === null || row.row <= region.toRow));
+      const rows = group.rows.sort((left, right) => left.row - right.row || left.sectionIndex - right.sectionIndex);
+      for (let rowPosition = 0; rowPosition < rows.length; rowPosition++) {
+        const row = rows[rowPosition];
+        const sourceRefs = row.sectionIds.map(sectionId => ({
+          sourceId: source.sourceId, sourceRevision: source.sourceRevision, sectionId,
+        }));
+        if (!row.cells.length) {
+          for (const ref of sourceRefs) sourceDecisions.push({
+            ...ref, decision: 'not-applicable',
+            rationale: '该行没有可识别的单元格内容，保留在原表位置但不生成测试项。', checkIds: [],
+          });
+          continue;
+        }
+        const regionIndex = regionForRow(row);
+        if (regionIndex < 0) {
+          for (const ref of sourceRefs) sourceDecisions.push({
+            ...ref, decision: 'reference',
+            rationale: '该行不在用户选择的表区范围内；内容和位置仍保留。', checkIds: [],
+          });
+          continue;
+        }
+        const region = regions[regionIndex];
+        const headerByColumn = headerMaps.get(regionIndex);
+        if (isMetadata(row.cells)) {
+          for (const ref of sourceRefs) sourceDecisions.push({
+            ...ref, decision: 'reference',
+            rationale: '程序识别为明确的键值元信息；完整要求语句仍作为测试项保留。', checkIds: [],
+          });
+          continue;
+        }
+        const firstEligible = !firstEligibleSeen.has(regionIndex);
+        const configuredHeader = region.headerMode === 'header'
+          && (region.headerRow === null ? firstEligible : row.row === region.headerRow);
+        const autoHeader = region.headerMode === 'auto'
+          && looksLikeHeader(row.cells, rows, rowPosition, headerByColumn);
+        if (configuredHeader || autoHeader) {
+          firstEligibleSeen.add(regionIndex);
+          headerByColumn.clear();
+          for (const cell of row.cells) if (cell.value) headerByColumn.set(cell.column, cell.value);
+          for (const ref of sourceRefs) sourceDecisions.push({
+            ...ref, decision: 'reference',
+            rationale: '程序按首行字段结构建立本工作表列映射；后续数据不会因词句中出现相同关键词而重置表头。', checkIds: [],
+          });
+          continue;
+        }
+        if ((row.hidden || group.hiddenSheet) && !region.includeHidden) {
+          for (const ref of sourceRefs) sourceDecisions.push({
+            ...ref, decision: 'excluded',
+            rationale: group.hiddenSheet
+              ? '隐藏工作表中的行默认不进入执行范围；内容和位置已保留，用户可在导入预览中明确选择纳入。'
+              : '隐藏行默认不进入执行范围；内容和位置已保留，用户可在导入预览中明确选择纳入。', checkIds: [],
+          });
+          continue;
+        }
+        const pairs = [];
+        for (const cell of row.cells) {
+          if (cell.hiddenColumn && !region.includeHidden) continue;
+          const column = columnReference(cell.column);
+          const header = headerByColumn.get(cell.column) || ('第' + cell.column + '列（' + column + '列）');
+          if (cell.value) pairs.push(header + '：' + cell.value);
+          if (cell.formulaNoResult) pairs.push(column + row.row + ' 公式无缓存结果，需核对原文件');
+        }
+        if (row.mergedRanges.length) pairs.push('合并区域：' + row.mergedRanges.join('、'));
+        if (!pairs.length) continue;
+        const requirement = pairs.join('；').slice(0, 4000);
+        const digest = crypto.createHash('sha256')
+          .update(JSON.stringify([source.sourceId, source.sourceRevision, row.sheet, row.row, requirement]))
+          .digest('hex').slice(0, 20);
+        const checkId = 'auto-' + digest;
+        checks.push({
+          checkId,
+          requirement,
+          sourceLocation: [source.displayName || source.sourceId, row.sheet, '第' + row.row + '行',
+            row.cells.map(cell => cell.ref).filter(Boolean).join(',') ? '单元格 ' + row.cells.map(cell => cell.ref).filter(Boolean).join(',') : '']
+            .filter(Boolean).join(' / ').slice(0, 1000),
+          sourceRefs,
+          order: checks.length,
+        });
+        for (const ref of sourceRefs) sourceDecisions.push({
+          ...ref, decision: 'requirements',
+          rationale: '程序按原工作表顺序、该表表头和真实列号建立检查。',
+          checkIds: [checkId],
+        });
+      }
+    }
+  }
+  if (checks.length) {
+    const decided = new Set(sourceDecisions.map(item => [item.sourceId, item.sourceRevision, item.sectionId].join('|')));
+    for (const source of sources) {
+      if (source.kind === 'xlsx') continue;
+      for (const section of source.sections || []) {
+        const key = [source.sourceId, source.sourceRevision, section.sectionId].join('|');
+        if (decided.has(key)) continue;
+        sourceDecisions.push({
+          sourceId: source.sourceId, sourceRevision: source.sourceRevision, sectionId: section.sectionId,
+          decision: 'reference', checkIds: [],
+          rationale: '已选中结构化表格作为检查来源；该文本、Word 或附件作为环境背景保留，不要求逐段人工登记。',
+        });
+      }
+    }
+  }
+  return { checks, sourceDecisions };
+}
+
+function startProjectFromSources(store, sessionId, input = {}) {
+  const existing = activeProjectRun(store, sessionId);
+  if (existing) return { existing: true, run: existing, autoChecks: 0, autoCheckError: '' };
+  const latestSources = new Map();
+  for (const source of listProjectSources(store, sessionId)) {
+    if (!latestSources.has(source.sourceId)) latestSources.set(source.sourceId, source);
+  }
+  const sourceSnapshot = [...latestSources.values()].map(source => ({
+    sourceId: source.sourceId,
+    sourceRevision: source.sourceRevision,
+    displayName: source.displayName || '',
+    snapshotRef: source.snapshotRef || '',
+    snapshotMaterialId: source.snapshotMaterialId || '',
+  }));
+  const policy = { ...(input.policy || {}) };
+  if (!policy.target) {
+    const origins = new Set();
+    for (const source of latestSources.values()) for (const section of source.sections || []) {
+      const targetText = [
+        section.text || '',
+        ...(Array.isArray(section.cells) ? section.cells.map(cell => cell?.value || '') : []),
+      ].join('\n');
+      for (const match of targetText.matchAll(/https?:\/\/[^\s<>"'`，。；）)\]]+/gi)) {
+        try {
+          const url = new URL(match[0].replace(/[.,;]+$/, ''));
+          if (!url.username && !url.password) origins.add(url.origin);
+        } catch { /* Ignore malformed source URLs. */ }
+      }
+    }
+    if (origins.size) policy.target = [...origins].join('\n');
+    const choiceRow = store.db.prepare('SELECT record FROM task_flow_choice WHERE session_id=?').get(sessionId);
+    const allowNetwork = policy.allowTargetNetwork !== false
+      && (!choiceRow || JSON.parse(choiceRow.record).allowTargetNetwork !== false);
+    if (!policy.target && allowNetwork)
+      throw new Error('请在测试设置里指定本次测试范围；文档没有可用网址。只分析文档时，先关闭“允许访问网站”。');
+  }
+  const run = startProjectTask(store, sessionId, {
+    ...input,
+    policy,
+    sourceSnapshot,
+    runtimeId: input.runtimeId || '',
+  });
+  let autoCheckError = '';
+  const autoPlan = autoChecksFromStructuredSources([...latestSources.values()]);
+  if (autoPlan.checks.length) {
+    try {
+      defineProjectChecks(store, sessionId, run.runId, autoPlan.checks, autoPlan.sourceDecisions,
+        { programmaticSourceDecisions: true });
+    } catch (error) {
+      autoCheckError = String(error.message || error);
+    }
+  }
+  reconcileSceneFromTask(store, sessionId, 'cases', 'pentest');
+  return { existing: false, run, autoChecks: autoPlan.checks.length, autoCheckError };
 }
 
 function apply(ctx) {
@@ -1418,28 +2319,200 @@ function apply(ctx) {
   ctx.provide?.('sakerTaskScenario', {
     get(sessionId) {
       const id = String(sessionId || '');
-      if (!id) return 'pentest';
+      if (!id) return '';
       try {
-        const policy = readTaskPolicy(theStore(), id);
-        if (policy?.scenario) return policy.scenario;
-        const row = theStore().db.prepare('SELECT record FROM task_flow_choice WHERE session_id=?').get(id);
-        if (row) {
-          const choice = JSON.parse(row.record);
-          if (choice?.scenario === 'project') return 'project';
-        }
+        const session = (ctx.sessions || ctx.get?.('sessions'))?.get(id);
+        const presetId = presetOfSession(session);
+        if (!isSakerPreset(presetId)) return '';
+        return readSceneContext(theStore(), id, presetId)?.sceneId || '';
       } catch { /* before store init or during shutdown */ }
-      return 'pentest';
+      return '';
     },
   });
+  ctx.provide?.('sakerSceneContext', {
+    get(sessionId) {
+      try {
+        const session = (ctx.sessions || ctx.get?.('sessions'))?.get(String(sessionId || ''));
+        const presetId = presetOfSession(session);
+        return isSakerPreset(presetId) ? readSceneContext(theStore(), String(sessionId), presetId) : null;
+      } catch { return null; }
+    },
+    knowledgeEnabled(sessionId) {
+      try {
+        const session = (ctx.sessions || ctx.get?.('sessions'))?.get(String(sessionId || ''));
+        if (presetOfSession(session) !== 'ctf-solver') return false;
+        return readSceneContext(theStore(), String(sessionId), 'ctf-solver')?.knowledgeEnabled === true;
+      } catch { return false; }
+    },
+    continuationPaused(sessionId) {
+      try {
+        const session = (ctx.sessions || ctx.get?.('sessions'))?.get(String(sessionId || ''));
+        const preset = presetOfSession(session);
+        return isSakerPreset(preset)
+          ? readSceneContext(theStore(), String(sessionId), preset)?.continuationPaused === true
+          : false;
+      } catch { return false; }
+    },
+  });
+  const competitionSession = exec => {
+    const session = sessionOf(ctx, exec);
+    if (!session || session.mode !== 'ctf-solver') throw new Error('仅比赛模式可用于赛题记录');
+    const scene = readSceneContext(theStore(), session.id, 'ctf-solver');
+    if (!scene || scene.sceneId !== 'competition') throw new Error('当前比赛场景上下文不可用');
+    return { ...session, id: scene.contextId || scene.rootSession || session.id, childId: session.id };
+  };
+  ctx.tools.register(defineTool({
+    name: 'competition_challenge',
+    description: '读取或保存赛题；候选答案不结束比赛。',
+    parameters: {
+      action: { type: 'string', required: true, enum: ['list', 'create', 'update', 'detail'] },
+      challengeId: { type: 'string', description: '赛题ID；detail/update 必填' },
+      title: { type: 'string', description: '题名；可空' },
+      prompt: { type: 'string', description: '题面原文' },
+      state: { type: 'string', enum: ['open', 'solving', 'blocked'], description: '模型不可设 solved' },
+      expectedRevision: { type: 'integer', description: 'update 时用于冲突检测' },
+      limit: { type: 'integer' },
+      offset: { type: 'integer' },
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
+      render: (_args, value) => [{ type: 'text', text: value.ok ? JSON.stringify(value.challenge || value.page || { ok: true }) : value.error }],
+    },
+    execute(args, exec) {
+      try {
+        const session = competitionSession(exec), store = theStore();
+        if (args.action === 'list') return Promise.resolve({ ok: true, page: listCompetitionChallenges(store, session.id, args) });
+        if (args.action === 'create') {
+          const challenge = createCompetitionChallenge(store, session.id, args);
+          setCurrentCompetitionChallenge(store, session.id, challenge.challengeId);
+          return Promise.resolve({ ok: true, challenge });
+        }
+        if (args.action === 'update') return Promise.resolve({ ok: true,
+          challenge: updateCompetitionChallenge(store, session.id, String(args.challengeId || ''), args) });
+        const challenge = readCompetitionChallenge(store, session.id, String(args.challengeId || ''));
+        if (!challenge) throw new Error('competition challenge not found');
+        setCurrentCompetitionChallenge(store, session.id, challenge.challengeId);
+        return Promise.resolve({ ok: true, challenge,
+          answers: listCompetitionAnswers(store, session.id, challenge.challengeId),
+          executions: listCompetitionExecutions(store, session.id, challenge.challengeId) });
+      } catch (error) { return Promise.resolve({ ok: false, error: error.message }); }
+    },
+  }));
+  ctx.tools.register(defineTool({
+    name: 'competition_answer',
+    description: '保存候选答案原文和来源；不能标记已通过。',
+    parameters: {
+      action: { type: 'string', required: true, enum: ['add', 'list', 'reject', 'unknown'] },
+      challengeId: { type: 'string', required: true },
+      value: { type: 'string', description: '保留原始 flag/答案，不裁剪、不改码' },
+      source: { type: 'string', description: '具体输出、文件位置或实例来源' },
+      evidenceRef: { type: 'string' },
+      answerId: { type: 'string' },
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
+      render: (_args, value) => [{ type: 'text', text: value.ok ? JSON.stringify(value.answer || value.answers || { ok: true }) : value.error }],
+    },
+    execute(args, exec) {
+      try {
+        const session = competitionSession(exec), store = theStore(), challengeId = String(args.challengeId || '');
+        if (args.action === 'list') return Promise.resolve({ ok: true, answers: listCompetitionAnswers(store, session.id, challengeId) });
+        if (args.action === 'add') return Promise.resolve({ ok: true,
+          answer: addCompetitionAnswer(store, session.id, challengeId, { ...args, status: 'pending' }) });
+        if (args.action === 'reject' || args.action === 'unknown') return Promise.resolve({ ok: true,
+          answer: updateCompetitionAnswer(store, session.id, challengeId, String(args.answerId || ''),
+            { status: args.action === 'reject' ? 'rejected' : 'unknown' }) });
+        throw new Error('invalid competition answer action');
+      } catch (error) { return Promise.resolve({ ok: false, error: error.message }); }
+    },
+  }));
+  ctx.tools.register(defineTool({
+    name: 'competition_execution',
+    description: '运行、读取、写入或停止受管命令。',
+    parameters: {
+      action: { type: 'string', required: true, enum: ['run', 'read', 'write', 'stop', 'list'] },
+      challengeId: { type: 'string', required: true },
+      executionId: { type: 'string' },
+      command: { type: 'string', description: 'run：交给当前环境执行的命令' },
+      text: { type: 'string', description: 'write：原样写入 stdin' },
+      offset: { type: 'integer' },
+      maxBytes: { type: 'integer' },
+      requestId: { type: 'string', description: 'run：同一次操作重试的稳定键' },
+      stdoutOffset: { type: 'integer' }, stderrOffset: { type: 'integer' },
+      environment: { type: 'string', enum: ['host', 'docker'] },
+      image: { type: 'string' },
+      newline: { type: 'boolean' },
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
+      render: (_args, value) => [{ type: 'text', text: value.ok ? JSON.stringify(value.execution || value) : value.error }],
+    },
+    execute(args, exec) {
+      try {
+        const session = competitionSession(exec), store = theStore(), challengeId = String(args.challengeId || '');
+        if (args.action === 'list') return Promise.resolve({ ok: true, executions: listCompetitionExecutions(store, session.id, challengeId) });
+        if (args.action === 'run') {
+          const current = readCurrentCompetitionChallenge(store, session.id);
+          if (current && current.challengeId !== challengeId)
+            throw new Error('competition challenge is not the current UI selection; select it in Desktop before running');
+          return Promise.resolve({ ok: true, execution: runCompetitionExecution(store, session.id, challengeId, args) });
+        }
+        const executionId = String(args.executionId || '');
+        if (args.action === 'read') return Promise.resolve({ ok: true, ...readCompetitionOutput(store, session.id, challengeId, executionId, args) });
+        if (args.action === 'write') return Promise.resolve({ ok: true, ...writeCompetitionInput(store, session.id, challengeId, executionId, args) });
+        if (args.action === 'stop') return stopCompetitionExecution(store, session.id, challengeId, executionId);
+        throw new Error('invalid competition execution action');
+      } catch (error) { return Promise.resolve({ ok: false, error: error.message }); }
+    },
+  }));
+  ctx.tools.register(defineTool({
+    name: 'competition_knowledge',
+    description: '开启本地资料后搜索和分段读取。',
+    parameters: {
+      action: { type: 'string', required: true, enum: ['search', 'read'] },
+      query: { type: 'string' },
+      sourceId: { type: 'string' },
+      revision: { type: 'integer' },
+      cursor: { type: 'string' },
+      limit: { type: 'integer' },
+      maxBytes: { type: 'integer' },
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
+      render: (_args, value) => [{ type: 'text', text: value.ok ? JSON.stringify({
+        sourceId: value.sourceId, revision: value.revision, query: value.query,
+        rows: value.rows, text: value.text, offset: value.offset,
+        nextOffset: value.nextOffset, nextCursor: value.nextCursor,
+        totalBytes: value.totalBytes, totalHits: value.totalHits, complete: value.complete,
+      }, null, 2) : value.error }],
+    },
+    execute(args, exec) {
+      try {
+        const session = competitionSession(exec), store = theStore();
+        const scene = readSceneContext(store, session.id, 'ctf-solver');
+        if (scene?.knowledgeEnabled !== true) throw new Error('本地资料未开启');
+        if (args.action === 'search') return Promise.resolve({ ok: true, ...searchKnowledge(store, session.id, args) });
+        return Promise.resolve({ ok: true, ...readKnowledge(store, session.id, args) });
+      } catch (error) { return Promise.resolve({ ok: false, error: error.message }); }
+    },
+  }));
   const modelAdmission=registerModelAdmission(ctx,theStore,{countInput:options=>{
     let counter;try{counter=ctx.get?.('sakerInputCounter');}catch{ /* optional certified provider counter is unavailable */ }
     return counter?.countInput?.(options);
+  },providerBaseUrl:provider=>{
+    try {
+      const namespace=readSettingsSection(ctx.settings,'llm-pi-ai',{});
+      const value=namespace?.providers?.[provider]?.baseURL;
+      return typeof value==='string'?value:'';
+    } catch { return ''; }
   }});
   modelAdmissions.set(ctx,modelAdmission);
   ctx.on?.('session/event', (session, event) => {
-    if (session?.header?.agentPreset !== 'pentest' && !siteWorkerParent(theStore(), session?.id || '')
+    if (!isSakerPreset(presetOfSession(session)) && !siteWorkerParent(theStore(), session?.id || '')
       && !readTaskPolicy(theStore(), session?.id || '')?.purposeTask) return;
     captureTaskCost(theStore(), session, event);
+    try { captureProjectNativeEvent(theStore(), session?.id || '', event); }
+    catch (error) { ctx.logger?.warn?.('project native fact association: %s', error.message); }
   });
   ctx.on?.('agent/turn-stopping', ({ agent, signal }) => {
     const session = sessionOf(ctx, { agent });
@@ -1447,6 +2520,12 @@ function apply(ctx) {
     const store = theStore();
     if (readTaskPolicy(store, session.id)?.scenario === 'project') {
       try {
+        const latestUserText = latestExplicitUserText(agent);
+        if (/只回复|只解释|不要使用工具|不要调用工具|查看状态|状态如何|停止|暂停/.test(latestUserText)) {
+          const current = readProjectRun(store, session.id, activeProjectRun(store, session.id)?.runId || '');
+          if (current && current.state === 'running') pauseProjectContinuation(store, session.id, '用户本轮只要求状态或解释', current.controlRev);
+          return;
+        }
         const decision = projectTurnDecision(store, session.id);
         if (decision.action === 'continue') {
           const continuation = decision.continuation;
@@ -1488,11 +2567,11 @@ function apply(ctx) {
     try { finishTaskOnTurnEnd(store, session.id); }
     catch (error) { pauseTaskPolicy(store, session.id, { code: 'needs-user', reason: '回合结束收口失败', evidence: String(error.message || error) }, 'host-turn-end-failure'); }
   });
-  // Ordinary end-of-turn is a pause, not a terminal stop. A real human message
-  // that explicitly asks to continue lifts only that pause; status questions and
-  // planning discussion leave target access stopped.
+  // An ordinary end-of-turn is idle, not a permission stop. Any real human
+  // message lifts the idle marker; the model still decides whether to answer,
+  // inspect or execute. Plugin-generated continuations do not clear it here.
   ctx.on?.('session/event', (session, event) => {
-    if (event?.type !== 'user/message' || !isExplicitTaskContinuation(event.data)) return;
+    if (event?.type !== 'user/message' || !isHumanUserMessage(event.data)) return;
     const sessionId = String(session?.id ?? session?.header?.id ?? '');
     if (!sessionId) return;
     try {
@@ -1515,6 +2594,24 @@ function apply(ctx) {
       return names.has('exercise_request') && !names.has('redteam_context');
     } catch { return false; }
   };
+  const materialIndexPrompt = (store, sessionId, limit = 6) => {
+    const rows = store.db.prepare('SELECT id,digest,record FROM business_materials WHERE session_id=? ORDER BY rowid DESC LIMIT ?')
+      .all(sessionId, Math.max(1, Math.min(20, limit))).map(row => {
+        try {
+          const record = JSON.parse(row.record);
+          return {
+            id: String(row.id),
+            name: String(record.name || record.displayName || row.id).slice(0, 120),
+            format: String(record.summary?.format || record.kind || record.source || 'file').slice(0, 40),
+            bytes: Number(record.bytes) || 0,
+          };
+        } catch { return null; }
+      }).filter(Boolean);
+    if (!rows.length) return '';
+    return '\n可用本地资料（只读索引，不含秘密）：'
+      + rows.map(row => '[' + row.id + '] ' + row.name + ' / ' + row.format + ' / ' + row.bytes + 'B').join('；')
+      + '。用 saker_material 的 list/search/read 读取所需片段。';
+  };
   registerTaskPrompt(ctx, assembly => sessionOf(ctx, { agent: assembly?.agent })?.mode === 'pentest',
     assembly => {
       const session = sessionOf(ctx, { agent: assembly?.agent });
@@ -1522,15 +2619,74 @@ function apply(ctx) {
       try {
         const store = theStore();
         const state = taskPolicyStatus(store, session.id);
-        return taskPromptStable(state, { controlledInterface: controlledInterface(assembly?.agent) });
+        return taskPromptStable(state, { controlledInterface: controlledInterface(assembly?.agent) })
+          + materialIndexPrompt(store, session.id);
       }
       catch { return '本会话任务状态无法读取，停止目标操作并报告原因；不要重建或重置历史。'; }
+    });
+  registerTaskPrompt(ctx, assembly => sessionOf(ctx, { agent: assembly?.agent })?.mode === 'ctf-solver',
+    assembly => {
+      const session = sessionOf(ctx, { agent: assembly?.agent });
+      if (!session || session.mode !== 'ctf-solver') return '';
+      try {
+        const store = theStore();
+        const scene = readSceneContext(store, session.id, 'ctf-solver');
+        if (!scene || scene.sceneId !== 'competition') return '';
+        const state = competitionPromptState(store, session.id);
+        return state.state
+          + '；本地资料=' + (scene.knowledgeEnabled ? '开' : '关') + '。'
+          + state.promptLine
+          + state.instanceLine
+          + state.attachmentLine
+          + (scene.knowledgeEnabled ? materialIndexPrompt(store, session.id) : '')
+          + '候选答案只保存原文和来源，不等于判题通过；实例变化时增加版本；恢复会话先核对遗留进程。';
+      } catch { return '比赛状态无法读取；停止派发新动作并报告原因。'; }
+    }, {
+      sectionName: 'saker-competition-task',
+      contextName: 'saker-competition-task-state',
+      stableRule: 'Saker 比赛模式以当前题面、附件、实例和保存的过程为准。先核对用户提供的数据身份，再选择工具；候选答案不等于判题通过，不得自动结束整场比赛。交互程序使用 competition_execution，读取原始输出和进程状态；本地资料只在开关开启时按需查询。',
     });
   const enforcementAvailable = typeof ctx.tools.guard === 'function';
   if (enforcementAvailable) ctx.tools.guard(exec => {
     const session = sessionOf(ctx, exec);
     if (!session || session.mode !== 'pentest') return undefined;
-    try { return taskExecutionGuard(theStore(), session.id, exec.name, Date.now(), { args: exec.arguments }); }
+    try {
+      const projectEntryTools = new Set(['project_request', 'project_document', 'project_check',
+        'project_evidence', 'saker_browser']);
+      if (projectEntryTools.has(exec.name) && readTaskPolicy(theStore(), session.id)?.scenario !== 'project') {
+        const scene = readSceneContext(theStore(), session.id, session.mode);
+        if (scene?.sceneId === 'cases') {
+          const question = latestExplicitUserText(exec.agent) || '按已导入案例逐项执行';
+          startProjectFromSources(theStore(), session.id, {
+            policy: { question, userRequest: question },
+            runtimeId: modelAdmissions.get(ctx)?.runtimeId || '',
+          });
+        }
+      }
+      // Resolve the current workspace before reserving the operation. A missing
+      // directory is a pre-dispatch failure and must not consume the final
+      // allowed tool call.
+      if (exec.name === 'project_evidence'
+        && String(exec.arguments?.action || '').trim() === 'command'
+        && !exec.arguments?.cwd) {
+        const fallback = sessionWorkingDirectory(ctx, session, '');
+        return ensureWorkingDirectory(ctx, exec.agent, exec.signal, fallback || undefined)
+          .then(directory => {
+            if (typeof directory !== 'string' || !directory)
+              return 'working_directory_unavailable：未取得当前会话工作目录，本次命令没有派发，也没有消耗操作额度。';
+            exec.__sakerWorkingDirectory = directory;
+            return taskExecutionGuard(theStore(), session.id, exec.name, Date.now(), {
+              args: exec.arguments,
+              onReserve: () => { exec.__sakerReservation = { name: exec.name, at: Date.now() } },
+            });
+          })
+          .catch(error => 'working_directory_unavailable：' + error.message + '；本次命令没有派发，也没有消耗操作额度。');
+      }
+      return taskExecutionGuard(theStore(), session.id, exec.name, Date.now(), {
+        args: exec.arguments,
+        onReserve: () => { exec.__sakerReservation = { name: exec.name, at: Date.now() } },
+      });
+    }
     catch (error) { return '任务策略无法读取，停止目标操作：' + error.message; }
   });
 	// 插件卸载时释放库句柄。句柄悬着会锁住 -wal/-shm —— Windows 上表现为这个库文件
@@ -1538,9 +2694,12 @@ function apply(ctx) {
 	// 对照 campaign-memory：它一直有这条 ctx.effect，其余插件此前都缺，
 	// 插件重载/HMR 会因此留下永不回收的句柄（实测同进程二次 openStore 会 EBUSY）。
   async function disposeTaskRuntime() {
-    if (store) for (const recovered of recoverInterruptedProjectRuns(store, { runtimeId: modelAdmission.runtimeId, shutdown: true })) {
+    if (store) {
+      for (const recovered of recoverInterruptedProjectRuns(store, { runtimeId: modelAdmission.runtimeId, shutdown: true })) {
       const browser = projectBrowsers.get(recovered.sessionId);
       if (browser) { await browser.close(); projectBrowsers.delete(recovered.sessionId); }
+      }
+      stopAllCompetitionExecutions(store)
     }
     await purposeTasks.dispose();
     await siteWorkers.dispose();
@@ -1554,7 +2713,7 @@ function apply(ctx) {
 	//#region 模型工具（宿主平面，三种安全模式可见）
 	ctx.tools.register(defineTool({
 		name: "redteam_finding_register",
-		description: "登记本会话成果；完整影响和复核证据才能交付。",
+		description: "登记成果。",
 		parameters: {
 			title: { type: "string", required: true, description: "名称（简短）" },
 			severity: { type: "string", enum: SEVERITIES, description: "等级；漏洞型必填，默认 medium" },
@@ -1566,7 +2725,7 @@ function apply(ctx) {
 			proofKind: { type: "string", enum: PROOF_KINDS, description: "证据类型；interaction 不代表 execution" },
 			reproduction: { type: "string", description: "旧完整方法JSON；已有对照优先用comparisonId" },
 			evidenceRefs: { type: "string", description: 'JSON：[{kind:"request"|"file",id}]，引用原文' },
-      comparisonId: { type: 'string', description: 'run-pair的id（pair-…）：自动填回执和方法，保留待复核读取线索' },
+      comparisonId: { type: 'string', description: '对照记录ID。' },
 			chain: { type: "string", description: "调用链 entry→sink（审计双链之一，每行一链）" },
 			chainTracer: { type: "string", description: "追踪员独立重追链（双链另一侧）" },
 			chainVerdict: { type: "string", description: "双链结论：一致 / 不一致+差异" },
@@ -1594,9 +2753,9 @@ function apply(ctx) {
 			identity: { type: "string", description: "利用身份（云）" },
 			permission: { type: "string", description: "权限（云）" },
 			resource: { type: "string", description: "目标资源（云）" },
-			status: { type: "string", enum: REGISTER_STATUSES, description: "默认pending；verified需二次复核；fixed仅redteam。" },
+			status: { type: "string", enum: REGISTER_STATUSES, description: "状态。" },
 			evidenceLevel: { type: "string", enum: EVIDENCE_LEVELS, description: "证据等级；语义见 finding-fields.md" },
-			auditMode: { type: "string", enum: ["static", "dynamic"], description: "代码审计必填：static=静态，dynamic=动态复现成功" }
+			auditMode: { type: "string", enum: ["static", "dynamic"], description: "static|dynamic" }
 		},
 		output: {
 			schema: {
@@ -1633,14 +2792,14 @@ function apply(ctx) {
 
 	ctx.tools.register(defineTool({
 		name: "redteam_finding_update",
-		description: "按 id 更新成果或复测；verified 须有二次评级和依据。",
+		description: "更新成果。",
 		parameters: {
 			id: { type: "string", required: true, description: "finding id（如 pentest-3）" },
-			status: { type: "string", enum: ALL_STATUSES, description: "新状态；按当前模式终态规则，详见 finding-fields.md" },
+			status: { type: "string", enum: ALL_STATUSES, description: "新状态；终态规则见 finding-fields.md" },
 			verifyNote: { type: "string", description: "复核注记（结论+依据，简短）" },
 			evidenceRefs: { type: "string", description: 'JSON：[{kind:"request"|"file",id}]，引用原文' },
-			secondRating: { type: "string", enum: SECOND_RATINGS, description: "复核独立给出的二次评级；首次流转 verified 时必填" },
-			secondRatingNote: { type: "string", description: "二次评级依据（≥40 字）：复核方式与观察现象" },
+			secondRating: { type: "string", enum: SECOND_RATINGS, description: "可选复核评级。" },
+			secondRatingNote: { type: "string", description: "可选复核依据。" },
 			severity: { type: "string", enum: SEVERITIES },
 			title: { type: "string" },
 			type: { type: "string" },
@@ -1671,7 +2830,7 @@ function apply(ctx) {
 			requestPkt: { type: "string" },
 			responsePkt: { type: "string" },
 			retestNote: { type: "string", description: "复测注记（结论+依据）" },
-			retestVerdict: { type: "string", enum: RETEST_VERDICTS, description: "结构化复测结论；给了它就同时留一条复测记录" },
+			retestVerdict: { type: "string", enum: RETEST_VERDICTS, description: "复测结论。" },
 			retestExecutionId: { type: "string", description: "本次复测的执行回执 ID" },
 			retestControlExecutionId: { type: "string", description: "「本次未复现」必填：正常功能对照回执 ID" },
 			evidence: { type: "string" },
@@ -1749,7 +2908,7 @@ function apply(ctx) {
 	//#region Web 通道路由（better-sidebar 同款：webServer 自注册 + 同源栅栏）
   ctx.tools.register(defineTool({
     name: 'redteam_method',
-    description: '精选方法包：读取固定版本；激活/回退须成果页审阅。',
+    description: '方法包：读取固定版本；激活/回退需成果页审阅。',
     parameters: {
       action: { type: 'string', required: true, enum: ['list', 'detail', 'active', 'stage', 'review', 'verify'], description: '方法资料操作，契约见README' },
       digest: { type: 'string', description: '固定版本SHA256摘要' },
@@ -1763,30 +2922,31 @@ function apply(ctx) {
     },
     execute(args, exec) {
       const session = sessionOf(ctx, exec);
-      if (!session || session.mode !== 'pentest') return Promise.resolve({ ok: false, error: '仅当前渗透会话可管理方法资料' });
+      if (!session || session.mode !== 'pentest') return Promise.resolve({ ok: false, error: '仅当前Saker 会话可管理方法资料' });
       try { return Promise.resolve({ ok: true, ...methodAction(theStore(), args, 'model:' + session.id) }); }
       catch (error) { return Promise.resolve({ ok: false, error: error.message }); }
     }
   }));
   ctx.tools.register(defineTool({
     name: 'redteam_execution',
-    description: '执行已存请求和正常/异常对照；回执不等于漏洞。',
+    description: '执行已存请求与对照；回执非漏洞。',
     parameters: {
       action: { type: 'string', required: true, enum: ['direct', 'run', 'detail', 'run-pair', 'pair-detail', 'run-effect', 'job-detail', 'verify-effect', 'effect-detail', 'oob-issue', 'oob-check', 'browser-run'] },
-      document: { type: 'string', description: 'direct填url/method/headers/body；pair引用请求；effect用method版本；verify用rounds' },
-      url: { type: 'string', description: 'direct：完整HTTP(S) URL；范围内自动保存资产/请求/响应' },
+      document: { type: 'string', description: 'direct/pair/effect/verify 的参数 JSON' },
+      url: { type: 'string', description: 'direct：完整 HTTP(S) URL' },
       method: { type: 'string', description: 'direct：HTTP方法，默认GET' },
       headers: { type: 'object', additionalProperties: true, description: 'direct：请求头对象' },
       body: { type: 'string', description: 'direct：请求正文' },
       identityRef: { type: 'string', description: 'direct/run：身份引用；不填使用default' },
+      authSource: { type: 'string', enum: ['request', 'account'], description: 'run：认证来源' },
       label: { type: 'string', description: 'oob-check：issue 的 label' },
       host: { type: 'string', description: 'oob-check：载荷回调域名' },
       hypothesisId: { type: 'string', description: 'run：当前验证方向ID' },
       requestId: { type: 'string', description: 'run：redteam_context中已保存的请求ID' },
       requestRevision: { type: 'string', description: 'run：已保存请求版本' },
-      purpose: { type: 'string', enum: ['baseline', 'first-contact', 'exploration'], description: 'baseline复查；first-contact/exploration直接执行已存请求，不要求研究方向' },
-      methodId: { type: 'string', description: 'run：用于复现绑定时提供当前已审阅方法ID' },
-      methodVersion: { type: 'string', description: 'run：与methodId同时提供，绑定当前方法版本' },
+      purpose: { type: 'string', enum: ['baseline', 'first-contact', 'exploration'], description: '复查或直接执行已保存请求' },
+      methodId: { type: 'string', description: 'run：已审阅方法 ID' },
+      methodVersion: { type: 'string', description: 'run：与 methodId 配套的版本' },
       id: { type: 'string', description: 'detail：宿主生成的回执ID' },
       timeoutMs: { type: 'integer', description: 'run：100到15000，默认5000' },
       maxBytes: { type: 'integer', description: 'run：响应体上限64到65536，默认65536' }
@@ -1797,13 +2957,13 @@ function apply(ctx) {
     },
     async execute(args, exec) {
       const session = sessionOf(ctx, exec);
-      if (!session || session.mode !== 'pentest') return { ok: false, error: '仅当前渗透会话可执行已保存请求' };
+      if (!session || session.mode !== 'pentest') return { ok: false, error: '仅当前Saker 会话可执行已保存请求' };
       try {
         const store = theStore();
         const readId = purposeReadSessionId(store, session);
         if (args.action === 'direct') {
           const doc = args.document ? JSON.parse(args.document) : {};
-          const merged = { ...doc, ...Object.fromEntries(['url', 'method', 'headers', 'body', 'identityRef'].filter(key => args[key] !== undefined).map(key => [key, args[key]])) };
+          const merged = { ...doc, ...Object.fromEntries(['url', 'method', 'headers', 'body', 'identityRef', 'authSource'].filter(key => args[key] !== undefined).map(key => [key, args[key]])) };
           return { ok: true, ...await executeDirectRequest(store, session.id, { ...merged, timeoutMs: args.timeoutMs, maxBytes: args.maxBytes, callId: exec.callId }, exec.signal) };
         }
         if (args.action === 'run') return { ok: true, ...await executeRecordedRequest(store, session.id, { ...args, callId: exec.callId }, undefined, exec.signal) };
@@ -1852,11 +3012,11 @@ function apply(ctx) {
   }));
   ctx.tools.register(defineTool({
     name: 'redteam_research',
-    description: '围绕实际输入研究具体问题，保留对照证据；结论须独立复核。',
+    description: '研究具体问题并保留对照；结论须独立复核。',
     parameters: {
       action: { type: 'string', required: true, enum: ['groups', 'list', 'detail', 'create', 'observe', 'assess', 'close'], description: '契约见README' },
-      id: { type: 'string', description: 'detail/observe/assess/close必填：验证方向ID；不是观察id' },
-      document: { type: 'string', description: 'create用独立字段；observe绑定回执；close写理由；assess兼容旧JSON。' },
+      id: { type: 'string', description: 'detail/observe/assess/close必填：方向ID，不是观察id' },
+      document: { type: 'string', description: 'observe/assess/close 的参数 JSON' },
       observationId: { type: 'string', description: 'assess：run-pair返回的观察ID，不重发请求' },
       outcome: { type: 'string', enum: ['support', 'counterevidence', 'no-information'], description: 'assess：支持/反证/无新信息；difference不能作为结论' },
       interpretation: { type: 'string', description: 'assess：效果如何支持或反驳；不另填阴性台账' },
@@ -1870,7 +3030,7 @@ function apply(ctx) {
     },
     execute(args, exec) {
       const session = sessionOf(ctx, exec);
-      if (!session || session.mode !== 'pentest') return Promise.resolve({ ok: false, error: '仅当前渗透会话可管理研究记录' });
+      if (!session || session.mode !== 'pentest') return Promise.resolve({ ok: false, error: '仅当前Saker 会话可管理研究记录' });
       try {
         if (args.restriction !== undefined && args.action !== 'close') throw new Error('restriction is only valid for close');
         if (['detail', 'observe', 'assess', 'close'].includes(args.action) && !args.id) throw new Error('outer id=<hypothesis ID> is required; assess uses observationId for the comparison ID, observe uses document.id');
@@ -1889,24 +3049,173 @@ function apply(ctx) {
     }
   }));
 	ctx.tools.register(defineTool({
+		name: 'saker_assist',
+		description: '执行具体独立工作并自动交回。',
+		parameters: {
+			goal: { type: 'string', required: true, description: '具体工作，≤1800字符。' },
+			purpose: { type: 'string', enum: ['investigate', 'analyze', 'verify', 'review'], description: '工作用途；review=独立复核。' },
+			why: { type: 'string', description: '为何需要独立上下文。' },
+			materialIds: { type: 'array', items: { type: 'string' }, description: '可选：父任务材料ID。' },
+			assetIds: { type: 'array', items: { type: 'string' }, description: '可选：父任务资产ID。' },
+			target: { type: 'string', description: '可选目标；本地文件放goal。' },
+			modelTier: { type: 'string', enum: ['worker', 'review'], description: '模型档。' },
+			tools: { type: 'array', items: { type: 'string' }, description: '可选：补充最多12个可用工具。' }
+		},
+		output: {
+			schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
+			render: (_args, value) => [{ type: 'text', text: value.ok
+				? `已启动独立工作 ${value.childId || ''}；完成时会由宿主自动交回，不需要轮询。`
+				: `无法启动独立工作：${value.error}` }]
+		},
+		async execute(args, exec) {
+			const session = sessionOf(ctx, exec);
+			if (!session || !isSakerPreset(session.mode))
+				return { ok: false, error: '仅当前Saker 会话可使用协作' };
+			try {
+				const store = theStore();
+				let state = taskPolicyStatus(store, session.id);
+				let scene = ctx.sakerSceneContext?.get?.(session.id)
+					|| readSceneContext(store, session.id, session.mode);
+				if (!scene?.sceneId) throw new Error('当前任务未运行；请先在场景中填写目标');
+				if (!state.configured) {
+					let workers = 0;
+					try {
+						const choiceRow = store.db.prepare('SELECT record FROM task_flow_choice WHERE session_id=?').get(session.id);
+						workers = Math.max(0, Number(JSON.parse(choiceRow?.record || '{}').workers) || 0);
+					} catch { workers = 0; }
+					if (scene.sceneId === 'competition') workers = Math.max(0, Number(scene.preferences?.workers) || 0);
+					if (workers < 1) throw new Error('当前任务的协作人数为0；先在“协作”中明确启用');
+					startTaskPolicy(store, session.id, { mode: 'regular',
+						scenario: 'pentest',
+						question: scene.sceneId === 'competition' ? '按当前比赛题目和用户消息完成解题' : '按当前会话中的用户要求工作',
+						workerModel: scene.preferences?.workerModel,
+						reviewModel: scene.preferences?.reviewModel,
+						reportModel: scene.preferences?.reportModel,
+						budget: { workers } });
+					state = taskPolicyStatus(store, session.id);
+				}
+				if (!state.configured || state.stopped) throw new Error('当前任务未运行或已停止');
+				if ((state.policy.workerLimit ?? 0) < 1) throw new Error('当前任务的协作人数为0；先在“协作”中明确启用');
+				scene = ctx.sakerSceneContext?.get?.(session.id)
+					|| readSceneContext(store, session.id, session.mode);
+				if (scene?.sceneId === 'competition') {
+					const rootSession = scene.contextId || scene.rootSession || session.id;
+					const challenge = readCurrentCompetitionChallenge(store, rootSession);
+					const work = {
+						...state.policy, sceneRootSession: rootSession, sceneId: 'competition', sceneRevision: scene.sceneRevision,
+						competitionChallengeId: challenge?.challengeId || '', competitionChallengeRevision: challenge?.revision || 0,
+					};
+					if (work.sceneRootSession !== state.policy.sceneRootSession || work.sceneRevision !== state.policy.sceneRevision
+						|| work.competitionChallengeId !== state.policy.competitionChallengeId
+						|| work.competitionChallengeRevision !== state.policy.competitionChallengeRevision) {
+						writeTaskPolicy(store, session.id, work, 'worker-scene-bound', { childId: session.id });
+						state = taskPolicyStatus(store, session.id);
+					}
+				}
+				const started = await siteWorkers.assist(exec.agent, args, exec.signal);
+				return { ok: true, childId: started.childId, workers: started.workers,
+					resultDelivery: '宿主在子任务结束时自动交回一次结果；不要轮询' };
+			} catch (error) {
+				return { ok: false, error: error?.message || String(error) };
+			}
+		}
+	}));
+	ctx.tools.register(defineTool({
+		name: 'saker_material',
+		description: '列出、搜索或读取本地资料与当前题目。',
+		parameters: {
+			action: { type: 'string', required: true, enum: ['list', 'search', 'read', 'current'] },
+			id: { type: 'string', description: '读取资料时的材料 ID。' },
+			query: { type: 'string', description: '搜索关键词。' },
+			offset: { type: 'integer' },
+			limit: { type: 'integer' },
+		},
+		output: {
+			schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
+			render: (_args, value) => [{ type: 'text', text: value.ok ? value.text : value.error }],
+		},
+		execute(args, exec) {
+			const session = sessionOf(ctx, exec);
+			if (!session || !isSakerPreset(session.mode))
+				return { ok: false, error: '仅当前 Saker 会话可读取资料' };
+			try {
+				const store = theStore();
+				const action = String(args.action || '');
+				const scene = readSceneContext(store, session.id, session.mode);
+				const ownerSessionId = scene?.contextId || scene?.rootSession || session.id;
+				if (action === 'list') {
+					const value = materialsList(store, ownerSessionId, {
+						type: 'all', sort: 'recent', offset: Math.max(0, Number(args.offset) || 0),
+						pageSize: Math.max(1, Math.min(20, Number(args.limit) || 20)),
+					});
+					const rows = value.rows.filter(row => row.meta?.materialSource !== 'local-knowledge-snapshot').map(row => ({ kind: row.kind, id: row.id, title: row.title,
+						bytes: row.meta?.bytes ?? null, format: row.meta?.format || row.meta?.kind || '',
+						source: row.meta?.source || row.meta?.host || row.meta?.endpoint || '' }));
+					return { ok: true, rows, total: value.total, nextOffset: value.nextOffset, text: JSON.stringify(rows) };
+				}
+				if (action === 'search') {
+					const value = searchMaterials(store, ownerSessionId, { query: args.query,
+						offset: Math.max(0, Number(args.offset) || 0) });
+					return { ok: true, ...value };
+				}
+				if (action === 'read') {
+					const value = readMaterialExcerpt(store, ownerSessionId, { id: args.id,
+						offset: Math.max(0, Number(args.offset) || 0), limit: Number(args.limit) || undefined });
+					recordMaterialRead(store, ownerSessionId, { materialId: 'file:' + String(args.id),
+						bytes: value.bytes || 0, offset: Number(args.offset) || 0 });
+					return { ok: true, ...value };
+				}
+				if (action === 'current') {
+					const preset = session.mode;
+					if (preset === 'ctf-solver' || scene?.sceneId === 'competition') {
+						const challenge = readCurrentCompetitionChallenge(store, ownerSessionId);
+						if (!challenge) return { ok: false, error: '当前没有活动题目' };
+						const prompt = String(challenge.prompt || '');
+						const cursor = Math.max(0, Number(args.offset) || 0);
+						const page = readDocumentSection({ sections: [{ sectionId: 'current-prompt', text: prompt }] },
+							'current-prompt', { cursor, limit: args.limit || 8192 });
+						const value = {
+							challengeId: challenge.challengeId, title: challenge.title, state: challenge.state,
+							challengeRevision: challenge.revision,
+							instanceRevision: challenge.instance?.revision || 1,
+							instance: { url: challenge.instance?.url || '', connection: challenge.instance?.connection || '' },
+							prompt: page.text, promptBytes: Buffer.byteLength(prompt), offset: page.range.start,
+							range: page.range, nextOffset: page.nextCursor, complete: !page.more,
+							attachments: (challenge.attachments || []).map(item => ({ id: item.materialId || item.id,
+								name: item.name, bytes: item.bytes, digest: item.digest, role: item.role })),
+						};
+						return { ok: true, ...value, text: JSON.stringify(value) };
+					}
+					const run = activeProjectRun(store, ownerSessionId);
+					if (preset === 'pentest' && run?.currentCheckId) {
+						const check = readProjectCheck(store, ownerSessionId, run.runId, run.currentCheckId);
+						return { ok: true, check, text: JSON.stringify(check || {}) };
+					}
+					return { ok: false, error: '当前场景没有可读取的题面或检查' };
+				}
+				throw new Error('未知资料操作');
+			} catch (error) { return { ok: false, error: error?.message || String(error) }; }
+		},
+	}));
+	ctx.tools.register(defineTool({
 		name: 'redteam_task',
-		description: 'start用独立字段；progress/checkpoint/delegate/cleanup管理进度与助手。',
+		description: '管理任务进度、助手和收尾。',
 		parameters: {
 			action: { type: 'string', enum: ['start', 'status', 'next', 'progress', 'checkpoint', 'cancel', 'pause', 'delegate', 'workers', 'send', 'report', 'review', 'report-draft', 'cleanup', 'update'], required: true },
 			mode: { type: 'string', enum: ['regular', 'nday', '0day'] },
-			target: { type: 'string', description: '完整 URL、多个 URL/域名/IP/CIDR，每行一条；可含 *.example.com' },
-			question: { type: 'string', description: '用户原始任务和问题，≤64000字符；不要压缩成单站小问题' },
+			target: { type: 'string', description: 'URL、域名或 IP/CIDR，每行一项' },
+			question: { type: 'string', description: '用户原始任务和问题，不超过 64000 字符' },
 			toolCalls: { type: 'integer', description: '整轮共享工具上限1–10000' },
-			modelCalls: { type: 'integer', description: '可选：主/子代理、重试、压缩和标题共享模型调用上限。' },
+			modelCalls: { type: 'integer', description: '主/子代理、重试、压缩、标题共享上限。' },
 			minutes: { type: 'integer', description: '时间上限1–10080分钟' },
 			workers: { type: 'integer', description: '子代理0–16，≤桌面上限；按独立问题数量决定' },
-			unmeteredToolCalls: { type: 'integer', description: '可选：无法逐条计量的工具调用硬上限0–1000；未填不额外限制' },
+			unmeteredToolCalls: { type: 'integer', description: '未计量工具调用上限，0–1000' },
 			stop: { type: 'string', enum: ['budget', 'queue', 'first-high', 'first-rce'] },
 			policy: { type: 'string', description: '旧JSON，与独立字段互斥' },
 			progress: { type: 'string', description: '进度JSON：完成标记和note' },
       planComplete: { type: 'boolean' },
       queueComplete: { type: 'boolean' },
-      document: { type: 'string', description: '子代理：delegate/send/report/pause/checkpoint/cleanup/update（范围与预算）。' }
+      document: { type: 'string', description: '助手动作的参数 JSON' }
 		},
 		output: {
 			schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
@@ -1917,7 +3226,7 @@ function apply(ctx) {
 		},
 		async execute(args, exec) {
 			const session = sessionOf(ctx, exec);
-			if (!session || session.mode !== 'pentest') return Promise.resolve({ ok: false, error: '仅当前渗透会话可管理任务策略' });
+			if (!session || session.mode !== 'pentest') return Promise.resolve({ ok: false, error: '仅当前Saker 会话可管理任务策略' });
 			try {
 				if (args.action === 'start') {
 					if (!enforcementAvailable) throw new Error('宿主缺少tools.guard，不能启动有预算保证的任务；请使用受支持桌面版本');
@@ -1966,7 +3275,7 @@ function apply(ctx) {
 	}));
 	ctx.tools.register(defineTool({
 		name: 'redteam_context',
-		description: '保存或读取本会话资产、入口条件、请求与方法上下文。',
+		description: '保存或读取本会话资产、请求与方法上下文。',
 		parameters: {
 			context: { type: 'string', description: '旧快照JSON；assets/requests增量；省略读索引' },
       assets: { type: 'array', items: { type: 'object', additionalProperties: true, properties: {
@@ -1979,11 +3288,11 @@ function apply(ctx) {
         method: { type: 'string' }, headers: { type: 'object', additionalProperties: true },
         body: { type: 'string' }, request: { type: 'string' }, valid: { type: 'boolean' }, responseReceiptId: { type: 'string' }
       } } },
-			kind: { type: 'string', description: 'asset/request/method详情；finding按id读详情；material读索引或原文' },
-      materials: { type: 'string', description: 'JSON：site、files[{path,url}]；离线索引选定JS，增量摘要不证明接口可用' },
+			kind: { type: 'string', description: 'asset/request/method详情；finding按id；material索引或原文' },
+      materials: { type: 'string', description: 'JSON：site、files[{path,url}]' },
 			id: { type: 'string', description: '详情记录ID，仅本会话' },
 			version: { type: 'string', description: '请求revision或方法version；多版本时必填' },
-			search: { type: 'string', description: '按关键词在测试资料里定位：每页最多 5 条短结果（来源/身份/时间）' },
+			search: { type: 'string', description: '在测试资料中按关键词定位' },
 			read: { type: 'integer', description: 'material/finding正文UTF-8偏移，默认0；续读用nextOffset' },
 			offset: { type: 'integer', description: '索引偏移；search 时是下一页游标' }
 		},
@@ -1993,7 +3302,7 @@ function apply(ctx) {
 		},
 		execute(args, exec) {
 			const session = sessionOf(ctx, exec);
-			if (!session || session.mode !== 'pentest') return Promise.resolve({ ok: false, error: '仅当前渗透会话可读写共享上下文' });
+			if (!session || session.mode !== 'pentest') return Promise.resolve({ ok: false, error: '仅当前Saker 会话可读写共享上下文' });
 		try {
         if (args.assets !== undefined || args.requests !== undefined) {
           if (args.context !== undefined) throw new Error('assets/requests 与旧 context 不可同时提供');
@@ -2033,7 +3342,7 @@ function apply(ctx) {
           const woken = (indexed.updatedIds || []).flatMap(id => wakeWorkersForMaterial(ctx, theStore(), session.id, 'file:' + id));
           return Promise.resolve({ ok: true, ...indexed, woken });
         }
-        // 模型读原文（v6 第 5.4.1 节）：kind=material + id + read=字节偏移；每段 ≤6000 字节，代码 ≤80 行，HTTP 分头/体。
+        // 模型读原文：kind=material + id + read=字节偏移；默认每段 8192 字节，代码 ≤80 行，HTTP 分头/体。
         if (args.read !== undefined && (args.kind !== 'material' || !args.id))
           throw new Error('读材料原文要 kind=material、id 和 read=字节偏移，不要和索引或搜索混用。');
         if (args.read !== undefined) {
@@ -2071,20 +3380,34 @@ function apply(ctx) {
 	//#region 项目测试工具（scenario=project）
 	const projectScopeOf = exec => {
 		const session = sessionOf(ctx, exec);
-		if (!session || session.mode !== 'pentest') return { error: '仅当前渗透会话可用' };
+		if (!session || session.mode !== 'pentest') return { error: '仅当前Saker 会话可用' };
 		const store = theStore();
-		const policy = readTaskPolicy(store, session.id);
-		if (policy?.scenario !== 'project') return { error: '仅「按文档测试」场景可用' };
+		let policy = readTaskPolicy(store, session.id);
+		if (policy?.scenario !== 'project') {
+			const scene = readSceneContext(store, session.id, session.mode);
+			if (scene?.sceneId !== 'cases') return { error: '仅「案例测试」场景可用' };
+			try {
+				const question = latestExplicitUserText(exec.agent) || '按已导入案例逐项执行';
+				startProjectFromSources(store, session.id, {
+					policy: { question, userRequest: question },
+					runtimeId: modelAdmissions.get(ctx)?.runtimeId || '',
+				});
+				policy = readTaskPolicy(store, session.id);
+			} catch (error) {
+				return { error: '案例任务尚未建立：' + redactText(error.message || error) };
+			}
+		}
+		if (policy?.scenario !== 'project') return { error: '仅「案例测试」场景可用' };
 		const run = activeProjectRun(store, session.id);
 		if (!run) return { error: '当前没有活动的项目运行' };
 		return { scenario: 'project', session, policy, run, store };
 	};
   const browserScopeOf = exec => {
     const session = sessionOf(ctx, exec);
-    if (!session || session.mode !== 'pentest') return { error: '仅当前渗透会话可用' };
+    if (!session || session.mode !== 'pentest') return { error: '仅当前Saker 会话可用' };
     const store = theStore();
     const policy = readTaskPolicy(store, session.id);
-    if (!policy?.startedAt) return { error: '请先开始自由测试或按文档测试，再打开受管浏览器' };
+    if (!policy?.startedAt) return { error: '请先开始自由测试或案例测试，再打开受管浏览器' };
     if (policy.scenario === 'project') return projectScopeOf(exec);
     return { scenario: 'pentest', session, policy, store };
   };
@@ -2098,10 +3421,10 @@ function apply(ctx) {
 			return { denial: '项目已暂停或停止，浏览器请求不能继续派发' };
 		if (listProjectActions(scope.store, scope.session.id, scope.run.runId).some(action => action.sideEffectUnknown === true))
 			return { denial: '原写入结果未知，浏览器请求已暂停，需先核对原动作' };
-		if (currentPolicy?.scenario !== 'project') return { denial: '当前会话已不是按文档测试场景' };
+		if (currentPolicy?.scenario !== 'project') return { denial: '当前会话已不是案例测试场景' };
 		const limits = effectivePolicy(scope.store, currentPolicy);
 		const identity = resolveTaskIdentity(scope.store, scope.session.id, identityRef);
-		const identityReason = identityDenial(identity);
+		const identityReason = identityDenial(identity, { explicit: !!String(identityRef || '').trim() });
 		if (identityReason) return { denial: identityReason };
 		let parsed;
 		try { parsed = new URL(String(url || '')); } catch { return { denial: '浏览器请求地址无效' }; }
@@ -2122,7 +3445,7 @@ function apply(ctx) {
     if (!currentPolicy || (!manual && state.stopped)) return { denial: '当前任务已停止，浏览器请求不能继续派发' };
     const limits = effectivePolicy(scope.store, currentPolicy);
     const identity = resolveTaskIdentity(scope.store, scope.session.id, identityRef);
-    const identityReason = identityDenial(identity);
+    const identityReason = identityDenial(identity, { explicit: !!String(identityRef || '').trim() });
     if (identityReason) return { denial: identityReason };
     let parsed;
     try { parsed = new URL(String(url || '')); } catch { return { denial: '浏览器请求地址无效' }; }
@@ -2143,8 +3466,9 @@ function apply(ctx) {
 			action: { type: 'string', required: true, enum: ['list', 'search', 'read'] },
 			query: { type: 'string' }, sourceId: { type: 'string' }, sourceRevision: { type: 'string' },
 			sectionId: { type: 'string' },
-      sectionIds: { type: 'array', description: 'read 批量读取同源 1–20 段；与 sectionId/cursor 互斥。', items: { type: 'string' } },
-      cursor: { type: 'integer' }, limit: { type: 'integer' }
+      sectionIds: { type: 'array', description: '批量读取同源1–20段；与sectionId/cursor互斥。', items: { type: 'string' } },
+      cursor: { type: 'integer', description: '续读起点，UTF-8字节偏移。' },
+      limit: { type: 'integer', description: 'UTF-8字节数。' }
 		},
 		output: { schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } }, render: (_args, value) => [{ type: 'text', text: value.ok ? value.text : value.error }] },
 		execute(args, exec) {
@@ -2185,7 +3509,13 @@ function apply(ctx) {
 					const hits = [];
 					for (const source of sources) for (const section of source.sections || []) {
 						const index = String(section.text || '').toLowerCase().indexOf(query);
-            if (index >= 0) hits.push({ sourceId: source.sourceId, sourceRevision: source.sourceRevision, sectionId: section.sectionId, location: section.location ?? null, offset: Math.max(0, index - 60), snippet: String(section.text).slice(Math.max(0, index - 60), index + 140) });
+            if (index >= 0) {
+              const sourceText = String(section.text || '');
+              const snippetStart = Math.max(0, index - 60);
+              hits.push({ sourceId: source.sourceId, sourceRevision: source.sourceRevision, sectionId: section.sectionId,
+                location: section.location ?? null, offset: Buffer.byteLength(sourceText.slice(0, snippetStart), 'utf8'),
+                snippet: sourceText.slice(snippetStart, index + 140) });
+            }
 					}
 					const shown = hits.slice(0, 20);
           for (const hit of shown) {
@@ -2205,15 +3535,15 @@ function apply(ctx) {
               recordProjectDocumentRead(scope.store, scope.session.id, scope.run.runId, { sourceId: source.sourceId, sourceRevision: source.sourceRevision, sectionId: result.sectionId, cursor: 0, text: result.text, controlRev: scope.run.controlRev });
             }
             const text = '来源：' + (source.displayName || source.sourceId) + ' · 修订：' + source.sourceRevision + '\n'
-              + batch.entries.map(result => '段落：' + result.sectionId + ' · 范围：[0,' + result.text.length + ')'
+              + batch.entries.map(result => '段落：' + result.sectionId + ' · 范围：[' + result.range.start + ',' + result.range.end + ')'
                 + (result.more ? ' · 后续：有，改用 sectionId=' + result.sectionId + ' cursor=' + result.nextCursor + ' 续读' : ' · 后续：无') + '\n' + result.text).join('\n\n')
               + (batch.unreadSectionIds.length ? '\n未返回、仍未读的段落：' + batch.unreadSectionIds.join('、') : '');
             return Promise.resolve({ ok: true, text, sourceId: source.sourceId, sourceRevision: source.sourceRevision, ...batch });
           }
 					const result = readDocumentSection({ sections: source.sections || [] }, String(args.sectionId || ''), { cursor: args.cursor, limit: args.limit });
-          recordMaterialRead(scope.store, scope.session.id, { materialId: 'project:' + source.sourceId + '@' + source.sourceRevision + ':' + result.sectionId, bytes: Buffer.byteLength(result.text, 'utf8'), offset: Math.max(0, Number(args.cursor) || 0) });
-          recordProjectDocumentRead(scope.store, scope.session.id, scope.run.runId, { sourceId: source.sourceId, sourceRevision: source.sourceRevision, sectionId: result.sectionId, cursor: args.cursor, text: result.text, controlRev: scope.run.controlRev });
-					const range = '[' + (Math.max(0, Number(args.cursor) || 0)) + ',' + (Math.max(0, Number(args.cursor) || 0) + result.text.length) + ')';
+          recordMaterialRead(scope.store, scope.session.id, { materialId: 'project:' + source.sourceId + '@' + source.sourceRevision + ':' + result.sectionId, bytes: result.bytes, offset: result.range.start });
+          recordProjectDocumentRead(scope.store, scope.session.id, scope.run.runId, { sourceId: source.sourceId, sourceRevision: source.sourceRevision, sectionId: result.sectionId, cursor: result.range.start, text: result.text, controlRev: scope.run.controlRev });
+					const range = '[' + result.range.start + ',' + result.range.end + ')';
 					const text = '来源：' + (source.displayName || source.sourceId) + ' · 修订：' + source.sourceRevision + ' · 段落：' + result.sectionId
 						+ ' · 范围：' + range + ' · 后续：' + (result.more ? '有，nextCursor=' + result.nextCursor : '无')
 						+ '\n\n' + result.text;
@@ -2243,15 +3573,16 @@ function apply(ctx) {
       sectionDecisions: { type: 'array', description: '来源整理决定', items: { type: 'object', additionalProperties: false, properties: {
         sourceId: { type: 'string', required: true }, sourceRevision: { type: 'string', required: true },
         sectionId: { type: 'string', required: true, description: '来源段落 ID；无段落用 #source。' },
-        decision: { type: 'string', required: true, enum: ['requirements', 'reference', 'unreadable'] },
+        decision: { type: 'string', required: true, enum: ['requirements', 'reference', 'pending', 'unreadable'] },
         rationale: { type: 'string', description: '参考/不可读依据' },
         checkIds: { type: 'array', description: '关联本批 checkId', items: { type: 'string' } },
       } } },
       document: { type: 'string', description: '兼容旧 JSON；新调用用 checks' }, checkId: { type: 'string' },
-			verdict: { type: 'string', enum: ['not_found', 'issue', 'needs_check', 'blocked', 'not_applicable'] },
+			verdict: { type: 'string', enum: ['expectation_met', 'not_found', 'issue', 'needs_check', 'blocked', 'not_applicable'] },
 			checkedContent: { type: 'string', description: '实际检查、观察及其他说明。' },
-      gaps: { type: 'string', description: '只写本项未完成部分或缺少条件；无缺口时留空。' },
+      gaps: { type: 'string', description: '未完成部分或缺少条件；无缺口留空。' },
 			findingRefs: { type: 'array', items: { type: 'string' } },
+      evidenceRefs: { type: 'array', description: 'project_evidence 返回的文件、命令或源码依据ID', items: { type: 'string' } },
 			reusedObservations: { type: 'array', description: '复用已有动作观察时提供 actionId 和具体理由', items: {
 				type: 'object', additionalProperties: false, properties: {
 					actionId: { type: 'string', required: true }, reason: { type: 'string', required: true },
@@ -2309,6 +3640,7 @@ function apply(ctx) {
 					if (!currentCheck) throw new Error('当前运行 ' + scope.run.runId + ' 没有该检查；用 project_check action=next 获取当前项，不沿用历史编号');
 					const check = recordProjectCheck(scope.store, scope.session.id, scope.run.runId, String(args.checkId || ''), {
 						executionState: 'ended', verdict: args.verdict, checkedContent: args.checkedContent, gaps: args.gaps, findingRefs,
+            evidenceRefs: Array.isArray(args.evidenceRefs) ? args.evidenceRefs.map(String) : [],
 						reusedObservations: args.reusedObservations, controlRev: scope.run.controlRev,
 						checkRevision: currentCheck.checkRevision,
 					});
@@ -2320,8 +3652,208 @@ function apply(ctx) {
 		}
 	}));
 	ctx.tools.register(defineTool({
+		name: 'project_evidence',
+			description: '执行并记录命令；读文件或引用。',
+			parameters: {
+				action: { type: 'string', required: true, enum: ['file', 'source', 'command', 'reference', 'list'] },
+			checkId: { type: 'string' },
+			path: { type: 'string' }, offset: { type: 'integer' }, limit: { type: 'integer' },
+			sourceId: { type: 'string' }, sourceRevision: { type: 'string' }, sectionId: { type: 'string' }, text: { type: 'string' },
+			command: { type: 'string' }, cwd: { type: 'string' }, timeoutMs: { type: 'integer' },
+				executionId: { type: 'string', description: 'reference：已有执行回执 ID' },
+				operationId: { type: 'string', description: '同一次 command 重试的稳定键' },
+		},
+		output: { schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
+			render: (_args, value) => [{ type: 'text', text: value.ok ? value.text : value.error }] },
+		async execute(args, exec) {
+			const scope = projectScopeOf(exec);
+			if (scope.error) return { ok: false, error: scope.error };
+			try {
+				const checkId = String(args.checkId || scope.run.currentCheckId || '');
+				const check = readProjectCheck(scope.store, scope.session.id, scope.run.runId, checkId);
+				if (!check) throw new Error('请先领取当前案例检查');
+				if (args.action === 'list') {
+					const allRefs = [...new Set([
+						...(check.evidenceRefs || []),
+						...scope.store.db.prepare(`SELECT id FROM business_materials
+							WHERE session_id=? AND json_extract(record,'$.projectRunId')=?
+							AND json_extract(record,'$.projectCheckId')=?
+							AND json_extract(record,'$.attemptId')=?
+							ORDER BY rowid`).all(scope.session.id, scope.run.runId, check.checkId,
+								check.activeAttempt?.attemptId || '').map(row => row.id),
+					])]
+					const evidence = allRefs.map(id => {
+						const row = scope.store.db.prepare('SELECT record FROM business_materials WHERE session_id=? AND id=?').get(scope.session.id, id);
+						try { const value = row && JSON.parse(row.record); return value ? { id, kind: value.kind, sourceType: value.sourceType, attemptId: value.attemptId, path: value.path, digest: value.digest, observedAt: value.observedAt } : null; }
+						catch { return null; }
+					}).filter(Boolean);
+					return { ok: true, text: JSON.stringify(evidence), evidence };
+				}
+				if (args.action === 'reference') {
+					const executionId = String(args.executionId || '');
+					const action = listProjectActions(scope.store, scope.session.id, scope.run.runId)
+						.find(candidate => candidate.checkId === check.checkId && candidate.requestRef === executionId);
+					const materialRow = scope.store.db.prepare(
+						"SELECT id,record FROM business_materials WHERE session_id=? AND json_extract(record,'$.executionId')=? LIMIT 1",
+					).get(scope.session.id, executionId);
+					if (!action && materialRow) {
+						const material = JSON.parse(materialRow.record);
+						if (material.projectRunId !== scope.run.runId || material.projectCheckId !== check.checkId)
+							throw new Error('referenced command does not belong to the current check');
+						return { ok: true, evidenceId: materialRow.id, kind: material.kind, historical: true,
+							text: JSON.stringify({ ...material, originalBase64: undefined }),
+							evidence: { ...material, originalBase64: undefined },
+							note: '已引用原执行；保留原 attempt 和观察时间。' };
+					}
+					if (!action) throw new Error('referenced execution does not belong to the current check');
+					const receipt = readExecutionReceipt(scope.store, scope.session.id, executionId);
+					const saved = saveProjectEvidence(scope.store, scope.session.id, scope.run.runId, checkId, {
+						kind: 'http', executionId, actionId: action.actionId,
+						attemptId: action.attemptId, instanceRevision: action.instanceRevision,
+						observedAt: action.endedAt || action.startedAt, historical: true,
+						status: receipt.status, outcome: receipt.outcome,
+						request: receipt.request, responseHead: receipt.responseHead,
+						responseBodyBase64: receipt.responseBodyBase64,
+						sha256: receipt.responseSha256,
+					});
+					return { ok: true, evidenceId: saved.id, kind: saved.kind, text: JSON.stringify(saved),
+						evidence: saved, note: '已引用原执行；没有再次派发请求。' };
+				}
+				let evidenceInput;
+				if (args.action === 'file') {
+					const file = path.resolve(String(args.path || ''));
+					const stat = fs.statSync(file);
+					if (!stat.isFile()) throw new Error('path is not a file');
+					const offset = Math.max(0, Math.trunc(Number(args.offset) || 0));
+					const limit = Math.max(1, Math.min(32768, Number(args.limit) || 8192));
+					const range = readFileRange(file, offset, limit);
+					const decoded = range.buffer.toString('utf8');
+					if (typeof args.text === 'string' && args.text && !decoded.includes(args.text))
+						throw new Error('provided text does not match the actual file range');
+					const fileHash = hashFileInChunks(file);
+					evidenceInput = { kind: 'file', path: file, offset, bytes: range.buffer.length, text: decoded,
+						sha256: fileHash.sha256, complete: range.complete };
+				} else if (args.action === 'source') {
+					const source = readProjectSource(scope.store, scope.session.id, String(args.sourceId || ''), String(args.sourceRevision || ''));
+					if (!source) throw new Error('source revision not found');
+					if (!(scope.run.sourceSnapshot || []).some(snapshot =>
+						snapshot.sourceId === source.sourceId && snapshot.sourceRevision === source.sourceRevision))
+						throw new Error('source revision is not part of the current project run');
+					const section = (source.sections || []).find(item => item.sectionId === String(args.sectionId || ''));
+					if (!section) throw new Error('source section not found');
+					const offset = Math.max(0, Math.trunc(Number(args.offset) || 0));
+					const limit = Math.max(1, Math.min(32768, Number(args.limit) || 8192));
+					const actual = String(section.text || '').slice(offset, offset + limit);
+					if (!actual) throw new Error('source evidence range is empty');
+					if (typeof args.text === 'string' && args.text && args.text !== actual)
+						throw new Error('provided source text does not match the stored range');
+					const covered = (scope.run.progressDocumentCoverage?.[
+						projectDocumentKey(source.sourceId, source.sourceRevision, section.sectionId)
+					] || []).some(interval => interval[0] <= offset && interval[1] >= offset + actual.length)
+					if (!covered) throw new Error('source evidence range has not been read in the current project run');
+					evidenceInput = { kind: 'source', sourceId: source.sourceId, sourceRevision: source.sourceRevision,
+						sectionId: section.sectionId, offset, bytes: Buffer.byteLength(actual), text: actual,
+						sha256: crypto.createHash('sha256').update(JSON.stringify([source.sourceId, source.sourceRevision, section.sectionId, actual])).digest('hex'),
+						complete: offset + actual.length >= String(section.text || '').length };
+				} else if (args.action === 'command') {
+					const command = String(args.command || '');
+					if (!command.trim()) throw new Error('command required');
+					const operationId = String(args.operationId || '').trim();
+					if (operationId) {
+						const prior = scope.store.db.prepare(
+							"SELECT id,record FROM business_materials WHERE session_id=? AND json_extract(record,'$.projectRunId')=? AND json_extract(record,'$.projectCheckId')=? AND json_extract(record,'$.attemptId')=? AND json_extract(record,'$.operationId')=? LIMIT 1",
+						).get(scope.session.id, scope.run.runId, checkId, check.activeAttempt?.attemptId || '', operationId);
+						if (prior) {
+							const material = JSON.parse(prior.record);
+							return { ok: material.outcome === 'completed', evidenceId: prior.id, kind: material.kind,
+								attemptId: material.attemptId, reused: true,
+								text: String(material.stdout || '') + (material.stderr ? '\n[stderr]\n' + material.stderr : ''),
+								observation: { stdout: material.stdout || '', stderr: material.stderr || '',
+									exitCode: material.exitCode, outcome: material.outcome },
+								evidence: { ...material, originalBase64: undefined },
+								note: '同一 operationId 已存在，返回原执行结果，没有再次派发。' };
+						}
+					}
+					const denied = taskExecutionGuard(scope.store, scope.session.id, 'project_evidence', Date.now(), {
+						args: { ...args, command }, reserve: false,
+						admitted: exec.__sakerReservation?.name === 'project_evidence',
+					});
+					if (denied) throw new Error(denied);
+					const cwd = args.cwd ? path.resolve(String(args.cwd)) : null;
+					const headerDirectory = exec.agent?.session?.header?.cwd || exec.agent?.session?.cwd
+						|| scope.session?.header?.cwd || scope.session?.cwd;
+					let working = cwd || exec.__sakerWorkingDirectory || '';
+					if (!working) {
+						try {
+							const fallback = headerDirectory || sessionWorkingDirectory(ctx, scope.session, '');
+							working = await ensureWorkingDirectory(ctx, exec.agent, exec.signal, fallback || undefined);
+						} catch {
+							working = fallback || '';
+						}
+					}
+					if (typeof working !== 'string' || !working)
+						throw new Error('working_directory_unavailable：未取得当前会话工作目录，本次命令没有派发。');
+					const startedAt = new Date().toISOString();
+					const dispatchAttempt = scope.store.db.prepare('SELECT record FROM project_checks WHERE session_id=? AND run_id=? AND check_id=?')
+						.get(scope.session.id, scope.run.runId, checkId);
+					const dispatchCheck = dispatchAttempt?.record ? JSON.parse(dispatchAttempt.record) : check;
+					const result = await runManagedEvidenceCommand(command, working,
+						Math.max(1000, Math.min(60000, Number(args.timeoutMs) || 30000)), exec.signal);
+					const completedAt = new Date().toISOString();
+					evidenceInput = { kind: 'command', sourceType: 'host-command-execution', command, cwd: working,
+						operationId, attemptId: dispatchCheck.activeAttempt?.attemptId,
+						instanceRevision: dispatchCheck.activeAttempt?.instanceRevision,
+						historical: true,
+						observedAt: completedAt,
+						executionId: 'command-' + crypto.randomUUID(), outcome: result.outcome,
+						exitCode: result.exitCode, signal: result.signal,
+						stdout: result.stdout, stderr: result.stderr,
+						stdoutBytes: result.stdoutBytes, stderrBytes: result.stderrBytes,
+						timedOut: result.timedOut, cancelled: result.cancelled,
+						error: result.error || '', startedAt, completedAt,
+						sha256: crypto.createHash('sha256').update(JSON.stringify([command, result.outcome,
+							result.stdout, result.stderr, result.exitCode])).digest('hex') };
+					if (result.cancelled && exec.signal?.aborted) {
+						const saved = saveProjectEvidence(scope.store, scope.session.id, scope.run.runId, checkId, {
+							...evidenceInput, historical: true,
+						});
+						return { ok: false, cancelled: true, evidenceId: saved.id, kind: saved.kind,
+							error: '命令已取消；原始观察已保存，不能记作成功。' };
+					}
+					if (result.timedOut) {
+						const saved = saveProjectEvidence(scope.store, scope.session.id, scope.run.runId, checkId, {
+							...evidenceInput, historical: true,
+						});
+						return { ok: false, timedOut: true, evidenceId: saved.id, kind: saved.kind,
+							error: '命令超时；原始观察已保存，不能记作成功。' };
+					}
+				} else throw new Error('unknown evidence action');
+				const existingOperation = evidenceInput?.operationId
+					? scope.store.db.prepare("SELECT id,record FROM business_materials WHERE session_id=? AND json_extract(record,'$.projectRunId')=? AND json_extract(record,'$.projectCheckId')=? AND json_extract(record,'$.attemptId')=? AND json_extract(record,'$.operationId')=? LIMIT 1")
+						.get(scope.session.id, scope.run.runId, checkId, check.activeAttempt?.attemptId || '', evidenceInput.operationId)
+					: null;
+				const saved = existingOperation
+					? { ...JSON.parse(existingOperation.record), id: existingOperation.id }
+					: saveProjectEvidence(scope.store, scope.session.id, scope.run.runId, checkId, evidenceInput);
+				const observation = evidenceInput.kind === 'command'
+					? { stdout: evidenceInput.stdout, stderr: evidenceInput.stderr, exitCode: evidenceInput.exitCode,
+						outcome: evidenceInput.outcome, timedOut: evidenceInput.timedOut === true, cancelled: evidenceInput.cancelled === true }
+					: null;
+				return { ok: evidenceInput.outcome !== 'failed' && evidenceInput.outcome !== 'cancelled',
+					evidenceId: saved.id, kind: saved.kind, attemptId: saved.attemptId,
+					text: observation
+						? `命令已${evidenceInput.outcome === 'completed' ? '完成' : '结束'}（exitCode=${String(evidenceInput.exitCode)}）。\n`
+							+ `stdout：${String(observation.stdout || '').slice(0, 4000)}\nstderr：${String(observation.stderr || '').slice(0, 4000)}\n`
+							+ `evidenceId=${saved.id} attemptId=${saved.attemptId}`
+						: JSON.stringify(saved),
+					observation, evidence: saved,
+					note: '本次调用已经执行并保存；同一 operationId 重试会返回这条结果。' };
+			} catch (error) { return { ok: false, error: redactText(error.message) }; }
+		},
+	}));
+	ctx.tools.register(defineTool({
 		name: 'saker_browser',
-		description: '受管 CfT 浏览器：打开、观察、操作、请求。',
+		description: '受管 CfT 浏览器操作。',
 		parameters: {
 			action: { type: 'string', required: true, enum: ['open', 'observe', 'act', 'requests', 'request-detail', 'close'] },
 			url: { type: 'string' }, checkId: { type: 'string' }, selector: { type: 'string' },
@@ -2345,7 +3877,7 @@ function apply(ctx) {
 				const identityRef = String(args.identityRef ?? browser?.identityRef ?? '').trim();
 				if (targetAction) {
 					const identity = resolveTaskIdentity(scope.store, scope.session.id, identityRef);
-					const identityReason = identityDenial(identity);
+					const identityReason = identityDenial(identity, { explicit: !!identityRef });
 					if (identityReason) throw new Error(identityReason);
 					if (exec.signal?.aborted) throw new Error('浏览器动作已取消');
 					let denied;
@@ -2353,10 +3885,11 @@ function apply(ctx) {
 						if (scope.run.state !== 'running') throw new Error('项目运行当前不可派发浏览器动作');
 						const checkId = String(args.checkId || scope.run.currentCheckId
 							|| projectExecutableChecks(scope.store, scope.session.id, scope.run.runId)[0]?.checkId || '');
-						if (!checkId) throw new Error('请先用 project_check 选择当前检查，再执行浏览器目标动作');
+						if (!checkId) throw new Error('当前没有可执行的案例检查；程序不会要求调用登记工具');
 						denied = taskExecutionGuard(scope.store, scope.session.id, 'recorded-project-execution', Date.now(), {
 							args: { url: args.url || '' },
 							onReserve: () => { begun = beginProjectAction(scope.store, scope.session.id, scope.run.runId, checkId, {
+								actionId: exec.callId,
 								identityRef, identityRevision: taskIdentityRevision(identity), controlRev: scope.run.controlRev,
 								scopeFingerprint: crypto.createHash('sha256').update(JSON.stringify([action, args.actType || '', args.url || '', args.selector || '', args.text || '', args.value || '', identityRef])).digest('hex'),
 							}); },
@@ -2444,7 +3977,10 @@ function apply(ctx) {
 					if (action === 'observe' && (!isProject || scope.run.state === 'running')) {
 						const checkId = isProject ? String(args.checkId || scope.run.currentCheckId || '') : '';
 						if (isProject && checkId) {
-							begun = beginProjectAction(scope.store, scope.session.id, scope.run.runId, checkId, { controlRev: scope.run.controlRev, identityRef, identityRevision: taskIdentityRevision(resolveTaskIdentity(scope.store, scope.session.id, identityRef)) });
+							begun = beginProjectAction(scope.store, scope.session.id, scope.run.runId, checkId, {
+								actionId: exec.callId, controlRev: scope.run.controlRev, identityRef,
+								identityRevision: taskIdentityRevision(resolveTaskIdentity(scope.store, scope.session.id, identityRef)),
+							});
 							const observationRef = saveProjectBrowserObservation(scope.store, scope.session.id, scope.run.runId, begun.action.actionId, result);
 							const page = redactValue(result);
 							return { ok: true, text: JSON.stringify(page), page, actionId: begun.action.actionId, observationRef };
@@ -2478,11 +4014,13 @@ function apply(ctx) {
 	}));
 	ctx.tools.register(defineTool({
 		name: 'project_request',
-		description: '项目 HTTP 请求，自动绑定检查、范围、身份。',
+		description: '项目 HTTP 请求，自动绑定检查与范围。',
 		parameters: {
 			method: { type: 'string' }, url: { type: 'string', required: true },
 			headers: { type: 'object', additionalProperties: true }, body: { type: 'string' },
-			authContext: { type: 'string' }, timeoutMs: { type: 'integer' }, checkId: { type: 'string' }
+			identityRef: { type: 'string', description: '要使用的已绑定身份；与 authContext 二选一。' },
+			authContext: { type: 'string' }, authSource: { type: 'string', enum: ['request', 'account'], description: '认证冲突时使用原请求或账号' },
+			timeoutMs: { type: 'integer' }, checkId: { type: 'string' }
 		},
 		output: { schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } }, render: (_args, value) => [{ type: 'text', text: value.ok ? value.text : value.error }] },
 		async execute(args, exec) {
@@ -2491,7 +4029,8 @@ function apply(ctx) {
 			try {
 				const checkId = String(args.checkId || scope.run.currentCheckId || projectExecutableChecks(scope.store, scope.session.id, scope.run.runId)[0]?.checkId || '');
 				if (!checkId) throw new Error('请先用 project_check 选择当前检查');
-        const result = await executeProjectHttp(scope.store, scope.session.id, scope.run.runId, checkId, args, exec.signal);
+        const result = await executeProjectHttp(scope.store, scope.session.id, scope.run.runId, checkId,
+          { ...args, callId: exec.callId }, exec.signal);
 				return { ok: true, text: result.summary, ...result };
 			} catch (error) { return { ok: false, error: redactText(error.message) }; }
 		}
@@ -2507,7 +4046,7 @@ function apply(ctx) {
 		},
 		async execute(_args, exec) {
 			const session = sessionOf(ctx, exec);
-			if (!session || session.mode !== 'pentest') return Promise.resolve({ ok: false, error: '仅当前渗透会话可生成交付包' });
+			if (!session || session.mode !== 'pentest') return Promise.resolve({ ok: false, error: '仅当前Saker 会话可生成交付包' });
 			try {
 				const readId = purposeReadSessionId(theStore(), session);
 				let cwd = await ensureWorkingDirectory(ctx, exec.agent, exec.signal);
@@ -2515,7 +4054,8 @@ function apply(ctx) {
 				if (cwd.startsWith('file:')) cwd = fileURLToPath(cwd);
 				if (!path.isAbsolute(cwd)) throw new Error('会话工作目录必须为绝对路径');
 				cwd = fs.realpathSync(cwd);
-				const bundle = buildDeliveryFiles(allFindings(theStore(), readId, 'pentest'), readChecks(theStore(), readId));
+				const bundle = buildDeliveryFiles(allFindings(theStore(), readId, 'pentest'), readChecks(theStore(), readId),
+					listOrdinaryReports(theStore(), readId, { limit: 50 }));
 				const target = path.join(cwd, 'saker-delivery-' + crypto.randomUUID() + '.zip');
 				fs.writeFileSync(target, zipDelivery(bundle.files), { flag: 'wx' });
 				return Promise.resolve({ ok: true, path: target, confirmedFindings: bundle.confirmedFindings, incompleteRecords: bundle.incompleteRecords, checkedCount: bundle.checkedCount });
@@ -2524,7 +4064,7 @@ function apply(ctx) {
 	}));
 	ctx.tools.register(defineTool({
 		name: 'redteam_checks',
-		description: '批量保存/读取本会话检查；未命中须有效请求与证据；交付仅三列。',
+		description: '保存或读取本会话检查。',
 		parameters: { records: { type: 'string', description: '省略读取；JSON数组，状态见README。' } },
 		output: {
 			schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
@@ -2532,7 +4072,7 @@ function apply(ctx) {
 		},
 		execute(args, exec) {
 			const session = sessionOf(ctx, exec);
-			if (!session || session.mode !== 'pentest') return Promise.resolve({ ok: false, error: '仅当前渗透会话可读写检查记录' });
+			if (!session || session.mode !== 'pentest') return Promise.resolve({ ok: false, error: '仅当前Saker 会话可读写检查记录' });
 			try {
 				const readId = purposeReadSessionId(theStore(), session);
 				const rows = args.records === undefined ? readChecks(theStore(), readId) : saveChecks(theStore(), session.id, JSON.parse(args.records));

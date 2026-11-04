@@ -17,7 +17,7 @@ const test = async (name, work) => { try { await work(); console.log('ok   ' + n
 // 捕获插件自己注册的 web 路由，用假 req/res 直接打它——测的是真实路由的 HTTP 语义。
 let handler;
 const disposers = [];
-const ctx = { sessions: { get: () => null }, effect: fn => { const d = fn(); if (typeof d === 'function') disposers.push(d); },
+const ctx = { sessions: { get: id => /^sid/.test(id) ? { id, header: { agentPreset: 'pentest' } } : null }, effect: fn => { const d = fn(); if (typeof d === 'function') disposers.push(d); },
   tools: { register: () => {}, guard: () => {} }, webRuntime: { trustedHosts: [] },
   webServer: { register: route => { handler = route.handler; return () => {}; } } };
 results.apply(ctx);

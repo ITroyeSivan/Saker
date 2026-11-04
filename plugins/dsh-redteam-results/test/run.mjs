@@ -725,8 +725,8 @@ ok("CSRF 头校验：匹配放行/缺失或错值拒", () => {
 		const f = registerFinding(st, "s-cv", "cloud-security", { title: "路径", type: "权限提升", target: "arn:x", summary: "s", chain: "前端AK→子账号→AdministratorAccess" });
 		const msg = verifyMessage(getFinding(st, "s-cv", f.id));
 		assert.match(msg, /路径链（入口→身份→权限→资源）/);
-		assert.match(msg, /三重证据/);
-		assert.match(msg, /四要素闭环核对/);
+	assert.match(msg, /云 API 响应\+策略文档\+权限清单至少其二/);
+	assert.match(msg, /入口\/身份\/权限\/资源/);
 	});
 	st.close();
 }
@@ -764,7 +764,7 @@ ok("verifyMessage IR 分支：取证复核纪律+fixed=已处置，不再落渗�
 	assert.match(msg, /｜ 主机 web-01 /);
 	assert.match(msg, /取证过程 \/ 检测命令/);
 	assert.match(msg, /取证过程（怎么证实）/);
-	assert.match(msg, /证据链交叉/);
+	assert.match(msg, /多源一致/);
 	assert.match(msg, /fixed=已处置/);
 	assert.match(msg, /code-reviewed=复核通过/);
 	assert.ok(!msg.includes("渗透模式=对照三件套"), "不再落渗透默认分支");
@@ -773,12 +773,13 @@ ok("verifyMessage IR 分支：取证复核纪律+fixed=已处置，不再落渗�
 });
 
 
-// ── 二次复核成对校验（首次流转 verified 必须同一次调用给齐独立评级 + 足量依据） ──
-ok("二次复核：首次流转 verified 缺 secondRating 被拒", () => {
+// ── 自动验证默认成立；独立复核是可选项，但一旦声明就必须成对完整 ──
+ok("自动验证：首次流转 verified 不强制独立二次评级", () => {
 	const st = openStore(":memory:");
 	const f = registerFinding(st, "s-sr1", "pentest", { title: "SQL 注入", type: "sql-injection", target: "http://t/api", summary: "s", severity: "high" });
-	assert.throws(() => updateFinding(st, "s-sr1", "pentest", f.id, { status: "verified" }), /secondRating/);
-	assert.equal(getFinding(st, "s-sr1", f.id).status, "pending", "被拒后状态不得改动");
+	const accepted = updateFinding(st, "s-sr1", "pentest", f.id, { status: "verified" });
+	assert.equal(accepted.status, "verified");
+	assert.equal(accepted.secondRating, "");
 	st.close();
 });
 
@@ -794,11 +795,13 @@ ok("二次复核：登记时不能直接写入 verified 绕过成对校验", () 
 	st.close();
 });
 
-ok("二次复核：secondRatingNote 不足 40 字被拒", () => {
+ok("二次复核：secondRatingNote 只要求非空具体依据", () => {
 	const st = openStore(":memory:");
 	const f = registerFinding(st, "s-sr2", "pentest", { title: "越权", type: "broken-access-control", target: "http://t/api", summary: "s", severity: "high" });
-	assert.throws(() => updateFinding(st, "s-sr2", "pentest", f.id, { status: "verified", secondRating: "high", secondRatingNote: "复核过了" }), /依据太短/);
+	assert.throws(() => updateFinding(st, "s-sr2", "pentest", f.id, { status: "verified", secondRating: "high", secondRatingNote: "   " }), /依据/);
 	assert.equal(getFinding(st, "s-sr2", f.id).status, "pending");
+	const accepted = updateFinding(st, "s-sr2", "pentest", f.id, { status: "verified", secondRating: "high", secondRatingNote: "复核过了" });
+	assert.equal(accepted.status, "verified");
 	st.close();
 });
 
@@ -826,13 +829,13 @@ ok("二次复核：已 verified 的行再改其它字段不再被拦", () => {
 	st.close();
 });
 
-ok("二次复核：红队台账模式同样受约束（fixed 语义=已路由）", () => {
+ok("二次复核：红队台账自动验证可成立，显式复核仍成对记录", () => {
 	const st = openStore(":memory:");
 	const f = registerFinding(st, "s-sr5", "redteam", { title: "边界突破", type: "内网", target: "10.0.0.1", summary: "s", severity: "high" });
-	assert.throws(() => updateFinding(st, "s-sr5", "redteam", f.id, { status: "verified" }), /secondRating/);
-	const up = updateFinding(st, "s-sr5", "redteam", f.id, { status: "verified", secondRating: "info", secondRatingNote: NOTE_OK });
-	assert.equal(up.status, "verified");
-	assert.equal(secondReviewVerdict(up), "downgrade", "high→info 应判降级");
+	const automatic = updateFinding(st, "s-sr5", "redteam", f.id, { status: "verified" });
+	assert.equal(automatic.status, "verified");
+	const reviewed = updateFinding(st, "s-sr5", "redteam", f.id, { secondRating: "info", secondRatingNote: NOTE_OK });
+	assert.equal(secondReviewVerdict(reviewed), "downgrade", "high→info 应判降级");
 	st.close();
 });
 
@@ -852,7 +855,8 @@ ok("secondReviewError：非 verified 目标与已 verified 前置一律放行", 
 	assert.equal(secondReviewError("pentest", { status: "verified" }, { status: "verified" }), null);
 	assert.equal(secondReviewError("pentest", { status: "pending" }, {}), null);
 	assert.equal(secondReviewError("redteam", { status: "pending" }, { status: "fixed" }), null, "fixed 非 verified 终态，不该套二次复核");
-	assert.match(secondReviewError("pentest", { status: "pending" }, { status: "verified" }), /secondRating/);
+	assert.equal(secondReviewError("pentest", { status: "pending" }, { status: "verified" }), null);
+	assert.match(secondReviewError("pentest", { status: "pending" }, { status: "verified", secondRating: "high" }), /依据/);
 });
 
 ok("二次评级词表与刻度自洽：info 低于 low，五档齐备", () => {

@@ -4,8 +4,8 @@
       name: '@deepseek-ai/dsh-agent-preset'
       config:
         id: ctf-solver
-        name: Saker CTF 解题
-        description: CTF 解题：flag 捕获与最小复现路径。
+        name: 比赛模式
+        description: 根据题面、附件和实例解题；保存候选答案和可复现过程。
         order: 30
         plugins:
           # The `ctf-solver` agent preset: the CTF challenge-solving agent, mounted once per process.
@@ -93,8 +93,6 @@
             config:
               customSkillDirs:
                 - !!js "process.getBuiltinModule('node:url').fileURLToPath(new URL('skills/', baseUrl))"
-                - !!js "process.getBuiltinModule('node:url').fileURLToPath(new URL('../pentest/skills/', baseUrl))"
-                - !!js "process.getBuiltinModule('node:url').fileURLToPath(new URL('../code-audit/skills/', baseUrl))"
                 - !!js "(() => { try { const f = process.getBuiltinModule('node:fs'); const u = process.getBuiltinModule('node:url'); const d = f.realpathSync(u.fileURLToPath(new URL('.', baseUrl))); return u.fileURLToPath(new URL('../../shared/skills/', u.pathToFileURL(d + '/'))); } catch { return '' } })()"
 
           - id: tool-skill

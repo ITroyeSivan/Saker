@@ -1,7 +1,9 @@
-// Only accounting metadata from the official session feed; no message bodies,
-// credentials, request headers or estimated model prices are stored here.
+// Bounded, redacted visible message and tool-result text plus accounting metadata
+// from the official session feed. Hidden reasoning, credentials, request headers
+// and estimated model prices are not stored here.
 import { siteWorkerRows } from './site-workers.js';
 import { ownedPurposeTasks, policyRecord } from './task-policy-record.js';
+import { redactText } from './redaction.js';
 export const TASK_COST_SCHEMA = `CREATE TABLE IF NOT EXISTS task_cost_events (
  session_id TEXT NOT NULL, seq INTEGER NOT NULL, at INTEGER NOT NULL,
  kind TEXT NOT NULL, record TEXT NOT NULL, PRIMARY KEY(session_id,seq));`;
@@ -36,6 +38,15 @@ export function captureTaskCost(store, session, event) {
   const toolName = event.type === 'tool/call' ? event.data?.name : event.type === 'tool/result' ? event.data?.message?.name : undefined;
   const usageRecord = Object.fromEntries(fields.map(key =>
     [key, Number.isFinite(usage?.[key]) && usage[key] >= 0 ? usage[key] : null]));
+  const contentText = value => {
+    if (typeof value === 'string') return value
+    if (Array.isArray(value)) return value
+      .filter(item => item?.type === 'text' || (item?.type === undefined && (item?.text !== undefined || item?.content !== undefined)))
+      .map(item => item?.text || item?.content || '').join('')
+    return value && typeof value === 'object' ? String(value.text || value.content || '') : ''
+  };
+  const rawMessageText = redactText(contentText(event.data?.message?.content ?? event.data?.content ?? ''));
+  const messageText = rawMessageText.slice(0, 200000);
   const record = event.type.startsWith('turn/')
     ? { turn: event.data?.turn ?? null }
     : event.type === 'tool/call'
@@ -43,15 +54,69 @@ export function captureTaskCost(store, session, event) {
       : event.type === 'tool/result'
         ? { toolName: String(toolName ?? ''), callId: String(toolCallId ?? ''),
             ok: event.data?.message?.isError !== true,
-            error: event.data?.error ? String(event.data.error.reason || event.data.error.code || event.data.error.name || '').slice(0, 200) : '' }
+            error: event.data?.error ? String(event.data.error.reason || event.data.error.code || event.data.error.name || '').slice(0, 200) : '',
+            output: messageText }
         : event.type === 'assistant/message'
-          ? { turn: event.data?.turn ?? null, step: event.data?.step ?? null, messageId: String(event.data?.message?.id ?? ''), callState, ...usageRecord }
+          ? { turn: event.data?.turn ?? null, step: event.data?.step ?? null, messageId: String(event.data?.message?.id ?? ''),
+              text: messageText, preview: messageText.slice(0, 4000), truncated: rawMessageText.length > messageText.length,
+              originalChars: [...rawMessageText].length, includedChars: [...messageText].length,
+              omittedFrom: rawMessageText.length > messageText.length ? [...messageText].length + 1 : null,
+              omittedTo: rawMessageText.length > messageText.length ? [...rawMessageText].length : null,
+              originalBytes: Buffer.byteLength(rawMessageText), callState, ...usageRecord }
           : event.type === 'assistant/attempt'
             ? { turn: event.data?.turn ?? null, step: event.data?.step ?? null, callState,
                 streamCount: Array.isArray(event.data?.stream) ? event.data.stream.length : 0, ...usageRecord }
             : usageRecord;
   store.db.prepare('INSERT INTO task_cost_events(session_id,seq,at,kind,record) VALUES(?,?,?,?,?) ON CONFLICT(session_id,seq) DO UPDATE SET record=excluded.record')
     .run(session.id, event.seq, event.time, event.type, JSON.stringify(record));
+}
+
+export function listOrdinaryReports(store, sessionId, { limit = 20 } = {}) {
+  const take = Math.max(1, Math.min(50, Number(limit) || 20));
+  const roundStartedAt = Number(policyRecord(store, String(sessionId || ''))?.startedAt) || 0;
+  const rows = store.db.prepare('SELECT seq,at,kind,record FROM task_cost_events WHERE session_id=? ORDER BY seq ASC')
+    .all(String(sessionId || '')).filter(row => row.at >= roundStartedAt);
+  const completedTurns = new Set();
+  for (const row of rows) {
+    if (row.kind !== 'turn/end') continue;
+    try {
+      const turn = JSON.parse(row.record)?.turn;
+      if (Number.isSafeInteger(turn)) completedTurns.add(turn);
+    } catch { /* a damaged event cannot prove a completed turn */ }
+  }
+  const byTurn = new Map();
+  for (const row of rows) {
+    if (row.kind !== 'assistant/message') continue;
+    try {
+      const record = JSON.parse(row.record);
+      const text = String(record.text || '').trim();
+      if (!text || record.callState !== 'returned') continue;
+      const key = Number.isSafeInteger(record.turn)
+        ? 'turn:' + record.turn
+        : record.messageId ? 'message:' + record.messageId : 'seq:' + row.seq;
+      const report = {
+        id: 'report-' + row.seq, seq: row.seq, at: row.at, turn: record.turn,
+        messageId: record.messageId || '', text,
+        preview: record.preview || text.slice(0, 4000),
+        truncated: record.truncated === true,
+        originalChars: record.originalChars ?? text.length,
+        includedChars: record.includedChars ?? text.length,
+        omittedRange: record.truncated === true
+          ? { from: record.omittedFrom ?? text.length + 1, to: record.omittedTo ?? null }
+          : null,
+        complete: record.truncated !== true,
+        source: record.truncated === true ? 'stored-prefix' : 'session-visible-text',
+        callState: record.callState || '',
+        inProgress: Number.isSafeInteger(record.turn) && !completedTurns.has(record.turn),
+      };
+      const prior = byTurn.get(key);
+      if (!prior || row.seq > prior.seq) byTurn.set(key, report);
+    } catch { /* ignore damaged event text */ }
+  }
+  const reports = [...byTurn.values()].sort((left, right) => right.seq - left.seq);
+  const finalReports = reports.filter(report => !report.inProgress);
+  const selected = finalReports.length ? finalReports : reports.slice(0, 1);
+  return selected.slice(0, take);
 }
 export function taskCostOverview(ctx, store, sessionId, since = 0) {
   const round = policyRecord(store, sessionId)?.startedAt;

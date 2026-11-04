@@ -13,7 +13,7 @@ const file = 'plugins/dsh-redteam-results/lib/project-runtime.js';
 const progressFile = 'plugins/dsh-redteam-results/lib/project-progress.js';
 const variants = [
   ['no-progress-threshold',
-    '  if (!executable.length) return null;\n  const fingerprint = projectProgressFingerprint(store, sessionId, run.runId);\n  const attempts = run.lastContinuationFingerprint === fingerprint ? (run.continuationNoProgress || 0) + 1 : 0;\n  if (attempts >= 2) {',
+    '  if (!executable.length) return null;\n  const fingerprint = projectProgressFingerprint(store, sessionId, run.runId);\n  const attempts = run.lastContinuationFingerprint === fingerprint ? (run.continuationNoProgress || 0) + 1 : 0;\n  if (attempts >= 1) {',
     '  if (!executable.length) return null;\n  const fingerprint = projectProgressFingerprint(store, sessionId, run.runId);\n  const attempts = run.lastContinuationFingerprint === fingerprint ? (run.continuationNoProgress || 0) + 1 : 0;\n  if (false) {',
     '同一进度重复接续达到阈值后暂停'],
   ['paused-run', "  if (!run || run.state !== 'running') return null;", '  if (!run) return null;',
@@ -31,8 +31,21 @@ const variants = [
     '迟到的接续标记不能修改已停止运行'],
   ['duplicate-document-range', 'if (length(merged) <= length(previous)) return false;', 'if (false) return false;',
     '真实文档工具读取新范围计进展，重读和搜索同片段不清零', progressFile, 'test-project-knowledge.mjs'],
+  ['native-case-fact-association',
+    "    try { captureProjectNativeEvent(theStore(), session?.id || '', event); }",
+    "    try { /* auto association disabled */ }",
+    'native read/result/reply bind to the current case check without registration tools',
+    'plugins/dsh-redteam-results/lib/index.js', 'test-project-tools.mjs'],
   ['legacy-empty-negative-complete', '    if (evidenceProblems.length) {\n      return {\n        action: \'waiting\', run,', '    if (false) {\n      return {\n        action: \'waiting\', run,',
     '完成判断独立拒绝历史遗留的无动作完整阴性'],
+  ['needs-check-still-waits', "    return {\n      action: 'completed', run,", "    return {\n      action: 'waiting', run,",
+    '只有缺条件项时执行可正常收尾'],
+  ['headerless-first-row',
+    '    // 没有明确字段词就是歧义，不凭“短行 + 下一行更长”删除首行；\n'
+      + '    // 用户可在导入预览明确选择“首行是表头”。\n'
+      + '    return false;',
+    '    return true;',
+    'a headerless spreadsheet keeps its first row', 'plugins/dsh-redteam-results/lib/index.js', 'test-project-tools.mjs'],
 ];
 
 const sourceHash = () => createHash('sha256').update([file, progressFile].map(relative => fs.readFileSync(path.join(root, relative))).join('\n')).digest('hex');
@@ -48,7 +61,8 @@ for (const [name, from, to, expected, variantFile = file, variantRunner = runner
     }
     fs.copyFileSync(path.join(root, 'package.json'), path.join(fixture, 'package.json'));
     fs.mkdirSync(path.join(fixture, 'scripts'), { recursive: true });
-    for (const script of [runner, 'test-project-knowledge.mjs', 'test-stub-register.mjs', 'test-stub-loader.mjs', 'test-home-isolation.mjs'])
+    fs.cpSync(path.join(root, 'scripts', 'lib'), path.join(fixture, 'scripts', 'lib'), { recursive: true });
+    for (const script of [runner, 'test-project-knowledge.mjs', 'test-project-tools.mjs', 'test-stub-register.mjs', 'test-stub-loader.mjs', 'test-home-isolation.mjs'])
       fs.copyFileSync(path.join(root, 'scripts', script), path.join(fixture, 'scripts', script));
     const target = path.join(fixture, variantFile);
     const content = fs.readFileSync(target, 'utf8').replaceAll('\r\n', '\n');

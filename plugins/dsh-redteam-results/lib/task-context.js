@@ -179,12 +179,22 @@ export function taskContextView(context, selector = {}) {
   if (selector.id !== undefined || selector.version !== undefined) throw new Error('detail lookup requires kind and id');
   const offset = selector.offset ?? 0;
   if (!Number.isInteger(offset) || offset < 0 || offset > 10000) throw new Error('invalid index offset');
-  const lines = [`资产 ${context.assets.length}；入口检查 ${context.checks.length}；请求 ${context.requests.length}；方法 ${context.methods.length}；索引offset=${offset}`];
-  for (const [field, kind] of [['assets', 'asset'], ['requests', 'request'], ['methods', 'method']]) {
-    lines.push(`${kind}索引（最多20条；详情用kind/id/version读取）：`);
-    for (const row of context[field].slice(offset, offset + 20)) lines.push(JSON.stringify({ id: row.id, version: row.revision || row.version, endpoint: row.endpoint || row.url, authContext: row.authContext, valid: row.valid, reviewed: row.reviewed }));
+  const entries = [
+    ...context.assets.map(row => ({ kind: 'asset', row })),
+    ...context.requests.map(row => ({ kind: 'request', row })),
+    ...context.methods.map(row => ({ kind: 'method', row })),
+  ];
+  const page = entries.slice(offset, offset + 6);
+  const lines = [`资产 ${context.assets.length}；入口检查 ${context.checks.length}；请求 ${context.requests.length}；方法 ${context.methods.length}；相关索引 ${page.length} 条；offset=${offset}`];
+  const bounded = value => String(value || '').slice(0, 300);
+  for (const { kind, row } of page) {
+    const line = '[' + kind + '] ' + JSON.stringify({ id: bounded(row.id), version: bounded(row.revision || row.version),
+      endpoint: bounded(row.endpoint || row.url), authContext: bounded(row.authContext), valid: row.valid, reviewed: row.reviewed });
+    if (Buffer.byteLength(lines.join('\n') + '\n' + line, 'utf8') > 2048) break;
+    lines.push(line);
   }
-  return { item: null, text: lines.join('\n') };
+  return { item: null, text: lines.join('\n'), nextOffset: offset + page.length < entries.length ? offset + page.length : null,
+    indexBytes: Buffer.byteLength(lines.join('\n'), 'utf8'), limitBytes: 2048, maxItems: 6 };
 }
 export function saveTaskContext(store, sessionId, input) {
   required(sessionId, 'sessionId');

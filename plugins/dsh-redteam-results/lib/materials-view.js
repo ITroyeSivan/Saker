@@ -20,7 +20,18 @@ const CODE_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '
   '.css', '.xml', '.vue', '.svelte', '.toml', '.ini', '.conf']);
 const HTTP_FORMATS = new Set(['http', 'har', 'curl']);
 const CODE_LINE_LIMIT = 80;
-const EXCERPT_DEFAULT_BYTES = 6000;
+const EXCERPT_DEFAULT_BYTES = 8192;
+
+function safeUtf8Slice(buffer, offset, budget) {
+  const start = Math.max(0, Number(offset) || 0);
+  let end = Math.min(buffer.length, start + Math.max(1, budget));
+  while (end > start && end < buffer.length && (buffer[end] & 0xc0) === 0x80) end -= 1;
+  if (end === start && start < buffer.length) {
+    end = start + 1;
+    while (end < buffer.length && (buffer[end] & 0xc0) === 0x80) end += 1;
+  }
+  return { start, end, bytes: buffer.subarray(start, end) };
+}
 
 // 主机名与端口分开：端口有独立字段，host 只放主机名，便于按站点聚合。
 const hostOf = url => { try { return new URL(url).hostname; } catch { return ''; } };
@@ -38,7 +49,8 @@ function fileRows(store, sessionId) {
       const record = JSON.parse(row.record);
       // 显示用可读名称：导入时用户给的名字（record.name）优先于磁盘上的内部文件名
       // （pasted-<uuid>.txt）——列表里该让人看到 practice-assets.csv，而不是内部 id。
-      const name = String(record.name || '').trim() || path.basename(String(record.file || '')) || record.id;
+      const name = String(record.name || record.displayName || '').trim()
+        || path.basename(String(record.file || record.path || '')) || record.id;
       const summary = record.summary && typeof record.summary === 'object' ? record.summary : null;
       out.push({ kind: 'file', id: record.id, title: name, meta: { name, source: record.sourceUrl || '', site: record.site || '',
         digest: record.digest || '', hints: Array.isArray(record.hints) ? record.hints.length : 0,
@@ -47,6 +59,7 @@ function fileRows(store, sessionId) {
         // 坏记录数（v6 第 10.3 节 E09「导入完整性」）：HAR 里解析不了的条目单独计数，
         // 列表里必须看得见 —— 只报"已索引"会让用户以为整份都进来了。
         broken: Number.isInteger(summary?.broken) ? summary.broken : null,
+        materialSource: String(record.source || ''),
         hosts: Array.isArray(summary?.hosts) ? summary.hosts.slice(0, 5) : [],
         bytes: Number.isInteger(summary?.bytes) ? summary.bytes : null,
         // 身份线索：只记「带了哪种身份头」，归属未确定就是待关联（v6 第 7.1 节）。
@@ -144,9 +157,11 @@ export function materialsList(store, sessionId, options = {}) {
   else if (readFilter === 'unread') filtered = filtered.filter(row => !row.modelRead && !row.viewedAt);
   if (sort === 'name') filtered = filtered.slice().sort((a, b) => a.title.localeCompare(b.title));
 
-  const total = filtered.length, offset = (page - 1) * pageSize;
+  const total = filtered.length, offset = options.offset === undefined ? (page - 1) * pageSize : Math.max(0, Number(options.offset) || 0);
   const pageRows = filtered.slice(offset, offset + pageSize);
-  return { type, sort, read: readFilter, page, pageSize, total, counts, rows: pageRows, more: Math.max(0, total - offset - pageRows.length),
+  return { type, sort, read: readFilter, page, pageSize, offset, total, counts, rows: pageRows,
+    nextOffset: offset + pageRows.length < total ? offset + pageRows.length : null,
+    more: Math.max(0, total - offset - pageRows.length),
     note: '列表正文只用于定位；实际读取原文才会计入模型输入。' };
 }
 
@@ -172,7 +187,7 @@ export function searchMaterials(store, sessionId, { query, offset = 0, workspace
   if (!Number.isInteger(offset) || offset < 0 || offset > 100000) throw new Error('搜索游标无效');
   const PAGE_SIZE = 5;
   const list = materialsList(store, sessionId, { type: 'all', sort: 'recent', page: Math.floor(offset / PAGE_SIZE) + 1, pageSize: PAGE_SIZE, query: text, workspace });
-  const results = list.rows.map(row => ({
+  const results = list.rows.filter(row => row.meta.materialSource !== 'local-knowledge-snapshot').map(row => ({
     kind: row.kind,
     id: row.kind === 'request' ? String(row.id).split(':')[0] : row.id,
     name: String(row.title || '').slice(0, 120),
@@ -183,7 +198,7 @@ export function searchMaterials(store, sessionId, { query, offset = 0, workspace
   // `unit` 说明这里的 3000 是 UTF-8 字节上限（没有可靠 tokenizer 的降级口径），不是精确 token。
   const payload = { query: text, offset, pageSize: PAGE_SIZE, total: list.total, unit: 'bytes-approx', results,
     nextOffset: list.more > 0 ? offset + PAGE_SIZE : null,
-    note: '短结果只用于定位；读取原文才计入模型输入（默认每段 6000 字节，可续读）。' };
+    note: '短结果只用于定位；读取原文才计入模型输入（默认每段 8192 字节，可续读）。' };
   let truncated = false;
   let json = JSON.stringify(payload);
   while (Buffer.byteLength(json) > 3000 && payload.results.length) { payload.results.pop(); truncated = true; json = JSON.stringify(payload); }
@@ -191,7 +206,7 @@ export function searchMaterials(store, sessionId, { query, offset = 0, workspace
 }
 
 /**
- * 模型侧读取材料原文（v6 第 5.4.1 节）：默认每段最多 **6000 UTF-8 字节**；
+ * 模型侧读取材料原文：默认每段最多 **8192 UTF-8 字节**；
  * 代码最多 **80 行**；HTTP 把**头与体分开**并标出截断落在哪一段；先到限制分页，用 nextOffset 续读。
  * 只读本机已保存的原文，不访问目标、不调用模型。
  */
@@ -203,16 +218,29 @@ export function readMaterialExcerpt(store, sessionId, { id, offset = 0, limit } 
   if (!row) throw new Error('材料不存在于当前任务');
   let record;
   try { record = JSON.parse(row.record); } catch { throw new Error('文件记录损坏，无法读取'); }
-  const name = String(record.name || '').trim() || path.basename(String(record.file || '')) || target;
+  const name = String(record.name || record.displayName || '').trim()
+    || path.basename(String(record.file || record.path || '')) || target;
   let bytes;
-  try { bytes = fs.readFileSync(record.file); }
+  try { bytes = fs.readFileSync(record.file || record.path); }
   catch {
-    const missing = { id: target, name, missing: true, note: '原始文件已不在本机；只保留索引信息。' };
-    return { ...missing, text: JSON.stringify(missing) };
+    if (typeof record.originalBase64 !== 'string' || !record.originalBase64)
+      return { id: target, name, missing: true, note: '原始文件已不在本机且没有保存正文；只保留索引信息。', text: JSON.stringify({ id: target, name, missing: true }) };
+    bytes = Buffer.from(record.originalBase64, 'base64');
   }
   const budget = Number.isInteger(limit) ? Math.max(512, Math.min(limit, 16384)) : EXCERPT_DEFAULT_BYTES;
-  const slice = bytes.subarray(offset, offset + budget);
-  const byteTruncated = offset + slice.length < bytes.length;
+  const extension = path.extname(name).toLowerCase();
+  const binary = !CODE_EXTENSIONS.has(extension) && !['.txt', '.md', '.csv', '.log', '.jsonl', '.xml', '.yml', '.yaml'].includes(extension)
+    && (bytes.includes(0) || [...bytes.subarray(0, Math.min(bytes.length, 8192))].filter(value => value < 9 || (value > 13 && value < 32)).length > 128);
+  if (binary) {
+    const pathValue = String(record.file || record.path || '');
+    const payload = { id: target, name, kind: 'binary', path: pathValue, digest: String(record.digest || ''),
+      totalBytes: bytes.length, binary: true,
+      note: pathValue ? '二进制原件已保存；请用原生文件或图片工具读取该路径。' : '二进制原件仅保存在材料库中，未暴露为磁盘路径。' };
+    return { ...payload, text: JSON.stringify(payload) };
+  }
+  const sliced = safeUtf8Slice(bytes, offset, budget);
+  const slice = sliced.bytes;
+  const byteTruncated = sliced.end < bytes.length;
   const format = String(record.summary?.format || '').toLowerCase();
   const kind = HTTP_FORMATS.has(format) ? 'http' : CODE_EXTENSIONS.has(path.extname(name).toLowerCase()) ? 'code' : 'text';
   const base = { id: target, name, kind, offset, limit: budget, totalBytes: bytes.length };
@@ -223,7 +251,7 @@ export function readMaterialExcerpt(store, sessionId, { id, offset = 0, limit } 
     const head = split >= 0 ? text.slice(0, split) : text;
     const body = split >= 0 ? text.slice(split + 4) : '';
     const payload = { ...base, head, body, headTruncated: split < 0, bodyTruncated: split >= 0 && byteTruncated,
-      nextOffset: byteTruncated ? offset + slice.length : null,
+      nextOffset: byteTruncated ? sliced.end : null,
       note: '头与体分开；截断位置已标注，用 nextOffset 续读。' };
     return { ...payload, text: JSON.stringify(payload) };
   }
@@ -233,18 +261,18 @@ export function readMaterialExcerpt(store, sessionId, { id, offset = 0, limit } 
     const capped = lines.length > CODE_LINE_LIMIT;
     const kept = capped ? lines.slice(0, CODE_LINE_LIMIT) : lines;
     const content = kept.join('\n');
-    const nextOffset = capped ? offset + Buffer.byteLength(content + '\n', 'utf8') : (byteTruncated ? offset + slice.length : null);
-    // 先到限制可能是行数（80 行）也可能是字节（6000）：note 必须说清到底被哪个截断，
+    const nextOffset = capped ? sliced.start + Buffer.byteLength(content + '\n', 'utf8') : (byteTruncated ? sliced.end : null);
+    // 先到限制可能是行数（80 行）也可能是字节（8192）：note 必须说清到底被哪个截断，
     // 否则 nextOffset 非空却写"没有更多内容"，模型会以为读完了。
     const note = capped ? '代码最多 80 行，本段先到行数上限；用 nextOffset 续读。'
-      : byteTruncated ? '代码每段最多 6000 字节，本段先到字节上限（行数未到 80）；用 nextOffset 续读。'
+      : byteTruncated ? '代码每段最多 8192 字节，本段先到字节上限（行数未到 80）；用 nextOffset 续读。'
         : '代码最多 80 行；本段之后没有更多内容。';
     const payload = { ...base, lines: kept.length, content, nextOffset,
       note };
     return { ...payload, text: JSON.stringify(payload) };
   }
-  const payload = { ...base, content: slice.toString('utf8'), nextOffset: byteTruncated ? offset + slice.length : null,
-    note: '默认每段最多 6000 字节；用 nextOffset 续读。' };
+  const payload = { ...base, content: slice.toString('utf8'), nextOffset: byteTruncated ? sliced.end : null,
+    note: '默认每段最多 8192 字节；用 nextOffset 续读。' };
   return { ...payload, text: JSON.stringify(payload) };
 }
 
@@ -287,9 +315,9 @@ export function materialsDetail(store, sessionId, { kind, id, offset, limit } = 
     let record;
     try { record = JSON.parse(raw.record); } catch { throw new Error('文件记录损坏，无法读取'); }
     // 大文件分段（v6 第 9.3 节）：按 offset/limit 读一段并给出 nextOffset，
-    // 调用方可以续读，而不是只看得到前 6000 字节。单段上限 16KB，避免一次灌爆上下文。
+    // 调用方可以续读。单段上限 16KB，避免一次灌爆上下文。
     const start = Number.isInteger(offset) && offset >= 0 ? offset : 0;
-    const size = Number.isInteger(limit) ? Math.max(512, Math.min(limit, 16384)) : 6000;
+    const size = Number.isInteger(limit) ? Math.max(512, Math.min(limit, 16384)) : EXCERPT_DEFAULT_BYTES;
     let preview = null, truncated = false, missing = false, totalBytes = null, nextOffset = null, bytes = null;
     try {
       bytes = fs.readFileSync(record.file);

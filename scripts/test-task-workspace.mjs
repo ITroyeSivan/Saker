@@ -52,7 +52,7 @@ try {
       assert.equal(value.ok,true,endpoint);assert.equal(disposed,reads,endpoint+' releases its observation');
     }
     assert.equal(reads,5);
-    await assert.rejects(dispatch(cold,store,'project.start',{sessionId:'current'}),/请选择当前可用的渗透会话/);
+    await assert.rejects(dispatch(cold,store,'project.start',{sessionId:'current'}),/请选择当前可用的Saker 会话/);
     assert.equal((await dispatch(cold,store,'knowledge.toggle',{sessionId:'current',enabled:false})).code,'feature_removed');
     assert.equal(reads,5,'retired features and execution mutations cannot borrow a read-only header');
   });

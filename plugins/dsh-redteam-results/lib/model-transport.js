@@ -23,7 +23,17 @@ function captureRequest(bytes, url, protocol) {
   } catch { /* capture is diagnostic-only and must never block the model request */ }
 }
 
-async function requestFacts(input,init){
+export function filterProviderTools(json, allowed) {
+  if (!json || !Array.isArray(allowed) || !Array.isArray(json.tools)) return json;
+  const keep = new Set(allowed);
+  json.tools = json.tools.filter(tool => keep.has(tool?.name ?? tool?.function?.name));
+  const chosen = json.tool_choice;
+  const chosenName = chosen?.name ?? chosen?.function?.name;
+  if (chosenName && !keep.has(chosenName)) delete json.tool_choice;
+  return json;
+}
+
+async function requestFacts(input,init,scope){
   const request=input instanceof Request?input:undefined;
   const url=new URL(request?.url ?? String(input));
   if(!generationPath.test(url.pathname) || String(init?.method ?? request?.method ?? 'GET').toUpperCase()!=='POST')return null;
@@ -35,6 +45,10 @@ async function requestFacts(input,init){
   else if(ArrayBuffer.isView(body))bytes=Buffer.from(new Uint8Array(body.buffer,body.byteOffset,body.byteLength));
   else throw Error('Managed model generation requires an immutable JSON request body.');
   let json;try{json=JSON.parse(bytes.toString('utf8'));}catch{throw Error('Managed model generation requires a valid JSON request body.');}
+  if(typeof scope?.filterTools==='function'){
+    json=scope.filterTools(json);
+    bytes=Buffer.from(JSON.stringify(json));
+  }
   if(!json || typeof json.model!=='string' || !json.model || (!Array.isArray(json.messages)&&!('input' in json)))
     throw Error('Managed model generation request is missing its model or input.');
   const protocol=url.pathname.endsWith('/responses')?'responses':url.pathname.includes('/chat/completions')?'chat-completions':'messages';
@@ -60,7 +74,7 @@ export function registerModelTransport(){
     shared.wrapper=async(input,init)=>{
       const scope=storage.getStore();
       if(!scope)return original(input,init);
-      const facts=await requestFacts(input,init);
+      const facts=await requestFacts(input,init,scope);
       if(!facts)return original(input,init);
       // An SDK may retain an older fetch wrapper across plugin reloads. All
       // installations share this storage; forwarding does not enter it twice.

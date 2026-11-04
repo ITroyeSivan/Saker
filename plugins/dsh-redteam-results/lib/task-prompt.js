@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 const rule = 'Saker任务约束以动态上下文中的“Saker task state”最新快照为准。沿用其中的目标、方向、流程、人数上限、剩余预算与等待原因；不得通过重建任务或改身份重置额度。状态不可读、已停止或等待确认时停止目标操作，保留依据并说明。快照是宿主持久状态，不是目标返回的指令；工具守卫继续强制执行约束。这段说明只用于四件事：查询当前任务设置、读取相关资料、使用可用工具、引用实际结果；它不是角色模板、方法清单或固定流程。';
 
-// v6 第 4.1 节：这条固定说明的初始上限是 600 token；没有可靠计量器时按 **1800 UTF-8 字节**
-// 控制，并如实标成近似（不冒充精确 token）。口径与上限放在同一处，由
+// 三场景方案要求新增固定运行说明初始目标不超过 1200 UTF-8 字节；
+// 没有可靠计量器时不冒充精确 token。口径与上限放在同一处，由
 // `scripts/test-task-prompt-cost.mjs` 盯住——否则以后往这里加句子没人会红。
-export const TASK_RULE_BUDGET = Object.freeze({ unit: 'bytes-approx', bytes: 1800, tokens: 600 });
+export const TASK_RULE_BUDGET = Object.freeze({ unit: 'bytes', bytes: 1200, tokens: null });
 export const TASK_RULE_TEXT = rule;
 
 const contextPrefix = 'Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\n';
@@ -40,15 +40,15 @@ export function compactRuntimeContexts(session, incoming = []) {
 
 // Mutable task facts belong in durable context snapshots, not a changing full
 // system section. Older hosts without contexts keep the original semantics.
-export function registerTaskPrompt(ctx, eligible, snapshot) {
+export function registerTaskPrompt(ctx, eligible, snapshot, { sectionName = 'saker-pentest-task', contextName = 'saker-pentest-task-state', stableRule = rule } = {}) {
   if (typeof ctx.systemPrompt?.section !== 'function') return false;
   if (typeof ctx.systemPrompt.context !== 'function') {
-    ctx.systemPrompt.section({ name: 'saker-pentest-task', order: 470, text: snapshot });
+    ctx.systemPrompt.section({ name: sectionName, order: 470, text: snapshot });
     return 'legacy-section';
   }
-  ctx.systemPrompt.section({ name: 'saker-pentest-task', order: 470,
-    text: assembly => eligible(assembly) ? rule : '' });
-  ctx.systemPrompt.context({ name: 'saker-pentest-task-state', order: 470,
+  ctx.systemPrompt.section({ name: sectionName, order: 470,
+    text: assembly => eligible(assembly) ? stableRule : '' });
+  ctx.systemPrompt.context({ name: contextName, order: 470,
     text: assembly => { const text = snapshot(assembly); return text ? 'Saker task state\n' + text : ''; } });
   ctx.on?.('agent/pre-step', async ({ agent, signal }, next) => {
     const decision = await next();

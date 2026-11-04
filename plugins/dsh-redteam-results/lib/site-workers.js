@@ -19,11 +19,26 @@ const text = (value, label, max = 1000) => {
   if (typeof value !== 'string' || !value.trim() || value.length > max) throw new Error(label + ' must be bounded nonempty text');
   return value.trim();
 };
+const utf8Prefix = (value, maxBytes) => {
+  const source = String(value || '');
+  if (Buffer.byteLength(source, 'utf8') <= maxBytes) return source;
+  let output = '';
+  for (const character of source) {
+    if (Buffer.byteLength(output + character, 'utf8') > maxBytes) break;
+    output += character;
+  }
+  return output;
+};
 const workerScope = value => {
   const normalized = normalizeTaskScope({ target: value })
   if (normalized.terms.include.length !== 1) throw new Error('worker scope requires one URL, domain, wildcard, IP or CIDR')
   return normalized.target
 };
+const localPathTarget = value => {
+  const text = String(value || '').trim()
+  return /^file:/i.test(text) || /^[a-z]:[\\/]/i.test(text) || /^\\\\/.test(text)
+    || /^\.{0,2}[\\/]/.test(text)
+}
 export function siteWorkerRows(store, parentId) {
   return store.db.prepare('SELECT record FROM site_workers WHERE parent_session=? ORDER BY rowid').all(parentId)
     .map(row => parseRowRecord(row, { table: 'site_workers', key: 'parent_session', id: parentId }));
@@ -50,7 +65,7 @@ export function siteWorkerView(store, parentId) {
     state: row.activationState || 'cleanup-failed', error: row.cleanupError || undefined,
   }))];
   return { active: rows.filter(row => row.state !== 'released').length,
-    workers: rows.filter(row => row.state !== 'released').concat(rows.filter(row => row.state === 'released').slice(-8)).map(({ childId, site, question, focus, state, report, error }) => ({ childId, site, question, focus, state,
+    workers: rows.filter(row => row.state !== 'released').concat(rows.filter(row => row.state === 'released').slice(-8)).map(({ childId, site, question, focus, assistPurpose, state, report, error }) => ({ childId, site, question, focus, assistPurpose, state,
       ...(report === undefined ? {} : { report }), ...(error === undefined ? {} : { error }) })), more: Math.max(0, rows.filter(row => row.state === 'released').length - 8) };
 }
 export function createSiteWorkers(ctx, getStore) {
@@ -132,7 +147,7 @@ export function createSiteWorkers(ctx, getStore) {
       let site = materialOnly ? 'task-materials' : workerScope(input.site)
       const question = text(input.question, 'question', 4000), reason = text(input.reason, 'necessity', 2000);
       if (!['large-site-materials', 'independent-site-research'].includes(input.need)) throw new Error('specific delegation need required');
-      const context = readTaskContext(store, parentId);
+      const context = readTaskContext(store, parentId) || { assets: [], requests: [], checks: [] };
       const effective = effectivePolicy(store, state.policy);
       const selectedAssetIds = Array.isArray(input.assetIds) ? [...new Set(input.assetIds.map(String).filter(Boolean))].slice(0, 50) : []
       let selectedAssets = selectedAssetIds.length
@@ -180,7 +195,8 @@ export function createSiteWorkers(ctx, getStore) {
       if (materialOnly && selectedMaterialIdSet.size
         && materialRecords.length !== selectedMaterialIdSet.size)
         throw new Error('selected worker materials are missing from the task context')
-      if (!materialOnly && !selectedAssets.some(asset => taskTermAllowsUrl(site, asset.url)))
+      if (!materialOnly && !taskTermInPolicy(state.policy, site)
+        && !selectedAssets.some(asset => taskTermAllowsUrl(site, asset.url)))
         throw new Error('worker scope has no saved asset in the current task context')
       // Reuse is decided by the work identity (site + question + selected
       // material revision), before occupancy, so asking the same question again
@@ -203,12 +219,22 @@ export function createSiteWorkers(ctx, getStore) {
       const remaining = state.policy.budget.toolCalls === null
         ? null : state.policy.budget.toolCalls - state.policy.used.toolCalls;
       const available = agent.ctx.tools.schemas(agent).map(row => row.name);
-      const nested = name => /^(?:subagent(?:_|$)|send_message$|interrupt_agent$|list_agents$|list_subagent_models$|workflow$)/.test(name);
+      const nested = name => /^(?:ralph$|subagent(?:_|$)|send_message$|interrupt_agent$|list_agents$|list_subagent_models$|workflow$)/.test(name);
       const deny = available.filter(nested);
       if (input.tools !== undefined && (!Array.isArray(input.tools) || input.tools.length > 12
         || input.tools.some(name => typeof name !== 'string' || !available.includes(name) || nested(name)))) throw new Error('select at most 12 available non-delegating tools');
-      const needed = name => /^(?:run_code|read|glob|grep|skill|redteam_(?:task|context|research|execution|finding_register|finding_update|checks))$/.test(name);
-      const allow = [...new Set([...available.filter(needed), ...(input.tools || [])])];
+      // Assistants must retain ordinary working capability, not just reading.
+      // Competition helpers already have the managed competition runner; adding
+      // a second shell there would only widen the tool table.
+      const competitionWorker = state.policy.sceneId === 'competition' || state.policy.scenario === 'competition'
+        || agent.session.header?.agentPreset === 'ctf-solver';
+      const baseWorkerTool = name => /^(?:read|glob|grep|skill|saker_material|saker_browser|project_document|project_request|competition_challenge|competition_execution|redteam_execution|oob_probe)$/.test(name);
+      const generalWorkerTool = name => /^(?:pwsh|powershell|exec_command|run_shell|run_code|bash|sh|write|edit|read_image|view_image|web_fetch|web_search)$/.test(name);
+      const needed = name => baseWorkerTool(name) || (!competitionWorker && generalWorkerTool(name));
+      // These are host-execution adapters, not model-facing tools. They remain
+      // allowed through the dispatch guard while the schema stays hidden.
+      const internalCapabilities = ['recorded-http-execution', 'recorded-project-execution'];
+      const allow = [...new Set([...available.filter(needed), ...internalCapabilities, ...(input.tools || [])])];
       // 工作键/租约（第 8.3 节）：同一目标+问题+资料版本跨进程唯一；接手提高 generation，
       // 旧工作者的迟到报告只作历史。
       // 必要资料版本（v6 第 8.3 节）：用资料的 (id, revision) 摘要，而不是条数 ——
@@ -225,7 +251,8 @@ export function createSiteWorkers(ctx, getStore) {
         throw new Error('worker limit reached, including concurrent reservations');
       }
       const row = { parentId, childId, site, focus, question, reason, state: 'starting', createdAt: Date.now(), runnerPid: process.pid,
-        allowedTools: allow,
+        deliveryMode: api === 'activation' ? 'parent' : 'continuable',
+        allowedTools: allow, assistPurpose: input.assistPurpose || '',
         workKey: lease.workKey, generation: lease.generation };
       try { save(store, row); }
       catch (error) {
@@ -253,14 +280,37 @@ export function createSiteWorkers(ctx, getStore) {
           discoveryCalls: remaining === null ? 0 : Math.min(remaining, Math.max(0, state.policy.budget.discoveryCalls - state.policy.used.discoveryCalls)),
           workers: 0 } });
       const childPolicy = readTaskPolicy(store, childId);
+      if (state.policy.sceneRootSession) {
+        childPolicy.sceneRootSession = state.policy.sceneRootSession;
+        childPolicy.sceneId = state.policy.sceneId;
+        childPolicy.sceneRevision = state.policy.sceneRevision;
+        childPolicy.competitionChallengeId = state.policy.competitionChallengeId || '';
+        childPolicy.competitionChallengeRevision = state.policy.competitionChallengeRevision || 0;
+      }
       if (state.policy.budget.deadline !== null && state.policy.budget.deadline !== undefined)
         childPolicy.budget.deadline = childPolicy.budget.deadline === null
           ? state.policy.budget.deadline
           : Math.min(childPolicy.budget.deadline, state.policy.budget.deadline);
       writeTaskPolicy(store, childId, childPolicy, 'worker-deadline-set', { workId: childId });
-      const prompt = `Work on ${materialOnly ? 'the selected task assets/materials' : site}. Focus: ${focus}. Question: ${question}. Need: ${reason}. Reuse saved redteam_context and task policy; never start/reset budgets or delegate. Follow relevant evidence continuously; save unrelated leads without expanding. IP blocking or broken normal access: stop affected requests and report, no repeated workarounds. Before ending/waiting call redteam_task report with document {state:"completed"|"blocked"|"needs-user",summary:"facts, effects, missing conditions, next step"}. Evidence stays in this child session. HTTP 200 and callbacks alone do not prove impact.`;
+      const prompt = utf8Prefix([
+        'Saker assist brief',
+        'Parent objective: ' + utf8Prefix(state.policy.question || '', 900),
+        'Assigned goal: ' + question,
+        'Purpose: ' + (input.assistPurpose || focus),
+        'Target: ' + (materialOnly ? 'selected task materials' : site),
+        ...(state.policy.sceneId === 'competition' ? [
+          'Competition root: ' + state.policy.sceneRootSession,
+          'Current challenge: ' + (state.policy.competitionChallengeId || 'not selected')
+            + ' revision=' + (state.policy.competitionChallengeRevision || 0),
+        ] : []),
+        'Material IDs: ' + (selectedMaterialIds.length ? selectedMaterialIds.join(', ') : 'use the copied task index'),
+        'Remaining tool-call budget: ' + (remaining === null ? 'not set' : String(remaining)),
+        'Why this separate work is needed: ' + reason,
+        'Work directly with the available tools. Use the copied parent context and selected materials so the parent does not need to fetch them first. Do not start another agent, change task scope, reset budget or claim tool success as business impact.',
+        'Finish with one ordinary concise answer: result, supporting observations, gaps, and next useful step. The host returns the result and child-session source location automatically; do not call a report tool or poll task status.',
+      ].join('\n'), 4096);
         // v6 5.5：用户给站点子代理选了模型时覆盖 provider/model；未选则沿用当前会话模型。
-        const workerModel = state.policy?.workerModel;
+        const workerModel = input.modelOptions === undefined ? state.policy?.workerModel : input.modelOptions;
         if (api === 'activation') {
           // 0.2.1：原生 API 用 startActivation；toolFilter 已移除，工具面由 agent/created
           // 监听器按 row.allowedTools 做 per-agent restrict，执行守卫仍在 ctx.tools.guard。
@@ -326,6 +376,13 @@ export function createSiteWorkers(ctx, getStore) {
         budget: { toolCalls: remaining, minutes: 15,
           discoveryCalls: remaining === null ? 0 : Math.min(remaining, Math.max(0, state.policy.budget.discoveryCalls-state.policy.used.discoveryCalls)), workers: 0 } });
       const next = readTaskPolicy(store, row.childId);
+      if (state.policy.sceneRootSession) {
+        next.sceneRootSession = state.policy.sceneRootSession;
+        next.sceneId = state.policy.sceneId;
+        next.sceneRevision = state.policy.sceneRevision;
+        next.competitionChallengeId = state.policy.competitionChallengeId || '';
+        next.competitionChallengeRevision = state.policy.competitionChallengeRevision || 0;
+      }
       if (state.policy.budget.deadline !== null) next.budget.deadline = Math.min(next.budget.deadline ?? Infinity, state.policy.budget.deadline);
       writeTaskPolicy(store, row.childId, next, 'worker-deadline-set', { workId: row.childId });
     }
@@ -369,7 +426,14 @@ export function createSiteWorkers(ctx, getStore) {
     }
     row.report = report; save(store, row);
     const { subagents, agents } = runtime(), parent = agents.get(parentId); let delivered = false;
-    try { if (!taskPolicyStatus(store, parentId).policy?.cancelled) { await subagents.sendMessage(agent, parentId, [{ type: 'text', text: `Site ${row.site}, worker ${row.childId}: ${input.state}. ${row.report.summary}. Read actual child evidence before accepting findings.` }], { signal }); delivered = true; } }
+    try { if (!taskPolicyStatus(store, parentId).policy?.cancelled) {
+      if (row.deliveryMode !== 'parent') {
+        const label = row.assistPurpose ? '独立工作' : '站点任务';
+        await subagents.sendMessage(agent, parentId, [{ type: 'text',
+          text: `${label} ${row.question || row.site}，子会话 ${row.childId}：${input.state}。${row.report.summary} 需要核对时按这个子会话ID读取原文，不能把摘要当作已验证结论。` }], { signal });
+        delivered = true;
+      }
+    } }
     catch (error) { row.error = 'report delivery failed: ' + String(error.message || error); save(store, row); }
     // Let the report tool settle and the child finish its final message first.
     // A bounded fallback releases a child that keeps going after reporting done.
@@ -378,6 +442,37 @@ export function createSiteWorkers(ctx, getStore) {
       timeout.unref?.(); reportTimers.set(row.childId, timeout);
     }
     return { saved: true, delivered, releaseAfterTurn: !!parent };
+  }
+  async function assist(agent, input, signal) {
+    const goal = text(input?.goal, 'goal', 1800);
+    const purpose = ['investigate', 'analyze', 'verify', 'review'].includes(input?.purpose)
+      ? input.purpose : 'investigate';
+    const reason = input?.why
+      ? text(input.why, 'why', 600)
+      : purpose === 'review' ? '独立复核关键疑点或证据边界' : '完成一项边界清楚、可与主任务并行推进的工作';
+    const materialIds = Array.isArray(input?.materialIds)
+      ? [...new Set(input.materialIds.map(value => String(value).trim()).filter(Boolean))].slice(0, 100) : [];
+    const assetIds = Array.isArray(input?.assetIds)
+      ? [...new Set(input.assetIds.map(value => String(value).trim()).filter(Boolean))].slice(0, 50) : [];
+    const requestedTarget = typeof input?.target === 'string' ? input.target.trim() : '';
+    const target = localPathTarget(requestedTarget) ? '' : requestedTarget;
+    const state = taskPolicyStatus(getStore(), parentIdOf(agent));
+    if (!state.configured || state.stopped) throw new Error('an active bounded task is required');
+    const modelOptions = input?.modelTier === 'review' || purpose === 'review'
+      ? state.policy.reviewModel || state.policy.workerModel || null
+      : state.policy.workerModel || null;
+    return delegate(agent, {
+      focus: state.policy.mode,
+      question: goal,
+      reason,
+      need: target ? 'independent-site-research' : 'large-site-materials',
+      ...(target ? { site: target } : {}),
+      materialIds,
+      assetIds,
+      tools: Array.isArray(input?.tools) ? input.tools : undefined,
+      modelOptions,
+      assistPurpose: purpose,
+    }, signal);
   }
   // 0.2.1 的 startActivation 不再接受 toolFilter。worker 的工具面在 agent/created
   // 与 inbox 插入后按持久化的 allowedTools 重新收窄；这是可见性层，执行守卫另在
@@ -489,6 +584,6 @@ export function createSiteWorkers(ctx, getStore) {
       catch (error) { ctx.logger?.warn?.('worker status: %s', error.message); }
     }
   }, 2000); timer.unref?.();
-  return { delegate, send, report, cleanup, async status(agent, signal) { const id = parentIdOf(agent); parents.set(id, agent); await reconcile(agent, signal); return siteWorkerView(getStore(), id); },
+  return { delegate, assist, send, report, cleanup, async status(agent, signal) { const id = parentIdOf(agent); parents.set(id, agent); await reconcile(agent, signal); return siteWorkerView(getStore(), id); },
     async dispose() { clearInterval(timer); for (const timeout of reportTimers.values()) clearTimeout(timeout); reportTimers.clear(); await Promise.allSettled([...parents.values()].map(parent => cleanup(parent, undefined, 'plugin unloaded'))); } };
 }

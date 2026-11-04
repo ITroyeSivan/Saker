@@ -83,8 +83,6 @@
   config:
     customSkillDirs:
       - !!js "process.getBuiltinModule('node:url').fileURLToPath(new URL('skills/', baseUrl))"
-      - !!js "process.getBuiltinModule('node:url').fileURLToPath(new URL('../pentest/skills/', baseUrl))"
-      - !!js "process.getBuiltinModule('node:url').fileURLToPath(new URL('../code-audit/skills/', baseUrl))"
       - !!js "(() => { try { const f = process.getBuiltinModule('node:fs'); const u = process.getBuiltinModule('node:url'); const d = f.realpathSync(u.fileURLToPath(new URL('.', baseUrl))); return u.fileURLToPath(new URL('../../shared/skills/', u.pathToFileURL(d + '/'))); } catch { return '' } })()"
 
 - id: tool-skill

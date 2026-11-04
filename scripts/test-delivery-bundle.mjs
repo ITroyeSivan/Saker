@@ -27,7 +27,12 @@ const input = { title: 'Controlled fixture', severity: 'high', type: 'RCE', targ
 const review = { status: 'verified', secondRating: 'high', secondRatingNote: 'Independent fixture replay produced the execution marker while the negative control did not.' };
 const confirmed = session => { const row = registerFinding(store, session, 'pentest', input); return updateFinding(store, session, 'pentest', row.id, review); };
 // Internal verdict fixture tests serialization only, not host execution or impact.
-const formatterFixture = row => ({ ...row, executionEvidence: { verified: true, impactVerified: true, binding: deliveryMaterialDigest(row) } });
+const formatterFixture = row => ({
+  ...row,
+  executionEvidence: { verified: true, impactVerified: true, binding: deliveryMaterialDigest(row) },
+  evidenceReferenceValidation: { refs: [], missing: [], reproductionMissing: [], host: true, user: false },
+  judgmentValidation: { host: true, user: false },
+});
 function zipContents(bytes) {
   const archive = path.join(home, 'verification.zip'); fs.writeFileSync(archive, bytes);
   const command = `Add-Type -AssemblyName System.IO.Compression.FileSystem; $archive = [System.IO.Compression.ZipFile]::OpenRead($env:SAKER_ARCHIVE); try { $result = @($archive.Entries | ForEach-Object { $stream = $_.Open(); $memory = New-Object System.IO.MemoryStream; try { $stream.CopyTo($memory); @{name=$_.FullName; content=[Convert]::ToBase64String($memory.ToArray())} } finally { $stream.Dispose(); $memory.Dispose() } }); ConvertTo-Json -InputObject $result -Compress } finally { $archive.Dispose() }`;
@@ -95,6 +100,12 @@ try {
     assert(getFinding(store, 's1', stored.id).delivery.gaps.includes('host-execution-evidence-missing'));
     const claimed = { ...stored, executionEvidence: undefined };
     assert.equal(buildDeliveryFiles([claimed], []).confirmedFindings, 0);
+  });
+  await test('automatic host verification can deliver without a mandatory independent review', () => {
+    const automaticallyVerified = formatterFixture({ ...row, secondRating: undefined, secondRatingNote: undefined });
+    const bundle = buildDeliveryFiles([automaticallyVerified], []);
+    assert.equal(bundle.confirmedFindings, 1);
+    assert.equal(bundle.files['delivery/findings.md'].includes('独立复核：undefined'), false);
   });
   await test('standard Windows ZIP reader recovers every bundled UTF8 file byte-for-byte', () => {
     const files = buildDeliveryFiles([row], []).files;

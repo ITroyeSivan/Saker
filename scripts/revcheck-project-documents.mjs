@@ -17,7 +17,7 @@ const variants = [
     'XLSX 工作表、隐藏表、隐藏行、隐藏列、合并区域与公式无结果都显式列出'],
   ['formula-result', 'formulaNoResult: formula !== undefined && rawValue === undefined', 'formulaNoResult: false',
     'XLSX 工作表、隐藏表、隐藏行、隐藏列、合并区域与公式无结果都显式列出'],
-  ['read-limit', 'const size = Math.max(1, Math.min(DOCUMENT_LIMITS.maxReadChars, Number.isFinite(requested) && requested > 0 ? requested : 4000));', 'const size = Math.max(1, Math.max(DOCUMENT_LIMITS.maxReadChars, Number.isFinite(requested) && requested > 0 ? requested : 4000));',
+  ['read-limit', "const size = Math.max(1, Math.min(DOCUMENT_LIMITS.maxReadBytes,\n    Number.isFinite(requested) && requested > 0 ? requested : DOCUMENT_LIMITS.maxReadBytes));", "const size = Math.max(1, Math.max(DOCUMENT_LIMITS.maxReadBytes,\n    Number.isFinite(requested) && requested > 0 ? requested : DOCUMENT_LIMITS.maxReadBytes));",
     '文本按行范围分段，长内容可继续读取且不一次返回全文'],
   ['zip-entry-limit', 'if (count > DOCUMENT_LIMITS.maxEntries) throw new Error(\'ZIP 条目数超过 5000 上限\');', '',
     'ZIP 条目数、解压大小和无压缩超限都在解析前受控失败'],

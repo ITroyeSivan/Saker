@@ -18,7 +18,7 @@ try {
       'empty findings yield truthful compact delivery and not-run methods keep their status'],
     ['delivery.js', "if (!request || !response || !bound)", 'if (false)',
       'incomplete malformed or cross-entry HTTP evidence never counts as a confirmed effect'],
-    ['delivery.js', "if (!executionVerified) gaps.push('host-execution-evidence-missing')", 'if (false)',
+    ['delivery.js', "if (hostProofRequired && !executionVerified) gaps.push('host-execution-evidence-missing')", "if (false) gaps.push('host-execution-evidence-missing')",
       'host execution evidence remains mandatory for a ready delivery'],
   ];
   for (const [file, anchor, mutation, assertion] of cases) {

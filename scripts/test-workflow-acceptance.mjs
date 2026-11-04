@@ -9,7 +9,7 @@ import { openStore } from '../plugins/dsh-redteam-results/lib/store.js'
 import {
   startTaskPolicy, readTaskPolicy, effectivePolicy, taskExecutionGuard, taskPolicyStatus,
   chooseTaskMode, chosenTaskOptions, setTaskActionLimits, updateTaskFromChat, applyPendingTaskChange,
-  finishTaskOnTurnEnd, resumeTurnEndedTask, isExplicitTaskContinuation,
+  finishTaskOnTurnEnd, resumeTurnEndedTask, isHumanUserMessage,
   normalizeExcludedPaths, updateTaskProgress, taskPromptStable, taskOverview,
 } from '../plugins/dsh-redteam-results/lib/task-policy.js'
 import {
@@ -286,18 +286,21 @@ await test('U02 reference reads and passive asset queries are not target traffic
   }), undefined)
 }))
 
-await test('U03 only an explicit human continue lifts ordinary turn_ended and preserves the task', () => memory(store => {
+await test('U01 ordinary turn end stays idle and any real human message resumes it', () => memory(store => {
   const before = start(store, 'continue')
   finishTaskOnTurnEnd(store, 'continue')
-  assert.equal(taskPolicyStatus(store, 'continue').reason, 'turn_ended')
-  assert(isExplicitTaskContinuation({ id: 'human-1', source: { kind: 'user' }, content: [{ type: 'text', text: '继续当前任务' }] }))
-  assert(!isExplicitTaskContinuation({ id: 'human-2', source: { kind: 'user' }, content: [{ type: 'text', text: '现在进展如何？' }] }))
+  const idle = taskPolicyStatus(store, 'continue')
+  assert.equal(idle.reason, 'turn_ended')
+  assert.equal(idle.idle, true)
+  assert.equal(idle.stopped, false)
+  assert.equal(taskExecutionGuard(store, 'continue', 'recorded-http-execution'), undefined)
   for (const text of [
-    'Do not continue the current task.',
-    '继续当前任务前先不要发请求。',
-    '继续当前任务前先不要访问网站，只讨论方案。',
-  ]) assert(!isExplicitTaskContinuation({ id: 'human-' + text.length, source: { kind: 'user' }, content: [{ type: 'text', text }] }))
-  assert(isExplicitTaskContinuation({ id: 'human-en', source: { kind: 'user' }, content: [{ type: 'text', text: 'Please continue the current task.' }] }))
+    '继续测试登录接口，重点看普通用户能否读取他人订单。',
+    '继续，先别扫描目录，改查这个接口。',
+    '现在进展如何？',
+    'Please continue testing the login endpoint using the supplied account.',
+  ]) assert(isHumanUserMessage({ id: 'human-' + text.length, source: { kind: 'user' }, content: [{ type: 'text', text }] }))
+  assert(!isHumanUserMessage({ id: 'saker-auto', source: { kind: 'user' }, content: [{ type: 'text', text: '继续' }] }))
   const resumed = resumeTurnEndedTask(store, 'continue')
   assert(resumed?.continued)
   assert.equal(taskPolicyStatus(store, 'continue').reason, '')
@@ -592,7 +595,7 @@ await test('U08 10, 100 and 1000-entry policies keep a bounded resident snapshot
     const bytes = Buffer.byteLength(prompt)
     sizes.push(bytes)
     assert(bytes <= 7000, count + ' entries produced ' + bytes + ' bytes')
-    assert(prompt.includes('完整') || prompt.includes('需要精确用量'))
+    assert(prompt.includes('精确用量由程序显示') || prompt.includes('完整'))
     if (count > 12) assert.equal(taskScopePromptText(policy).includes(entries[count - 1]), false)
   }
   assert(sizes[2] - sizes[0] < 2000, 'snapshot growth is bounded across 10 to 1000 entries')

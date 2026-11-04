@@ -1,29 +1,27 @@
 # 插件清单
 
-Saker 当前包含 17 个独立插件及一个根模式包。运行 `node scripts/pack-all.mjs` 打包，再在官方桌面端插件页面安装并启用；需要脚本安装时使用 `scripts/install-desktop.mjs`。旧 `install-all` 网页安装流程已弃用。
-本版不发布 `dsh-attack-atlas`、`dsh-campaign-memory`、`dsh-webshell-mgr`、`dsh-method-stack`、`dsh-route-boost`、`dsh-knowledge-hub`、`dsh-nday-hunter`。统一清单禁止这些插件打包、安装和激活；旧 profile 升级时由官方插件管理移除。hunter 只保留 FOFA、Hunter、Quake 资产查询、平台配置和授权资产写入。
+Saker 当前包含 15 个独立插件及一个根模式包。运行 `node scripts/pack-all.mjs` 打包，再在官方桌面端插件页面安装并启用；需要脚本安装时使用 `scripts/install-desktop.mjs`。旧 `install-all` 网页安装流程已弃用。
+本版不发布 `dsh-attack-atlas`、`dsh-campaign-memory`、`dsh-webshell-mgr`、`dsh-method-stack`、`dsh-route-boost`、`dsh-knowledge-hub`、`dsh-nday-hunter`、`dsh-ctf-observer`、`dsh-refusal-guard`。统一清单禁止这些插件打包、安装和激活；旧 profile 升级时由官方插件管理移除。`dsh-refusal-guard` 因会把缺少文档/账号的正常说明误判为拒答并自动重试而退出默认路径，旧审计文件不删除。比赛模式由当前 Saker 插件承载，不再启用旧 CTF 观察器；hunter 只保留 FOFA、Hunter、Quake 资产查询、平台配置和授权资产写入。
 
 每个插件目录都有独立 README 说明配置、边界与验证方式。配置方式见各插件 README。
 
 | 位置 | 插件 | 版本 | 做什么 |
 |---|---|---|---|
-| 界面与配置 | `dsh-mode-group` | 1.0.13 | 新会话统一展示渗透测试入口及三个子模式 |
+| 界面与配置 | `dsh-mode-group` | 1.1.7 | 新会话统一展示自由测试、比赛模式与案例测试入口，并在切换正在运行的任务时要求明确处理 |
 | 界面与配置 | `dsh-sec-config` | 1.3.38 | 管理本机工具路径与服务配置，提供工具探测、模型接入代理和端点切换 |
 | 界面与配置 | `dsh-mcp-studio` | 1.2.13 | 管理 MCP 服务、连接状态与工具；支持直接或代理接入、列表刷新与调用记录 |
 | 界面与配置 | `dsh-skill-browse` | 1.1.17 | 浏览、导入和卸载用户技能，复制宿主引用；卸载内容可恢复 |
 | 工具 | `dsh-scanner-tools` | 1.2.0 | 封装本机扫描与爬取工具，按需加载；导入已有资产导出结果 |
 | 工具 | `dsh-semgrep-audit` | 1.0.12 | 提供本地 Semgrep 扫描能力；代码审计独立模式已退出新任务菜单 |
 | 工具 | `dsh-hunter` | 1.6.1 | 聚合 FOFA、Hunter、Quake 查询，提供资产平台 API 和授权资产写入 |
-| 工具 | `dsh-tool-scope` | 0.2.4 | 按任务场景加载或隐藏工具，缩小模型每轮需要读取的工具列表 |
+| 工具 | `dsh-tool-scope` | 0.3.0 | 按任务场景加载或隐藏工具，缩小模型每轮需要读取的工具列表 |
 | 过程 | `dsh-stage-gate` | 1.10.2 | 记录目标、方向与任务状态，检查阶段材料和任务结束条件；仅代码审计/CTF 模式可见 |
 | 过程 | `dsh-sec-enforce` | 1.4.12 | 检查工作目录、请求预算与操作约束，阻止不符合当前任务要求的执行 |
-| 过程 | `dsh-auto-advance` | 0.3.15 | 在有限轮次内推进尚未完成的任务，支持用户接管，避免结束后反复自动开工 |
-| 过程 | `dsh-refusal-guard` | 1.0.4 | 识别异常拒答并记录；模型与服务自身的安全限制仍然有效 |
-| 记录 | `dsh-redteam-results` | 1.0.200 | 管理自由测试、按文档连续检查、执行证据、发现、恢复与报告材料包 |
+| 过程 | `dsh-auto-advance` | 0.3.15 | 可选自动续接组件，默认关闭；按案例继续由当前运行状态处理 |
+| 记录 | `dsh-redteam-results` | 1.1.6 | 管理自由测试、比赛模式、案例测试、执行证据、发现、恢复与报告材料包 |
 | 记录 | `dsh-trace-vault` | 0.3.10 | 记录工具调用、错误和中断，区分执行失败与目标访问受阻 |
 | 协作 | `dsh-product-subagents` | 1.1.3 | 按需接入本机 Claude Code、Codex CLI，提供明确范围的复核任务 |
 | 协作 | `dsh-session-pulse` | 0.1.16 | 默认停用；保留旧宿主兼容实现，当前任务与子代理界面由官方宿主提供 |
-| 协作 | `dsh-ctf-observer` | 0.1.10 | 保留历史 CTF 会话兼容；当前没有 CTF 新任务入口 |
 
 每个插件目录都有独立README，说明配置、边界和验证方式。完整目录见 [`plugins/`](../plugins/)。
 

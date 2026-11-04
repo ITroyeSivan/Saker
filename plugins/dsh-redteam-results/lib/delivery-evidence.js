@@ -41,11 +41,41 @@ export function attachDeliveryEvidence(store, sessionId, finding) {
   } catch (error) { reason = error.message; }
   row.executionEvidence = { source: 'host-derived-delivery-evidence', verified, reason, receiptIds,
     binding: deliveryMaterialDigest(row), impactVerified, effectId, effectEvidence, impactReason };
-  if (verified && !impactVerified) {
-    const review = readImpactReview(store, sessionId, row);
-    if (review?.current) { row.executionEvidence.impactVerified = true; row.executionEvidence.impactReason = ''; row.executionEvidence.effectEvidence = review; }
-    else if (review) row.executionEvidence.impactReason = review.reason;
+  const review = readImpactReview(store, sessionId, row);
+  if (review?.current) {
+    row.executionEvidence.impactVerified = true;
+    row.executionEvidence.impactReason = '';
+    row.executionEvidence.effectEvidence = review;
+    row.explicitUserReview = review;
+  } else if (review) {
+    row.explicitUserReview = review;
+    row.executionEvidence.impactReason = review.reason;
   }
+  const evidenceRefs = Array.isArray(row.evidenceRefs) ? row.evidenceRefs : [];
+  const reproductionRefs = Array.isArray(row.reproduction)
+    ? []
+    : (() => { try { return parseReproduction(row.reproduction)?.verification?.evidenceIds || [] } catch { return [] } })();
+  const validateRef = ref => {
+    const kind = String(ref?.kind || 'material');
+    const id = String(ref?.id || '');
+    if (!id) return false;
+    try {
+      if (store.db.prepare('SELECT 1 FROM business_materials WHERE session_id=? AND id=?').get(sessionId, id)) return true;
+      if (store.db.prepare('SELECT 1 FROM execution_receipts WHERE session_id=? AND id=?').get(sessionId, id)) return true;
+      if (kind === 'source' && store.db.prepare('SELECT 1 FROM project_sources WHERE session_id=? AND source_id=? LIMIT 1').get(sessionId, id)) return true;
+    } catch { return false; }
+    return false;
+  };
+  row.evidenceReferenceValidation = {
+    refs: evidenceRefs.map(ref => ({ ...ref, exists: validateRef(ref) })),
+    missing: evidenceRefs.filter(ref => !validateRef(ref)).map(ref => ({ kind: ref?.kind || 'material', id: ref?.id || '' })),
+    reproductionMissing: reproductionRefs.filter(id => !validateRef({ kind: 'material', id })).map(String),
+  };
+  row.judgmentValidation = {
+    host: verified && impactVerified,
+    user: review?.current === true,
+    reviewReason: review?.reason || '',
+  };
   row.delivery = undefined;
   return row;
 }

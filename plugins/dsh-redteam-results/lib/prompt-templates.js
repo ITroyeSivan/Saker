@@ -1,4 +1,4 @@
-// 提示词模板库：36 篇内置模板 + 字段定义 + 同义词搜索 + 渲染。
+// 提示词模板库：稳定内置模板 + 字段定义 + 同义词搜索 + 渲染。
 //
 // 为什么独立：旧实现把示例模板按模式筛选、正文用 [占位] 且默认选首篇。本层只做
 // **纯数据与纯函数**（不碰数据库、不调用模型、不创建任务），让编辑器与 RPC 共用同一份
@@ -32,8 +32,12 @@ export function promptFields() {
 }
 
 /** 内置模板只读列表（保持目录顺序）。 */
-export function builtinTemplates() {
-  return promptCatalog().templates.map(t => ({ ...t, builtin: true, readOnly: true }));
+export function builtinTemplates({ scene = '' } = {}) {
+  const rows = promptCatalog().templates.map(t => {
+    const inferred = t.scene || (t.id === 'P01' ? ['cases'] : t.id === 'U01' ? ['free', 'competition', 'cases'] : ['free'])
+    return { ...t, scene: Array.isArray(inferred) ? inferred : [inferred], builtin: true, readOnly: true }
+  })
+  return scene ? rows.filter(t => t.scene.includes('all') || t.scene.includes(scene)) : rows
 }
 
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -60,6 +64,9 @@ export function validateTemplate(template, { builtin = false } = {}) {
     throw new Error('模板声明了字段但正文没有引用：' + key);
   return { id, title, group: String(template.group ?? '自定义').slice(0, 40), text,
     required: [...required], optional: [...optional],
+    scene: Array.isArray(template.scene) && template.scene.length
+      ? [...new Set(template.scene.map(String).filter(scene => ['all', 'free', 'competition', 'cases'].includes(scene)))]
+      : ['all'],
     keywords: Array.isArray(template.keywords) ? template.keywords.map(String).slice(0, 24) : [],
     builtin, readOnly: builtin };
 }
@@ -86,7 +93,7 @@ export function searchTemplates(query, templates = builtinTemplates()) {
   const terms = new Set([q, ...(SYNONYMS[q] || []), ...q.split(/[\s,，、/]+/).filter(Boolean)]);
   const lower = s => String(s).toLowerCase();
   return templates.filter(t => {
-    const hay = [t.id, t.title, t.group, ...(t.keywords || []), ...(t.required || []), ...(t.optional || [])].map(lower).join(' ');
+    const hay = [t.id, t.title, t.group, ...(t.scene || []), ...(t.keywords || []), ...(t.required || []), ...(t.optional || [])].map(lower).join(' ');
     for (const term of terms) if (hay.includes(lower(term))) return true;
     return false;
   });

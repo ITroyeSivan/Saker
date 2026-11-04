@@ -62,9 +62,10 @@ try {
   await test('budget counts survive database reopen and another session never consumes this task budget', () => {
     store.close(); store = openStore(path.join(home, 'redteam-results', 'results.db'));
     assert.equal(taskPolicyStatus(store, 'actual').reason, 'tool_budget_exhausted');
-    assert.match(taskExecutionGuard(store, 'other', 'fetch'), /task_policy_missing/);
+    assert.match(taskExecutionGuard(store, 'other', 'httpx_probe'), /target_scope_missing/, 'the first real target action initializes its own task');
+    assert.equal(readTaskPolicy(store, 'other').question, '按当前会话中的用户请求执行');
+    assert.equal(readTaskPolicy(store, 'other').used.toolCalls, 0, 'a pre-dispatch scope denial does not consume the operation budget');
     assert.equal(readTaskPolicy(store, 'actual').used.toolCalls, 2);
-    assert.equal(readTaskPolicy(store, 'other'), null);
   });
   await test('method-orchestration and abstract-workbench tools are retired, refused for every session, and never counted as local work', () => {
     // 批次 A：这些工具已退出运行，任何会话都不再当作本地登记放行。

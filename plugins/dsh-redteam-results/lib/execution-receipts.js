@@ -4,7 +4,7 @@ import https from 'node:https';
 import { createHash, randomUUID } from 'node:crypto';
 import { readTaskContext, saveTaskContext } from './task-context.js';
 import { researchDetail, researchNext } from './research.js';
-import { taskExecutionGuard, readTaskPolicy, pauseTaskPolicy, acceptBaselineRecheck, targetTrafficDenial, excludedPathDenial, effectivePolicy } from './task-policy.js';
+import { startTaskPolicy, taskExecutionGuard, readTaskPolicy, pauseTaskPolicy, acceptBaselineRecheck, targetTrafficDenial, excludedPathDenial, effectivePolicy } from './task-policy.js';
 import { writeTaskPolicy, taskEvent } from './task-policy-record.js';
 import { moduleGateFor, rootModuleSelection } from './execution-modules.js';
 import { sameEndpointPath } from './endpoint-binding.js';
@@ -179,13 +179,13 @@ export async function executeRecordedRequest(store, sessionId, input, jobStep, s
   if (pathDenial) throw new Error(pathDenial);
   // 身份需求（第 5.5/8.1 节）：已失效/待确认的账号不会被当成有效；
   // 有效账号另存的秘密只在请求自己没带 Cookie/Authorization 时套上去，秘密不进回执。
-  const identity = resolveTaskIdentity(store, sessionId, row.authContext);
-  const identityReason = identityDenial(identity);
+  let identity = resolveTaskIdentity(store, sessionId, row.authContext);
+  let identityReason = identityDenial(identity);
   if (identityReason) throw new Error(identityReason);
-  const identityHeaders = identityRequestHeaders(parsed, identity);
-  const identitySecretApplied = identityHeaders ? identityHeaders.kind : null;
-  // 派发用带上秘密的头；回执仍记请求原文，秘密不进回执。
-  const outgoing = identityHeaders ? { ...parsed, headers: identityHeaders.headers } : parsed;
+  const authSource = input.authSource === 'request' ? 'request' : input.authSource === 'account' ? 'account' : '';
+  let identityHeaders = identityRequestHeaders(parsed, identity, { authSource });
+  if (identityHeaders?.conflict) throw Object.assign(new Error(identityHeaders.error), { code: 'identity-header-conflict' });
+  let identitySource = identityHeaders?.source || (identity?.matched ? 'request' : 'anonymous');
   const recheck = input.purpose === 'baseline' && task?.needsBaselineRecheck === true;
   const firstContact = input.purpose === 'first-contact';
   const exploration = firstContact || (!recheck && (typeof input.hypothesisId !== 'string' || !input.hypothesisId.trim()));
@@ -244,14 +244,30 @@ export async function executeRecordedRequest(store, sessionId, input, jobStep, s
       releaseExecutionReservation(store, sessionId);
       throw new Error(lateDenial);
     }
-    result = await exchange(outgoing, timeoutMs, maxBytes, signal);
+    identity = resolveTaskIdentity(store, sessionId, row.authContext);
+    identityReason = identityDenial(identity);
+    if (identityReason) {
+      releaseExecutionReservation(store, sessionId);
+      throw new Error(identityReason);
+    }
+    const latestHeaders = identityRequestHeaders(parsed, identity, { authSource });
+    if (latestHeaders?.conflict) {
+      releaseExecutionReservation(store, sessionId);
+      throw Object.assign(new Error(latestHeaders.error), { code: 'identity-header-conflict' });
+    }
+    identityHeaders = latestHeaders;
+    identitySource = latestHeaders?.source || (identity?.matched ? 'request' : 'anonymous');
+    result = await exchange({ ...parsed, headers: latestHeaders?.headers || parsed.headers }, timeoutMs, maxBytes, signal);
   }
   finally { releaseSlot(); }
   const record = { id: 'execution-' + randomUUID(), source: 'host-http-execution', hypothesisId: direction.id,
     requestId: row.id, requestRevision: row.revision, endpoint: row.endpoint, authContext: row.authContext,
     ...(typeof input.callId === 'string' && input.callId ? { callId: input.callId } : {}),
-    ...(identity?.matched ? { identity: { name: identity.name, status: identity.status } } : {}),
-    ...(identitySecretApplied ? { identitySecretApplied } : {}),
+    ...(identity?.matched && identitySource === 'account' ? { identity: { accountId: identity.accountId, name: identity.name,
+      credentialRevision: identity.credentialRevision, status: identity.status, source: identitySource } } : {}),
+    ...(identity?.matched && identitySource === 'request' ? { selectedIdentityRef: identity.name } : {}),
+    identitySource,
+    ...(identityHeaders?.source === 'account' ? { identitySecretApplied: identityHeaders.kind } : {}),
     ...(selectedMethod ? { methodId: selectedMethod.id, methodVersion: selectedMethod.version, methodBasis: executionMethodBasis(selectedMethod) } : {}),
     ...(requirement.modules.length ? { contentRequirement: requirement.modules } : {}),
     ...(modulePolicy ? { modulePolicy } : {}),
@@ -306,8 +322,20 @@ export async function executeDirectRequest(store, sessionId, input, signal) {
   try { endpoint = new URL(String(input?.url || '')) } catch { throw new Error('direct request requires a complete HTTP(S) URL') }
   if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password) throw new Error('direct request requires a plain HTTP(S) URL')
   endpoint.hash = ''
-  const policy = readTaskPolicy(store, sessionId)
-  if (!policy) throw new Error('start a task before sending a direct request')
+  let policy = readTaskPolicy(store, sessionId)
+  if (!policy) {
+    // First direct action in free chat is the task boundary. Use only the
+    // explicit URL supplied by the caller; never infer a wider scope.
+    startTaskPolicy(store, sessionId, {
+      mode: 'regular',
+      question: '自由测试：' + endpoint.origin,
+      userRequest: '自由测试：' + endpoint.origin,
+      target: endpoint.origin,
+      budget: {},
+    })
+    policy = readTaskPolicy(store, sessionId)
+  }
+  if (!policy) throw new Error('task policy could not be created for the direct request')
   const limits = effectivePolicy(store, policy)
   if (!taskScopeIncludesUrl(limits, endpoint)) throw new Error('direct request is outside the current task scope')
   const directExclusion = excludedPathDenial(limits, { url: endpoint })
@@ -320,6 +348,13 @@ export async function executeDirectRequest(store, sessionId, input, signal) {
   }
   const body = input?.body === undefined ? '' : String(input.body)
   if (body && ['GET', 'HEAD'].includes(method)) throw new Error('GET/HEAD direct requests cannot include a body')
+  const identityRef = String(input?.identityRef || input?.authContext || '').trim()
+  const identity = resolveTaskIdentity(store, sessionId, identityRef)
+  const identityReason = identityDenial(identity, { explicit: !!identityRef })
+  if (identityReason) throw new Error(identityReason)
+  const authSource = input?.authSource === 'request' ? 'request' : input?.authSource === 'account' ? 'account' : ''
+  const identityHeaders = identityRequestHeaders({ headers }, identity, { authSource })
+  if (identityHeaders?.conflict) throw Object.assign(new Error(identityHeaders.error), { code: 'identity-header-conflict' })
   const current = readTaskContext(store, sessionId) || { assets: [], checks: [], requests: [], methods: [], maxSupplementAttempts: 2 }
   const assetId = 'asset-direct-' + digest(endpoint.origin).slice(0, 16)
   const requestId = 'request-direct-' + randomUUID()
@@ -335,7 +370,7 @@ export async function executeDirectRequest(store, sessionId, input, signal) {
     id: requestId,
     revision: requestRevision,
     endpoint: endpoint.href,
-    authContext: String(input?.identityRef || input?.authContext || 'default'),
+    authContext: identityRef || 'anonymous',
     method,
     headers,
     body,
@@ -351,6 +386,7 @@ export async function executeDirectRequest(store, sessionId, input, signal) {
     requestRevision,
     timeoutMs: input?.timeoutMs,
     maxBytes: input?.maxBytes,
+    authSource,
     callId: input?.callId,
   }, undefined, signal)
   const after = readTaskContext(store, sessionId) || current

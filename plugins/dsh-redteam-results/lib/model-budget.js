@@ -3,13 +3,15 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { writeTaskPolicy } from './task-policy-record.js';
-import { registerModelTransport, MODEL_TRANSPORT_SUPPORT } from './model-transport.js';
+import { writeTaskPolicy, childAllowedTools } from './task-policy-record.js';
+import { registerModelTransport, MODEL_TRANSPORT_SUPPORT, filterProviderTools } from './model-transport.js';
 export const MODEL_BUDGET_SCHEMA = `CREATE TABLE IF NOT EXISTS task_model_calls (
  id TEXT PRIMARY KEY, root_session TEXT NOT NULL, round_at INTEGER NOT NULL,
  session_id TEXT NOT NULL, state TEXT NOT NULL, record TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS task_model_calls_round ON task_model_calls(root_session,round_at);
  CREATE TABLE IF NOT EXISTS task_model_runtimes (id TEXT PRIMARY KEY, pid INTEGER NOT NULL);`;
+export const MODEL_SERVICE_SCHEMA = `CREATE TABLE IF NOT EXISTS task_model_services (
+ service_key TEXT PRIMARY KEY, concurrency INTEGER NOT NULL, updated_at TEXT NOT NULL);`;
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 export function normalizedModelUsage(usage) {
   if (!usage || !['inputTokens','outputTokens'].every(key=>integer(usage[key]))) return null;
@@ -28,7 +30,54 @@ function policy(store, id) {
   const row=store.db.prepare('SELECT record FROM task_policy WHERE session_id=?').get(id);
   return row ? JSON.parse(row.record) : null;
 }
+function competitionOwner(store, sessionId) {
+  let root = String(sessionId || '')
+  if (!root) return null
+  for (let depth = 0; depth < 4; depth += 1) {
+    let parent = ''
+    try { parent = store.db.prepare('SELECT parent_session FROM site_workers WHERE child_id=?').get(root)?.parent_session || '' }
+    catch { /* purpose-task ownership is checked below */ }
+    if (!parent) {
+      try {
+        const child = store.db.prepare('SELECT parent_session,record FROM task_policy WHERE session_id=?').get(root)
+        if (child?.parent_session) {
+          const childRecord = JSON.parse(child.record || '{}')
+          const parentRow = store.db.prepare('SELECT record FROM task_policy WHERE session_id=?').get(child.parent_session)
+          const parentRecord = parentRow ? JSON.parse(parentRow.record || '{}') : null
+          if (!childRecord.parentRound || !parentRecord?.startedAt || childRecord.parentRound === parentRecord.startedAt)
+            parent = child.parent_session
+        }
+      } catch { /* malformed ownership cannot inherit a competition */ }
+    }
+    if (!parent || parent === root) break
+    root = String(parent)
+  }
+  let row
+  try { row = store.db.prepare('SELECT record FROM scene_contexts WHERE session_id=?').get(root) } catch { return null }
+  if (!row) return null
+  let scene
+  try { scene = JSON.parse(row.record) } catch { return null }
+  const preferences = scene?.preferences
+  if (scene?.sceneId !== 'competition') return null
+  const limits = preferences?.budget || {}
+  const at = Date.parse(limits.roundStartedAt || scene.createdAt || preferences?.updatedAt || scene.updatedAt || '')
+  if (!Number.isSafeInteger(at)) throw new Error('model_budget_owner_invalid')
+  const minutes = Number(limits.minutes)
+  const started = Date.parse(limits.startedAt || '')
+  const deadline = Number.isFinite(minutes) && minutes > 0 && Number.isFinite(started)
+    ? started + minutes * 60000 : null
+  const ownerPolicy = {
+    budget: { modelCalls: limits.modelCalls ?? null, tokens: limits.tokens ?? null, deadline },
+    cancelled: scene.continuationReason === '用户切换场景前取消',
+    continuationPaused: scene.continuationPaused === true,
+    modelBudgetBlock: preferences?.modelBudgetBlock || null,
+  }
+  return { root, round: at, policy: ownerPolicy, sessionPolicy: ownerPolicy,
+    competition: { scene, sceneId: root } }
+}
 export function modelBudgetOwner(store, sessionId) {
+  const competition = competitionOwner(store, sessionId)
+  if (competition) return competition
   const own=policy(store,sessionId); if(!own) return null;
   const root=own.parentSession || sessionId, current=own.parentSession ? policy(store,root) : own;
   if (!current || current.parentSession || !integer(current.startedAt)) throw new Error('model_budget_owner_invalid');
@@ -68,7 +117,10 @@ function read(store,id) {
   if(!row)throw new Error('model_budget_call_missing');return JSON.parse(row.record);
 }
 function overview(store,owner) {
-  for(const key of ['modelCalls','tokens'])if(owner.policy.budget[key]!==undefined && (!integer(owner.policy.budget[key])||owner.policy.budget[key]<1))throw new Error('model_budget_invalid_limits');
+  for(const key of ['modelCalls','tokens']){
+    const value=owner.policy.budget[key];
+    if(value!==undefined && value!==null && (!integer(value)||value<1))throw new Error('model_budget_invalid_limits');
+  }
   const rows=store.db.prepare('SELECT record FROM task_model_calls WHERE root_session=? AND round_at=? ORDER BY rowid').all(owner.root,owner.round).map(r=>JSON.parse(r.record));
   let knownTokens=0,heldTokens=0,unknownCalls=0,unresolvedCalls=0,chargedCalls=0,unboundedUnknownCalls=0;
   for(const row of rows){
@@ -96,17 +148,102 @@ export function modelBudgetOverview(store,sessionId) {
 }
 function block(store, owner, code, message, details={}) {
   const next={...owner.policy,modelBudgetBlock:{code,message,at:Date.now(),...details}};
+  if (owner.competition) {
+    const scene = owner.competition.scene
+    const record = { ...scene, preferences: { ...(scene.preferences || {}), modelBudgetBlock: next.modelBudgetBlock },
+      updatedAt: new Date().toISOString() }
+    store.db.prepare('UPDATE scene_contexts SET record=?,updated_at=? WHERE session_id=?')
+      .run(JSON.stringify(record), record.updatedAt, owner.competition.sceneId)
+    owner.policy.modelBudgetBlock = next.modelBudgetBlock
+    return {ok:false,code,message};
+  }
   writeTaskPolicy(store,owner.root,next,'model-budget-blocked',{code});
   return {ok:false,code,message};
 }
 function stopped(owner, now=Date.now()) {
   return [owner.policy,owner.sessionPolicy].some(p=>p.cancelled ||
+    p.continuationPaused === true ||
     (p.budget.deadline !== null && p.budget.deadline !== undefined && now>=p.budget.deadline));
 }
 function stoppedResult() {
   // Child cancellation is local. It must not become a persistent root-wide
   // budget failure and disable siblings that are still allowed to run.
   return {ok:false,code:'task_stopped',message:'任务已取消或超过时间额度，未发出新的模型请求。'};
+}
+function privateHost(hostname) {
+  const host=String(hostname||'').toLowerCase();
+  if(host==='localhost'||host==='::1'||host==='[::1]'||/^127\./.test(host))return true;
+  if(/^10\./.test(host)||/^192\.168\./.test(host)||/^169\.254\./.test(host))return true;
+  const match=/^172\.(\d+)\./.exec(host);
+  return !!match&&Number(match[1])>=16&&Number(match[1])<=31;
+}
+/** Use the host-resolved provider URL as the service identity. Names are user
+ * aliases and cannot prove that two routes share one concurrency limit. */
+export function localModelServiceKey(options={}) {
+  for(const value of [options.baseURL,options.baseUrl,options.endpoint,options.providerEndpoint]){
+    if(typeof value!=='string'||!value.trim())continue;
+    try{const url=new URL(value);if(privateHost(url.hostname))return 'model-service:'+url.origin;}catch{/* not a URL */}
+  }
+  if(options.local===true)return 'model-service:provider:'+String(options.provider||'local');
+  return null;
+}
+export function modelConcurrency(store,sessionId,serviceKey) {
+  const environment=Number(process.env.SAKER_MODEL_CONCURRENCY);
+  if(Number.isSafeInteger(environment)&&environment>0)return Math.min(16,environment);
+  if(!serviceKey)return Number.POSITIVE_INFINITY;
+  let configured=null;
+  try{
+    const root=competitionOwner(store,sessionId)?.root||String(sessionId||'');
+    const row=store.db.prepare('SELECT record FROM scene_contexts WHERE session_id=?').get(root);
+    const scene=row?JSON.parse(row.record):null;
+    const value=Number(scene?.preferences?.modelConcurrency);
+    if(Number.isSafeInteger(value)&&value>0)configured=Math.min(16,value);
+  }catch{/* malformed local state falls back to the safe default */}
+  const value=configured||1;
+  const now=new Date().toISOString();
+  try {
+    store.db.prepare('INSERT INTO task_model_services(service_key,concurrency,updated_at) VALUES(?,?,?) '
+      + 'ON CONFLICT(service_key) DO UPDATE SET concurrency=excluded.concurrency,updated_at=excluded.updated_at')
+      .run(serviceKey,value,now);
+  } catch { /* schema availability is checked by the store */ }
+  return value;
+}
+export function createModelServiceGate() {
+  const services=new Map();
+  function stateFor(key){let state=services.get(key);if(!state){state={active:0,queue:[]};services.set(key,state);}return state;}
+  function grant(key,item,state){
+    item.granted=true;state.active++;
+    if(item.signal&&item.abort)item.signal.removeEventListener?.('abort',item.abort);
+    item.resolve({release:()=>release(key,state,item)});
+  }
+  function release(key,state,item){
+    if(item.released)return;item.released=true;
+    state.active=Math.max(0,state.active-1);
+    while(state.queue.length){
+      const next=state.queue.shift();
+      if(next.cancelled)continue;
+      grant(key,next,state);
+      return;
+    }
+    if(!state.active&&!state.queue.length)services.delete(key);
+  }
+  function acquire(key,limit,signal){
+    const state=stateFor(key);
+    return new Promise((resolve,reject)=>{
+      const item={resolve,reject,signal,cancelled:false,granted:false,released:false};
+      if(signal?.aborted){item.cancelled=true;reject(signal.reason||Object.assign(new Error('model admission queued request cancelled'),{name:'AbortError'}));return;}
+      if(state.active<limit){grant(key,item,state);return;}
+      item.abort=()=>{
+        if(item.granted||item.cancelled)return;item.cancelled=true;
+        const index=state.queue.indexOf(item);if(index>=0)state.queue.splice(index,1);
+        reject(signal.reason||Object.assign(new Error('model admission queued request cancelled'),{name:'AbortError'}));
+        if(!state.active&&!state.queue.length)services.delete(key);
+      };
+      signal?.addEventListener?.('abort',item.abort,{once:true});
+      state.queue.push(item);
+    });
+  }
+  return {acquire,stats:()=>[...services].map(([key,value])=>({key,active:value.active,queued:value.queue.filter(item=>!item.cancelled).length}))};
 }
 export function reserveModelCall(store,sessionId,options,{counter,runtimeId='unknown-runtime',priorWireAttempts=0}={}) {
   return transaction(store,()=>{
@@ -210,23 +347,38 @@ export function recoverDeadModelRuntimes(store) {
   return recovered;
 }
 
-export function registerModelAdmission(ctx,getStore,{countInput}={}) {
+export function registerModelAdmission(ctx,getStore,{countInput,providerBaseUrl}={}) {
   const runtimeId=randomUUID();
   if(typeof ctx.on!=='function')return {runtimeId,available:false,dispose:async()=>{}};
   const initialStore=getStore();
   recoverDeadModelRuntimes(initialStore);
   initialStore.db.prepare('INSERT INTO task_model_runtimes(id,pid) VALUES(?,?)').run(runtimeId,process.pid);
   const active=new Map();
+  const serviceGate=createModelServiceGate();
   const transport=registerModelTransport();
   const detach=ctx.on('llm/stream',(options,next)=>(async function*(){
     captureModelStream(options);
-    if(!options.sessionId || !modelBudgetOwner(getStore(),String(options.sessionId))){yield*next();return;}
+    let lease;
+    let resolvedBaseUrl='';
+    try { resolvedBaseUrl=String(providerBaseUrl?.(options.provider)||''); } catch { /* route identity remains unavailable */ }
+    const serviceKey=localModelServiceKey({...options,baseURL:resolvedBaseUrl||options.baseURL});
+    if(serviceKey){
+      try{
+        lease=await serviceGate.acquire(serviceKey,modelConcurrency(getStore(),String(options.sessionId||''),serviceKey),options.signal);
+      }catch(error){
+        yield {type:'finish',reason:{kind:'error',failure:{code:'TASK_MODEL_QUEUE',message:error?.name==='AbortError'?'排队中的模型请求已取消，未发送到服务端。':String(error?.message||error)}}};
+        return;
+      }
+    }
     const activeId=randomUUID();let done;
     const completion=new Promise(resolve=>{done=resolve;});
-    active.set(activeId,{sessionId:String(options.sessionId),completion});
+    const ownerSession=options.sessionId?String(options.sessionId):'';
+    if(ownerSession)active.set(activeId,{sessionId:ownerSession,completion});
     try {
-    const store=getStore();let counter;
-    const owner=modelBudgetOwner(store,String(options.sessionId));
+    const store=getStore();
+    const owner=ownerSession?modelBudgetOwner(store,ownerSession):null;
+    if(!owner){yield*next();return;}
+    let counter;
     if(stopped(owner)){
       yield {type:'finish',reason:{kind:'error',failure:{code:'TASK_MODEL_BUDGET',message:stoppedResult().message}}};return;
     }
@@ -234,7 +386,7 @@ export function registerModelAdmission(ctx,getStore,{countInput}={}) {
       try {counter=await countInput(options);}catch{ /* admission reports unsupported/unavailable counting, without leaking an endpoint or secret */ }
     }
     if(options.signal?.aborted)return;
-    const admitted=reserveModelCall(store,String(options.sessionId),options,{counter,runtimeId});
+    const admitted=reserveModelCall(store,ownerSession,options,{counter,runtimeId});
     if(!admitted.ok){yield {type:'finish',reason:{kind:'error',failure:{code:'TASK_MODEL_BUDGET',message:admitted.message}}};return;}
     if(admitted.unmanaged){yield*next();return;}
     let dispatched=false, usage, finish, currentId=admitted.id, currentDispatched=false, wireAttempts=0, successfulWires=0, currentResponseOk=false, wireDenial;
@@ -242,6 +394,7 @@ export function registerModelAdmission(ctx,getStore,{countInput}={}) {
       if(options.signal?.aborted){cancelModelReservation(store,admitted.id);return;}
       if(!dispatchModelCall(store,admitted.id)){yield {type:'finish',reason:{kind:'error',failure:{code:'TASK_MODEL_BUDGET',message:'任务已停止，本次生成未发出。'}}};return;}
       dispatched=true;currentDispatched=true;
+      const allowedTools=childAllowedTools(store,ownerSession);
       const wireScope={dispatch:async(facts,send)=>{
         if(options.signal?.aborted)options.signal.throwIfAborted();
         if(facts.signal?.aborted)facts.signal.throwIfAborted();
@@ -250,7 +403,7 @@ export function registerModelAdmission(ctx,getStore,{countInput}={}) {
           // outer llm/stream middleware was entered only once. Keep the prior
           // attempt unknown; a later success cannot erase its unresolved cost.
           settleModelCall(store,currentId,{reason:'provider started another wire attempt; prior usage unknown'});
-          const retry=reserveModelCall(store,String(options.sessionId),options,{runtimeId,priorWireAttempts:wireAttempts});
+          const retry=reserveModelCall(store,ownerSession,options,{runtimeId,priorWireAttempts:wireAttempts});
           if(!retry.ok || retry.unmanaged){wireDenial=retry.unmanaged?stoppedResult():retry;throw Error(wireDenial.message);}
           currentId=retry.id;currentDispatched=false;currentResponseOk=false;
           if(!dispatchModelCall(store,currentId)){wireDenial=stoppedResult();throw Error(wireDenial.message);}
@@ -262,7 +415,7 @@ export function registerModelAdmission(ctx,getStore,{countInput}={}) {
         const wireId=currentId,response=await send();
         if(response.ok) successfulWires++;
         if(currentId===wireId)currentResponseOk=response.ok;return response;
-      }};
+      },filterTools:Array.isArray(allowedTools)?json=>filterProviderTools(json,allowedTools):undefined};
       for await(const chunk of transport.iterate(wireScope,next)){
         if(chunk.type==='usage')usage=chunk.usage;
         if(chunk.type==='finish')finish=chunk.reason;
@@ -279,7 +432,7 @@ export function registerModelAdmission(ctx,getStore,{countInput}={}) {
         complete:!!finish&&!wireDenial&&(wireAttempts===0 || (successfulWires===1&&currentResponseOk))&&!['error','aborted'].includes(finish.kind)&&!options.signal?.aborted,
         reason:finish?.failure?.code || 'stream missing a successful terminal finish'});
     }
-    }finally{active.delete(activeId);done();}
+    }finally{active.delete(activeId);done();lease?.release();}
   })());
   return {runtimeId,available:true,dispose:async()=>{
     if(typeof detach==='function')detach();

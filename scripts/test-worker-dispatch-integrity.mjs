@@ -3,7 +3,7 @@ import http from 'node:http';
 import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
 import { chooseTaskMode, startTaskPolicy, readTaskPolicy, taskExecutionGuard, setTaskActionLimits } from '../plugins/dsh-redteam-results/lib/task-policy.js';
 import { createPurposeTasks } from '../plugins/dsh-redteam-results/lib/purpose-tasks.js';
-import { createSiteWorkers } from '../plugins/dsh-redteam-results/lib/site-workers.js';
+import { createSiteWorkers, siteWorkerRows } from '../plugins/dsh-redteam-results/lib/site-workers.js';
 import { saveTaskContext } from '../plugins/dsh-redteam-results/lib/task-context.js';
 import { captureTaskCost, taskCostOverview } from '../plugins/dsh-redteam-results/lib/task-cost.js';
 import { executionLedger } from '../plugins/dsh-redteam-results/lib/execution-view.js';
@@ -188,6 +188,69 @@ await test('offline review and report accept a parent task with no website addre
     assert.equal(starts, 2); assert.equal(tasks.activeCount(), 0);
   } finally { await tasks.dispose(); store.close(); }
 });
+await test('saker_assist builds a bounded brief, selects the configured review model, and needs no report tool', async () => {
+  const store = openStore(':memory:');
+  chooseTaskMode(store, 'assist-no-scope', 'regular', { workers: 1 });
+  startTaskPolicy(store, 'assist-no-scope', { mode: 'regular', budget: { toolCalls: 5, workers: 1 } });
+  assert.equal(taskExecutionGuard(store, 'assist-no-scope', 'saker_assist', Date.now(), {
+    args: { goal: '独立读取本地材料并核对内容', purpose: 'analyze' },
+  }), undefined, 'local collaboration dispatch does not require a target scope');
+  for (const name of ['ask_user_question', 'get_goal', 'working_directory', 'todo_write'])
+    assert.equal(taskExecutionGuard(store, 'assist-no-scope', name, Date.now(), { args: {} }), undefined,
+      name + ' stays local without a target scope');
+  const agent = parent(store, 'assist-brief', 'http://127.0.0.1:1', {
+    workerModel: { provider: 'fixture', model: 'worker-model' },
+    reviewModel: { provider: 'fixture', model: 'review-model' },
+  });
+  store.db.prepare('DELETE FROM task_context WHERE session_id=?').run('assist-brief');
+  agent.ctx = { tools: { schemas: () => ['read', 'grep', 'run_code', 'pwsh', 'write', 'edit', 'read_image', 'web_fetch', 'web_search',
+    'redteam_execution', 'oob_probe', 'project_request', 'project_document', 'saker_material', 'saker_browser', 'saker_assist', 'ralph', 'redteam_task']
+    .map(name => ({ name })) } };
+  const children = new Map();
+  let captured;
+  const manager = createSiteWorkers({
+    subagents: {
+      async startActivation(spec) {
+        captured = spec;
+        children.set(spec.childId, { session: { id: spec.childId } });
+        return { result: new Promise(() => {}), dispose: async () => { children.delete(spec.childId); } };
+      },
+      async drainChildren(_parent, ids) { for (const id of ids) children.delete(id); },
+      listDescendants() { return []; },
+    },
+    agents: { get: id => children.get(id) },
+    on() {},
+  }, () => store);
+  try {
+    const started = await manager.assist(agent, {
+      goal: '复核这条接口判断，确认是否存在真实的跨账号读取。',
+      purpose: 'review',
+      why: '主代理已形成假设，需要独立上下文挑战它。',
+      modelTier: 'review',
+      target: 'E:/work/local-fixture.txt',
+    }, new AbortController().signal);
+    assert(started.childId);
+    assert(captured, 'native activation must be started');
+    const prompt = captured.request.prompt.map(part => part.text).join('\n');
+    assert(prompt.includes('复核这条接口判断'));
+    assert(Buffer.byteLength(prompt, 'utf8') <= 4096);
+    assert(!prompt.includes('redteam_task report'));
+    assert.equal(captured.request.agentOptions.model, 'review-model');
+    assert.equal(siteWorkerRows(store, 'assist-brief').find(row => row.childId === started.childId).site, 'task-materials');
+    const childTools = siteWorkerRows(store, 'assist-brief').find(row => row.childId === started.childId).allowedTools;
+    assert(!childTools.includes('redteam_task'));
+    assert(!childTools.includes('saker_assist'));
+    assert(childTools.includes('saker_material'), 'the same tool must be visible and accepted by the execution guard');
+    for (const name of ['pwsh', 'write', 'edit', 'read_image', 'web_fetch', 'web_search', 'redteam_execution', 'oob_probe'])
+      assert(childTools.includes(name), 'free-test assistant must retain ordinary capability: ' + name);
+    assert.equal(taskExecutionGuard(store, started.childId, 'pwsh', Date.now(), { args: { command: 'Write-Output fixture' } }), undefined,
+      'the command tool admitted to the child request must also pass the execution guard');
+    assert(!childTools.includes('ralph'));
+  } finally {
+    await manager.dispose();
+    store.close();
+  }
+});
 await test('starting managed accounting preserves earlier historical session usage', async () => {
   const store = openStore(':memory:'); const agent = parent(store, 'mixed-cost');
   try {
@@ -200,6 +263,38 @@ await test('starting managed accounting preserves earlier historical session usa
     assert.equal(cost.totalTokens, 110); assert.equal(cost.modelCalls, 2);
   } finally { store.close(); }
 });
+await test('competition preset keeps its managed runner without a duplicate shell', async () => {
+  const store = openStore(':memory:');
+  chooseTaskMode(store, 'ctf-fallback', 'regular', { workers: 1 });
+  startTaskPolicy(store, 'ctf-fallback', { mode: 'regular', budget: { toolCalls: 5, workers: 1 } });
+  const agent = { session: { id: 'ctf-fallback', header: { agentPreset: 'ctf-solver' } }, ctx: { tools: {
+    schemas: () => ['read', 'pwsh', 'write', 'competition_execution', 'competition_challenge', 'saker_material', 'saker_browser', 'saker_assist']
+      .map(name => ({ name })),
+  } } };
+  const children = new Map();
+  const manager = createSiteWorkers({
+    subagents: {
+      async startActivation(spec) {
+        children.set(spec.childId, { session: { id: spec.childId } });
+        return { result: new Promise(() => {}), dispose: async () => { children.delete(spec.childId); } };
+      },
+      async drainChildren(_parent, ids) { for (const id of ids) children.delete(id); },
+      listDescendants() { return []; },
+    },
+    agents: { get: id => children.get(id) },
+    on() {},
+  }, () => store);
+  try {
+    const started = await manager.assist(agent, { goal: '读取当前题面并运行受管命令', purpose: 'investigate' }, new AbortController().signal);
+    const childTools = siteWorkerRows(store, 'ctf-fallback').find(row => row.childId === started.childId).allowedTools;
+    assert(childTools.includes('competition_execution'));
+    assert(!childTools.includes('pwsh'), 'competition helper must not receive a second shell');
+    assert(!childTools.includes('write'));
+  } finally {
+    await manager.dispose();
+    store.close();
+  }
+});
 await test('MCP catalog lookup works without a target task while execution remains guarded', async () => {
   const store = openStore(':memory:');
   try {
@@ -209,10 +304,9 @@ await test('MCP catalog lookup works without a target task while execution remai
     for (const args of [{ server: 'yakit', tool: 'exec_codec', args: { workFlow: [{ codecType: 'CustomCodecPlugin' }] } },
       { server: 'yakit', tool: 'encode', args: { type: 'script', text: 'Saker' } },
       { server: 'yakit', tool: 'encode', args: { type: 'base64', text: 'Saker', command: 'unexpected' } }])
-      assert.match(taskExecutionGuard(store, 'catalog', 'mcp_call', Date.now(), { args }), /task_policy_missing/);
-    assert.match(taskExecutionGuard(store, 'catalog', 'mcp_call', Date.now(), { args: { server: 'burp', tool: 'send_http_request', arguments: {} } }), /task_policy_missing/);
-    chooseTaskMode(store, 'catalog', 'regular', { allowTargetNetwork: false });
-    startTaskPolicy(store, 'catalog', { mode: 'regular', budget: { toolCalls: 5, modelCalls: 5, workers: 0 } });
+      assert.match(taskExecutionGuard(store, 'catalog', 'mcp_call', Date.now(), { args }), /target_scope_missing/);
+    assert.match(taskExecutionGuard(store, 'catalog', 'mcp_call', Date.now(), { args: { server: 'burp', tool: 'send_http_request', arguments: {} } }), /target_scope_missing/);
+    assert.equal(readTaskPolicy(store, 'catalog').question, '按当前会话中的用户请求执行');
     setTaskActionLimits(store, 'catalog', { allowTargetNetwork: false }, 'desktop-user');
     assert.equal(taskExecutionGuard(store, 'catalog', 'mcp_search', Date.now(), { args: { server: 'burp', query: 'http://example.invalid/' } }), undefined);
     assert.match(taskExecutionGuard(store, 'catalog', 'mcp_call', Date.now(), { args: { server: 'burp', tool: 'send_http_request', arguments: {} } }), /target_network_disabled/);

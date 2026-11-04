@@ -3,20 +3,24 @@ import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import { SCHEMA_VERSION } from './store.js';
 
-export const TASK_ARCHIVE_SCHEMA = 'saker.task-archive/3';
+export const TASK_ARCHIVE_SCHEMA = 'saker.task-archive/4';
+export const PREVIOUS_TASK_ARCHIVE_SCHEMA = 'saker.task-archive/3';
 export const LEGACY_TASK_ARCHIVE_SCHEMA = 'saker.task-archive/2';
 
 const TABLES = Object.freeze([
   'task_policy', 'task_flow_choice', 'task_choice', 'task_context', 'task_context_records',
   'findings', 'counters', 'execution_receipts', 'business_materials', 'task_policy_events',
-  'task_rounds',
-  'project_runs', 'project_sources', 'project_checks', 'project_actions',
+  'task_rounds', 'task_cost_events',
+  'project_runs', 'project_sources', 'project_checks', 'project_actions', 'scene_contexts',
+  'competition_challenges', 'competition_answers', 'competition_executions', 'competition_knowledge',
 ]);
+const PREVIOUS_TABLES = Object.freeze(TABLES.filter(table => table !== 'task_cost_events'));
 const LEGACY_TABLES = Object.freeze([
   'task_policy', 'task_flow_choice', 'task_choice', 'task_context', 'task_context_records',
   'findings', 'counters', 'execution_receipts', 'business_materials', 'task_policy_events',
   'task_rounds', 'knowledge_usage', 'task_knowledge',
-  'project_runs', 'project_sources', 'project_checks', 'project_actions',
+  'project_runs', 'project_sources', 'project_checks', 'project_actions', 'scene_contexts',
+  'competition_challenges', 'competition_answers', 'competition_executions', 'competition_knowledge',
 ]);
 // Extracted from v0.4.113 knowledge-usage.js / knowledge-switch.js. Retired
 // sections are still validated against this fixed schema before they are ignored.
@@ -33,11 +37,57 @@ const LEGACY_SECTION_SCHEMAS = Object.freeze({
   }),
 });
 const PROJECT_ACTIVE_STATES = new Set(['preparing', 'running', 'waiting', 'paused']);
+const COMPETITION_ACTIVE_STATES = new Set(['starting', 'running', 'stopping']);
 const sha = value => createHash('sha256').update(value).digest('hex');
 const scalar = value => value === null || ['string', 'number'].includes(typeof value);
 const hasColumn = (store, table, column) => store.db.prepare(`PRAGMA table_info(${table})`).all().some(row => row.name === column);
 const archiveTables = store => TABLES.filter(table => hasColumn(store, table, 'session_id'));
 const rowsOf = (store, table, sessionId) => store.db.prepare(`SELECT * FROM ${table} WHERE session_id=?`).all(sessionId);
+const competitionOutputId = (executionId, stream) => 'competition-output-' + executionId + '-' + stream;
+
+function hydrateCompetitionOutputs(sections) {
+  const rows = Array.isArray(sections.competition_executions) ? sections.competition_executions : [];
+  const materials = Array.isArray(sections.business_materials) ? sections.business_materials : [];
+  const ids = new Set(materials.map(row => row.id));
+  const missingFiles = [];
+  sections.business_materials = materials;
+  for (const row of rows) {
+    let execution;
+    try { execution = JSON.parse(row.record); } catch { continue; }
+    if (!execution?.executionId) continue;
+    for (const stream of ['stdout', 'stderr']) {
+      const id = competitionOutputId(execution.executionId, stream);
+      execution[stream + 'MaterialId'] = id;
+      if (!ids.has(id)) {
+        const sourceFile = execution[stream + 'File'];
+        try {
+          const bytes = fs.readFileSync(sourceFile);
+          const digest = sha(bytes);
+          const record = {
+            id, source: 'competition-output', executionId: execution.executionId,
+            challengeId: execution.challengeId, stream, displayName: execution.executionId + '.' + stream + '.log',
+            kind: 'competition-output', digest, bytes: bytes.length,
+            originalBase64: bytes.toString('base64'), relativeRef: 'materials/' + id,
+          };
+          materials.push({
+            session_id: row.session_id, id, source_url: '', digest,
+            record: JSON.stringify(record),
+          });
+          ids.add(id);
+          delete execution[stream + 'Missing'];
+        } catch {
+          execution[stream + 'Missing'] = true;
+          missingFiles.push({
+            id, name: String(sourceFile || id), executionId: execution.executionId,
+            challengeId: execution.challengeId, stream, reason: 'competition-output-missing',
+          });
+        }
+      }
+    }
+    row.record = JSON.stringify(execution);
+  }
+  return missingFiles;
+}
 
 function validateLegacySection(table, rows, sourceSession, problems) {
   const schema = LEGACY_SECTION_SCHEMAS[table];
@@ -126,7 +176,9 @@ export function exportTaskArchive(store, sessionId, { now = Date.now() } = {}) {
       columns[table] = store.db.prepare(`PRAGMA table_info(${table})`).all().map(row => row.name).sort();
     }
     store.db.exec('COMMIT');
+    const competitionMissing = hydrateCompetitionOutputs(sections);
     const attachments = hydrateMaterialFiles(sections);
+    attachments.missingFiles.push(...competitionMissing);
     const digests = {};
     const counts = {};
     for (const [table, rows] of Object.entries(sections)) {
@@ -152,7 +204,7 @@ export function verifyTaskArchive(archive) {
   if (!archive || typeof archive !== 'object' || Array.isArray(archive)) return { ok: false, problems: ['归档不是对象'] };
   const { manifest, sections } = archive;
   if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) return { ok: false, problems: ['缺少 manifest'] };
-  if (![TASK_ARCHIVE_SCHEMA, LEGACY_TASK_ARCHIVE_SCHEMA].includes(manifest.schema))
+  if (![TASK_ARCHIVE_SCHEMA, PREVIOUS_TASK_ARCHIVE_SCHEMA, LEGACY_TASK_ARCHIVE_SCHEMA].includes(manifest.schema))
     problems.push('归档 schema 不匹配或版本不受支持');
   if (!Number.isInteger(manifest.schemaVersion) || manifest.schemaVersion < 1 || manifest.schemaVersion > SCHEMA_VERSION)
     problems.push('schemaVersion 缺失、过旧或高于当前支持版本');
@@ -170,7 +222,8 @@ export function verifyTaskArchive(archive) {
   const sectionKeys = sections && typeof sections === 'object' && !Array.isArray(sections) ? Object.keys(sections).sort() : [];
   const countKeys = manifest.sections && typeof manifest.sections === 'object' ? Object.keys(manifest.sections).sort() : [];
   const digestKeys = manifest.digests && typeof manifest.digests === 'object' ? Object.keys(manifest.digests).sort() : [];
-  const expectedTables = manifest.schema === LEGACY_TASK_ARCHIVE_SCHEMA ? LEGACY_TABLES : TABLES;
+  const expectedTables = manifest.schema === LEGACY_TASK_ARCHIVE_SCHEMA ? LEGACY_TABLES
+    : manifest.schema === PREVIOUS_TASK_ARCHIVE_SCHEMA ? PREVIOUS_TABLES : TABLES;
   if (JSON.stringify(sectionKeys) !== JSON.stringify([...expectedTables].sort()))
     problems.push('归档分节与 schema 固定表清单不一致');
   if (JSON.stringify(sectionKeys) !== JSON.stringify(countKeys)) problems.push('sections 与 counts 分节不一致');
@@ -284,6 +337,51 @@ function restoreProjectSafety(store, sourceSession, targetSession, now) {
   return updatedRunIds;
 }
 
+function restoreCompetitionSafety(store, sourceSession, targetSession, now) {
+  const restoredAt = new Date(now).toISOString();
+  const missing = [];
+  const rows = store.db.prepare('SELECT challenge_id,execution_id,state,record FROM competition_executions WHERE session_id=?')
+    .all(targetSession);
+  for (const row of rows) {
+    let record;
+    try { record = JSON.parse(row.record); } catch { continue; }
+    record.sessionId = targetSession;
+    record.restoredFrom = sourceSession;
+    if (COMPETITION_ACTIVE_STATES.has(record.state || row.state)) {
+      record.state = 'unknown';
+      record.restoredInterrupted = true;
+      record.restoredAt = restoredAt;
+      record.recoveryReason = 'archive restore owns history only; source process is not attached';
+    }
+    for (const stream of ['stdout', 'stderr']) {
+      const id = record[stream + 'MaterialId'] || competitionOutputId(record.executionId, stream);
+      const material = store.db.prepare('SELECT record FROM business_materials WHERE session_id=? AND id=?')
+        .get(targetSession, id);
+      let valid = false;
+      if (material) {
+        try {
+          const payload = JSON.parse(material.record);
+          const bytes = Buffer.from(String(payload.originalBase64 || ''), 'base64');
+          valid = payload.source === 'competition-output' && !!payload.digest && sha(bytes) === payload.digest;
+        } catch { valid = false; }
+      }
+      record[stream + 'MaterialId'] = id;
+      if (valid) delete record[stream + 'Missing'];
+      else {
+        record[stream + 'Missing'] = true;
+        missing.push({
+          id, executionId: record.executionId, challengeId: record.challengeId,
+          stream, reason: 'competition-output-material-missing',
+        });
+      }
+    }
+    record.updatedAt = restoredAt;
+    store.db.prepare('UPDATE competition_executions SET state=?,record=?,updated_at=? WHERE session_id=? AND challenge_id=? AND execution_id=?')
+      .run(record.state, JSON.stringify(record), restoredAt, targetSession, row.challenge_id, row.execution_id);
+  }
+  return missing;
+}
+
 function restorePolicyAndAttachmentState(store, archive, targetSession, now) {
   const policyRow = store.db.prepare('SELECT record FROM task_policy WHERE session_id=?').get(targetSession);
   let projectRunState = null;
@@ -337,11 +435,13 @@ export function importTaskArchive(store, archive, { sessionId = 'restored-' + ra
   const verdict = verifyTaskArchive(archive);
   if (!verdict.ok) throw Object.assign(new Error('归档校验失败：' + verdict.problems.join('；')), { code: 'task-archive-invalid', details: verdict });
   const available = archiveTables(store);
-  const activeSections = available.filter(table => TABLES.includes(table));
+  const schemaTables = archive.manifest.schema === LEGACY_TASK_ARCHIVE_SCHEMA ? LEGACY_TABLES
+    : archive.manifest.schema === PREVIOUS_TASK_ARCHIVE_SCHEMA ? PREVIOUS_TABLES : TABLES;
+  const activeSections = available.filter(table => schemaTables.includes(table));
   const retiredSections = archive.manifest.schema === LEGACY_TASK_ARCHIVE_SCHEMA
     ? LEGACY_TABLES.filter(table => !TABLES.includes(table))
     : [];
-  if (archive.manifest.schema === TASK_ARCHIVE_SCHEMA
+  if ([TASK_ARCHIVE_SCHEMA, PREVIOUS_TASK_ARCHIVE_SCHEMA].includes(archive.manifest.schema)
     && JSON.stringify(Object.keys(archive.sections).sort()) !== JSON.stringify([...activeSections].sort()))
     throw new Error('归档分节与当前支持表不一致');
   const schema = {};
@@ -386,11 +486,12 @@ export function importTaskArchive(store, archive, { sessionId = 'restored-' + ra
       }
     }
     restoreProjectSafety(store, archive.manifest.sourceSession, sessionId, now);
+    const competitionMissing = restoreCompetitionSafety(store, archive.manifest.sourceSession, sessionId, now);
     const state = restorePolicyAndAttachmentState(store, archive, sessionId, now);
     store.db.exec('COMMIT');
     return {
       sessionId, restoredFrom: archive.manifest.sourceSession, state: 'unconfirmed', secretsNeedRebind: true,
-      projectRunState: state.projectRunState, missingAttachments: state.missingAttachments,
+      projectRunState: state.projectRunState, missingAttachments: [...state.missingAttachments, ...competitionMissing],
       files: archive.manifest.files || [], missingFiles: archive.manifest.missingFiles || [],
       sections: Object.fromEntries(activeSections.map(table => [table, archive.manifest.sections[table]])),
       retiredSectionsIgnored: retiredSections,

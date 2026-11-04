@@ -13,9 +13,9 @@ const store = openStore(path.join(home, 'redteam-results/results.db'));
 let failed = 0;
 const test = (name, work) => { try { work(); console.log('ok   ' + name); } catch (error) { failed++; console.log('FAIL ' + name + ': ' + (error.stack || error.message)); } };
 try {
-  test('the built-in catalog has 36 self-consistent templates with the required fields', () => {
+  test('the built-in catalog preserves legacy IDs, adds scene templates, and keeps fields bounded', () => {
     const list = builtinTemplates();
-    assert.equal(list.length, 36, 'the plan ships exactly 36 built-in templates');
+    assert.equal(list.length, 50, '36 legacy templates plus the three-scene additions');
     assert.equal(list.filter(t => t.id === 'U01').length, 1);
     for (const t of list) validateTemplate(t, { builtin: true });
     // required must stay 0–2 so the editor only asks for the key fields.
@@ -44,7 +44,7 @@ try {
     assert(searchTemplates('EXP').some(t => t.id === 'N01'), 'EXP must reach the direct vulnerability template');
     assert(searchTemplates('文档').some(t => t.id === 'P01'), '文档 must reach the document test template');
     assert.equal(searchTemplates('知识').some(t => ['F06', 'A06'].includes(t.id)), false, 'retired knowledge search must not resurface old guidance');
-    assert.equal(searchTemplates('').length, 36);
+    assert.equal(searchTemplates('').length, 50);
   });
   test('render substitutes provided values, falls back to defaults, and reports missing required fields', () => {
     const s01 = builtinTemplates().find(t => t.id === 'S01');

@@ -19,11 +19,11 @@ try {
     receiptSource.indexOf('\n}\nexport function executionReceiptSummary'));
   const cases = [
     ['execution-receipts.js', "current = (canonical !== '' && basis(currentRow, canonical) === result.requestBasis) || basis(currentRow) === result.requestBasis;", 'current = true;', 'unchanged evidence stays current after 16 minutes; request mismatch revokes confirmation without HTTP'],
-    ['impact-reviews.js', "  requireFreshExecutions(receipts);\n  if (receipts.some(receipt => !receipt.current || receipt.source !== 'host-http-execution' || receipt.outcome !== 'response'\n    || new URL(receipt.endpoint).origin !== new URL(parseReproduction(finding.reproduction).endpoint).origin)) throw new Error('人工复核需要当前仍匹配的同源完整执行回执，已失效的回执不能作为依据');",
-      "  if (receipts.some(receipt => receipt.source !== 'host-http-execution' || receipt.outcome !== 'response'\n    || new URL(receipt.endpoint).origin !== new URL(parseReproduction(finding.reproduction).endpoint).origin)) throw new Error('人工复核需要当前仍匹配的同源完整执行回执，已失效的回执不能作为依据');",
+    ['impact-reviews.js', '  if (receipts.length) {',
+      '  if (false) {',
       'unchanged evidence stays current after 16 minutes; request mismatch revokes confirmation without HTTP'],
-    ['delivery-evidence.js', "    requireFreshExecutions([control, probe]);\n    if ([control, probe].some(receipt => receipt.source !== 'host-http-execution' || receipt.current !== true || receipt.outcome !== 'response'\n      || receipt.endpoint !== method.endpoint || receipt.authContext !== row.identity) || control.hypothesisId !== probe.hypothesisId) throw new Error('正常/差分执行对照与当前发现的端点或身份不匹配，请重新采集');",
-      "    if ([control, probe].some(receipt => receipt.source !== 'host-http-execution' || receipt.outcome !== 'response'\n      || receipt.endpoint !== method.endpoint || receipt.authContext !== row.identity) || control.hypothesisId !== probe.hypothesisId) throw new Error('正常/差分执行对照与当前发现的端点或身份不匹配，请重新采集');",
+    ['delivery-evidence.js', "    requireFreshExecutions([control, probe]);\n    if ([control, probe].some(receipt => receipt.source !== 'host-http-execution' || receipt.current !== true || receipt.outcome !== 'response'",
+      "    if ([control, probe].some(receipt => receipt.source !== 'host-http-execution' || receipt.outcome !== 'response'",
       'unchanged evidence stays current after 16 minutes; request mismatch revokes confirmation without HTTP'],
     ['execution-receipts.js', integrityBlock, `  let current = false;
   try { current = basis(requestRow(store, sessionId, result.requestId, result.requestRevision)) === result.requestBasis; } catch {}

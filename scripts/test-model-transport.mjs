@@ -4,11 +4,17 @@ import { createHash } from 'node:crypto';
 import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
 import { startTaskPolicy, updateTaskProgress } from '../plugins/dsh-redteam-results/lib/task-policy.js';
 import { registerModelAdmission, modelBudgetOverview } from '../plugins/dsh-redteam-results/lib/model-budget.js';
-import { registerModelTransport } from '../plugins/dsh-redteam-results/lib/model-transport.js';
+import { registerModelTransport, filterProviderTools } from '../plugins/dsh-redteam-results/lib/model-transport.js';
 let failures=0;
 async function test(label,body){try{await body();console.log('ok '+label);}catch(error){failures++;console.error('FAIL '+label+': '+error.stack);}}
 const options={sessionId:'main',provider:'fixture',model:'local-model',messages:[],maxTokens:8};
 const usage={inputTokens:3,outputTokens:2};
+await test('provider wire filter removes tools outside the child allow-list before serialization',()=>{
+  const body=filterProviderTools({model:'fixture',messages:[],tools:[{type:'function',function:{name:'read'}},{type:'function',function:{name:'subagent'}}],
+    tool_choice:{type:'function',function:{name:'subagent'}}},['read']);
+  assert.deepEqual(body.tools.map(tool=>tool.function.name),['read']);
+  assert.equal(body.tool_choice,undefined);
+});
 async function fixture(budget,body){
   const received=[],store=openStore(':memory:');let hook;
   const server=http.createServer(async(req,res)=>{const parts=[];for await(const p of req)parts.push(p);
@@ -80,6 +86,20 @@ await test('concurrent parent and child generation attempts retain separate iden
   assert.deepEqual(s.calls.map(x=>x.sessionId).sort(),['child','main']);assert.equal(new Set(s.calls.map(x=>x.id)).size,2);
   const chunks=await collect(generate);assert.equal(chunks.at(-1).reason.failure.code,'TASK_MODEL_BUDGET');assert.equal(received.length,2);
   assert.equal(JSON.parse(parent.record).startedAt,s.round);
+}));
+await test('child provider request uses the same persisted allow-list as the execution guard',()=>fixture({modelCalls:1},async({received,url,collect,store})=>{
+  store.db.prepare('INSERT INTO site_workers(parent_session,child_id,site,record) VALUES(?,?,?,?)')
+    .run('main','child-filter','http://127.0.0.1',JSON.stringify({ allowedTools:['read'] }));
+  startTaskPolicy(store,'child-filter',{mode:'regular',budget:{toolCalls:5,workers:0}});
+  await collect(async function*(){
+    await fetch(url,{method:'POST',body:JSON.stringify({model:options.model,messages:[],tools:[
+      {type:'function',function:{name:'read'}},{type:'function',function:{name:'subagent'}},
+    ],tool_choice:{type:'function',function:{name:'subagent'}}})});
+    yield {type:'usage',usage};yield {type:'finish',reason:{kind:'stop'}};
+  },{...options,sessionId:'child-filter'});
+  const wire=JSON.parse(received[0].bytes);
+  assert.deepEqual(wire.tools.map(tool=>tool.function.name),['read']);
+  assert.equal(wire.tool_choice,undefined);
 }));
 await test('fetch retained by an SDK still uses current scope after unload and reload',async()=>{
   const first=registerModelTransport(),captured=globalThis.fetch;first.dispose();

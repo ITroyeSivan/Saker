@@ -185,8 +185,13 @@ await test('long and non-ASCII identities never share the same browser profile',
 
 await test('explicit HTTP credentials are recognized regardless of header casing', () => {
   const identity = { matched: true, status: 'valid', secret: 'Cookie: account=alice' };
-  assert.equal(identityRequestHeaders({ headers: { Cookie: 'account=bob' } }, identity), null);
-  assert.equal(identityRequestHeaders({ headers: { AUTHORIZATION: 'Bearer bob' } }, identity), null);
+  const cookieConflict = identityRequestHeaders({ headers: { Cookie: 'account=bob' } }, identity);
+  assert.equal(cookieConflict.conflict, true);
+  assert.equal(identityRequestHeaders({ headers: { Cookie: 'account=bob' } }, identity, { authSource: 'request' }).source, 'request');
+  assert.equal(identityRequestHeaders({ headers: { Cookie: 'account=bob' } }, identity, { authSource: 'account' }).headers.cookie, 'account=alice');
+  const authorizationConflict = identityRequestHeaders({ headers: { AUTHORIZATION: 'Bearer bob' } }, identity);
+  assert.equal(authorizationConflict.conflict, true);
+  assert.equal(identityRequestHeaders({ headers: { AUTHORIZATION: 'Bearer bob' } }, identity, { authSource: 'account' }).headers.cookie, 'account=alice');
   assert.equal(identityRequestHeaders({ headers: { 'X-Test': 'yes' } }, identity).headers.cookie, 'account=alice');
 });
 

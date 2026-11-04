@@ -10,7 +10,7 @@ import { resolveTaskIdentity, identityDenial, taskIdentityRevision } from './ide
 export const PROJECT_RUN_STATES = ['preparing', 'running', 'waiting', 'paused', 'completed', 'cancelled', 'failed'];
 export const PROJECT_ACTIVE_STATES = ['preparing', 'running', 'waiting', 'paused'];
 export const PROJECT_CHECK_STATES = ['pending', 'running', 'paused', 'ended'];
-export const PROJECT_VERDICTS = ['not_found', 'issue', 'needs_check', 'blocked', 'not_applicable'];
+export const PROJECT_VERDICTS = ['expectation_met', 'not_found', 'issue', 'needs_check', 'blocked', 'not_applicable'];
 export const PROJECT_ACTION_STATES = ['queued', 'dispatched', 'completed', 'failed', 'unknown'];
 
 const RUN_TRANSITIONS = {
@@ -52,6 +52,13 @@ const conflict = message => Object.assign(new Error(message), { code: 'project-s
 const uniqueStrings = values => [...new Set((Array.isArray(values) ? values : []).map(value => String(value || '').trim()).filter(Boolean))];
 const batchFingerprint = (checks, sectionDecisions) => createHash('sha256')
   .update(JSON.stringify({ checks, sectionDecisions })).digest('hex');
+const newAttempt = (run, input = {}) => ({
+  attemptId: 'attempt-' + randomUUID(),
+  startedAt: nowIso(),
+  identityRef: optionalText(input.identityRef, 300),
+  identityRevision: optionalText(input.identityRevision, 200),
+  instanceRevision: Math.max(1, Number(input.instanceRevision) || Number(run.instanceRevision) || 1),
+});
 
 function validateDependencyGraph(checks) {
   const byId = new Map(checks.map(check => [check.checkId, check]));
@@ -78,10 +85,13 @@ function validateDependencyGraph(checks) {
   }
 }
 
-function usableProjectObservation(store, sessionId, runId, action, { requireComplete = true } = {}) {
+function usableProjectObservation(store, sessionId, runId, action, { requireComplete = true, attemptId = '' } = {}) {
   if (!action || action.executionState !== 'completed' || action.sideEffectUnknown || action.bodyUnavailable) return false;
+  if (attemptId && action.attemptId !== attemptId) return false;
   const identity = resolveTaskIdentity(store, sessionId, action.identityRef);
-  if (identityDenial(identity) || (action.identityRevision && taskIdentityRevision(identity) !== action.identityRevision)) return false;
+  if (identityDenial(identity)
+    || (action.identityRef !== 'request-original' && action.identityRevision
+      && taskIdentityRevision(identity) !== action.identityRevision)) return false;
   if (action.pageRef) {
     const row = store.db.prepare('SELECT record FROM business_materials WHERE session_id=? AND id=?').get(sessionId, action.pageRef);
     if (!row) return false;
@@ -106,6 +116,98 @@ function usableProjectObservation(store, sessionId, runId, action, { requireComp
   } catch {
     return false;
   }
+}
+
+function projectEvidence(store, sessionId, evidenceRef) {
+  const row = store.db.prepare('SELECT record FROM business_materials WHERE session_id=? AND id=?')
+    .get(sessionId, String(evidenceRef || ''))
+  if (!row) return null
+  try {
+    const value = JSON.parse(row.record)
+    return value?.source === 'host-project-evidence' ? value : null
+  } catch { return null }
+}
+
+function usableProjectEvidence(store, sessionId, runId, checkId, evidenceRef, check) {
+  const value = projectEvidence(store, sessionId, evidenceRef)
+  return !!value && value.projectRunId === runId && value.projectCheckId === checkId
+    && typeof value.kind === 'string' && !!value.digest
+    && (!check?.activeAttempt?.attemptId || value.attemptId === check.activeAttempt.attemptId)
+    && Number(value.instanceRevision || 1) === Number(check?.activeAttempt?.instanceRevision || value.instanceRevision || 1)
+}
+
+export function saveProjectEvidence(store, sessionId, runId, checkId, input = {}) {
+  return taskTransaction(store, () => {
+    const run = readProjectRun(store, sessionId, runId)
+    const check = readProjectCheck(store, sessionId, runId, checkId)
+    if (!run || !check) throw new Error('project check not found')
+    const kind = String(input.kind || '')
+    if (!['file', 'command', 'source', 'http', 'browser', 'tool'].includes(kind)) throw new Error('unsupported project evidence kind')
+    let attempt = check.activeAttempt
+    if (input.attemptId && input.attemptId !== attempt?.attemptId) {
+      if (input.historical !== true) throw new Error('evidence attempt does not match the active project attempt')
+      attempt = {
+        ...(attempt || newAttempt(run, check)),
+        attemptId: String(input.attemptId),
+        instanceRevision: Math.max(1, Number(input.instanceRevision) || Number(attempt?.instanceRevision) || 1),
+        identityRef: String(input.identityRef ?? attempt?.identityRef ?? ''),
+        identityRevision: String(input.identityRevision ?? attempt?.identityRevision ?? ''),
+      }
+    } else if (!attempt?.attemptId) {
+      attempt = newAttempt(run, check)
+      const migrated = { ...check, activeAttempt: attempt, attempts: Array.isArray(check.attempts) ? check.attempts : [] }
+      store.db.prepare('UPDATE project_checks SET record=?,updated_at=? WHERE session_id=? AND run_id=? AND check_id=?')
+        .run(JSON.stringify(migrated), nowIso(), sessionId, runId, checkId)
+    }
+    const sourceType = kind === 'file' ? 'host-file-read'
+      : kind === 'source' ? 'host-source-read'
+        : kind === 'http' ? 'host-project-http-execution'
+          : kind === 'browser' ? 'host-project-browser-observation'
+            : kind === 'tool' ? 'host-native-tool-result'
+              : String(input.sourceType || '')
+    if (kind === 'command' && sourceType !== 'host-command-execution')
+      throw new Error('command evidence must come from a managed host execution')
+    const at = String(input.observedAt || nowIso())
+    const payload = {
+      source: 'host-project-evidence',
+      kind,
+      sourceType,
+      projectRunId: runId,
+      projectCheckId: checkId,
+      attemptId: attempt.attemptId,
+      instanceRevision: attempt.instanceRevision,
+      identityRef: String(input.identityRef ?? attempt.identityRef ?? ''),
+      identityRevision: String(input.identityRevision ?? attempt.identityRevision ?? ''),
+      createdBy: 'host',
+      sessionId,
+      observedAt: at,
+      ...input,
+    }
+    payload.attemptId = attempt.attemptId
+    payload.instanceRevision = attempt.instanceRevision
+    payload.sourceType = sourceType
+    payload.createdBy = 'host'
+    payload.source = 'host-project-evidence'
+    payload.kind = kind
+    payload.projectRunId = runId
+    payload.projectCheckId = checkId
+    payload.sessionId = sessionId
+    payload.observedAt = at
+    payload.operationId = String(input.operationId || '')
+    payload.historical = input.historical === true
+    delete payload.id
+    const original = Buffer.from(JSON.stringify(payload))
+    const digest = createHash('sha256').update(original).digest('hex')
+    const id = 'project-evidence-' + randomUUID()
+    const record = {
+      ...payload, id, digest, bytes: original.length,
+      originalBase64: original.toString('base64'),
+    }
+    store.db.prepare('INSERT INTO business_materials(session_id,id,source_url,digest,record) VALUES(?,?,?,?,?)')
+      .run(sessionId, id, String(input.path || input.url || ''), digest, JSON.stringify(record))
+    return { id, kind, sourceType, attemptId: attempt.attemptId, instanceRevision: attempt.instanceRevision,
+      digest, bytes: original.length, observedAt: at }
+  })
 }
 
 export function saveProjectBrowserObservation(store, sessionId, runId, actionId, page) {
@@ -135,10 +237,21 @@ export function projectObservationRefs(store, sessionId, runId, check) {
   if (!check) return [];
   const direct = new Set(uniqueStrings(check.actionRefs));
   const reused = new Set((check.reusedObservations || []).filter(item => String(item?.reason || '').trim()).map(item => item.actionId));
-  return listProjectActions(store, sessionId, runId)
-    .filter(action => ((action.checkId === check.checkId && direct.has(action.actionId)) || reused.has(action.actionId))
-      && usableProjectObservation(store, sessionId, runId, action, { requireComplete: false }))
+  const refs = listProjectActions(store, sessionId, runId)
+    .filter(action => {
+      if (action.checkId === check.checkId && direct.has(action.actionId))
+        return usableProjectObservation(store, sessionId, runId, action, {
+          requireComplete: false, attemptId: check.activeAttempt?.attemptId || '',
+        })
+      return reused.has(action.actionId) && usableProjectObservation(store, sessionId, runId, action, { requireComplete: false })
+    })
     .map(action => action.requestRef ? { kind: 'request', id: action.requestRef } : { kind: 'file', id: action.pageRef });
+  for (const evidenceRef of uniqueStrings(check.evidenceRefs)) {
+    const evidence = projectEvidence(store, sessionId, evidenceRef)
+    if (evidence && usableProjectEvidence(store, sessionId, runId, check.checkId, evidenceRef, check))
+      refs.push({ kind: evidence.kind, id: evidenceRef });
+  }
+  return refs;
 }
 
 function reviewedFinding(store, sessionId, findingId, evidenceRefs) {
@@ -146,7 +259,7 @@ function reviewedFinding(store, sessionId, findingId, evidenceRefs) {
   if (!finding) return false;
   return finding.status === 'verified' && !!finding.verifiedAt
     && ['impact', 'confirmed'].includes(finding.evidenceLevel)
-    && !!finding.secondRating && String(finding.secondRatingNote || '').trim().length >= 40
+    && !!finding.secondRating && String(finding.secondRatingNote || '').trim().length > 0
     && (finding.evidenceRefs || []).some(ref => evidenceRefs.some(current => current.kind === ref.kind && current.id === ref.id));
 }
 
@@ -159,7 +272,9 @@ export function projectCheckEvidenceProblems(store, sessionId, runId, check) {
   if (check.verdict === 'not_found' && !String(check.gaps || '').trim()) {
     const direct = uniqueStrings(check.actionRefs)
       .map(actionId => actions.find(action => action.actionId === actionId && action.checkId === check.checkId))
-      .filter(action => usableProjectObservation(store, sessionId, runId, action));
+      .filter(action => usableProjectObservation(store, sessionId, runId, action, {
+        attemptId: check.activeAttempt?.attemptId || '',
+      }));
     const reused = Array.isArray(check.reusedObservations)
       ? check.reusedObservations.map(item => {
         const action = actions.find(candidate => candidate.actionId === String(item?.actionId || ''));
@@ -168,13 +283,16 @@ export function projectCheckEvidenceProblems(store, sessionId, runId, check) {
       : [];
     if (!direct.length && !reused.length) problems.push('usable-observation-missing');
   }
-  if (check.verdict === 'issue') {
+  const materialRefs = projectObservationRefs(store, sessionId, runId, check);
+  if (check.verdict === 'expectation_met' && !materialRefs.length) problems.push('actual-evidence-missing');
+  if (check.verdict === 'issue' && !materialRefs.length) problems.push('actual-evidence-missing');
+  if (check.verdict === 'issue' && uniqueStrings(check.findingRefs).length) {
     const refs = uniqueStrings(check.findingRefs);
-    const evidenceRefs = projectObservationRefs(store, sessionId, runId, check);
-    if (!refs.length) problems.push('finding-reference-missing');
-    else if (refs.some(findingId => !reviewedFinding(store, sessionId, findingId, evidenceRefs))) problems.push('reviewed-finding-required');
+    if (refs.some(findingId => !reviewedFinding(store, sessionId, findingId, materialRefs))) problems.push('reviewed-finding-required');
   }
-  if (['blocked', 'needs_check'].includes(check.verdict) && !String(check.gaps || '').trim())
+  if (check.verdict === 'not_applicable' && !String(check.gaps || '').trim())
+    problems.push('not-applicable-reason-missing');
+  if (check.verdict === 'blocked' && !String(check.gaps || '').trim())
     problems.push('gap-reason-missing');
   return problems;
 }
@@ -208,6 +326,8 @@ export function createProjectRun(store, sessionId, input = {}) {
       ownerPid: process.pid, ownerRuntimeId: String(input.runtimeId || ''),
       policyRev: Number.isSafeInteger(input.policyRev) ? input.policyRev : null,
       question: optionalText(input.question, 600),
+      instanceRevision: Math.max(1, Number(input.instanceRevision) || 1),
+      executionAuthorized: input.executionAuthorized !== false,
       sourceSnapshot: Array.isArray(input.sourceSnapshot) ? input.sourceSnapshot : [],
       currentCheckId: '', blocker: null,
       createdAt: nowIso(), updatedAt: nowIso(),
@@ -255,12 +375,17 @@ export function upsertProjectSource(store, sessionId, input = {}) {
     const existing = readProjectSource(store, sessionId, sourceId, sourceRevision);
     const record = {
       ...(existing || {}), sessionId, sourceId, sourceRevision,
-      kind: optionalText(input.kind, 40) || 'text',
-      displayName: optionalText(input.displayName, 300),
-      summary: optionalText(input.summary, 2000),
-      snapshotRef: optionalText(input.snapshotRef, 1000),
-      snapshotMaterialId: optionalText(input.snapshotMaterialId, 300),
-      parseState: ['ready', 'partial', 'unreadable', 'pending'].includes(input.parseState) ? input.parseState : 'pending',
+      kind: optionalText(input.kind, 40) || existing?.kind || 'text',
+      displayName: input.displayName !== undefined ? optionalText(input.displayName, 300) : (existing?.displayName || ''),
+      summary: input.summary !== undefined ? optionalText(input.summary, 2000) : (existing?.summary || ''),
+      sourceRole: ['requirements', 'environment'].includes(input.sourceRole)
+        ? input.sourceRole : (['requirements', 'environment'].includes(existing?.sourceRole) ? existing.sourceRole : ''),
+      preparation: input.preparation && typeof input.preparation === 'object' && !Array.isArray(input.preparation)
+        ? input.preparation : (existing?.preparation || null),
+      snapshotRef: input.snapshotRef !== undefined ? optionalText(input.snapshotRef, 1000) : (existing?.snapshotRef || ''),
+      snapshotMaterialId: input.snapshotMaterialId !== undefined ? optionalText(input.snapshotMaterialId, 300) : (existing?.snapshotMaterialId || ''),
+      parseState: ['ready', 'partial', 'unreadable', 'pending'].includes(input.parseState)
+        ? input.parseState : (existing?.parseState || 'pending'),
       sections: Array.isArray(input.sections) ? input.sections : (existing?.sections || []),
       unread: Array.isArray(input.unread) ? input.unread : (existing?.unread || []),
       updatedAt: nowIso(), createdAt: existing?.createdAt || nowIso(),
@@ -294,6 +419,7 @@ export function defineProjectChecks(store, sessionId, runId, checks = [], sectio
     if (!run) throw new Error('project run not found');
     if (!Array.isArray(checks) || !Array.isArray(sectionDecisions)) throw new Error('checks 和 sectionDecisions 必须是数组');
     if (!checks.length && !sectionDecisions.length) throw new Error('没有可保存的检查或来源整理决定');
+    const programmaticSourceDecisions = options.programmaticSourceDecisions === true;
     const fingerprint = batchFingerprint(checks, sectionDecisions);
     const batchId = String(options.batchId || 'auto-' + fingerprint).trim();
     if (!batchId || batchId.length > 200) throw new Error('define batchId 无效');
@@ -325,7 +451,8 @@ export function defineProjectChecks(store, sessionId, runId, checks = [], sectio
       if (!source) throw new Error('来源不存在：' + ref.sourceId + '@' + ref.sourceRevision);
       const section = (source.sections || []).find(item => item.sectionId === ref.sectionId);
       if (!section) throw new Error('来源段落不存在：' + ref.sourceId + '@' + ref.sourceRevision + ' ' + ref.sectionId);
-      if (!sectionState(run, source, section).full) throw new Error('来源段落尚未完整读取，不能声明已整理：' + ref.sectionId);
+      if (!programmaticSourceDecisions && !sectionState(run, source, section).full)
+        throw new Error('来源段落尚未完整读取，不能声明已整理：' + ref.sectionId);
     };
     const out = [];
     for (const [index, item] of checks.entries()) {
@@ -334,15 +461,32 @@ export function defineProjectChecks(store, sessionId, runId, checks = [], sectio
       const checkRevision = 1;
       const sourceRefs = Array.isArray(item?.sourceRefs) ? item.sourceRefs.map(normalizedRef) : [];
       for (const ref of sourceRefs) validateRef(ref);
+      const inherited = item?.inherited === true;
+      const inheritedAttempt = inherited ? {
+        ...newAttempt(run, item),
+        completedAt: optionalText(item?.completedAt, 100),
+      } : null;
       const record = {
         sessionId, runId, checkId, checkRevision,
+        originRunId: optionalText(item?.originRunId, 200),
+        originCheckId: optionalText(item?.originCheckId, 200),
+        requirementRevision: Number.isSafeInteger(item?.requirementRevision) ? item.requirementRevision : 1,
         sourceLocation: optionalText(item?.sourceLocation, 1000),
         sourceRefs,
         requirement, order: Number.isSafeInteger(item?.order) ? item.order : existingCount + index,
         dependencies: uniqueStrings(item?.dependencies),
         provides: uniqueStrings(item?.provides),
         requiresFacts: uniqueStrings(item?.requiresFacts),
-        executionState: 'pending', verdict: '', checkedContent: '', gaps: '',
+        inherited,
+        executionState: inherited && ['ended'].includes(item?.executionState) ? 'ended' : 'pending',
+        verdict: inherited && PROJECT_VERDICTS.includes(item?.verdict) ? item.verdict : '',
+        checkedContent: inherited ? optionalText(item?.checkedContent, 20000) : '',
+        gaps: inherited ? optionalText(item?.gaps, 20000) : '',
+        evidenceRefs: inherited && Array.isArray(item?.evidenceRefs) ? uniqueStrings(item.evidenceRefs) : [],
+        instanceRevision: Math.max(1, Number(item?.instanceRevision) || Number(run.instanceRevision) || 1),
+        activeAttempt: inheritedAttempt || newAttempt(run, item),
+        attempts: inheritedAttempt ? [{ ...inheritedAttempt, inherited: true, verdict: item.verdict || '',
+          checkedContent: item.checkedContent || '', evidenceRefs: uniqueStrings(item.evidenceRefs) }] : [],
         findingRefs: [], actionRefs: [], createdAt: nowIso(), updatedAt: nowIso(),
       };
       if (out.some(check => check.checkId === checkId)) throw new Error('同批次 checkId 重复：' + checkId);
@@ -353,8 +497,8 @@ export function defineProjectChecks(store, sessionId, runId, checks = [], sectio
     const decisions = { ...(run.sectionDecisions || {}) };
     for (const input of sectionDecisions) {
       const decision = String(input?.decision || '');
-      if (!['requirements', 'reference', 'unreadable'].includes(decision))
-        throw new Error('sectionDecisions.decision 只能是 requirements、reference 或 unreadable');
+      if (!['requirements', 'reference', 'excluded', 'not-applicable', 'pending', 'unreadable'].includes(decision))
+        throw new Error('sectionDecisions.decision 只能是 requirements、reference、excluded、not-applicable、pending 或 unreadable');
       const ref = normalizedRef(input);
       const source = sourceOf(ref.sourceId, ref.sourceRevision);
       if (!source || !snapshot.has(JSON.stringify([ref.sourceId, ref.sourceRevision])))
@@ -369,7 +513,7 @@ export function defineProjectChecks(store, sessionId, runId, checks = [], sectio
           throw new Error('该来源没有记录不可解析区域，不能标记为无法读取：' + (ref.sectionId || '#source'));
       } else if (sourceLevel && decision === 'requirements') {
         throw new Error('来源级 #source 只能作为参考或无法读取决定，不能直接关联检查');
-      } else if (!sourceLevel && !sectionState(run, source, section).full) {
+      } else if (!programmaticSourceDecisions && !sourceLevel && !sectionState(run, source, section).full) {
         throw new Error('来源段落尚未完整读取，不能声明已整理：' + ref.sectionId);
       }
       const rationale = optionalText(input?.rationale, 2000);
@@ -424,6 +568,8 @@ export function recordProjectCheck(store, sessionId, runId, checkId, patch = {})
       throw new Error('invalid project verdict: ' + patch.verdict);
     if (patch.executionState !== undefined && !PROJECT_CHECK_STATES.includes(patch.executionState))
       throw new Error('invalid project check state: ' + patch.executionState);
+    const activeAttempt = check.activeAttempt || newAttempt(run, check)
+    const checkWithAttempt = { ...check, activeAttempt }
     const actions = listProjectActions(store, sessionId, runId);
     const actionRefs = patch.actionRefs === undefined ? uniqueStrings(check.actionRefs) : uniqueStrings(patch.actionRefs);
     for (const actionId of actionRefs) {
@@ -447,6 +593,11 @@ export function recordProjectCheck(store, sessionId, runId, checkId, patch = {})
     for (const findingId of findingRefs) {
       if (!getFinding(store, sessionId, findingId)) throw new Error('未找到关联 finding：' + findingId);
     }
+    const evidenceRefs = patch.evidenceRefs === undefined ? uniqueStrings(check.evidenceRefs) : uniqueStrings(patch.evidenceRefs);
+    for (const evidenceRef of evidenceRefs) {
+      if (!usableProjectEvidence(store, sessionId, runId, checkId, evidenceRef, checkWithAttempt))
+        throw new Error('项目依据不属于当前运行和检查：' + evidenceRef);
+    }
     const next = {
       ...check,
       executionState: patch.executionState ?? check.executionState,
@@ -455,15 +606,19 @@ export function recordProjectCheck(store, sessionId, runId, checkId, patch = {})
       gaps: patch.gaps !== undefined ? optionalText(patch.gaps) : check.gaps,
       findingRefs,
       actionRefs,
+      evidenceRefs,
       reusedObservations,
+      instanceRevision: activeAttempt.instanceRevision,
+      activeAttempt,
+      attempts: Array.isArray(check.attempts) ? check.attempts : [],
       updatedAt: nowIso(),
     };
     const materialBefore = JSON.stringify([
       check.verdict, check.checkedContent, check.gaps, check.findingRefs || [], check.actionRefs || [],
-      check.reusedObservations || [],
+      check.reusedObservations || [], check.evidenceRefs || [],
     ]);
     const materialAfter = JSON.stringify([
-      next.verdict, next.checkedContent, next.gaps, next.findingRefs, next.actionRefs, next.reusedObservations,
+      next.verdict, next.checkedContent, next.gaps, next.findingRefs, next.actionRefs, next.reusedObservations, next.evidenceRefs,
     ]);
     next.checkRevision = materialBefore === materialAfter
       ? check.checkRevision
@@ -473,11 +628,58 @@ export function recordProjectCheck(store, sessionId, runId, checkId, patch = {})
       if (run.state !== 'running') throw conflict('项目已暂停或停止，不能写入本轮结束结论');
       const problems = projectCheckEvidenceProblems(store, sessionId, runId, next);
       if (problems.length) throw new Error('项目检查缺少有效执行事实：' + problems.join('、'));
+      if (check.executionState !== 'ended' || check.verdict !== next.verdict
+        || check.checkedContent !== next.checkedContent || JSON.stringify(check.evidenceRefs || []) !== JSON.stringify(next.evidenceRefs)) {
+        const attempt = {
+          ...activeAttempt,
+          completedAt: nowIso(),
+          verdict: next.verdict,
+          checkedContent: next.checkedContent,
+          gaps: next.gaps,
+          actionRefs: next.actionRefs,
+          evidenceRefs: next.evidenceRefs,
+          findingRefs: next.findingRefs,
+          recordedAt: nowIso(),
+        };
+        next.attempts = [...next.attempts, attempt];
+        next.lastAttemptId = attempt.attemptId;
+        next.activeAttempt = { ...activeAttempt, completedAt: attempt.completedAt };
+      }
     }
     store.db.prepare('UPDATE project_checks SET record=?,updated_at=? WHERE session_id=? AND run_id=? AND check_id=?')
       .run(JSON.stringify(next), next.updatedAt, sessionId, runId, checkId);
     return next;
   });
+}
+
+export function reopenProjectCheck(store, sessionId, runId, checkId, input = {}) {
+  return taskTransaction(store, () => {
+    const run = readProjectRun(store, sessionId, runId)
+    const check = readProjectCheck(store, sessionId, runId, checkId)
+    if (!run || !check) throw new Error('project check not found')
+    if (!['paused', 'waiting', 'running', 'preparing'].includes(run.state)) throw new Error('project run cannot reopen checks')
+    if (!['blocked', 'needs_check'].includes(check.verdict) && input.force !== true)
+      throw new Error('only blocked or needs-check results can be retried in the same run')
+    const next = {
+      ...check,
+      executionState: 'pending',
+      verdict: '',
+      checkedContent: '',
+      gaps: String(input.reason || check.gaps || '').trim(),
+      actionRefs: [],
+      evidenceRefs: [],
+      findingRefs: [],
+      reusedObservations: [],
+      activeAttempt: newAttempt(run, { ...input, instanceRevision: input.instanceRevision || check.instanceRevision }),
+      checkRevision: (Number(check.checkRevision) || 1) + 1,
+      reopenedAt: nowIso(),
+      updatedAt: nowIso(),
+    }
+    delete next.nativePendingReply
+    store.db.prepare('UPDATE project_checks SET record=?,updated_at=? WHERE session_id=? AND run_id=? AND check_id=?')
+      .run(JSON.stringify(next), next.updatedAt, sessionId, runId, checkId)
+    return next
+  })
 }
 
 export function readProjectAction(store, sessionId, runId, actionId) {
@@ -506,20 +708,32 @@ export function beginProjectAction(store, sessionId, runId, checkId, input = {})
     if (input.scopeFingerprint && listProjectActions(store, sessionId, runId).some(action => action.checkId === checkId
       && action.reconciliation?.outcome === 'occurred' && action.scopeFingerprint === input.scopeFingerprint))
       throw conflict('该检查的相同操作已人工确认生效，请读取已有结果，不要重复提交');
-    const inflight = store.db.prepare("SELECT action_id FROM project_actions WHERE session_id=? AND run_id=? AND state IN ('queued','dispatched') LIMIT 1")
-      .get(sessionId, runId);
-    if (inflight) throw conflict('同一项目运行同时只能有一个派发中的动作');
-    const actionId = 'project-action-' + randomUUID();
+    const inflight = store.db.prepare("SELECT record FROM project_actions WHERE session_id=? AND run_id=? AND state IN ('queued','dispatched')")
+      .all(sessionId, runId).map(row => {
+        try { return JSON.parse(row.record); } catch { return null; }
+      }).filter(Boolean);
+    const concurrentNative = input.concurrentNative === true
+      && inflight.every(action => action.nativeTool === true
+        && ['read', 'glob', 'grep', 'view_image'].includes(action.toolName));
+    if (inflight.length && !concurrentNative) throw conflict('同一项目运行同时只能有一个派发中的动作');
+    const actionId = optionalText(input.actionId, 200) || 'project-action-' + randomUUID();
+    const existingAction = readProjectAction(store, sessionId, runId, actionId);
+    if (existingAction) return { run, check, action: existingAction, idempotent: true };
     const executionState = input.executionState === 'queued' ? 'queued' : 'dispatched';
     const record = {
       sessionId, runId, checkId, actionId, controlRev: run.controlRev,
       policyRev: input.policyRevision !== undefined ? input.policyRevision : run.policyRev,
       checkRevision: check.checkRevision,
+      attemptId: check.activeAttempt?.attemptId || '',
+      instanceRevision: check.activeAttempt?.instanceRevision || check.instanceRevision || 1,
       executionState, identityRef: optionalText(input.identityRef, 300),
       identityRevision: optionalText(input.identityRevision, 200),
       scopeFingerprint: optionalText(input.scopeFingerprint, 200),
       method: optionalText(input.method, 20).toUpperCase(),
       targetUrl: optionalText(input.targetUrl, 2000),
+      toolName: optionalText(input.toolName, 100),
+      toolArguments: optionalText(input.toolArguments, 8000),
+      nativeTool: input.nativeTool === true,
       startedAt: nowIso(), endedAt: '', pageRef: '', requestRef: '', attachmentRef: '',
       error: null, sideEffectUnknown: false,
     };
@@ -583,6 +797,8 @@ export function finishProjectAction(store, sessionId, runId, actionId, patch = {
       receivedBytes: patch.receivedBytes !== undefined ? Math.max(0, Number(patch.receivedBytes) || 0) : (action.receivedBytes || 0),
       retainedBytes: patch.retainedBytes !== undefined ? Math.max(0, Number(patch.retainedBytes) || 0) : (action.retainedBytes || 0),
       bodyUnavailable: patch.bodyUnavailable === true || action.bodyUnavailable === true,
+      evidenceRef: patch.evidenceRef !== undefined ? optionalText(patch.evidenceRef, 300) : (action.evidenceRef || ''),
+      resultRecordedAt: patch.resultRecordedAt !== undefined ? optionalText(patch.resultRecordedAt, 100) : (action.resultRecordedAt || ''),
     };
     store.db.prepare('UPDATE project_actions SET state=?,record=?,updated_at=? WHERE session_id=? AND run_id=? AND action_id=?')
       .run(next.executionState, JSON.stringify(next), next.endedAt, sessionId, runId, actionId);

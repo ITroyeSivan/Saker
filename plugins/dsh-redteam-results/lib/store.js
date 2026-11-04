@@ -25,7 +25,7 @@ import { CHAT_SETUP_SCHEMA } from './chat-setup.js';
 import { ACCOUNTS_SCHEMA } from './accounts.js';
 import { PROMPT_LIBRARY_SCHEMA } from './prompt-store.js';
 import { WORK_LEASE_SCHEMA } from './work-lease.js';
-import { MODEL_BUDGET_SCHEMA } from './model-budget.js';
+import { MODEL_BUDGET_SCHEMA, MODEL_SERVICE_SCHEMA } from './model-budget.js';
 import { RETEST_SCHEMA, requireCurrentRepairRetest } from './retest.js';
 import { MATERIAL_READS_SCHEMA, MATERIAL_VIEWS_SCHEMA } from './material-reads.js';
 import { INTERACTION_RECORD_SCHEMA } from './server-side-access.js';
@@ -74,7 +74,9 @@ const SECOND_RATINGS = ["critical", "high", "medium", "low", "info"];
 /** 严重度刻度（数字越大越严重）：用于比对两次评级。info 低于 low。 */
 const RATING_SCALE = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
 /** 二次评级依据的最低字数——低于此视为"走流程"，判定不成立。 */
-const SECOND_REVIEW_MIN_NOTE = 40;
+// Presence and concrete meaning are validated semantically; a fixed character
+// count neither proves independent review nor fits every source/business issue.
+const SECOND_REVIEW_MIN_NOTE = 1;
 const DEFAULT_PAGE_SIZE = 10;
 const MODES = ["pentest", "code-audit", "ctf-solver"];
 
@@ -95,6 +97,7 @@ ${ACCOUNTS_SCHEMA}
 ${PROMPT_LIBRARY_SCHEMA}
 ${WORK_LEASE_SCHEMA}
 ${MODEL_BUDGET_SCHEMA}
+${MODEL_SERVICE_SCHEMA}
 ${RETEST_SCHEMA}
 ${MATERIAL_READS_SCHEMA}
 ${MATERIAL_VIEWS_SCHEMA}
@@ -187,6 +190,36 @@ CREATE TABLE IF NOT EXISTS task_flow_choice (
  session_id TEXT NOT NULL PRIMARY KEY,
  record TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS scene_contexts (
+ session_id TEXT NOT NULL PRIMARY KEY,
+ scene_id TEXT NOT NULL,
+ preset_id TEXT NOT NULL,
+ revision INTEGER NOT NULL,
+ record TEXT NOT NULL,
+ updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS competition_challenges (
+ session_id TEXT NOT NULL, challenge_id TEXT NOT NULL, state TEXT NOT NULL,
+ revision INTEGER NOT NULL, record TEXT NOT NULL, updated_at TEXT NOT NULL,
+ PRIMARY KEY(session_id,challenge_id)
+);
+CREATE TABLE IF NOT EXISTS competition_answers (
+ session_id TEXT NOT NULL, challenge_id TEXT NOT NULL, answer_id TEXT NOT NULL,
+ record TEXT NOT NULL, updated_at TEXT NOT NULL,
+ PRIMARY KEY(session_id,challenge_id,answer_id)
+);
+CREATE TABLE IF NOT EXISTS competition_executions (
+ session_id TEXT NOT NULL, challenge_id TEXT NOT NULL, execution_id TEXT NOT NULL,
+ state TEXT NOT NULL, record TEXT NOT NULL, updated_at TEXT NOT NULL,
+ PRIMARY KEY(session_id,challenge_id,execution_id)
+);
+CREATE INDEX IF NOT EXISTS idx_competition_executions_state
+ ON competition_executions(session_id,challenge_id,state);
+CREATE TABLE IF NOT EXISTS competition_knowledge (
+ session_id TEXT NOT NULL, source_id TEXT NOT NULL, revision INTEGER NOT NULL,
+ record TEXT NOT NULL, updated_at TEXT NOT NULL,
+ PRIMARY KEY(session_id,source_id,revision)
+);
 CREATE TABLE IF NOT EXISTS task_module_choices (
  session_id TEXT NOT NULL PRIMARY KEY, record TEXT NOT NULL, updated_at TEXT NOT NULL
 );
@@ -255,7 +288,7 @@ const MIGRATION_COLUMNS = [
 ];
 
 /** 库结构版本。写入 `PRAGMA user_version`，供后续迁移按版本排序与回退。 */
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 /**
  * 库比本构建新时的拒绝错误。
@@ -446,21 +479,19 @@ const cleanStatus = (value, mode, fallback) => {
 /**
  * 二次复核成对校验（纯函数，供测试与存储层共用）：返回错误文案，或 null 表示放行。
  *
- * 规则：**首次**流转到 verified 终态时，必须同时给出独立二次评级与足量依据。
- * 已 verified 的行只改其它字段时不再要求——否则二次编辑会被反复拦下。
- * 为什么必须独立：首次评级来自发现者本人，自带确认偏误；二次评级若由同一次推理
- * 顺手写上，就只是把同一个结论抄了一遍，对"报告能不能用"毫无增量。
+ * 规则：自动验证是默认路径，独立复核是可选的额外能力。首次流转到 verified
+ * 不强制二次评级；只要声称存在独立复核，二次评级与足量依据就必须成对完整。
  */
 export function secondReviewError(mode, prev, patch) {
 	const statusSet = statusesOf(mode);
 	const next = cleanEnum(patch.status, statusSet, prev.status);
 	if (next !== "verified" || prev.status === "verified") return null;
-	if (cleanEnum(patch.secondRating, SECOND_RATINGS, "") === "") {
-	return `流转到 verified 须在同一次调用里给出二次评级 secondRating（${SECOND_RATINGS.join("/")}）——首次评级来自发现者，二次评级由复核独立给出，两者不一致时报告会标注；未能复现所声称的影响就评 info`;
-	}
+	const rating = cleanEnum(patch.secondRating, SECOND_RATINGS, "");
 	const note = cleanText(patch.secondRatingNote);
-	if (note.length < SECOND_REVIEW_MIN_NOTE) {
-	return `二次评级的依据太短（当前 ${note.length} 字，至少 ${SECOND_REVIEW_MIN_NOTE} 字）——写清复核方式与观察到的现象：换观测通道重新触发一次的结果、或复现失败时实际看到什么`;
+	if (!rating && !note) return null;
+	if (!rating) return `已填写二次评级依据时，必须同时给出 secondRating（${SECOND_RATINGS.join("/")}）并说明这与自动验证是两项不同工作`;
+	if (!note || note.length < SECOND_REVIEW_MIN_NOTE) {
+		return `二次评级的依据不完整（当前 ${note.length} 字，至少 ${SECOND_REVIEW_MIN_NOTE} 字）——写清独立复核方式与观察到的现象；不需要复核时留空即可`;
 	}
 	return null;
 	}
@@ -477,7 +508,7 @@ export function secondReviewVerdict(finding) {
 	}
 
 /** 追加的可选富字段（camelCase → 列名映射）。 */
-const EVIDENCE_REF_KINDS = new Set(["request", "file", "asset", "execution"]);
+const EVIDENCE_REF_KINDS = new Set(["request", "file", "asset", "execution", "source", "command", "user-fact"]);
 /**
  * 证据引用（v6 第 14 节「问题用 evidenceRefs 引用原始请求或文件」）：`[{kind,id}]`。
  * 接受数组或 JSON 字符串，最多 50 条；id 用资料行 id（请求是 `id:revision`，文件是材料 id）。

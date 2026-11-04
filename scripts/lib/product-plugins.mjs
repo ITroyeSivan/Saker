@@ -13,6 +13,10 @@ export const RETIRED_PLUGINS = Object.freeze([
   '@dsh-external/dsh-route-boost',
   '@dsh-external/dsh-knowledge-hub',
   '@dsh-external/dsh-nday-hunter',
+  '@dsh-external/dsh-ctf-observer',
+  // 自动拒答纠偏会把“缺少文档/缺少账号”的正常说明误判为拒答，
+  // 并在后台自动重发；正常对话的结束和继续应由用户与模型处理。
+  '@dsh-external/dsh-refusal-guard',
 ])
 export function productPluginDirectories(root) {
   return readdirSync(join(root, 'plugins')).sort().filter(name => {

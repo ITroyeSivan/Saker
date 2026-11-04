@@ -71,7 +71,7 @@ try {
     assert.match(found.text, /input/);
     const mixed = await tools.get('redteam_context').execute({ search: 'input', context: '{}' }, exec);
     assert.equal(mixed.ok, false); assert.match(mixed.error, /只传search/);
-    // 模型读原文（v6 第 5.4.1 节）：kind=material + id + read 走真实注册表返回分段，默认 ≤6000 字节。
+    // 模型读原文：kind=material + id + read 走真实注册表返回分段，默认 ≤8192 字节。
     const material = importPastedMaterial(store, 's1', { name: 'big.js', text: Array.from({ length: 200 }, (_, i) => 'const v' + i + ' = ' + i + ';').join('\n') }, { home });
     const excerpt = await tools.get('redteam_context').execute({ kind: 'material', id: material.id, read: 0 }, exec);
     assert.equal(excerpt.ok, true, excerpt.error);
@@ -142,6 +142,8 @@ try {
     assert.throws(() => taskContextView(revisions, { kind: 'request', id: 'baseline' }), /multiple revisions/);
     const many = { ...context, requests: Array.from({ length: 25 }, (_, i) => ({ ...context.requests[0], id: `request-${i}` })) };
     assert.doesNotMatch(taskContextView(many).text, /request-24/);
+    assert(Buffer.byteLength(taskContextView(many).text, 'utf8') <= 2048);
+    assert.equal(taskContextView(many).maxItems, 6);
     assert.match(taskContextView(many, { offset: 20 }).text, /request-24/);
   });
   await test('legacy snapshots remain readable without rewriting or trusting unlinked validity claims', () => {

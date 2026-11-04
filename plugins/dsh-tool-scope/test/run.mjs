@@ -45,7 +45,7 @@ const known = [
 
   const ctf = computeDeny("ctf-solver", known, RULES);
   ok("ctf-solver retains CTF tools", !ctf.includes("ctf_challenge"));
-  ok("ctf-solver hides pentest-only tools", ctf.includes("webshell_exec") && ctf.includes("tool_pack") && ctf.includes("operation_goal"));
+  ok("ctf-solver hides pentest-only tools while retaining the shared tool pack selector", ctf.includes("webshell_exec") && !ctf.includes("tool_pack") && ctf.includes("operation_goal"));
 
   const standard = computeDeny("", known, RULES);
   ok("default mode hides scoped plugin tools", ["webshell_exec", "ctf_state", "operation_goal", "tool_pack"].every((name) => standard.includes(name)));
@@ -105,18 +105,19 @@ const known = [
   ok("CTF rule mirrors MODE_ID", ctfMode !== null && JSON.stringify([ctfMode[1]]) === JSON.stringify(RULES.find((rule) => rule.id === "ctf").modes));
 
   const securityRule = RULES.find((rule) => rule.id === "security");
-  const sources = [
-    ["dsh-redteam-results", /const MODES = \[([^\]]*)\]/],
-    ["dsh-campaign-memory", /const MODE_IDS = \[([^\]]*)\]/],
-    ["dsh-trace-vault", /const MODE_IDS = \[([^\]]*)\]/],
-  ];
-  for (const [plugin, pattern] of sources) {
+  const parsedModes = (plugin, pattern) => {
     const source = readPlugin(plugin);
     const match = pattern.exec(source);
-    const modes = match ? match[1].split(",").map((item) => item.trim().replace(/['"]/g, "")).filter(Boolean) : null;
-    ok(`${plugin} modes match the security rule`, modes !== null && JSON.stringify(modes) === JSON.stringify(securityRule.modes));
+    return match ? match[1].split(",").map((item) => item.trim().replace(/['"]/g, "")).filter(Boolean) : null;
   }
-  ok("DEFAULT_MODES uses the same source of truth", JSON.stringify(DEFAULT_MODES) === JSON.stringify(securityRule.modes));
+  const redteamModes = parsedModes("dsh-redteam-results", /const MODES = \[([^\]]*)\]/);
+  ok("redteam keeps competition registered while tool scope is free/cases only",
+    JSON.stringify(redteamModes) === JSON.stringify(DEFAULT_MODES)
+      && JSON.stringify(securityRule.modes) === JSON.stringify(["pentest", "code-audit"]));
+  for (const plugin of ["dsh-campaign-memory", "dsh-trace-vault"]) {
+    const modes = parsedModes(plugin, /const MODE_IDS = \[([^\]]*)\]/);
+    ok(`${plugin} keeps the free/cases security surface`, securityRule.modes.every((mode) => modes?.includes(mode)));
+  }
   ok("retired knowledge and Nday products are absent from active rules",
     !RULES.some((rule) => rule.prefixes.some((prefix) => /knowledge|nday/.test(prefix))));
 }

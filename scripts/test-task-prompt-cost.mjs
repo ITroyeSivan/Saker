@@ -10,12 +10,11 @@ const exec=id=>({agent:{session:{id,header:{agentPreset:'pentest',cwd:process.en
 const task=tools.get('redteam_task'),section=sections.find(p=>p.name==='saker-pentest-task'),context=contexts.find(p=>p.name==='saker-pentest-task-state');
 let failed=0;async function test(name,fn){try{await fn();console.log('ok '+name)}catch(error){failed++;console.log('FAIL '+name+': '+error.stack)}}
 try{
-  // v6 第 4.1 节：固定说明「初始控制在 600 token 内；无可靠计量器时使用 1800 UTF-8 字节并标为近似」。
-  // 没有 token 计量器，所以口径必须是字节近似；上限也要有人盯住。
-  await test('fixed capability note stays inside the plan budget and is marked approximate',async()=>{
-    assert.equal(TASK_RULE_BUDGET.unit,'bytes-approx','没有 token 计量器时必须标成字节近似');
-    assert.equal(TASK_RULE_BUDGET.bytes,1800);
-    assert.equal(TASK_RULE_BUDGET.tokens,600);
+  // 三场景方案：固定说明初始目标不超过 1200 UTF-8 字节；没有可靠 token 计量器时不冒充 token。
+  await test('fixed capability note stays inside the 1200-byte plan budget',async()=>{
+    assert.equal(TASK_RULE_BUDGET.unit,'bytes');
+    assert.equal(TASK_RULE_BUDGET.bytes,1200);
+    assert.equal(TASK_RULE_BUDGET.tokens,null);
     const bytes=Buffer.byteLength(TASK_RULE_TEXT,'utf8');
     assert(bytes<=TASK_RULE_BUDGET.bytes,`固定说明 ${bytes} 字节超过上限 ${TASK_RULE_BUDGET.bytes}`);
     // v6 第 4.1 节还要求这条固定说明的内容限定为四件事；同时明确不重新引入角色模板/方法清单/固定流程。
@@ -57,7 +56,7 @@ try{
     // 常驻快照不能携带每次工具调用都会变的用量计数：否则宿主每个工具调用都会追加
     // 新的 runtime-context 消息，缓存整段失效。精确用量改由 redteam_task status 查询。
     const first=context.text(scope);assert(!first.includes('操作=')&&!first.includes('未计量目标流量='),'常驻快照不携带易变用量计数');
-    assert(first.includes('需要精确用量时调用 redteam_task action=status'),'常驻快照提示按需查询用量');
+    assert(first.includes('精确用量由程序显示，宿主守卫按最新预算拦截'),'常驻快照提示程序显示精确用量');
     const allowed=guards[0]({...scope,name:'pwsh'});assert.equal(allowed,undefined);
     assert.equal(context.text(scope),first,'工具调用计数变化不改常驻快照');assert.equal(section.text(scope),stable);
     const done=await task.execute({action:'progress',planComplete:true},scope);assert(done.stopped);assert.match(context.text(scope),/plan_complete/);assert.notEqual(context.text(scope),first,'任务状态变化会更新快照');assert.equal(section.text(scope),stable);

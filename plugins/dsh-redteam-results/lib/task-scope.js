@@ -264,7 +264,7 @@ export function taskScopeAllowsAsset(policy, asset) {
   if (candidates.some(host => terms.include.some(term => hostMatchesTerm(term, String(host).toLowerCase(), asset?.port, asset?.protocol)))) return true
   try {
     if (matchesScope(asset, terms.include.filter(term => ['domain', 'wildcard', 'ip', 'cidr'].includes(term.kind)).map(term => term.raw).join(' '))) return true
-  } catch {}
+  } catch { /* malformed optional asset fields do not grant access */ }
   return false
 }
 

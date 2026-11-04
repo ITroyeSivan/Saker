@@ -193,6 +193,296 @@ function Chip(props) {
     React.createElement(TaskChoices, { ctl: ctl, current: snap.current }));
 }
 
+var SCENE_DEFS = [
+	{ id: "free", label: "自由测试", desc: "按你的目标和思路开展测试。", preset: "pentest" },
+	{ id: "competition", label: "比赛模式", desc: "根据题面、附件和实例解题。", preset: "ctf-solver" },
+	{ id: "cases", label: "案例测试", desc: "按已有案例或测试要求逐项执行。", preset: "pentest" }
+];
+var SCENE_IDS = SCENE_DEFS.map(function (s) { return s.id; });
+var SCENE_BY_PRESET = { pentest: "free", "ctf-solver": "competition" };
+var sceneToken = "";
+var sceneApiBase = "";
+var SCENE_API_BASES = ["/dsh-redteam-results", "/api/dsh-redteam-results"];
+var pendingOpenedScene = null;
+var activeSceneController = null;
+var workspaceHookInstalled = false;
+function draftOrAttachmentsPresent() {
+	try {
+		var card = document.querySelector("[data-composer-card]");
+		if (!card) return false;
+		var text = "";
+		var editor = card.querySelector('[contenteditable="true"]');
+		if (editor) text = String(editor.innerText || editor.textContent || "").trim();
+		return text !== "" || !!card.querySelector("[data-composer-chip]");
+	} catch { return true; }
+}
+function sceneApi(endpoint, payload) {
+	var request = { endpoint: endpoint, payload: payload || {} };
+	function fetchToken(base) {
+		return fetch(base + "/csrf", { credentials: "same-origin" })
+			.then(function (response) {
+				if (!response.ok) throw new Error("读取场景 CSRF 失败：HTTP " + response.status);
+				return response.json();
+			})
+			.then(function (body) {
+				var token = body && body.token || "";
+				if (!token) throw new Error("CSRF token unavailable");
+				return { base: base, token: token };
+			});
+	}
+	function detectBase() {
+		if (sceneApiBase) return Promise.resolve(sceneApiBase);
+		var pending = Promise.resolve(null);
+		SCENE_API_BASES.forEach(function (base) {
+			pending = pending.then(function (hit) {
+				if (hit) return hit;
+				return fetchToken(base).catch(function () { return null; });
+			});
+		});
+		return pending.then(function (hit) {
+			if (!hit) throw new Error("场景接口不可用：CSRF 获取失败");
+			sceneApiBase = hit.base;
+			sceneToken = hit.token;
+			return sceneApiBase;
+		});
+	}
+	function send(token) {
+		return fetch(sceneApiBase + "/" + endpoint, {
+			method: "POST",
+			credentials: "same-origin",
+			headers: { "content-type": "application/json", "x-dsh-csrf": token },
+			body: JSON.stringify(request.payload)
+		}).then(function (response) {
+			return response.json().catch(function () { return { ok: false, error: "HTTP " + response.status }; }).then(function (body) {
+				return { response: response, body: body };
+			});
+		}).then(function (result) {
+			var body = result.body;
+			if (result.response.status === 403) return { retry: true };
+			if (!body || body.ok === false) {
+				var error = new Error((body && body.error) || "场景请求失败");
+				error.code = body && body.code;
+				throw error;
+			}
+			return body;
+		});
+	}
+	return detectBase().then(function () {
+		return sceneToken || fetchToken(sceneApiBase).then(function (result) {
+			sceneToken = result.token;
+			return sceneToken;
+		});
+	}).then(function (token) {
+		return send(token);
+	}).then(function (result) {
+		if (!result || result.retry !== true) return result;
+		sceneToken = "";
+		return fetchToken(sceneApiBase).then(function (result) {
+			sceneToken = result.token;
+			return send(sceneToken);
+		}).then(function (result) {
+			if (!result || result.retry === true) {
+				var error = new Error("场景请求令牌已刷新，但仍被拒绝");
+				error.code = "route-csrf";
+				throw error;
+			}
+			return result;
+		});
+	});
+}
+function sceneController(remote, sessions, uiWorkspace, workspaceList, currentSession) {
+	var state = { scenes: SCENE_DEFS.slice(), presets: [], currentScene: "", currentPreset: "", canSwitchInPlace: false, busy: false, error: null, pendingTaskChoice: null };
+	var subs = [];
+	var refreshGeneration = 0, selectGeneration = 0;
+	function snap() { return state; }
+	function set(patch) { state = Object.assign({}, state, patch); subs.forEach(function (fn) { fn(state); }); }
+	function subscribe(fn) { subs.push(fn); return function () { subs = subs.filter(function (x) { return x !== fn; }); }; }
+	function refresh() {
+		var s = currentSession();
+		var generation = ++refreshGeneration;
+		var sessionId = s && s.id;
+		var sceneRequest = s ? sceneApi("scene.get", { sessionId: s.id, hasDraft: draftOrAttachmentsPresent() }) : Promise.resolve(null);
+		return Promise.all([remote.agentPresets.list(), sceneRequest]).then(function (out) {
+			if (generation !== refreshGeneration || (currentSession() && currentSession().id) !== sessionId) return;
+			var presets = (out[0] && out[0].value && out[0].value.presets || []).filter(function (p) {
+				return SCENE_IDS.every(function (id) { return SCENE_DEFS.find(function (d) { return d.id === id; }).preset !== p.id; }) || p.id === "standard";
+			});
+			var view = out[1];
+			var preset = s && s.agentPreset || (presets.find(function (p) { return p.isDefault; }) || presets[0] || {}).id || "";
+			if (view && view.saker) {
+				set({ currentScene: view.scene && view.scene.id || view.sceneId || SCENE_BY_PRESET[preset] || "", currentPreset: preset, canSwitchInPlace: view.canSwitchInPlace === true, presets: presets, error: null });
+			} else set({ currentScene: "", currentPreset: preset, canSwitchInPlace: false, presets: presets, error: null });
+		}).catch(function (error) { set({ error: msgOf(error) }); });
+	}
+	function openCreated(sessionId, expectedCurrentId) {
+		var now = currentSession();
+		if (!now || now.id !== expectedCurrentId) return Promise.resolve(sessionId);
+		var opened;
+		try { if (sessionId && uiWorkspace && typeof uiWorkspace.openSession === "function") opened = uiWorkspace.openSession(sessionId); } catch { /* next list refresh still exposes it */ }
+		return Promise.resolve(opened).then(function () {
+			return new Promise(function (resolve) { setTimeout(resolve, 80); });
+		}).then(function () {
+			var current = currentSession();
+			return current && current.id !== expectedCurrentId ? current.id : sessionId;
+		});
+	}
+	function ensureOpenedScene(sessionId, targetScene, targetPreset, expectedCurrentId) {
+		if (!sessionId || sessionId === expectedCurrentId) return Promise.resolve(sessionId);
+		return sceneApi("scene.get", { sessionId: sessionId, hasDraft: false }).then(function (view) {
+			if (view && view.saker === true && view.sceneId === targetScene && view.presetId === targetPreset)
+				return sessionId;
+			return remote.agentPresets.select(sessionId, targetPreset).then(function () {
+				return sceneApi("scene.bind", {
+					sessionId: sessionId, scene: targetScene, expectedRevision: Number(view?.sceneRevision) || 0,
+					requestId: "scene-rebind-" + Date.now() + "-" + Math.random().toString(36).slice(2),
+				});
+			}).then(function () { return sessionId; });
+		});
+	}
+	function completePendingWorkspace(workspaceId) {
+		var pending = pendingOpenedScene;
+		if (!pending || Date.now() - pending.at >= 120000) return Promise.resolve();
+		return sessions.create({ agentPreset: pending.presetId, workspaceId: workspaceId }).then(function (created) {
+			return sceneApi("scene.bind", {
+				sessionId: created, scene: pending.sceneId, expectedRevision: 0,
+				requestId: "scene-workspace-" + Date.now() + "-" + Math.random().toString(36).slice(2),
+			}).then(function () { return created; });
+		}).then(function (created) {
+			try { if (uiWorkspace && typeof uiWorkspace.openSession === "function") uiWorkspace.openSession(created); } catch { /* list refresh still exposes it */ }
+			pendingOpenedScene = null;
+			return created;
+		});
+	}
+	function createWithPreset(summary, preset) {
+		var workspaceId = summary && summary.workspaceId;
+		if (!workspaceId && summary && summary.id) {
+			try {
+				var workspaceState = workspaceList && workspaceList.getSnapshot && workspaceList.getSnapshot();
+				workspaceId = workspaceState && (workspaceState.items || []).find(function (item) {
+					return Array.isArray(item.sessionIds) && item.sessionIds.includes(summary.id);
+				})?.workspaceId;
+			} catch { /* current folder metadata remains usable */ }
+		}
+		var request = {
+			agentPreset: preset,
+			sessionId: "session-" + ((globalThis.crypto && typeof globalThis.crypto.randomUUID === "function")
+				? globalThis.crypto.randomUUID()
+				: Date.now() + "-" + Math.random().toString(16).slice(2))
+		};
+		if (summary && summary.cwd) request.cwd = summary.cwd;
+		else if (workspaceId) request.workspaceId = workspaceId;
+		return sessions.create(request);
+	}
+	function performSwitch(s, target, view) {
+		var scene = SCENE_DEFS.find(function (item) { return item.id === target; });
+		var generation = selectGeneration;
+		var work;
+		if (scene) {
+			var hasDraft = draftOrAttachmentsPresent();
+			work = Promise.resolve(view).then(function (view) {
+				var inPlace = view.saker === true && view.canSwitchInPlace === true && hasDraft === false && view.presetId === scene.preset;
+				if (inPlace) {
+					return remote.agentPresets.select(s.id, scene.preset).then(function () {
+						return sceneApi("scene.select", { sessionId: s.id, scene: scene.id, expectedRevision: view.sceneRevision, requestId: "scene-" + Date.now() + "-" + Math.random().toString(36).slice(2), hasDraft: false });
+					}).then(function () { return s.id; });
+				}
+				return createWithPreset(s, scene.preset).then(function (sessionId) {
+					return sceneApi("scene.bind", { sessionId: sessionId, scene: scene.id, expectedRevision: 0, requestId: "scene-bind-" + Date.now() + "-" + Math.random().toString(36).slice(2) }).then(function () { return sessionId; });
+				}).then(function (sessionId) { return openCreated(sessionId, s.id); })
+					.then(function (openedId) {
+						return ensureOpenedScene(openedId, scene.id, scene.preset, s.id).then(function (finalId) {
+							pendingOpenedScene = { sceneId: scene.id, presetId: scene.preset, openedSessionId: finalId, at: Date.now() };
+							return finalId;
+						});
+					});
+			});
+		} else {
+			pendingOpenedScene = null;
+			work = remote.agentPresets.select(s.id, target).then(function () { return s.id; }).catch(function () {
+				return createWithPreset(s, target).then(function (sessionId) { return openCreated(sessionId, s.id); });
+			});
+		}
+		return work.then(function (sessionId) {
+			if (generation !== selectGeneration) return;
+			set({ busy: false, error: null });
+			if (sessionId === s.id) return refresh();
+		}).catch(function (error) { set({ busy: false, error: msgOf(error) }); });
+	}
+	function select(target) {
+		var s = currentSession();
+		if (!s || state.busy) return Promise.resolve();
+		if (target === state.currentScene || (!state.currentScene && target === state.currentPreset)) return Promise.resolve();
+		var generation = ++selectGeneration;
+		set({ busy: true, error: null, pendingTaskChoice: null });
+		return sceneApi("scene.get", { sessionId: s.id, hasDraft: draftOrAttachmentsPresent() }).then(function (view) {
+			if (generation !== selectGeneration) return;
+			if (view.task && view.task.active && (view.task.agentRunning || ['preparing','running','waiting'].includes(view.task.projectState))) {
+				set({ busy: false, pendingTaskChoice: { target: target, session: s, view: view } });
+				return;
+			}
+			return performSwitch(s, target, view);
+		}).catch(function (error) { set({ busy: false, error: msgOf(error) }); });
+	}
+	function resolveTaskChoice(action) {
+		var pending = state.pendingTaskChoice;
+		if (!pending) return Promise.resolve();
+		if (!['continue', 'pause', 'cancel'].includes(action)) return Promise.resolve();
+		var generation = ++selectGeneration;
+		set({ busy: true, error: null, pendingTaskChoice: null });
+		var control = action === 'continue' ? Promise.resolve() : sceneApi("scene.task-control", {
+			sessionId: pending.session.id, action: action,
+		});
+		return control.then(function () {
+			if (generation !== selectGeneration) return;
+			return performSwitch(pending.session, pending.target, pending.view);
+		}).catch(function (error) { set({ busy: false, error: msgOf(error), pendingTaskChoice: pending }); });
+	}
+	return { snap: snap, subscribe: subscribe, refresh: refresh, select: select, resolveTaskChoice: resolveTaskChoice,
+		completePendingWorkspace: completePendingWorkspace };
+}
+function SceneChip(props) {
+	var ctl = props.ctl, st = useState(ctl.snap()), snap = st[0], set = st[1];
+	var menu = useState(false), open = menu[0], setOpen = menu[1];
+	var btnRef = useRef(null), menuRef = useRef(null);
+	useEffect(function () { var off = ctl.subscribe(set); ctl.refresh(); return off; }, []);
+	useEffect(function () {
+		if (open && menuRef.current && btnRef.current) place(menuRef.current, btnRef.current, "root");
+		if (!open) return;
+		function down(event) {
+			if (btnRef.current?.contains(event.target) || menuRef.current?.contains(event.target)) return;
+			setOpen(false);
+		}
+		function key(event) { if (event.key === "Escape") setOpen(false); }
+		document.addEventListener("mousedown", down);
+		document.addEventListener("keydown", key);
+		return function () { document.removeEventListener("mousedown", down); document.removeEventListener("keydown", key); };
+	}, [open]);
+	var current = snap.currentScene && SCENE_DEFS.find(function (s) { return s.id === snap.currentScene; });
+	var preset = snap.presets.find(function (p) { return p.id === snap.currentPreset; });
+	var label = current ? current.label : (preset ? preset.name : (snap.currentPreset || "选择场景"));
+	useEffect(function () { if (snap.pendingTaskChoice) setOpen(true); }, [snap.pendingTaskChoice]);
+	return React.createElement(React.Fragment, null,
+		React.createElement("button", { ref: btnRef, type: "button", className: "dsh-mg-chip", title: snap.error || label, disabled: snap.busy, onClick: function () { setOpen(!open); } },
+			label, React.createElement("span", { className: "dsh-mg-caret" }, "▾")),
+		open ? React.createElement("div", { ref: menuRef, className: "dsh-mg-menu", role: "menu" },
+			SCENE_DEFS.map(function (scene) {
+				return React.createElement("button", { key: scene.id, type: "button", role: "menuitem", className: "dsh-mg-item" + (scene.id === snap.currentScene ? " is-cur" : ""), onClick: function () { setOpen(false); ctl.select(scene.id); } },
+					React.createElement("span", { className: "dsh-mg-name" }, scene.label), React.createElement("span", { className: "dsh-mg-desc" }, scene.desc));
+			}),
+			snap.presets.length ? React.createElement("div", { className: "dsh-mg-desc", style: { padding: "8px 12px 0", borderTop: "1px solid var(--dsw-alias-border-l1,#e9e9ec)", marginTop: "8px" } }, "宿主预设") : null,
+			snap.presets.map(function (item) {
+				return React.createElement("button", { key: item.id, type: "button", role: "menuitem", className: "dsh-mg-item" + (!snap.currentScene && item.id === snap.currentPreset ? " is-cur" : ""), onClick: function () { setOpen(false); ctl.select(item.id); } },
+					React.createElement("span", { className: "dsh-mg-name" }, item.name), item.description ? React.createElement("span", { className: "dsh-mg-desc" }, item.description) : null);
+			})) : null,
+			snap.pendingTaskChoice ? React.createElement("div", { role: "dialog", "aria-label": "切换场景时如何处理正在运行的任务", style: { padding: "10px 12px 4px", borderTop: "1px solid var(--dsw-alias-border-l1,#e9e9ec)", marginTop: "8px" } },
+				React.createElement("p", { style: { margin: "0 0 8px", fontSize: "12px" } }, "旧任务仍在运行。选择切换后的处理方式："),
+				React.createElement("button", { type: "button", className: "dsh-mg-item", onClick: function () { ctl.resolveTaskChoice("continue"); } }, "保留旧任务继续，在新会话打开所选场景"),
+				React.createElement("button", { type: "button", className: "dsh-mg-item", onClick: function () { ctl.resolveTaskChoice("pause"); } }, "暂停旧任务后切换"),
+				React.createElement("button", { type: "button", className: "dsh-mg-item", onClick: function () { ctl.resolveTaskChoice("cancel"); } }, "取消旧任务后切换")) : null,
+		snap.error ? React.createElement("div", { role: "alert", className: "dsh-mg-desc", style: { padding: "8px 12px" } }, snap.error) : null
+	);
+}
+
 function installStyles() {
 	if (document.getElementById("dsh-mg-style")) return function () {};
 	var css = [
@@ -225,17 +515,17 @@ function installStyles() {
 
 function apply(ctx) {
 	ctx.effect(function () { return installStyles(); }, "dsh-mode-group: styles");
-	ctx.inject(["slots", "conversation", "sessions", "workspaces", "connection", "remote"], function (scope) {
+	ctx.inject(["slots", "conversation", "sessions", "workspaces", "connection", "remote", "uiWorkspace"], function (scope) {
 		var active = true;
 		var stops = [];
 		function addStop(f) { stops.push(f); }
 		var api = scope.remote;
-		var ctl = createController(api, function () {
+		var ctl = sceneController(api, scope.sessions, scope.uiWorkspace, scope.workspaces && scope.workspaces.list, function () {
 			if (!active) return undefined;
 			try {
 				var state = scope.sessions.list.getSnapshot();
 				var s = state.current === undefined ? undefined : state.byId[state.current];
-				if (!s || !s.blank) {
+				if (!s) {
 					var blanks = Object.keys(state.byId || {}).map(function (id) { return state.byId[id]; }).filter(function (row) {
 						return row && row.blank;
 					});
@@ -247,17 +537,26 @@ function apply(ctx) {
 					});
 					s = retained[0] || blanks[0];
 				}
-				return s === undefined ? undefined : { id: s.id, blank: s.blank, agentPreset: s.projectionValues && s.projectionValues.agentPreset };
+				return s === undefined ? undefined : { id: s.id, blank: s.blank, cwd: s.cwd, workspaceId: s.workspaceId, agentPreset: s.projectionValues && s.projectionValues.agentPreset };
 			} catch { return undefined; }
-		}, function (sessionId, agentPreset) {
-			try { scope.sessions.noteAgentPreset(sessionId, agentPreset); } catch { /* 列表不在时静默 */ }
 		});
-		addStop(scope.sessions.list.subscribe(function () {
-			if (!active) return;
-			try { ctl.applyStaged(); } catch { /* 失活窗口静默 */ }
-		}));
+		activeSceneController = ctl;
+		if (!workspaceHookInstalled && scope.uiWorkspace && typeof scope.uiWorkspace.openWorkspace === "function") {
+			var originalOpenWorkspace = scope.uiWorkspace.openWorkspace;
+			scope.uiWorkspace.openWorkspace = function (workspaceId, beforeOpen) {
+				return Promise.resolve(originalOpenWorkspace.call(scope.uiWorkspace, workspaceId, beforeOpen)).then(function () {
+					return activeSceneController && activeSceneController.completePendingWorkspace(workspaceId);
+				});
+			};
+			workspaceHookInstalled = true;
+		}
 		addStop(scope.remote.$on("agent-preset/selected", function (sessionId, agentPreset) {
 			try { scope.sessions.noteAgentPreset(sessionId, agentPreset); } catch { /* 同上 */ }
+			try { ctl.refresh(); } catch { /* 同上 */ }
+		}));
+		addStop(scope.sessions.list.subscribe(function () {
+			if (!active) return;
+			try { ctl.refresh(); } catch { /* window may be unmounted */ }
 		}));
 		scope.slots.inject("conversation.hero.agentPreset", function () {
 			var make = function (priority) {
@@ -267,7 +566,7 @@ function apply(ctx) {
 					useEffect(function () { return ctl.subscribe(function (s) { st[1](s); }); }, []);
 					return sel === undefined ? st[0] : sel(st[0]);
 				};
-				return React.createElement(Chip, { ctl: ctl, useCtl: useCtl, key: "dsh-mg" });
+				return React.createElement(SceneChip, { ctl: ctl, key: "dsh-mg-scene" });
 				});
 			};
 			try {

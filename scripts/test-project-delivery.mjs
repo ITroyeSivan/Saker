@@ -6,7 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
 import { startTaskPolicy, readTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy.js';
-import { createProjectRun, transitionProjectRun, defineProjectChecks, recordProjectCheck, upsertProjectSource, readProjectRun, listProjectChecks } from '../plugins/dsh-redteam-results/lib/project-store.js';
+import { createProjectRun, transitionProjectRun, defineProjectChecks, recordProjectCheck, upsertProjectSource, readProjectRun, listProjectChecks, beginProjectAction, finishProjectAction } from '../plugins/dsh-redteam-results/lib/project-store.js';
+import { setProjectRunState } from '../plugins/dsh-redteam-results/lib/project-runtime.js';
 import { buildProjectDeliveryFiles, zipProjectDelivery, projectCounts } from '../plugins/dsh-redteam-results/lib/project-delivery.js';
 import { dispatch } from '../plugins/dsh-redteam-results/lib/index.js';
 import { writeTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy-record.js';
@@ -111,6 +112,47 @@ try {
     assert.equal(taskStatus.policy.scenario, 'project', 'task.status 必须向项目面板透传 scenario');
   });
 
+  await test('后续成功动作不再沿用旧原生失败，停止运行不再显示正在执行', async () => {
+    const sid = 'pd-view-state';
+    startTaskPolicy(store, sid, { scenario: 'project', question: '视图状态', budget: { minutes: 10 } });
+    const created = createProjectRun(store, sid, { question: '视图状态' });
+    const run = transitionProjectRun(store, sid, created.runId, 'running', created.controlRev);
+    const [check] = defineProjectChecks(store, sid, run.runId, [{ checkId: 'recovered', requirement: '先失败后成功' }]);
+
+    const failed = beginProjectAction(store, sid, run.runId, check.checkId, {});
+    finishProjectAction(store, sid, run.runId, failed.action.actionId, { executionState: 'failed', error: '第一次读取失败' });
+    const completed = beginProjectAction(store, sid, run.runId, check.checkId, {});
+    finishProjectAction(store, sid, run.runId, completed.action.actionId, { executionState: 'completed', evidenceRef: 'evidence-after-failure' });
+    recordProjectCheck(store, sid, run.runId, check.checkId, {
+      executionState: 'ended', verdict: 'blocked', gaps: '原生工具执行失败；程序已保存原始结果，需处理后再判断。',
+    });
+
+    const recovered = await dispatch(ctx, store, 'project.status', { sessionId: sid });
+    assert.equal(recovered.checks[0].displayResult, '待核对');
+    assert.equal(recovered.checks[0].viewVerdict, 'needs_check');
+    assert.equal(recovered.counts.blocked, 0);
+    assert.equal(recovered.counts.unverified, 1);
+    assert.match(recovered.checks[0].displayNotes, /历史失败动作 1 项已保留/);
+
+    const [remaining] = defineProjectChecks(store, sid, run.runId, [{ checkId: 'interrupted', requirement: '停止中的检查' }]);
+    beginProjectAction(store, sid, run.runId, remaining.checkId, {});
+    setProjectRunState(store, sid, run.runId, 'cancelled', readProjectRun(store, sid, run.runId).controlRev, {
+      blocker: { code: 'cancelled', reason: '用户停止' },
+    });
+    const stopped = await dispatch(ctx, store, 'project.status', { sessionId: sid });
+    const interrupted = stopped.checks.find(item => item.checkId === 'interrupted');
+    assert.equal(interrupted.displayResult, '已停止');
+    assert.equal(interrupted.viewExecutionState, 'paused');
+    assert.equal(stopped.counts.inProgress, 0);
+    assert.equal(stopped.counts.interrupted, 1);
+
+    const exported = buildProjectDeliveryFiles(store, sid, run.runId);
+    const report = exported.files['delivery/project-report.md'];
+    assert.match(report, /先失败后成功[^\n]*→ 待核对/);
+    assert.match(report, /历史失败动作 1 项已保留/);
+    assert.match(report, /停止中的检查[^\n]*→ 已停止/);
+  });
+
   await test('project.start 幂等，pause / resume / stop 状态一致', async () => {
     const started = await dispatch(ctx, store, 'project.start', { sessionId: 'pd-start', policy: { question: '按文档测试', allowTargetNetwork: false, budget: { minutes: 30 } } });
     assert.equal(started.ok, true);
@@ -186,6 +228,30 @@ try {
     const manifest = JSON.parse(bundle.files['delivery/manifest.json']);
     assert.equal(manifest.sourceSnapshot[0].sourceRevision, 'rev-1');
   });
+
+  await test('project.status returns a bounded 50-item page for a 10000-check run', async () => {
+    const sid = 'pd-scale'
+    startTaskPolicy(store, sid, { scenario: 'project', question: 'scale', budget: { minutes: 30 } })
+    const run = createProjectRun(store, sid, { question: 'scale' })
+    const at = new Date().toISOString()
+    store.db.exec('BEGIN IMMEDIATE')
+    try {
+      const insert = store.db.prepare('INSERT INTO project_checks(session_id,run_id,check_id,check_revision,record,updated_at) VALUES(?,?,?,?,?,?)')
+      for (let index = 0; index < 10000; index += 1) {
+        const checkId = 'scale-' + index
+        insert.run(sid, run.runId, checkId, 1, JSON.stringify({ sessionId: sid, runId: run.runId, checkId, checkRevision: 1,
+          requirement: 'Requirement ' + index, order: index, executionState: 'pending', verdict: '', checkedContent: '', gaps: '',
+          findingRefs: [], actionRefs: [], evidenceRefs: [], createdAt: at, updatedAt: at }), at)
+      }
+      store.db.exec('COMMIT')
+    } catch (error) { store.db.exec('ROLLBACK'); throw error }
+    const page = await dispatch(ctx, store, 'project.status', { sessionId: sid, runId: run.runId, checkOffset: 0, checkLimit: 50 })
+    assert.equal(page.ok, true)
+    assert.equal(page.checks.length, 50)
+    assert.equal(page.checkTotal, 10000)
+    assert.equal(page.nextCheckOffset, 50)
+    assert.equal(page.counts.total, 10000)
+  })
 } finally {
   store.close();
   fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 });

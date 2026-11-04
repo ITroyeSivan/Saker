@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
 import { startTaskPolicy, taskPolicyStatus, taskPromptStable } from '../plugins/dsh-redteam-results/lib/task-policy.js';
-import { createProjectRun, transitionProjectRun, defineProjectChecks, upsertProjectSource } from '../plugins/dsh-redteam-results/lib/project-store.js';
+import { createProjectRun, readProjectRun, transitionProjectRun, defineProjectChecks, upsertProjectSource } from '../plugins/dsh-redteam-results/lib/project-store.js';
 import { listMaterialReads } from '../plugins/dsh-redteam-results/lib/material-reads.js';
 import { projectContinuation, markProjectContinuation } from '../plugins/dsh-redteam-results/lib/project-runtime.js';
 
@@ -70,7 +70,7 @@ try {
   await test('项目提示只带当前要求摘要，不附文档全文', () => {
     prepare('pk-prompt');
     const prompt = taskPromptStable(taskPolicyStatus(store, 'pk-prompt'));
-    assert(prompt.includes('按文档连续测试'));
+    assert(prompt.includes('案例连续测试'));
     assert(prompt.includes('按文档测试人事系统'));
     assert(!prompt.includes(DOCUMENT_TEXT), '项目提示不能附文档全文');
     assert(!prompt.includes('methodId'), '项目提示不能要求旧方法字段');
@@ -91,25 +91,14 @@ try {
     const tool = tools.get('project_document');
     const mark = value => markProjectContinuation(store, sid, run.runId, value.fingerprint, value.attempts);
     mark(projectContinuation(store, sid));
-    assert.equal((await tool.execute({ action: 'read', sourceId: 'doc-1', sectionId: 'p1', cursor: 0, limit: 8 }, exec(sid))).ok, true);
+    assert.equal((await tool.execute({ action: 'read', sourceId: 'doc-1', sectionId: 'p1', cursor: 0, limit: 9 }, exec(sid))).ok, true);
     const firstRead = projectContinuation(store, sid);
     assert.equal(firstRead.attempts, 0, '首次读取真正的新原文范围算进展');
     mark(firstRead);
-    await tool.execute({ action: 'read', sourceId: 'doc-1', sectionId: 'p1', cursor: 4, limit: 2 }, exec(sid));
+    await tool.execute({ action: 'read', sourceId: 'doc-1', sectionId: 'p1', cursor: 3, limit: 3 }, exec(sid));
     const repeated = projectContinuation(store, sid);
-    assert.equal(repeated.attempts, 1, '已读范围里的小片段不算新进展');
-    mark(repeated);
-    await tool.execute({ action: 'read', sourceId: 'doc-1', sectionId: 'p1', cursor: 8, limit: 8 }, exec(sid));
-    const newRange = projectContinuation(store, sid);
-    assert.equal(newRange.attempts, 0, '向后续读必须允许继续');
-    mark(newRange);
-    await tool.execute({ action: 'search', query: '员工' }, exec(sid));
-    const searched = projectContinuation(store, sid);
-    assert.equal(searched.attempts, 0, '搜索实际提供尚未读到的后半段算进展');
-    mark(searched);
-    await tool.execute({ action: 'search', query: '员工' }, exec(sid));
-    const duplicateSearch = projectContinuation(store, sid);
-    assert.equal(duplicateSearch.attempts, 1, '相同搜索片段不重复提供进展');
+    assert.equal(repeated, null, '已读范围里的小片段不重复发送相同继续指令');
+    assert.equal(readProjectRun(store, sid, run.runId).state, 'paused', '无进展后暂停等待用户明确继续');
   });
 } finally {
   for (const dispose of disposers.reverse()) await dispose();

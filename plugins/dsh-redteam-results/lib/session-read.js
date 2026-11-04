@@ -5,7 +5,7 @@ function service(ctx, name) {
   try { return ctx[name] || ctx.get?.(name); } catch { return undefined; }
 }
 function pentest(session) {
-  if (session.header?.agentPreset !== 'pentest')
+  if ((session.mode || session.header?.agentPreset) !== 'pentest')
     throw failure('session-preset-mismatch', '该会话不是渗透测试会话');
   return session;
 }

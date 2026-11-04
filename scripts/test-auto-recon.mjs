@@ -54,26 +54,23 @@ try {
     assert.equal(readTaskPolicy(store, 'allowed').used.unmeteredToolCalls, 1, 'the exhausted allowance must not grow');
     assert.equal(readTaskPolicy(store, 'allowed').used.toolCalls, 1);
     assert(taskPrompt({ configured: true, policy: readTaskPolicy(store, 'allowed'), stopped: false }).includes('未计量通道=1/1'));
-    // 实测发现：模型会用宿主 shell 直接发目标请求，绕过执行回执链——提示词必须点明这点。
-    assert(taskPrompt({ configured: true, policy: readTaskPolicy(store, 'allowed'), stopped: false }).includes('不会产生宿主执行回执'));
+    // 登记链退役后，提示词应说明程序保存真实调用事实，而不是要求模型补执行回执。
+    assert(taskPrompt({ configured: true, policy: readTaskPolicy(store, 'allowed'), stopped: false }).includes('实际 shell/MCP 的事实由程序记录'));
     // 实测 J2–J9：模型宁可翻文件找契约也不猜——工具契约最短路径要写进每轮提示词。
     const hint = taskPrompt({ configured: true, policy: readTaskPolicy(store, 'allowed'), stopped: false });
     for (const removed of ['first-contact', 'run-pair', 'responseReceiptId', 'normalRequests', 'verify-effect', '整包替换']) {
       assert(!hint.includes(removed), '默认任务快照不得重新塞回操作教程：' + removed);
     }
-    assert(hint.includes('redteam_task progress {planComplete:true}') && hint.includes('只等待用户资料或未完成时不要标记'),
-      '回合结束前的显式收口与不标记边界仍要保留');
+    assert(hint.includes('不要为维护插件账本调用登记、领取、补录或状态查询工具'),
+      '提示词必须明确取消模型登记、领取、补录和状态对账');
+    assert(!hint.includes('redteam_task progress {planComplete:true}'),
+      '退役的登记链不能重新出现在常驻提示词中');
     // 受控工具面只暴露 exercise_request/exercise_submit：常驻提示必须跟着实际工具面走。
     const controlled = taskPromptStable({ configured: true, policy: readTaskPolicy(store, 'allowed'), stopped: false }, { controlledInterface: true });
     assert(controlled.includes('exercise_request') && controlled.includes('exercise_submit'), '受控工具面要说明实际可用工具');
     for (const forbidden of ['redteam_context', 'first-contact', 'run-pair', 'verify-effect']) {
       assert(!controlled.includes(forbidden), '受控工具面不得引用被隐藏的工具：' + forbidden);
     }
-    assert(taskPromptStable({ configured: true, policy: readTaskPolicy(store, 'allowed'), stopped: false }).includes('redteam_task'),
-      '普通工具面仍保留任务收口入口');
-    // E09 实测：模型结束回合后任务等到时限——结束前的显式收口必须写进每轮提示词。
-    assert(hint.includes('redteam_task progress {planComplete:true}') && hint.includes('只等待用户资料或未完成时不要标记'),
-      '回合结束前的显式收口与不标记边界要写进每轮提示词');
   });
   test('opaque shell and MCP traffic follows scope without a default quota', () => {
     startTaskPolicy(store, 'shell-open', { mode: 'regular', question: '只查这个入口', target: 'http://127.0.0.1:3000', budget: { toolCalls: 10 } });

@@ -19,7 +19,7 @@ export function saveChatDefaults(store, input) {
   const record = { interaction: normalizeInteraction(input.interaction), reporting: reportingFor(input), workers: input.workers, explain: input.explain === true };
   // v6 5.5：存为默认偏好也保存测试内容偏好；空数组表示“只分析已添加内容，不再访问网站”。
   if (input.content !== undefined) record.content = normalizeTestContent(input.content);
-  for (const [key, label] of [['workerModel', '查找问题模型'], ['reviewModel', '复核结果模型'], ['reportModel', '整理报告模型']]) {
+  for (const [key, label] of [['workerModel', '协作模型'], ['reviewModel', '独立复核模型'], ['reportModel', '明确写报告时使用']]) {
     const value = input[key] === undefined ? previous[key] : input[key];
     if (value !== undefined) record[key] = normalizeModelChoice(value, label);
   }

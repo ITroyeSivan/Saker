@@ -113,6 +113,30 @@
       "type": "textarea",
       "placeholder": "例如创建订单、申请审批、下载导出文件",
       "default": "以材料里的实际操作为准"
+    },
+    "challenge": {
+      "label": "题面或附件",
+      "type": "material-picker",
+      "placeholder": "选择本题题面、附件或已有记录",
+      "default": "当前赛题材料"
+    },
+    "instance": {
+      "label": "题目实例或连接",
+      "type": "text",
+      "placeholder": "网址或连接说明；可留空",
+      "default": "没有提供远程实例"
+    },
+    "progress": {
+      "label": "当前进度或报错",
+      "type": "textarea",
+      "placeholder": "脚本、已得到的输出、卡住的位置",
+      "default": "从已有脚本和保存输出继续"
+    },
+    "selection": {
+      "label": "选中项或变化",
+      "type": "textarea",
+      "placeholder": "要重测的检查项，以及本次环境变化",
+      "default": "重测当前选中的检查项"
     }
   },
   "templates": [
@@ -769,6 +793,146 @@
         "检查表",
         "测试报告"
       ]
+    },
+    {
+      "id": "competition.solve.v1",
+      "title": "根据题面完成本题",
+      "group": "比赛模式",
+      "scene": ["competition"],
+      "required": ["challenge"],
+      "optional": ["instance", "focus"],
+      "text": "根据 {{challenge}} 完成本题。{{instance}}。{{focus}}。按题目实际条件选择工具，保留有用脚本、原始输出和答案来源。",
+      "keywords": ["比赛", "CTF", "解题", "题面"]
+    },
+    {
+      "id": "competition.continue-script.v1",
+      "title": "接着现有脚本做",
+      "group": "比赛模式",
+      "scene": ["competition"],
+      "required": ["challenge", "progress"],
+      "optional": [],
+      "text": "从 {{challenge}} 和 {{progress}} 继续，不先推倒重写。修改后在当前环境实际验证，保留脚本和输出。",
+      "keywords": ["比赛", "脚本", "继续", "报错"]
+    },
+    {
+      "id": "competition.web.v1",
+      "title": "Web 题",
+      "group": "比赛模式",
+      "scene": ["competition"],
+      "required": ["challenge", "instance"],
+      "optional": ["focus"],
+      "text": "根据 {{challenge}} 和 {{instance}} 解这道 Web 题。{{focus}}。沿实际页面、请求和源码线索验证，不要求遍历通用漏洞清单。",
+      "keywords": ["比赛", "Web", "HTTP", "浏览器"]
+    },
+    {
+      "id": "competition.pwn.v1",
+      "title": "Pwn 题",
+      "group": "比赛模式",
+      "scene": ["competition"],
+      "required": ["challenge"],
+      "optional": ["instance"],
+      "text": "分析 {{challenge}}，结合当前运行环境完成本地或远程验证。{{instance}}。保存利用脚本，并写清本地与远程条件差异。",
+      "keywords": ["比赛", "Pwn", "二进制", "利用"]
+    },
+    {
+      "id": "competition.reverse.v1",
+      "title": "逆向题",
+      "group": "比赛模式",
+      "scene": ["competition"],
+      "required": ["challenge", "output"],
+      "optional": [],
+      "text": "分析 {{challenge}}，得到 {{output}}。保存必要的还原代码或求解脚本，并说明结果如何实际验证。",
+      "keywords": ["比赛", "逆向", "分析", "反编译"]
+    },
+    {
+      "id": "competition.crypto.v1",
+      "title": "密码题",
+      "group": "比赛模式",
+      "scene": ["competition"],
+      "required": ["challenge", "output"],
+      "optional": [],
+      "text": "根据 {{challenge}} 完成 {{output}}。核对构造与参数，保存求解脚本和实际结果。",
+      "keywords": ["比赛", "密码", "Crypto", "密文"]
+    },
+    {
+      "id": "competition.forensics.v1",
+      "title": "取证与隐写",
+      "group": "比赛模式",
+      "scene": ["competition"],
+      "required": ["challenge", "output"],
+      "optional": [],
+      "text": "分析 {{challenge}}，定位 {{output}}。保留提取过程及产物，区分真实提取的数据和推测。",
+      "keywords": ["比赛", "取证", "隐写", "流量", "图片"]
+    },
+    {
+      "id": "competition.other.v1",
+      "title": "其他题型",
+      "group": "比赛模式",
+      "scene": ["competition"],
+      "required": ["challenge"],
+      "optional": ["focus"],
+      "text": "根据 {{challenge}} 解题。{{focus}}。按实际条件选择工具，保留结果及验证过程。",
+      "keywords": ["比赛", "其他", "杂项", "Misc"]
+    },
+    {
+      "id": "competition.hint.v1",
+      "title": "只给提示",
+      "group": "比赛模式",
+      "scene": ["competition"],
+      "required": ["challenge", "progress"],
+      "optional": [],
+      "text": "根据 {{challenge}} 和 {{progress}} 提示下一步方向。只解释，不运行程序，也不直接给出答案。",
+      "keywords": ["比赛", "提示", "只解释", "不给答案"]
+    },
+    {
+      "id": "competition.writeup.v1",
+      "title": "整理 Writeup",
+      "group": "比赛模式",
+      "scene": ["competition"],
+      "required": ["challenge"],
+      "optional": ["output"],
+      "text": "根据 {{challenge}} 的已有记录整理可复现的 Writeup。{{output}}。保留命令、脚本与答案来源；没有记录的内容标明缺失，不编造过程。",
+      "keywords": ["比赛", "Writeup", "报告", "复盘"]
+    },
+    {
+      "id": "cases.list.v1",
+      "title": "只整理案例清单",
+      "group": "案例测试",
+      "scene": ["cases"],
+      "required": ["materials"],
+      "optional": [],
+      "text": "从 {{materials}} 整理测试清单，保留原文和出处，区分要求、环境说明和待核对内容。先不执行测试。",
+      "keywords": ["案例", "清单", "整理", "不执行"]
+    },
+    {
+      "id": "cases.continue.v1",
+      "title": "继续未完成项",
+      "group": "案例测试",
+      "scene": ["cases"],
+      "required": ["selection"],
+      "optional": [],
+      "text": "接着本次记录处理 {{selection}}。沿用已有有效条件，已完成内容不无故重做；新的缺口继续保留。",
+      "keywords": ["案例", "继续", "未完成", "缺口"]
+    },
+    {
+      "id": "cases.retest.v1",
+      "title": "重测选中项",
+      "group": "案例测试",
+      "scene": ["cases"],
+      "required": ["selection"],
+      "optional": ["change"],
+      "text": "重新执行 {{selection}}，结合 {{change}} 核对结果。建立本次重测记录，保留原结论，不把本次子集当成整个项目已完成。",
+      "keywords": ["案例", "重测", "选中", "复测"]
+    },
+    {
+      "id": "cases.summary.v1",
+      "title": "整理案例结果",
+      "group": "案例测试",
+      "scene": ["cases"],
+      "required": ["output"],
+      "optional": [],
+      "text": "按 {{output}} 整理当前案例结果，包含要求、实际结果、必要材料和未完成项。只整理已有记录，不重新执行测试。",
+      "keywords": ["案例", "结果", "导出", "整理"]
     },
     {
       "id": "U01",

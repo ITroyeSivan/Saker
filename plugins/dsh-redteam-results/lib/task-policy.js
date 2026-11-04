@@ -26,9 +26,12 @@ const startModes = new Set(['materials-first', 'auto-recon', 'direct-test']);
 const localTools = new Set(['redteam_task', 'redteam_context', 'redteam_checks', 'redteam_delivery',
   'redteam_method', 'redteam_research', 'redteam_execution',
   'redteam_finding_register', 'redteam_finding_update', 'redteam_finding_delete', 'redteam_chain_reconcile',
+  'saker_assist',
+  'saker_material',
   'read', 'write', 'edit', 'glob', 'grep', 'run_code', 'skill', 'tool_pack',
-  'mcp_search', 'exercise_submit',
-  'project_document', 'project_check']);
+  'mcp_search', 'exercise_submit', 'get_goal', 'todo_write', 'working_directory', 'ask_user_question',
+  'project_document', 'project_check',
+  'competition_challenge', 'competition_answer', 'competition_execution', 'competition_knowledge']);
 const projectMetadataTools = new Set(['working_directory', 'get_goal', 'todo_write', 'read_image']);
 // 批次 A：方法编排与抽象工作台已退出运行。任何一次调用都直接拒绝并计数，
 // 不再当作"本地登记"放行——否则停用后模型仍能通过它们继续推进目标操作。
@@ -47,7 +50,7 @@ const URL_IN_COMMAND = /https?:\/\/[^\s"'`()<>|[\]{}]+/gi;
 const SHELL_COMMAND_KEYS = new Set(['command', 'cmd', 'script', 'code', 'shell', 'input']);
 const URL_ARGUMENT_KEYS = new Set(['url', 'uri', 'endpoint', 'target', 'base-url', 'baseUrl', 'baseURL',
   'targetUrl', 'target_url', 'requestUrl', 'request_url', 'host', 'hostname']);
-const SHELL_NETWORK_COMMAND = /(?:^|[;&|\r\n]\s*)(?:curl(?:\.exe)?|wget(?:\.exe)?|Invoke-WebRequest|Invoke-RestMethod|iwr|irm|http(?:\.exe)?|https(?:\.exe)?|nuclei|httpx|ffuf|nmap)\b[^\r\n;&|]*/gim;
+const SHELL_NETWORK_COMMAND = /(?:^|[;&|\r\n]\s*)(?:(?:pwsh|powershell|cmd|bash|sh)(?:\.exe)?(?:\s+(?:-[A-Za-z-]+|\/[A-Za-z]+))*\s*["']?\s*)?(?:curl(?:\.exe)?|wget(?:\.exe)?|Invoke-WebRequest|Invoke-RestMethod|iwr|irm|http(?:\.exe)?|https(?:\.exe)?|nuclei|httpx|ffuf|nmap)\b[^\r\n;&|]*/gim;
 const offlineMcpTools = new Set(['base64_encode', 'base64_decode', 'url_encode', 'url_decode']);
 function offlineToolCall(name, args) {
   if (name !== 'mcp_call') return false;
@@ -447,9 +450,9 @@ export function chooseTaskMode(store, sessionId, mode, options) {
     interaction,
     reporting: reportingFor({ interaction, reporting: options?.reporting ?? previous?.reporting }),
     explain: options?.explain === undefined ? (previous?.explain ?? false) : options.explain === true,
-    workerModel: normalizeModelChoice(options?.workerModel === undefined ? previous?.workerModel : options.workerModel, '查找问题模型'),
-    reviewModel: normalizeModelChoice(options?.reviewModel === undefined ? previous?.reviewModel : options.reviewModel, '复核结果模型'),
-    reportModel: normalizeModelChoice(options?.reportModel === undefined ? previous?.reportModel : options.reportModel, '整理报告模型'),
+    workerModel: normalizeModelChoice(options?.workerModel === undefined ? previous?.workerModel : options.workerModel, '协作模型'),
+    reviewModel: normalizeModelChoice(options?.reviewModel === undefined ? previous?.reviewModel : options.reviewModel, '独立复核模型'),
+    reportModel: normalizeModelChoice(options?.reportModel === undefined ? previous?.reportModel : options.reportModel, '写报告模型'),
     // 第 4.3/5.5 节动作限制：未开始的任务先记在选择里，开始时落进策略。
     allowTargetNetwork: options?.allowTargetNetwork === undefined ? (previous?.allowTargetNetwork ?? true) : options.allowTargetNetwork !== false,
     readOnly: options?.readOnly === undefined ? (previous?.readOnly ?? false) : options.readOnly === true,
@@ -462,8 +465,8 @@ export function chooseTaskMode(store, sessionId, mode, options) {
     allowedOrigins: normalizeAllowedOrigins(options?.allowedOrigins ?? previous?.allowedOrigins),
     requestRatePerMinute: options?.requestRatePerMinute === undefined ? normalizeRequestRate(previous?.requestRatePerMinute) : normalizeRequestRate(options.requestRatePerMinute),
     requestConcurrency: options?.requestConcurrency === undefined ? normalizeRequestConcurrency(previous?.requestConcurrency) : normalizeRequestConcurrency(options.requestConcurrency),
-    // v6 第 5.5 / 8.3 节：初始「自动」上限是 2（保守配置，不是性能结论）。
-    workers: integer(options?.workers ?? previous?.workers ?? 2, 'workers', 0, MAX_SITE_WORKERS) };
+    // 新任务默认不创建助手；已有用户明确选择的上限继续保留。
+    workers: integer(options?.workers ?? previous?.workers ?? 0, 'workers', 0, MAX_SITE_WORKERS) };
   normalizeTaskFlow('single', mode);
   store.db.exec('BEGIN IMMEDIATE');
   try {
@@ -482,7 +485,8 @@ export function archiveTaskRound(store, sessionId, source, now = Date.now()) {
   if (!current) throw new Error('no previous round');
   if (current.awaitingConfirmation && !current.cancelled) throw new Error('阶段确认不是任务结束；先确认继续或停止本轮');
   if (current.blocker || (source === 'desktop-user' && current.parentSession)) throw new Error('受阻任务或子任务不能自行开启新一轮');
-  if (source === 'desktop-user' && (!taskPolicyStatus(store, sessionId, now).stopped || current.blocker))
+  const status = taskPolicyStatus(store, sessionId, now);
+  if (source === 'desktop-user' && ((!status.stopped && !status.idle) || current.blocker))
     throw new Error('先结束当前任务；访问阻碍必须先处理，不能通过新一轮绕过');
   if (hasUnreleasedWorker(store, sessionId)) throw new Error('先确认全部子代理已释放');
   store.db.exec('BEGIN IMMEDIATE');
@@ -551,7 +555,7 @@ export function startTaskPolicy(store, sessionId, input, now = Date.now()) {
   if(parentId && Object.entries(modelLimits).some(([key,value])=>value!==readTaskPolicy(store,parentId)?.budget[key]))
     throw Error('子代理不能更改主任务共享模型额度');
   const question = input.question === undefined ? '' : boundedText(input.question, 'question', 64000);
-  const workerLimit = integer(input.budget?.workers ?? choice?.workers ?? 2, 'budget.workers', 0, MAX_SITE_WORKERS);
+  const workerLimit = integer(input.budget?.workers ?? choice?.workers ?? 0, 'budget.workers', 0, MAX_SITE_WORKERS);
   if (parentId && workerLimit !== 0) throw Error('子代理不能再派子代理');
   if (choice && workerLimit > choice.workers) throw new Error('不能提高桌面已选择的子代理上限');
   const recordedParent = store.db.prepare('SELECT parent_session FROM site_workers WHERE child_id=?').get(sessionId)?.parent_session;
@@ -758,7 +762,7 @@ export function setTaskMode(store, sessionId, mode, source) {
   if (!modes.has(mode)) throw new Error('invalid task mode')
   const policy = readTaskPolicy(store, sessionId)
   if (!policy || policy.parentSession) throw new Error('only a main task can change focus')
-  if (policy.scenario === 'project') throw new Error('按文档测试不使用研究重点模式')
+  if (policy.scenario === 'project') throw new Error('案例测试不使用研究重点模式')
   if (policy.mode === mode) return policy
   // A focus-only change must not silently discard a scope/time proposal the
   // user still has to approve.
@@ -861,7 +865,7 @@ const CHAT_UPDATE_LABELS = {
   interaction: '什么时候问我', reporting: '什么时候汇报', explain: '解释原理', workerLimit: '助手上限',
   allowTargetNetwork: '允许访问网站', readOnly: '不改动网站数据', excludedPaths: '排除路径',
   requestRatePerMinute: '扫描速率', requestConcurrency: '并发上限', toolCalls: '工具调用上限', minutes: '时间上限',
-  workerModel: '查找问题模型', reviewModel: '复核结果模型', reportModel: '整理报告模型',
+  workerModel: '协作模型', reviewModel: '独立复核模型', reportModel: '写报告模型',
   target: '测试范围', mode: '测试重点', unmeteredToolCalls: '未计量通道上限', extendMinutes: '时间上限',
   scopeOperation: '范围操作', scopeMode: '范围操作',
 };
@@ -951,7 +955,7 @@ export function updateTaskFromChat(store, sessionId, input, source = 'model-chat
   }
   if (input.mode !== undefined) {
     if (!modes.has(input.mode)) throw new Error('invalid task mode');
-    if (policy.scenario === 'project') throw new Error('按文档测试不使用研究重点模式');
+    if (policy.scenario === 'project') throw new Error('案例测试不使用研究重点模式');
     if (desktop) { next.mode = input.mode; next.flow = normalizeTaskFlow('single', input.mode); mark('mode'); }
     else propose('mode', input.mode, '测试重点');
   }
@@ -1010,7 +1014,7 @@ export function updateTaskFromChat(store, sessionId, input, source = 'model-chat
       : propose('requestRatePerMinute', input.requestRatePerMinute, '扫描速率');
     else if (value !== current) { next.requestRatePerMinute = value; mark('requestRatePerMinute'); }
   }
-  for (const [field, label] of [['workerModel', '查找问题模型'], ['reviewModel', '复核结果模型'], ['reportModel', '整理报告模型']]) {
+  for (const [field, label] of [['workerModel', '协作模型'], ['reviewModel', '独立复核模型'], ['reportModel', '写报告模型']]) {
     if (input[field] === undefined) continue;
     const value = normalizeModelChoice(input[field], label);
     if (JSON.stringify(value) !== JSON.stringify(policy[field] ?? null)) { next[field] = value; mark(field); }
@@ -1091,7 +1095,7 @@ export function taskPolicyStatus(store, sessionId, now = Date.now()) {
     const state = findingDeliveryState(finding);
     return state.ready && state.reproductionVerified;
   });
-  let reason = '';
+  let reason = '', idle = false;
   if (policy.blocker) reason = 'paused:' + policy.blocker.code;
   else if (policy.modelBudgetBlock) reason = 'model_budget:' + policy.modelBudgetBlock.code;
   else if (policy.cancelled) reason = 'cancelled';
@@ -1100,7 +1104,7 @@ export function taskPolicyStatus(store, sessionId, now = Date.now()) {
   else if (policy.stop === 'budget' && policy.planComplete) reason = 'plan_complete';
   else if (policy.budget.deadline !== null && now >= policy.budget.deadline) reason = 'time_budget_exhausted';
   else if (policy.budget.toolCalls !== null && policy.budget.toolCalls !== undefined && policy.used.toolCalls >= policy.budget.toolCalls) reason = 'tool_budget_exhausted';
-  else if (policy.turnEndedAt) reason = 'turn_ended';
+  else if (policy.turnEndedAt) { reason = 'turn_ended'; idle = true; }
   else if (policy.stop === 'first-rce' && findings.some(finding => finding.proofKind === 'execution')) reason = 'first_verified_rce';
   else if (policy.stop === 'first-high' && findings.some(finding => ['high', 'critical'].includes(finding.secondRating))) reason = 'first_verified_high';
   else if (policy.awaitingConfirmation) reason = 'interaction_confirmation_required';
@@ -1111,13 +1115,14 @@ export function taskPolicyStatus(store, sessionId, now = Date.now()) {
   }
   // 任务状态词表（v6 第 8.2 节）：准备 / 运行 / 等待信息 / 暂停中 / 已暂停 / 已完成 / 失败。
   // 这里只算不依赖代理运行时的部分；「暂停中 vs 已暂停」由调用方按代理是否仍在收尾细分。
-  const phase = !reason ? 'running'
+  const phase = idle ? 'idle'
+    : !reason ? 'running'
     : ['plan_complete', 'queue_complete', 'first_verified_rce', 'first_verified_high'].includes(reason) ? 'completed'
     : reason.startsWith('model_budget:') ? 'failed'
     : reason === 'cancelled' ? 'paused'
     : (reason === 'interaction_confirmation_required' || reason.startsWith('paused:')) ? 'waiting-info'
     : 'paused';
-  return { configured: true, phase, stopped: !!reason, reason, policy, researchReady: ready,
+  return { configured: true, phase, stopped: !!reason && !idle, idle, reason, policy, researchReady: ready,
     observationExhausted: policy.mode === '0day' && !ready && policy.used.discoveryCalls >= policy.budget.discoveryCalls,
     reviewedReproducedFindings: findings.length };
 }
@@ -1137,38 +1142,27 @@ export function takeTaskContinuation(store, sessionId) {
   } catch (error) { store.db.exec('ROLLBACK'); throw error; }
 }
 /**
- * 回合已经停止、没有待续流程或未释放子代理时，收口本轮目标操作。
- * 这不是“完成”：只把 turnEndedAt 写进同一份任务记录，资料、预算、未完成项都保留；
- * 用户下一次消息可继续，不必等时间上限，也不会把“模型停止输出”伪装成 plan_complete。
+ * 回合已经停止、没有待续流程或未释放子代理时，记录本轮空闲。
+ * 这不是“完成”，也不是撤销任务权限：只把 turnEndedAt 写进同一份任务记录，
+ * 资料、范围、账号、预算、未完成项都保留；用户下一次真实消息可直接继续。
  */
 export function finishTaskOnTurnEnd(store, sessionId, now = Date.now()) {
   const state = taskPolicyStatus(store, sessionId, now);
-  if (!state.configured || state.stopped || state.policy.parentSession) return null;
+  if (!state.configured || state.stopped || state.idle || state.policy.parentSession) return null;
   // 多阶段流程由 takeTaskContinuation 负责；回合结束兜底只收口单阶段小任务。
   if (state.policy.flow?.kind !== 'single') return null;
   if (state.policy.flow?.needsContinuation || state.policy.needsBaselineRecheck
     || state.policy.awaitingConfirmation || state.policy.blocker) return null;
   if (hasUnreleasedWorker(store, sessionId)) return null;
   const next = write(store, sessionId, { ...state.policy, turnEndedAt: now, finishedAt: now });
-  return { ...state, stopped: true, reason: 'turn_ended', policy: next };
+  // An ordinary completed model turn is idle, not a terminal task stop. The
+  // next real user message may continue with the same scope, accounts and budget.
+  return { ...state, stopped: false, idle: true, phase: 'idle', reason: 'turn_ended', policy: next };
 }
 
-/** True only for an explicit human request to keep the existing task running. */
-export function isExplicitTaskContinuation(message) {
-  if (!message || message.source?.kind !== 'user' || /^saker-/i.test(String(message.id || ''))) return false;
-  const text = (Array.isArray(message.content) ? message.content : [message.content])
-    .filter(block => block?.type === 'text' || typeof block === 'string')
-    .map(block => typeof block === 'string' ? block : block.text)
-    .join('\n').replace(/\s+/g, ' ').trim();
-  if (!text || text.length > 300) return false;
-  if (/(?:怎么|如何|为什么|是否|能否|可不可以).{0,12}继续|(?:status|状态|进展|计划|方案)/i.test(text)) return false;
-  // Negation, pausing and conditional language must stay stopped. Keep this
-  // deliberately conservative; uncertain long sentences can use the explicit
-  // Desktop button instead of being guessed as an execution command.
-  if (/(?:不要|别|无需|不必|先不|暂缓|暂停|等一下|稍后|前先|do\s+not|don't|dont|stop|wait|before|not\s+now)/i.test(text))
-    return false;
-  return /^(?:请|麻烦)?(?:继续|接着(?:做|测试)?)(?:当前)?(?:任务|测试|执行|做)?(?:吧)?[。.!！]?$/.test(text)
-    || /^(?:please\s+)?(?:continue|resume)\s+(?:the\s+)?(?:current\s+)?(?:task|testing|work|run)(?:\s+please)?[.!]?$/i.test(text);
+/** A real human message, not a plugin/system-generated continuation. */
+export function isHumanUserMessage(message) {
+  return !!message && message.source?.kind === 'user' && !/^saker-/i.test(String(message.id || ''));
 }
 
 /**
@@ -1216,7 +1210,9 @@ function taskPromptBase(state, includeUsage = true, controlledInterface = false)
     const selectedTarget = String(state.options?.target || '');
     const targetText = selectedTarget.slice(0, 4000)
       + (selectedTarget.length > 4000 ? '\n[完整目标与范围已保存在桌面任务选择中；此处只显示前 4000 字。]' : '');
-    return (state.choice ? '用户选择了/pentest-'+state.choice+'。用户决定目标、范围和重点，模型选择方法与顺序；选择菜单没有开始测试。' : '渗透测试：用户可给网址、域名、IP/CIDR、资产清单、代码、请求或文档；已有材料直接推进，不要求先做全量测绘。')
+    return '程序会在首次真实工具动作时建立任务记录；不要调用任务登记或状态工具。'
+      + (state.choice ? '桌面研究偏好=' + state.choice + '；' : '')
+      + '用户决定目标、范围和重点，模型选择方法与顺序。已有材料直接推进。'
       + (state.options?'沿用桌面选择workflow='+state.options.workflow+'，子代理上限='+state.options.workers+'，不能自行增加。':'')
       + (selectedTarget ? '；用户在桌面设置中给出的目标与范围（保留完整路径）：'+targetText : '')
       + interactionPrompt(state.options?.interaction,false,reportingFor(state.options));
@@ -1226,12 +1222,13 @@ function taskPromptBase(state, includeUsage = true, controlledInterface = false)
     const projectUsage = includeUsage && policy.budget.toolCalls !== null && policy.budget.toolCalls !== undefined
       ? '操作=' + policy.used.toolCalls + '/' + policy.budget.toolCalls + '；'
       : '操作按实际调用统计（未设上限）；';
-    return '按文档连续测试：先用 project_document list/read 读取用户提供的测试要求，用 project_check define/next 保存并领取检查、record 保存实际结果和缺口；继续独立项；'
+    return '案例连续测试：程序已从导入资料和实际工具事件保存来源与进度；直接按当前项读取、执行并在正常答复中说明观察和缺口，不要为登记另调用管理工具；继续独立项；'
       + '目标测试优先用 saker_browser 的受管 Chrome for Testing（CDP）；原始 HTTP 用 project_request，'
       + '不要用 shell curl 直接发目标请求——curl 不会自动带 Cookie/Origin/Referer/User-Agent 等浏览器请求头，容易误判结果；'
-      + (policy.projectRunId ? '当前运行=' + policy.projectRunId + '；历史检查编号不沿用，当前项用 project_check next 获取。' : '')
+      + '需要命令时直接调用现有执行工具；程序和宿主事件会保存调用与结果，不要为了补记 evidenceId 再次执行。'
+      + (policy.projectRunId ? '当前运行=' + policy.projectRunId + '；历史检查编号不沿用，当前项由程序状态提供。' : '')
       + '本轮问题：' + (policy.question || '按用户文档') + '；站点：' + (policy.target || '按已给授权范围，不能自行扩大') + '；' + projectUsage
-      + '停止规则=' + policy.stop + '。' + (includeUsage ? '' : '需要精确用量时调用 redteam_task action=status；宿主守卫按最新预算拦截。')
+      + '停止规则=' + policy.stop + '。' + (includeUsage ? '' : '精确用量由程序显示，宿主守卫按最新预算拦截。')
       + (state.stopped ? '目标操作已停止：' + state.reason + '。只整理证据与交付。' : '使用实际观察结果；没有执行到的项写清未完成，不能写成通过。')
       + (controlledInterface ? CONTROLLED_INTERFACE_HINT : '');
   }
@@ -1243,11 +1240,11 @@ function taskPromptBase(state, includeUsage = true, controlledInterface = false)
       +'；未计量通道='+(policy.used.unmeteredToolCalls??0)+(Number.isInteger(policy.budget.unmeteredToolCalls)?'/'+policy.budget.unmeteredToolCalls:'/未设额外上限')
       +'（实际请求数未知，一次工具调用不等于一个目标请求）；'
     : '';
-  const usageHint = includeUsage ? '' : '需要精确用量时调用 redteam_task action=status；宿主守卫按最新预算拦截。';
+  const usageHint = includeUsage ? '' : '精确用量由程序显示，宿主守卫按最新预算拦截。';
     const scopeText = taskScopePromptText(policy);
     const fullRequest = String(policy.requestText || '');
     const requestText = fullRequest.slice(0, 4000) + (fullRequest.length > 4000 ? '\n[完整用户原文已保存在任务记录；此处只显示前 4000 字，避免每轮重复占满上下文。]' : '');
-    return interactionPrompt(policy.interaction, !!policy.parentSession,reportingFor(policy))+taskFlowPrompt(policy)+'用户要求：'+requestText+'；范围：'+scopeText+'；重点='+policy.mode+'；'+usage+'方法、顺序、工具和分工由模型按用户目标决定；直接使用 shell/MCP 的请求若宿主未捕获，不会产生宿主执行回执，要留可复查证据优先用 redteam_execution direct/run；停止规则='+policy.stop+'。'+usageHint+'不要重置预算。可在范围内改变优先级、工具和助手对象；准备结束本轮时先cleanup释放全部子代理，再redteam_task progress {planComplete:true}（只等待用户资料或未完成时不要标记）；子代理不能再派代理。'+(state.stopped?'目标操作已停止：'+state.reason+'。'+(policy.awaitingConfirmation?'等待桌面确认并继续；不能自行解除。':policy.blocker?policy.blocker.reason+'；先向用户汇报，不能自动绕行或自行解除。':'只整理证据与交付。'):policy.needsBaselineRecheck?'用户已处理阻碍，先用redteam_execution run purpose=baseline复查已存正常GET/HEAD请求，然后继续原问题。':'使用实际正常对照和影响证据；回执不等于漏洞。')+(controlledInterface ? CONTROLLED_INTERFACE_HINT : '');
+    return interactionPrompt(policy.interaction, !!policy.parentSession,reportingFor(policy))+taskFlowPrompt(policy)+'用户要求：'+requestText+'；范围：'+scopeText+'；重点='+policy.mode+'；'+usage+'方法、顺序、工具和分工由模型按用户目标决定；实际 shell/MCP 的事实由程序记录；停止规则='+policy.stop+'。'+usageHint+'不要重置预算。可在范围内改变优先级、工具和助手对象；不要为维护插件账本调用登记、领取、补录或状态查询工具。'+(state.stopped?'目标操作已停止：'+state.reason+'。'+(policy.awaitingConfirmation?'等待桌面确认并继续；不能自行解除。':policy.blocker?policy.blocker.reason+'；先向用户汇报，不能自动绕行或自行解除。':'只整理证据与交付。'):policy.needsBaselineRecheck?'用户已处理阻碍，直接用现有请求工具复查已存正常GET/HEAD请求，然后继续原问题。':'使用实际正常对照和影响证据；回执不等于漏洞。')+(controlledInterface ? CONTROLLED_INTERFACE_HINT : '');
 }
 function taskPromptWithUsage(state, includeUsage, controlledInterface = false, selection = null) {
   const base = taskPromptBase(state, includeUsage, controlledInterface);
@@ -1313,13 +1310,30 @@ export function taskOverview(store, sessionId) {
   scope: taskScopeSummary(state.policy || {}), pendingChange: state.policy?.pendingChange || null,
   gaps: gaps.slice(0, 20), moreGaps: Math.max(0, gaps.length - 20) };
 }
-export function taskExecutionGuard(store, sessionId, name, now = Date.now(), { onReserve, baselineRecheck = false, args, reserve = true } = {}) {
+export function taskExecutionGuard(store, sessionId, name, now = Date.now(), { onReserve, baselineRecheck = false, args, reserve = true, admitted = false } = {}) {
+  if (name === 'project_evidence') {
+    if (String(args?.action || '').trim() === 'command') {
+      return taskExecutionGuard(store, sessionId, 'pwsh', now, { onReserve, baselineRecheck, args, reserve, admitted })
+    }
+    // File/source/list/reference only read already available local records.
+    if (readTaskPolicy(store, sessionId)?.startedAt) {
+      store.db.exec('BEGIN IMMEDIATE')
+      try {
+        const policy = readTaskPolicy(store, sessionId)
+        policy.used = { ...policy.used, localToolCalls: (policy.used?.localToolCalls ?? 0) + 1 }
+        write(store, sessionId, policy)
+        store.db.exec('COMMIT')
+      } catch { store.db.exec('ROLLBACK') }
+    }
+    return undefined
+  }
   // Visibility restrictions cannot hide agent-scoped tools. Enforce ownership on every dispatch,
   // including PTC's eventual call, before the local-tool fast path. [] means no tools.
   const allowed = childAllowedTools(store, sessionId);
   const permissionName = name === 'recorded-project-execution' ? 'project_request'
     : ['recorded-http-execution', 'recorded-browser-execution', 'redteam_execution', 'saker_browser'].includes(name) ? 'redteam_execution' : name;
-  if (allowed !== undefined && (!Array.isArray(allowed) || !allowed.includes(permissionName)))
+  if (allowed !== undefined && (!Array.isArray(allowed)
+    || (!allowed.includes(permissionName) && !allowed.includes(name))))
     return 'worker_tool_not_allowed：当前助手未获准使用 ' + name;
   const earlyPolicy = readTaskPolicy(store, sessionId);
   // A reference fetch is passive unless its concrete URL belongs to the active
@@ -1360,8 +1374,44 @@ export function taskExecutionGuard(store, sessionId, name, now = Date.now(), { o
     } catch { store.db.exec('ROLLBACK'); }
     return undefined;
   }
-  if (retiredTools.has(name)) return 'retired_tool：' + name + ' 已退出运行（方法编排 / 抽象工作台已停用）；改用聊天、测试内容选择、redteam_task / redteam_context / redteam_execution 等当前入口。';
-  if (/^(?:subagent(?:_|$)|workflow$|send_message$)/.test(name)) return 'managed_delegation_required：需要独立问题时使用 redteam_task delegate/send；保留父子预算、范围、取消归属和清理。';
+  if (retiredTools.has(name)) return 'retired_tool：' + name + ' 已退出运行（方法编排、登记和抽象工作台已停用）；直接使用聊天、实际读取、请求与执行工具。';
+  if (/^(?:subagent(?:_|$)|workflow$|send_message$)/.test(name)) return 'managed_delegation_required：需要独立问题或复核时使用 saker_assist；程序负责父子预算、范围、取消归属、自动交回和清理。';
+  // The model-facing task-start/registration tool is retired. Initialize the
+  // existing policy once from the first real dispatched action instead; local
+  // reads above remain free of a task and never create one.
+  if (!readTaskPolicy(store, sessionId)) {
+    try {
+      const choice = chosenTaskOptions(store, sessionId) || {};
+      const selectedMode = chosenTaskMode(store, sessionId)
+        || (choice.mode && modes.has(choice.mode) ? choice.mode : 'regular');
+      const target = candidateUrlsFromArgs(args).find(raw =>
+        choice.scopeTerms?.include?.some(term => taskTermAllowsUrl(term, raw))) || choice.target || candidateUrlsFromArgs(args)[0] || '';
+      startTaskPolicy(store, sessionId, {
+        mode: selectedMode,
+        scenario: choice.scenario === 'project' ? 'pentest' : (choice.scenario || 'pentest'),
+        interaction: choice.interaction,
+        reporting: choice.reporting,
+        explain: choice.explain,
+        workerModel: choice.workerModel,
+        reviewModel: choice.reviewModel,
+        reportModel: choice.reportModel,
+        allowTargetNetwork: choice.allowTargetNetwork,
+        readOnly: choice.readOnly,
+        excludedPaths: choice.excludedPaths,
+        allowedOrigins: choice.allowedOrigins,
+        requestRatePerMinute: choice.requestRatePerMinute,
+        requestConcurrency: choice.requestConcurrency,
+        // This anchor is created from the real dispatched action, not a model
+        // registration step. The original user request remains in chat history;
+        // the concise anchor satisfies the policy's bounded nonempty contract.
+        question: choice.requestText || '按当前会话中的用户请求执行',
+        ...(target ? { target, scope: choice.scope?.include || choice.scopeTerms?.include?.map(term => term.raw) } : {}),
+        budget: { workers: Number.isInteger(Number(choice.workers)) ? Number(choice.workers) : 0 },
+      }, now);
+    } catch (error) {
+      return 'task_policy_missing：程序无法从当前动作建立任务记录，但不会要求模型调用登记工具：' + error.message;
+    }
+  }
   store.db.exec('BEGIN IMMEDIATE');
   try {
     const state = taskPolicyStatus(store, sessionId, now);
@@ -1370,10 +1420,11 @@ export function taskExecutionGuard(store, sessionId, name, now = Date.now(), { o
     // 用户在主任务里关掉网站访问/改成只读后，已经在跑的子代理立刻同样被拦。
     const effective = state.configured ? effectivePolicy(store, state.policy) : state.policy;
     let reason;
-      if (!state.configured) reason = 'task_policy_missing：先调用redteam_task设置模式和任务预算，再执行目标操作。';
+      if (!state.configured) reason = 'task_policy_missing：当前没有可执行的任务状态；请从桌面重新开始本次场景，程序不会要求模型调用登记工具。';
       else if (state.policy.parentSession && workerReportedFinished(store, sessionId))
         reason = 'worker_reported_finished：子任务已报告结束；只能整理最终回复，不能继续目标操作。';
-    else if (state.stopped) reason = '任务已停止：' + state.reason + '；仅继续证据整理与交付，不能重置预算或继续目标操作。';
+    else if (state.stopped && !(admitted && state.reason === 'tool_budget_exhausted'))
+      reason = '任务已停止：' + state.reason + '；仅继续证据整理与交付，不能重置预算或继续目标操作。';
     else if (isProject && store.db.prepare("SELECT 1 FROM project_actions a JOIN project_runs r ON r.session_id=a.session_id AND r.run_id=a.run_id WHERE a.session_id=? AND r.state IN ('preparing','running','waiting','paused') AND json_extract(a.record,'$.sideEffectUnknown')=1 LIMIT 1").get(sessionId))
       reason = 'project_write_outcome_unknown：原写入结果未知，请先核对原动作，不能继续目标操作。';
     else if (!isProject && state.policy.needsBaselineRecheck && !baselineRecheck) reason = 'baseline_recheck_required：用户已处理阻碍，先用redteam_execution run purpose=baseline复查已存正常GET/HEAD请求，不能直接重试探针。';

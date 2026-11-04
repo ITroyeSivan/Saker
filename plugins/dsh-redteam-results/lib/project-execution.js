@@ -6,13 +6,18 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readTaskPolicy, effectivePolicy, targetTrafficDenial, excludedPathDenial, taskExecutionGuard } from './task-policy.js';
 import { resolveTaskIdentity, identityDenial, identityRequestHeaders, taskIdentityRevision as identityRevision } from './identity-binding.js';
 import { acquireTargetSlot } from './request-pacing.js';
-import { beginProjectAction, markProjectActionDispatched, finishProjectAction, readProjectRun, readProjectCheck } from './project-store.js';
+import { beginProjectAction, markProjectActionDispatched, finishProjectAction, readProjectRun, readProjectCheck,
+  transitionProjectRun, saveProjectEvidence } from './project-store.js';
 import { redactHeaders, redactText } from './redaction.js';
 import { readTaskContext } from './task-context.js';
 import { responseBodyText } from './response-body.js';
 import { taskScopeIncludesUrl } from './task-scope.js';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
+const authHeaderRevision = headers => digest(JSON.stringify(Object.entries(headers || {})
+  .filter(([name]) => /^(cookie|authorization)$/i.test(name.trim()))
+  .map(([name, value]) => [name.toLowerCase(), String(value)])
+  .sort(([a], [b]) => a.localeCompare(b))));
 
 function parseTarget(input) {
   let url;
@@ -131,8 +136,9 @@ function dispatch(url, method, headers, body, timeoutMs, signal) {
 
 export async function executeProjectHttp(store, sessionId, runId, checkId, input = {}, signal) {
   if (signal?.aborted) throw new Error('项目动作已取消');
-  const run = readProjectRun(store, sessionId, runId);
+  let run = readProjectRun(store, sessionId, runId);
   if (!run) throw new Error('project run not found');
+  if (run.state === 'preparing') run = transitionProjectRun(store, sessionId, runId, 'running', run.controlRev);
   if (run.state !== 'running') throw Object.assign(new Error('项目运行当前不可派发新动作'), { code: 'project-state-conflict' });
   const check = readProjectCheck(store, sessionId, runId, checkId);
   if (!check) throw new Error('project check not found');
@@ -144,20 +150,65 @@ export async function executeProjectHttp(store, sessionId, runId, checkId, input
   const denial = targetTrafficDenial(limits, { method }) || excludedPathDenial(limits, { url: url.href })
     || targetScopeDenial(store, sessionId, limits, url);
   if (denial) throw new Error(denial);
-  const authContext = String(input.authContext || '');
-  const associatedDenial = associatedIdentityDenial(store, sessionId, limits, url, authContext);
-  if (associatedDenial) throw new Error(associatedDenial);
-  const identity = resolveTaskIdentity(store, sessionId, authContext);
-  const identityReason = identityDenial(identity);
-  if (identityReason) throw new Error(identityReason);
+  const authContext = String(input.authContext || '').trim();
+  const identityRef = String(input.identityRef || '').trim();
+  if (authContext && identityRef && authContext !== identityRef)
+    throw new Error('identityRef 与 authContext 不一致');
+  const requestedIdentity = identityRef || authContext;
+  const requiredIdentity = /identityRef\s*=\s*([A-Za-z0-9._-]+)/i.exec(String(check.requirement || ''))?.[1] || '';
+  if (requiredIdentity && requestedIdentity !== requiredIdentity)
+    throw new Error('当前检查要求 identityRef=' + requiredIdentity + '，本次请求的身份为空或不一致');
+  const requiredUrls = [...String(check.requirement || '').matchAll(/https?:\/\/[^\s<>"'`，。；）)\]]+/gi)]
+    .map(match => match[0].replace(/[.,;]+$/, ''))
+    .flatMap(raw => {
+      try {
+        const parsed = new URL(raw);
+        parsed.hash = '';
+        return [parsed.href];
+      } catch { return []; }
+    });
+  if (requiredUrls.length && !requiredUrls.includes(url.href))
+    throw new Error('请求地址不属于当前检查；请只执行检查表中当前项');
+  const associatedDenial = associatedIdentityDenial(store, sessionId, limits, url, requestedIdentity);
+  const identity = resolveTaskIdentity(store, sessionId, requestedIdentity);
+  const identityReason = identityDenial(identity, { explicit: !!requestedIdentity });
+  const identityFailure = associatedDenial || identityReason;
+  if (identityFailure) {
+    const failedAction = beginProjectAction(store, sessionId, runId, checkId, {
+      actionId: input.callId ? String(input.callId) : undefined,
+      identityRef: requestedIdentity || 'anonymous',
+      method, targetUrl: url.href, executionState: 'queued',
+    });
+    const evidence = saveProjectEvidence(store, sessionId, runId, checkId, {
+      kind: 'tool',
+      operationId: failedAction.action.actionId,
+      identityRef: requestedIdentity || 'anonymous',
+      text: identityFailure,
+      error: identityFailure,
+      complete: true,
+    });
+    finishProjectAction(store, sessionId, runId, failedAction.action.actionId, {
+      executionState: 'failed',
+      evidenceRef: evidence.id,
+      error: identityFailure,
+    });
+    throw new Error(identityFailure);
+  }
   const headers = { ...(input.headers || {}) };
-  const identityHeaders = identityRequestHeaders({ headers }, identity);
+  const authSource = input.authSource === 'request' ? 'request' : input.authSource === 'account' ? 'account' : '';
+  const identityHeaders = identityRequestHeaders({ headers }, identity, { authSource });
+  if (identityHeaders?.conflict) throw Object.assign(new Error(identityHeaders.error), { code: 'identity-header-conflict' });
   const outgoingHeaders = identityHeaders ? identityHeaders.headers : headers;
+  let effectiveIdentityRef = identityHeaders?.source === 'request' ? 'request-original' : (identity?.accountId || requestedIdentity);
+  let effectiveIdentityRevision = identityHeaders?.source === 'request'
+    ? authHeaderRevision(headers) : identityRevision(identity);
+  let effectiveIdentitySource = identityHeaders?.source || 'anonymous';
   const body = input.body === undefined || input.body === null ? '' : String(input.body);
   let dispatchHeaders = outgoingHeaders;
-  const initialFingerprint = requestFingerprint(limits, method, url, authContext, identity, body);
+  const initialFingerprint = requestFingerprint(limits, method, url, requestedIdentity, identity, body);
   const begun = beginProjectAction(store, sessionId, runId, checkId, {
-    identityRef: authContext, identityRevision: identityRevision(identity),
+    actionId: input.callId ? String(input.callId) : undefined,
+    identityRef: effectiveIdentityRef, identityRevision: effectiveIdentityRevision,
     controlRev: input.controlRev, policyRevision: policy.policyRev,
     scopeFingerprint: initialFingerprint, method, targetUrl: url.href,
     executionState: 'queued',
@@ -188,19 +239,26 @@ export async function executeProjectHttp(store, sessionId, runId, checkId, input
     if (lateDenial) throw new Error(lateDenial);
     const currentScopeDenial = targetScopeDenial(store, sessionId, currentLimits, url);
     if (currentScopeDenial) throw new Error(currentScopeDenial);
-    const currentIdentity = resolveTaskIdentity(store, sessionId, authContext);
-    const currentIdentityReason = identityDenial(currentIdentity);
+    const currentIdentity = resolveTaskIdentity(store, sessionId, requestedIdentity);
+    const currentIdentityReason = identityDenial(currentIdentity, { explicit: !!requestedIdentity });
     if (currentIdentityReason) throw new Error(currentIdentityReason);
-    const currentAssociatedDenial = associatedIdentityDenial(store, sessionId, currentLimits, url, authContext);
+    const currentAssociatedDenial = associatedIdentityDenial(store, sessionId, currentLimits, url, requestedIdentity);
     if (currentAssociatedDenial) throw new Error(currentAssociatedDenial);
-    const currentIdentityHeaders = identityRequestHeaders({ headers }, currentIdentity);
+    const currentIdentityHeaders = identityRequestHeaders({ headers }, currentIdentity, { authSource });
+    if (currentIdentityHeaders?.conflict) throw Object.assign(new Error(currentIdentityHeaders.error), { code: 'identity-header-conflict' });
     dispatchHeaders = currentIdentityHeaders ? currentIdentityHeaders.headers : headers;
-    const currentFingerprint = requestFingerprint(currentLimits, method, url, authContext, currentIdentity, body);
+    const currentIdentityRevision = currentIdentityHeaders?.source === 'request'
+      ? authHeaderRevision(headers) : identityRevision(currentIdentity);
+    effectiveIdentityRef = currentIdentityHeaders?.source === 'request'
+      ? 'request-original' : (currentIdentity?.accountId || requestedIdentity);
+    effectiveIdentityRevision = currentIdentityRevision;
+    effectiveIdentitySource = currentIdentityHeaders?.source || 'anonymous';
+    const currentFingerprint = requestFingerprint(currentLimits, method, url, requestedIdentity, currentIdentity, body);
     const admission = taskExecutionGuard(store, sessionId, 'recorded-project-execution', Date.now(), {
       args: { method, url: url.href },
       onReserve: () => {
         markProjectActionDispatched(store, sessionId, runId, begun.action.actionId, {
-          identityRef: authContext, identityRevision: identityRevision(currentIdentity),
+          identityRef: effectiveIdentityRef, identityRevision: currentIdentityRevision,
           controlRev: currentRun.controlRev, policyRevision: currentPolicy.policyRev,
           scopeFingerprint: currentFingerprint,
         });
@@ -226,12 +284,14 @@ export async function executeProjectHttp(store, sessionId, runId, checkId, input
   } finally {
     release();
   }
-  const requestWire = wireRequest(method, url, headers, body);
+  const requestWire = wireRequest(method, url, redactHeaders(dispatchHeaders), body);
   const record = {
     id: 'execution-' + randomUUID(),
     source: 'host-project-http-execution',
     projectRunId: runId, projectCheckId: checkId, actionId: begun.action.actionId,
-    endpoint: url.origin, authContext, method, url: url.href,
+    endpoint: url.origin, authContext: requestedIdentity, method, url: url.href,
+    identityRef: effectiveIdentityRef, identitySource: effectiveIdentitySource,
+    identityRevision: effectiveIdentityRevision,
     request: requestWire, requestSha256: digest(requestWire),
     responseHead: result.responseHead, responseBodyBase64: result.body.toString('base64'),
     responseSha256: digest(Buffer.concat([Buffer.from(result.responseHead), result.body])),

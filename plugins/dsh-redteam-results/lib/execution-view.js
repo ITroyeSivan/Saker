@@ -1,7 +1,8 @@
 // 执行记录页（v6 第 5.3 节）：只列真实发生的调用、时间、成功/失败/未知与用量。
 //
 // 不保存第二份请求原文：原文字节仍在测试资料里，这里只保留 requestId:revision 引用与回执 ID。
-// 摘要来自 host 捕获的执行回执；用量来自 task_cost_events（只读计数，不含消息正文）。
+// 摘要来自 host 捕获的执行回执；task_cost_events 只保存脱敏、限长的可见
+// 工具输出和模型答复，不读取隐藏推理。
 import { parseRowRecord } from './row-record.js';
 import { readTaskContext } from './task-context.js';
 import { readTaskPolicy } from './task-policy.js';
@@ -104,7 +105,8 @@ export function executionLedger(store, sessionId, options = {}) {
         if (callId) toolCalls.set(callId, { seq: row.seq, at: row.at, toolName: String(record.toolName || '') });
       } else if (row.kind === 'tool/result') {
         const callId = String(record.callId || '');
-        if (callId) toolResults.set(callId, { ok: record.ok !== false, error: String(record.error || '') });
+        if (callId) toolResults.set(callId, { ok: record.ok !== false, error: String(record.error || ''),
+          output: String(record.output || '').slice(0, 4000) });
       } else if (row.kind === 'assistant/message') {
         modelMessages.push({ seq: row.seq, at: row.at, record });
       } else if (row.kind === 'assistant/attempt') {
@@ -121,7 +123,7 @@ export function executionLedger(store, sessionId, options = {}) {
       outcome: result ? (result.ok ? 'completed' : 'error') : '', status: result ? (result.ok ? 'ok' : 'error') : null,
       attempts: null, callState: result ? (result.ok ? 'returned' : 'failed') : 'unknown', elapsedMs: null,
       result: result ? (result.ok ? 'returned' : 'failed') : 'unknown', impactVerified: false,
-      toolName: call.toolName, callId, detail: result?.error || '' });
+      toolName: call.toolName, callId, detail: result?.error || result?.output || '' });
   }
   for (const message of modelMessages) {
     const at = new Date(message.at).toISOString();
@@ -130,7 +132,8 @@ export function executionLedger(store, sessionId, options = {}) {
     all.push({ id: 'model-message-' + message.seq, at, source: 'session-model-call', kind: 'model',
       target: '', host: '', path: '', hypothesisId: '', requestRef: '', taskId: taskIdFor(at), identity: '',
       outcome: 'message', status: state, attempts: null, callState: state, elapsedMs: null,
-      result: bucket, impactVerified: false, toolName: 'model', callId: '', detail: '', usage: message.record });
+      result: bucket, impactVerified: false, toolName: 'model', callId: '',
+      detail: String(message.record.text || '').slice(0, 4000), usage: message.record });
   }
   for (const attempt of modelAttempts) {
     const at = new Date(attempt.at).toISOString();

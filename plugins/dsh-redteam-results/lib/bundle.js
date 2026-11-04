@@ -26,10 +26,12 @@ function scriptFilename(method) {
   }
   return name;
 }
-export function buildDeliveryFiles(findings, checks) {
+export function buildDeliveryFiles(findings, checks, ordinaryReports = []) {
   const summary = outcomeSummary(findings);
+  const reports = Array.isArray(ordinaryReports) ? ordinaryReports.filter(item => String(item?.text || '').trim()) : [];
   const files = { 'delivery/checked.tsv': renderCheckedTsv(checks) };
-  const report = ['# 有效漏洞交付', '', summary.confirmedFindings ? `本包包含 ${summary.confirmedFindings} 条已复核的有效漏洞。` : '本轮未确认有效漏洞。',
+  const report = ['# 有效漏洞交付', '', summary.confirmedFindings ? `本包包含 ${summary.confirmedFindings} 条已复核的有效漏洞。`
+    : reports.length ? '结构化成果库未确认漏洞；普通结果见 reports/，不代表已完成独立确认。' : '本轮未确认有效漏洞。',
     summary.incompleteRecords ? `另有 ${summary.incompleteRecords} 条记录材料或复核未齐，未计入本包有效成果；请在本地台账补齐。` : '',
     '检查覆盖见 checked.tsv；阴性仅适用于记录的入口、身份、方法与请求条件。',
     '证据中的常见认证头与凭据字段已脱敏。复现时通过参数或环境变量提供自己的测试身份。', ''];
@@ -44,7 +46,22 @@ export function buildDeliveryFiles(findings, checks) {
     report.push(`复现材料：repro/${stem}.md；关键证据：evidence/${stem}-request.txt、evidence/${stem}-response.txt`, '', redactCredentials(renderFindingDelivery(finding)), '');
   });
   files['delivery/findings.md'] = report.filter(value => value !== '').join('\n\n') + '\n';
-  return { files, confirmedFindings: summary.confirmedFindings, incompleteRecords: summary.incompleteRecords, checkedCount: checks.length };
+  const reportIndex = ['# 普通结果索引', '', '这些是模型最终可见答复，不等同于已独立确认的漏洞。', ''];
+  for (const [index, item] of reports.entries()) {
+    const stem = String(index + 1).padStart(2, '0') + '-report-' + String(item.seq || item.id || 'result');
+    const file = 'delivery/reports/' + stem + '.md';
+    const text = redactCredentials(String(item.text));
+    const marker = item.truncated
+      ? '\n\n[原件不完整，内容已截断：已保存前 ' + Number(item.includedChars || text.length) + ' 个字符，缺少 '
+        + (item.omittedRange?.from ? item.omittedRange.from + '-' + (item.omittedRange.to ?? '末尾') : '后续内容') + ']\n'
+      : '';
+    files[file] = text + marker;
+    reportIndex.push('- ' + file + ' · ' + (item.complete === false ? '不完整' : '完整')
+      + ' · 原件 ' + Number(item.originalChars || text.length) + ' 字符 · 来源 ' + String(item.source || 'session-visible-text'));
+  }
+  if (reports.length) files['delivery/reports/index.md'] = reportIndex.join('\n') + '\n';
+  return { files, confirmedFindings: summary.confirmedFindings, incompleteRecords: summary.incompleteRecords,
+    checkedCount: checks.length, ordinaryReportCount: reports.length };
 }
 
 const crcTable = Array.from({ length: 256 }, (_, i) => {

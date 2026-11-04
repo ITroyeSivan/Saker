@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
 import { executionLedger } from '../plugins/dsh-redteam-results/lib/execution-view.js';
+import { captureTaskCost } from '../plugins/dsh-redteam-results/lib/task-cost.js';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-execution-view-'));
 process.env.DSH_HOME = home;
@@ -70,6 +71,35 @@ try {
     assert(ledger.rows.some(row => row.kind === 'model'));
     assert(ledger.rows.some(row => row.kind === 'model-attempt' && row.callState === 'unknown'));
     assert(ledger.rows.some(row => row.kind === 'http'));
+  });
+  test('visible tool output and assistant conclusions are retained while credentials and hidden reasoning are excluded', () => {
+    const at = Date.parse('2026-10-12T00:00:06.000Z');
+    captureTaskCost(store, { id: 'ex3' }, {
+      type: 'tool/call', seq: 1, time: at,
+      data: { name: 'read', callId: 'c3' },
+    });
+    captureTaskCost(store, { id: 'ex3' }, {
+      type: 'tool/result', seq: 2, time: at + 1,
+      data: { message: { name: 'read', toolCallId: 'c3', content: [
+        { type: 'text', text: 'SAFE_TOOL_OUTPUT\nCookie: session=secret-value' },
+      ] } },
+    });
+    captureTaskCost(store, { id: 'ex3' }, {
+      type: 'assistant/message', seq: 3, time: at + 2,
+      data: {
+        message: { id: 'm3', content: [{ type: 'text', text: '可见结论：条件已核实。\nAuthorization: Bearer secret-token' }] },
+        usage: { totalTokens: 12 },
+        reasoning: 'hidden private chain of thought',
+      },
+    });
+    const ledger = executionLedger(store, 'ex3', {});
+    const tool = ledger.rows.find(row => row.kind === 'tool');
+    const model = ledger.rows.find(row => row.kind === 'model');
+    assert.match(tool.detail, /SAFE_TOOL_OUTPUT/);
+    assert.match(model.detail, /可见结论：条件已核实/);
+    const persisted = store.db.prepare('SELECT record FROM task_cost_events WHERE session_id=?').all('ex3')
+      .map(row => row.record).join('\n');
+    assert.doesNotMatch(persisted, /secret-value|secret-token|hidden private chain of thought/);
   });
 } finally { store.close(); fs.rmSync(home, { recursive: true, force: true }); }
 console.log(`${failed ? failed + ' failed' : 'all passed'}`); if (failed) process.exitCode = 1;

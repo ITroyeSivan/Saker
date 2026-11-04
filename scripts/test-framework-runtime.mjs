@@ -164,7 +164,8 @@ try{
     // 批次 A：这些工具已退出运行，任何会话都直接拒绝，且不写入任务台账。
     for(const name of names)assert.match(taskExecutionGuard(store,'ledger-only',name),/retired_tool/);
     assert.equal(readTaskPolicy(store,'ledger-only'),null);
-    assert.match(taskExecutionGuard(store,'ledger-only','httpx_probe'),/task_policy_missing/);
+    assert.match(taskExecutionGuard(store,'ledger-only','httpx_probe'),/target_scope_missing/);
+    assert.equal(readTaskPolicy(store,'ledger-only').question,'按当前会话中的用户请求执行');
     parent('ledger-stopped');updateTaskProgress(store,'ledger-stopped',{cancelled:true});
     const before=readTaskPolicy(store,'ledger-stopped');
     for(const name of names)assert.match(taskExecutionGuard(store,'ledger-stopped',name),/retired_tool/);
@@ -237,7 +238,8 @@ try{
     const agent=live.get(child);const finalEvent={type:'assistant/message',data:{turn:2,message:{content:[{type:'text',text:'New related call checked; actual effect still unknown.'}]}}};agent.session.seq=1;agent.session.eventAt=()=>finalEvent;
     await hooks.get('agent/turn-stopping')({agent,turn:2});await settle();
     assert.equal(siteWorkerView(store,'workers').active,0);assert(!live.has(child));assert.match(siteWorkerRows(store,'workers')[0].report.summary,/New related/);
-    assert(messages.some(message=>message.id==='workers'));
+    assert.equal(siteWorkerRows(store,'workers')[0].deliveryMode,'parent');
+    assert(!messages.some(message=>message.id==='workers'),'native parent delivery must not be duplicated by a plugin sendMessage');
   });
   await test('child operations charge the parent and a parent pause immediately prevents extra child target work',async()=>{
     const p=parent('shared');const id=(await delegateManager.delegate(p,delegate)).childId;

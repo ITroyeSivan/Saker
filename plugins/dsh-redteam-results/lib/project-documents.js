@@ -10,7 +10,7 @@ const DOCUMENT_LIMITS = Object.freeze({
   maxEntries: 5000,
   maxEntryBytes: 16 * 1024 * 1024,
   maxTotalBytes: 64 * 1024 * 1024,
-  maxReadChars: 8000,
+  maxReadBytes: 8192,
   parseDeadlineMs: 15000,
 });
 const decodeXml = value => String(value).replace(/&(amp|lt|gt|quot|apos|#\d+|#x[0-9a-f]+);/gi, (match, entity) => {
@@ -145,8 +145,13 @@ function parseXlsx(entries) {
       return;
     }
     if (sheet.state !== 'visible')
-      sections.push({ sectionId: 'sheet-' + (sheetIndex + 1) + '-hidden', location: { kind: 'worksheet', sheet: sheet.name, state: sheet.state }, kind: 'worksheet-note', text: '工作表「' + sheet.name + '」为' + (sheet.state === 'veryHidden' ? '深度隐藏' : '隐藏') + '状态' });
-    const hiddenCols = [...xml.matchAll(/<col\b[^>]*hidden="1"[^>]*\/>/g)].map(match => /min="(\d+)"/.exec(match[0])?.[1]).filter(Boolean);
+      sections.push({ sectionId: 'sheet-' + (sheetIndex + 1) + '-hidden', location: { kind: 'worksheet', sheet: sheet.name, sheetIndex, state: sheet.state }, kind: 'worksheet-note', text: '工作表「' + sheet.name + '」为' + (sheet.state === 'veryHidden' ? '深度隐藏' : '隐藏') + '状态' });
+    const hiddenCols = [...xml.matchAll(/<col\b[^>]*hidden="1"[^>]*\/>/g)].flatMap(match => {
+      const min = Number(/min="(\d+)"/.exec(match[0])?.[1]);
+      const max = Number(/max="(\d+)"/.exec(match[0])?.[1] || min);
+      if (!Number.isSafeInteger(min) || min < 1 || !Number.isSafeInteger(max) || max < min) return [];
+      return Array.from({ length: Math.min(1000, max - min + 1) }, (_, index) => min + index);
+    });
     if (hiddenCols.length)
       sections.push({ sectionId: 'sheet-' + (sheetIndex + 1) + '-hidden-cols', location: { kind: 'worksheet', sheet: sheet.name }, kind: 'worksheet-note', text: '隐藏列：' + hiddenCols.join(', ') });
     const merges = [...xml.matchAll(/<mergeCell\b[^>]*ref="([^"]+)"/g)].map(match => match[1]);
@@ -167,19 +172,42 @@ function parseXlsx(entries) {
         if (type === 's') value = shared[Number(rawValue)] ?? '';
         else if (type === 'inlineStr') value = [...cell[2].matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map(item => stripTags(item[1])).join('');
         else value = rawValue !== undefined ? stripTags(rawValue) : '';
-        return { ref, value, formula: formula !== undefined ? stripTags(formula) : '', formulaNoResult: formula !== undefined && rawValue === undefined };
+        return { ref, value, formula: formula !== undefined ? stripTags(formula) : '',
+          formulaNoResult: formula !== undefined && rawValue === undefined };
       });
       const text = cells.filter(cell => cell.value || cell.formula)
         .map(cell => cell.ref + ': ' + cell.value + (cell.formulaNoResult ? '（公式无缓存结果，未猜值）' : cell.formula ? '（公式）' : '')).join(' | ');
       if (text || hidden)
-        sections.push({ sectionId: 'sheet-' + (sheetIndex + 1) + '-row-' + rowNumber, location: { kind: 'row', sheet: sheet.name, row: rowNumber, hidden }, kind: 'row', text: (hidden ? '[隐藏行] ' : '') + text, cells });
+        sections.push({
+          sectionId: 'sheet-' + (sheetIndex + 1) + '-row-' + rowNumber,
+          location: { kind: 'row', sheet: sheet.name, sheetIndex, sheetState: sheet.state, row: rowNumber, hidden, hiddenColumns: hiddenCols },
+          kind: 'row', text: (hidden ? '[隐藏行] ' : '') + text, cells,
+          hiddenColumns: hiddenCols,
+          mergedRanges: merges.filter(ref => mergedRangeTouchesRow(ref, rowNumber)),
+          formulasWithoutCache: cells.filter(cell => cell.formulaNoResult).map(cell => cell.ref),
+        });
     });
   });
   return { kind: 'xlsx', sections, unread, warnings: [] };
 }
 
-function parseText(buffer) {
-  const lines = buffer.toString('utf8').split(/\r?\n/);
+export function columnNumber(reference) {
+  const letters = /^([A-Z]+)/i.exec(String(reference || ''))?.[1]?.toUpperCase() || '';
+  let value = 0;
+  for (const character of letters) value = value * 26 + character.charCodeAt(0) - 64;
+  return value;
+}
+
+function mergedRangeTouchesRow(reference, row) {
+  const match = /^[A-Z]+(\d+):[A-Z]+(\d+)$/i.exec(String(reference || ''));
+  if (!match) return false;
+  const from = Math.min(Number(match[1]), Number(match[2]));
+  const to = Math.max(Number(match[1]), Number(match[2]));
+  return row >= from && row <= to;
+}
+
+function parseText(text) {
+  const lines = String(text).split(/\r?\n/);
   const chunk = 200, sections = [];
   for (let start = 0; start < lines.length; start += chunk) {
     const end = Math.min(lines.length, start + chunk);
@@ -196,15 +224,58 @@ export function parseDocumentBuffer(buffer, { displayName = '' } = {}) {
   if (!Buffer.isBuffer(buffer)) throw new Error('文档内容必须是 Buffer');
   if (buffer.length > DOCUMENT_LIMITS.maxInputBytes) throw new Error('文档超过 20MiB 输入上限');
   const name = String(displayName || '').toLowerCase();
+  const unreadableBinary = (kind, reason, mimeType = '') => ({
+    displayName, parseState: 'unreadable', kind, sections: [],
+    unread: [{ location: { kind: 'binary', format: kind, mimeType }, reason }], warnings: [],
+  });
+  const starts = (...bytes) => buffer.length >= bytes.length && bytes.every((byte, index) => buffer[index] === byte);
   if (buffer.length >= 4 && buffer.readUInt32LE(0) === 0x04034b50) {
-    const entries = readZipEntries(buffer);
+    let entries;
+    try { entries = readZipEntries(buffer); }
+    catch (error) {
+      if (/\.docx?$/.test(name) || /\.xlsx?$/.test(name)) throw error;
+      return unreadableBinary('zip', '这是 ZIP 压缩包，当前未配置解包预览；原件已保留，可在本地工具中打开。', 'application/zip');
+    }
     if (entries.has('word/document.xml')) return { displayName, parseState: 'ready', ...parseDocx(entries) };
     if (entries.has('xl/workbook.xml')) return { displayName, parseState: 'ready', ...parseXlsx(entries) };
-    throw new Error('暂不支持这种 Office 文件结构：只支持 .docx 与 .xlsx');
+    return unreadableBinary('zip', '这是未适配的 ZIP 容器；原件已保留，请使用对应本地工具打开。', 'application/zip');
   }
+  if (buffer.subarray(0, 5).toString('ascii') === '%PDF-' || /\.pdf$/.test(name))
+    return unreadableBinary('pdf', 'PDF 尚未配置文本提取或 OCR；原件已保留，请使用本地 PDF 工具打开。', 'application/pdf');
+  if (starts(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a) || /\.png$/.test(name))
+    return unreadableBinary('image', '图片尚未配置 OCR；原件已保留，请使用本地图片查看或 OCR 工具打开。', 'image/png');
+  if (starts(0xff, 0xd8, 0xff) || /\.(?:jpe?g)$/.test(name))
+    return unreadableBinary('image', '图片尚未配置 OCR；原件已保留，请使用本地图片查看或 OCR 工具打开。', 'image/jpeg');
+  if (starts(0x47, 0x49, 0x46, 0x38) || /\.gif$/.test(name))
+    return unreadableBinary('image', '动图或图片尚未配置 OCR；原件已保留，请使用本地图片工具打开。', 'image/gif');
+  if (starts(0x42, 0x4d) || /\.bmp$/.test(name))
+    return unreadableBinary('image', '位图尚未配置 OCR；原件已保留，请使用本地图片工具打开。', 'image/bmp');
+  if (starts(0x52, 0x49, 0x46, 0x46) && buffer.subarray(8, 12).toString('ascii') === 'WEBP')
+    return unreadableBinary('image', '图片尚未配置 OCR；原件已保留，请使用本地图片工具打开。', 'image/webp');
   if (/\.docx?$/.test(name)) throw new Error('文件扩展名是 Word，但内容不是有效的 .docx（旧版 .doc 不支持，请另存为 .docx 或粘贴正文）');
   if (/\.xlsx?$/.test(name)) throw new Error('文件扩展名是 Excel，但内容不是有效的 .xlsx（旧版 .xls 不支持，请另存为 .xlsx 或粘贴正文）');
-  return { displayName, parseState: 'ready', ...parseText(buffer) };
+  let decoded;
+  try {
+    if (starts(0xff, 0xfe)) decoded = buffer.subarray(2).toString('utf16le');
+    else if (starts(0xfe, 0xff)) {
+      const swapped = Buffer.allocUnsafe(buffer.length - 2);
+      for (let index = 2; index + 1 < buffer.length; index += 2) {
+        swapped[index - 2] = buffer[index + 1];
+        swapped[index - 1] = buffer[index];
+      }
+      decoded = new TextDecoder('utf-16le', { fatal: true }).decode(swapped);
+    } else decoded = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+  } catch {
+    return unreadableBinary('binary', '内容不是有效 UTF-8/UTF-16 文本，当前格式尚未适配；原件已保留。', 'application/octet-stream');
+  }
+  if (decoded.includes('\0')) return unreadableBinary('binary', '内容含二进制 NUL 字节，当前格式尚未适配；原件已保留。', 'application/octet-stream');
+  const controlCount = [...decoded].filter(character => {
+    const code = character.codePointAt(0);
+    return (code < 9 || (code > 13 && code < 32)) && code !== 0x1b;
+  }).length;
+  if (decoded.length && controlCount / decoded.length > 0.01)
+    return unreadableBinary('binary', '内容含大量不可打印字节，当前格式尚未适配；原件已保留。', 'application/octet-stream');
+  return { displayName, parseState: 'ready', ...parseText(decoded) };
 }
 
 export function readDocumentFile(filePath, options = {}) {
@@ -222,33 +293,43 @@ export function readDocumentUrl(url) {
   };
 }
 
-export function readDocumentSection(parsed, sectionId, { cursor = 0, limit = 4000 } = {}) {
+export function readDocumentSection(parsed, sectionId, { cursor = 0, limit = 8192 } = {}) {
   const section = (parsed?.sections || []).find(item => item.sectionId === sectionId);
   if (!section) throw new Error('未找到该文档段落：' + sectionId);
-  const text = String(section.text || '');
+  const buffer = Buffer.from(String(section.text || ''), 'utf8');
   const start = Math.max(0, Number(cursor) || 0);
-  if (start > text.length) throw new Error('文档读取位置超出段落范围：' + start + ' > ' + text.length);
+  if (start > buffer.length) throw new Error('文档读取位置超出段落范围：' + start + ' > ' + buffer.length);
   const requested = Number(limit);
-  const size = Math.max(1, Math.min(DOCUMENT_LIMITS.maxReadChars, Number.isFinite(requested) && requested > 0 ? requested : 4000));
-  const end = Math.min(text.length, start + size);
-  return { sectionId, location: section.location ?? null, text: text.slice(start, end), nextCursor: end < text.length ? end : null, more: end < text.length };
+  const size = Math.max(1, Math.min(DOCUMENT_LIMITS.maxReadBytes,
+    Number.isFinite(requested) && requested > 0 ? requested : DOCUMENT_LIMITS.maxReadBytes));
+  let end = Math.min(buffer.length, start + size);
+  while (end > start && end < buffer.length && (buffer[end] & 0xc0) === 0x80) end -= 1;
+  if (end === start && start < buffer.length) {
+    end = start + 1;
+    while (end < buffer.length && (buffer[end] & 0xc0) === 0x80) end += 1;
+  }
+  const text = buffer.toString('utf8', start, end);
+  const bytes = Buffer.byteLength(text, 'utf8');
+  return { sectionId, location: section.location ?? null, text, bytes, range: { start, end },
+    nextCursor: end < buffer.length ? end : null, more: end < buffer.length };
 }
 
 /** A bounded batch returns only actual text ranges; unreturned sections stay unread. */
-export function readDocumentSections(parsed, sectionIds, { limit = 4000 } = {}) {
+export function readDocumentSections(parsed, sectionIds, { limit = 8192 } = {}) {
   if (!Array.isArray(sectionIds) || !sectionIds.length || sectionIds.length > 20
     || sectionIds.some(id => typeof id !== 'string' || !id.trim()) || new Set(sectionIds).size !== sectionIds.length)
     throw new Error('sectionIds 需要 1–20 个不重复的段落 ID');
   for (const id of sectionIds) if (!(parsed?.sections || []).some(section => section.sectionId === id))
     throw new Error('未找到该文档段落：' + id);
   const requested = Number(limit);
-  let remaining = Math.max(1, Math.min(DOCUMENT_LIMITS.maxReadChars, Number.isFinite(requested) && requested > 0 ? Math.floor(requested) : 4000));
+  let remaining = Math.max(1, Math.min(DOCUMENT_LIMITS.maxReadBytes,
+    Number.isFinite(requested) && requested > 0 ? Math.floor(requested) : DOCUMENT_LIMITS.maxReadBytes));
   const entries = [], unreadSectionIds = [];
   for (const id of sectionIds) {
     if (!remaining) { unreadSectionIds.push(id); continue; }
     const entry = readDocumentSection(parsed, id, { limit: remaining });
     entries.push(entry);
-    remaining -= entry.text.length;
+    remaining -= entry.bytes;
   }
   return { entries, unreadSectionIds };
 }
