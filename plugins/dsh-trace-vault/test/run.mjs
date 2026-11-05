@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { openStore, insertTrace, beginTrace, finishTrace, heartbeatRunning, recoverStaleRunning, searchTraces, getTrace, listRecent, statsTraces, sessionStats, sessionMetrics, purgeOld, capRows, classifyOutcome, argsTextOf, resultTextOf, escapeLike, ARGS_CAP, RESULT_CAP } from "../lib/store.js";
-import { createCapture, callIdOfResult, isErrorResult, MODE_IDS } from "../lib/index.js";
+import { createCapture, callIdOfResult, isErrorResult, isCancelledResult, MODE_IDS } from "../lib/index.js";
 
 let pass = 0, fail = 0;
 // Windows 下临时库文件可能仍被模块级 store 单例占用（EBUSY）——清理失败不该判定套件失败。
@@ -89,10 +89,26 @@ const ok = (label, cond) => { if (cond) { pass++; console.log(`ok   ${label}`); 
 	// 无 tool/call 前置的结果（事件流中途接入）：不落不炸
 	cap.onResult("s1", { type: "tool/result", data: { message: { source: { kind: "tool", callId: "ghost" }, content: [{ type: "text", text: "x" }] } } });
 	ok("未配对结果安全跳过", searchTraces(st, { q: "x" }).every((r) => r.id !== "s1:ghost"));
+	// PTC 嵌套 dispatch：subCallId/parentCallId + 对象参数，必须与普通 tool/call 一样落库。
+	cap.onCall("s1", { type: "tool/ptc-dispatch-start", data: { name: "pwsh", subCallId: "p1", parentCallId: "root", arguments: { command: "id" } } });
+	cap.onResult("s1", { type: "tool/ptc-dispatch", data: { name: "pwsh", subCallId: "p1", parentCallId: "root", content: [{ type: "text", text: "uid=0" }], isError: false } });
+	const ptc = searchTraces(st, { q: "uid=0" });
+	const ptcFull = ptc[0] ? getTrace(st, ptc[0].id) : null;
+	ok("PTC 嵌套调用配对落库", ptc.length === 1 && ptc[0].tool === "pwsh" && ptcFull.args.includes("id") && ptcFull.result.includes("uid=0"));
+	// PTC 取消：ABORTED 是控制结果，归 interrupted，不按普通业务 error。
+	cap.onCall("s1", { type: "tool/ptc-dispatch-start", data: { name: "pwsh", subCallId: "p2", parentCallId: "root", arguments: { command: "sleep 60" } } });
+	cap.onResult("s1", { type: "tool/ptc-dispatch", data: { name: "pwsh", subCallId: "p2", parentCallId: "root", content: [{ type: "text", text: "tool call aborted" }], isError: true, error: { code: "ABORTED" } } });
+	const aborted = searchTraces(st, { q: "tool call aborted" });
+	ok("PTC ABORTED 归 interrupted", aborted.length === 1 && aborted[0].outcome === "interrupted");
 	// callId 提取器与错误位（纯函数）
 	ok("callId 提取：source 形态", callIdOfResult({ data: { message: { source: { kind: "tool", callId: "a" } } } }) === "a");
 	ok("callId 提取：content 块形态", callIdOfResult({ data: { message: { content: [{ toolCallId: "b" }] } } }) === "b");
+	ok("callId 提取：PTC subCallId", callIdOfResult({ data: { subCallId: "p1" } }) === "p1");
 	ok("错误位：块 isError", isErrorResult({ data: { message: { content: [{ isError: true }] } } }) === true);
+	ok("错误位：PTC isError", isErrorResult({ data: { isError: true } }) === true);
+	ok("取消位：PTC ABORTED", isCancelledResult({ data: { error: { code: "ABORTED" } } }) === true
+		&& isCancelledResult({ data: { error: { code: "ABORTED_BEFORE_DISPATCH" } } }) === true
+		&& isCancelledResult({ data: { error: { code: "OTHER" } } }) === false);
 	st.close();
 }
 
@@ -166,8 +182,11 @@ ok("安全模式清单", Array.isArray(MODE_IDS) && MODE_IDS.length === 3 && MOD
 	ok("session/event 已接线", typeof handlers["session/event"] === "function");
 	handlers["session/event"]({ id: "sx" }, { type: "tool/call", data: { name: "bash", callId: "k1", arguments: "{\"command\":\"id\"}" } });
 	handlers["session/event"]({ id: "sx" }, { type: "tool/result", data: { message: { source: { kind: "tool", callId: "k1" }, content: [{ type: "text", text: "uid=0(root)" }] } } });
+	handlers["session/event"]({ id: "sx" }, { type: "tool/ptc-dispatch-start", data: { name: "pwsh", subCallId: "k2", parentCallId: "k1", arguments: { command: "id" } } });
+	handlers["session/event"]({ id: "sx" }, { type: "tool/ptc-dispatch", data: { name: "pwsh", subCallId: "k2", parentCallId: "k1", content: [{ type: "text", text: "ptc-marker" }], isError: false } });
 	const st = openStore(process.env.DSH_TRACE_VAULT_DB);
 	ok("apply 接线后事件落库", searchTraces(st, { q: "uid=0" }).length === 1);
+	ok("apply 接线后 PTC 嵌套事件落库", searchTraces(st, { q: "ptc-marker" }).length === 1);
 	// 模式门禁：非安全模式 exec 拒用工具（composedPreset 依 agent.ctx.preset）
 	const tool = registered.find((t) => t?.name === "trace_search");
 	const denied = await tool.execute({ query: "x" }, { agent: { session: { id: "sx", header: {} }, ctx: { preset: "plain-chat" } } });

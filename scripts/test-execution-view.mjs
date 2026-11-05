@@ -101,5 +101,39 @@ try {
       .map(row => row.record).join('\n');
     assert.doesNotMatch(persisted, /secret-value|secret-token|hidden private chain of thought/);
   });
+  test('PTC nested dispatch is counted once and surfaced as a tool row', () => {
+    const at = Date.parse('2026-10-12T00:00:07.000Z');
+    captureTaskCost(store, { id: 'ptc' }, { type: 'tool/call', seq: 1, time: at,
+      data: { name: 'run_code', callId: 'root' } });
+    captureTaskCost(store, { id: 'ptc' }, { type: 'tool/ptc-dispatch-start', seq: 2, time: at + 1,
+      data: { name: 'pwsh', subCallId: 'root:ptc:1', parentCallId: 'root', arguments: { command: 'id' } } });
+    captureTaskCost(store, { id: 'ptc' }, { type: 'tool/ptc-dispatch', seq: 3, time: at + 2,
+      data: { name: 'pwsh', subCallId: 'root:ptc:1', parentCallId: 'root', arguments: { command: 'id' },
+        content: [{ type: 'text', text: 'uid=0' }], isError: false } });
+    const ledger = executionLedger(store, 'ptc', {});
+    assert.equal(ledger.usage.toolCalls, 2);
+    const row = ledger.rows.find(entry => entry.callId === 'root:ptc:1');
+    assert(row && row.toolName === 'pwsh' && row.transport === 'ptc');
+    assert.match(row.detail, /uid=0/);
+  });
+  test('PTC cancellation keeps interrupted semantics', () => {
+    const at = Date.parse('2026-10-12T00:00:08.000Z');
+    captureTaskCost(store, { id: 'ptc-abort' }, { type: 'tool/ptc-dispatch-start', seq: 1, time: at,
+      data: { name: 'pwsh', subCallId: 'root:ptc:2', parentCallId: 'root', arguments: { command: 'sleep 60' } } });
+    captureTaskCost(store, { id: 'ptc-abort' }, { type: 'tool/ptc-dispatch', seq: 2, time: at + 1,
+      data: { name: 'pwsh', subCallId: 'root:ptc:2', parentCallId: 'root', arguments: { command: 'sleep 60' },
+        content: [{ type: 'text', text: 'tool call aborted' }], isError: true,
+        error: { code: 'ABORTED', reason: 'caller cancelled' } } });
+    const row = executionLedger(store, 'ptc-abort', {}).rows.find(entry => entry.callId === 'root:ptc:2');
+    assert(row && row.callState === 'cancelled' && row.result === 'unknown');
+  });
+  test('PTC start already represented by a native call is not counted twice', () => {
+    const at = Date.parse('2026-10-12T00:00:09.000Z');
+    captureTaskCost(store, { id: 'ptc-dup' }, { type: 'tool/call', seq: 1, time: at,
+      data: { name: 'read', callId: 'dup' } });
+    captureTaskCost(store, { id: 'ptc-dup' }, { type: 'tool/ptc-dispatch-start', seq: 2, time: at + 1,
+      data: { name: 'read', subCallId: 'dup', parentCallId: 'root', arguments: {} } });
+    assert.equal(executionLedger(store, 'ptc-dup', {}).usage.toolCalls, 1);
+  });
 } finally { store.close(); fs.rmSync(home, { recursive: true, force: true }); }
 console.log(`${failed ? failed + ' failed' : 'all passed'}`); if (failed) process.exitCode = 1;

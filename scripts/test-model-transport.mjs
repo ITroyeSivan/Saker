@@ -15,6 +15,12 @@ await test('provider wire filter removes tools outside the child allow-list befo
   assert.deepEqual(body.tools.map(tool=>tool.function.name),['read']);
   assert.equal(body.tool_choice,undefined);
 });
+await test('provider wire filter keeps the reserved PTC transport when the child allow-list includes it',()=>{
+  const body=filterProviderTools({model:'fixture',messages:[],tools:[
+    {type:'function',function:{name:'read'}},{type:'function',function:{name:'run_code'}},{type:'function',function:{name:'subagent'}},
+  ]},['read','run_code']);
+  assert.deepEqual(body.tools.map(tool=>tool.function.name),['read','run_code']);
+});
 async function fixture(budget,body){
   const received=[],store=openStore(':memory:');let hook;
   const server=http.createServer(async(req,res)=>{const parts=[];for await(const p of req)parts.push(p);

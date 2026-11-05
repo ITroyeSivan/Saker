@@ -90,6 +90,12 @@ try {
     assert(source.includes('more[1](false);inlineAssetView[1](false);'), 'opening settings must close inline assets');
     assert(source.includes('open[1](false);inlineAssetView[1](false);'), 'opening the prompt drawer must be exclusive');
   });
+  await test('competition form fields stack vertically inside a scrollable panel body', async () => {
+    assert(source.includes('.dsh-chat-setup .dsh-chat-field,.dsh-task-workspace .dsh-chat-field{display:flex;flex-direction:column'), 'field labels must sit above controls');
+    assert(source.includes('.dsh-chat-field>textarea') && source.includes('resize:vertical'), 'long competition textareas must wrap and resize');
+    assert(source.includes("className:'dsh-competition-body'"), 'competition panels must expose an internal scroll body');
+    assert(source.includes('.dsh-chat-more>.dsh-competition-body{flex:1 1 auto'), 'the competition drawer must scroll instead of clipping the form');
+  });
   await test('接口错误把「可恢复操作」一起显示给用户', async () => {
     const sb={};
     runInNewContext(source.slice(source.indexOf('function chatError('),source.indexOf('function promptSubstitute(')),sb);

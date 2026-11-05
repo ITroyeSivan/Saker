@@ -10,8 +10,16 @@ assert.doesNotThrow(()=>assertReleaseContent(body));
 console.log('ok valid release sections');
 assert.doesNotThrow(()=>assertReleaseContent(body+'\n- 常规测试支持 Nday 衔接。'));
 console.log('ok product test mode remains allowed');
+assert.doesNotThrow(()=>assertReleaseContent(body+'\n- 案例测试与测试结果页支持按项目查看。'));
+console.log('ok product test/result wording remains allowed');
 assert.throws(()=>assertReleaseContent(body+'\n- 回归 12 套，120 通过。'),/development records/);
 console.log('ok regression results rejected');
+assert.throws(()=>assertReleaseContent(body+'\n- 全量回归通过。'),/development records/);
+console.log('ok regression wording without a number rejected');
+assert.throws(()=>assertReleaseContent(body+'\n- 本轮使用合成本地夹具和隔离宿主验证。'),/development records/);
+console.log('ok synthetic fixture and isolated host wording rejected');
+assert.throws(()=>assertReleaseContent(body+'\n- 正式 Desktop 检查了结果页和设置面板。'),/development records/);
+console.log('ok desktop inspection wording rejected');
 assert.throws(()=>assertReleaseContent(body+'\n- '+['用户反馈','原话'].join('')+': synthetic'),/development records/);
 console.log('ok development conversation rejected');
 assert.throws(()=>assertReleaseContent(body.replace('### ⚠️ 其他变更','')),/Missing release section/);
@@ -35,4 +43,4 @@ try {
 } finally {
   rmSync(fixture, { recursive: true, force: true });
 }
-console.log('Public release guard: 8 checks passed');
+console.log('Public release guard: all checks passed');

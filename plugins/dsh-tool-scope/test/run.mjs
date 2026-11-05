@@ -144,6 +144,7 @@ const known = [
     },
     logger: { info() {}, warn() {} },
     agentPresets: { composedPreset: () => "pentest" },
+    agents: { get: (id) => id === "agent-pack-test" ? agent : undefined },
     on: (event, handler) => { handlers[event] = handler; },
   };
   apply(ctx, { log: false });
@@ -188,14 +189,112 @@ const known = [
   ok("list reports supported packs and no retired Nday or WebShell pack",
     list.ok && list.packs.some((pack) => pack.id === "active-scan" && pack.loaded)
       && !list.packs.some((pack) => ["nday", "webshell"].includes(pack.id)));
+  await toolPack.execute({ action: "unload", pack: "active-scan" }, { agent });
+  toolNames.push("nuclei_scan_review_marker");
+  handlers["tools/change"]();
+  ok("tools/change refreshes restrictable names for a late matching tool", denied("nuclei_scan_review_marker"));
+  handlers["tools/change"]();
+  ok("tools/change remains idempotent for the same late tool", denied("nuclei_scan_review_marker"));
+  toolNames.splice(toolNames.indexOf("nuclei_scan_review_marker"), 1);
+  handlers["tools/change"]();
+  ok("unregistering a late matching tool keeps its restriction", denied("nuclei_scan_review_marker"));
+  toolNames.push("nuclei_scan_review_marker");
+  handlers["tools/change"]();
+  handlers["tools/change"]();
+  ok("re-registering or shadowing the same late tool does not widen visibility", denied("nuclei_scan_review_marker"));
+  toolNames.push("nuclei_scan_second_marker");
+  handlers["tools/change"]();
+  const lateLoaded = await toolPack.execute({ action: "load", pack: "active-scan" }, { agent });
+  ok("both late markers become visible when active-scan is loaded",
+    lateLoaded.ok && !denied("nuclei_scan_review_marker") && !denied("nuclei_scan_second_marker"));
+  await toolPack.execute({ action: "unload", pack: "active-scan" }, { agent });
+  ok("both late markers are hidden again after unload",
+    denied("nuclei_scan_review_marker") && denied("nuclei_scan_second_marker"));
   handlers["agent/disposed"]({ agent });
   ok("agent disposal releases every filter", layers.size === 0);
+}
+
+{
+  const handlers = {};
+  let restrictCalls = 0;
+  const names = ["read", "write", "nuclei_scan", "ctf_state", "tool_pack"];
+  const agent = {
+    id: "reentrant-agent",
+    ctx: {
+      tools: {
+        schemas: () => names.map((name) => ({ name })),
+        view: () => ({ restrictableNames: new Set(names) }),
+        restrict() {
+          restrictCalls += 1;
+          if (restrictCalls > 50) throw new Error("recursive restrict");
+          handlers["tools/change"]?.();
+          return () => {};
+        },
+      },
+    },
+  };
+  const ctx = {
+    tools: { schemas: () => names.map((name) => ({ name })), register() {} },
+    logger: { info() {}, warn() {} },
+    agentPresets: { composedPreset: () => "pentest" },
+    agents: { get: (id) => id === agent.id ? agent : undefined },
+    on: (event, handler) => { handlers[event] = handler; },
+  };
+  let error;
+  try { apply(ctx, { log: false }); handlers["agent/created"]({ agent }); }
+  catch (failure) { error = failure; }
+  ok("synchronous tools/change reentry is bounded", !error && restrictCalls > 0 && restrictCalls < 50);
+}
+
+{
+  const handlers = {};
+  let triggerSecond = false;
+  let secondRegistered = false;
+  let layerId = 0;
+  const layers = new Map();
+  const names = ["read", "write", "nuclei_scan", "ctf_state", "tool_pack"];
+  const denied = (name) => [...layers.values()].some((set) => set.has(name));
+  const agent = {
+    id: "second-registration-agent",
+    ctx: {
+      tools: {
+        schemas: () => names.map((name) => ({ name })),
+        view: () => ({ restrictableNames: new Set(names) }),
+        restrict(filter) {
+          const id = ++layerId;
+          layers.set(id, new Set(filter.deny));
+          if (triggerSecond && !secondRegistered) {
+            secondRegistered = true;
+            names.push("nuclei_scan_second_marker");
+            handlers["tools/change"]?.();
+          }
+          return () => layers.delete(id);
+        },
+      },
+    },
+  };
+  const ctx = {
+    tools: { schemas: () => names.map((name) => ({ name })), register() {} },
+    logger: { info() {}, warn() {} },
+    agentPresets: { composedPreset: () => "pentest" },
+    agents: { get: (id) => id === agent.id ? agent : undefined },
+    on: (event, handler) => { handlers[event] = handler; },
+  };
+  apply(ctx, { log: false });
+  handlers["agent/created"]({ agent });
+  names.push("nuclei_scan_review_marker");
+  triggerSecond = true;
+  handlers["tools/change"]();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  ok("a second registration during refresh is folded into the same tool packs",
+    secondRegistered && denied("nuclei_scan_review_marker") && denied("nuclei_scan_second_marker"));
 }
 
 {
   const source = readFileSync(new URL("../lib/index.js", import.meta.url), "utf8");
   ok("implementation only uses deny filters", /restrict\(\{\s*deny/.test(source) && !/restrict\(\{[^}]*allow/.test(source));
   ok("filter failures remain visible", /restrict 失败/.test(source) && /logger\?\.warn\?\./.test(source));
+  ok("hot tool refresh failures remain visible", /工具变化后刷新失败/.test(source) && /tools\/change/.test(source));
   ok("binding is idempotent and disposed", /states\.has\(agent\.id\)/.test(source) && /agent\/disposed/.test(source));
   ok("tool-scope logs both to host logger and stdout", /logger\?\.info\?\./.test(source) && /console\.log\('\[tool-scope\] '/.test(source));
 }

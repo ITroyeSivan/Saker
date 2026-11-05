@@ -240,6 +240,7 @@ await test('saker_assist builds a bounded brief, selects the configured review m
     const childTools = siteWorkerRows(store, 'assist-brief').find(row => row.childId === started.childId).allowedTools;
     assert(!childTools.includes('redteam_task'));
     assert(!childTools.includes('saker_assist'));
+    assert(childTools.includes('run_code'), 'PTC transport must stay available even when it is not a registered schema');
     assert(childTools.includes('saker_material'), 'the same tool must be visible and accepted by the execution guard');
     for (const name of ['pwsh', 'write', 'edit', 'read_image', 'web_fetch', 'web_search', 'redteam_execution', 'oob_probe'])
       assert(childTools.includes(name), 'free-test assistant must retain ordinary capability: ' + name);
@@ -288,6 +289,7 @@ await test('competition preset keeps its managed runner without a duplicate shel
     const started = await manager.assist(agent, { goal: '读取当前题面并运行受管命令', purpose: 'investigate' }, new AbortController().signal);
     const childTools = siteWorkerRows(store, 'ctf-fallback').find(row => row.childId === started.childId).allowedTools;
     assert(childTools.includes('competition_execution'));
+    assert(childTools.includes('run_code'), 'competition PTC helpers still need the reserved transport');
     assert(!childTools.includes('pwsh'), 'competition helper must not receive a second shell');
     assert(!childTools.includes('write'));
   } finally {

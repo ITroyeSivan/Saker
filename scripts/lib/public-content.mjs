@@ -3,6 +3,7 @@ import { join, relative } from 'node:path';
 
 const internalPath=/^(?:_ref\/|docs\/(?:verification|reports|plans|images)\/|docs\/(?:saker-.+|.+-20\d\d-\d\d-\d\d)\.md$|docs\/nday-(?:development-handoff|implementation-audit)\.md$)/;
 const privateText=/(?:用户反馈原话|他说得对|用户反馈[「（(]|[A-Z]:[\\/]Users[\\/](?!<|%|example\b|name\b)[^\\/\s"'`]+|docs\/verification\/|saker-(?:goal-prompt|consolidated-delivery|implementation-progress)-20\d\d)/;
+const developmentText=/(?:验收|回归\s*\d|(?:全量)?回归(?:通过|完成|结果)|回归\s*通过|\d[\d,]*\s*(?:通过|失败|跳过|断言)|实测|校准|测试结果(?!页)|测试记录|开发对话|G0[–—-]G10|隔离宿主|隔离运行|合成本地夹具|合成(?:本地)?夹具|本地夹具|模型交接|开发验证|正式\s*Desktop\s*检查|检查了.*(?:面板|弹窗|结果页))/;
 // `_ref/…` 是开发工作区（用户拿到的包里没有它），`X:\工作\…` 是这台机器的实际路径。
 // 出现在产品内容里就等于把开发环境泄漏给用户，并让说明变成照抄就会失败的命令。
 // 只对 `scripts/` 之外的内容生效：`scripts/` 是开发与安装工具，`desktop-shortcut.mjs`
@@ -10,7 +11,7 @@ const privateText=/(?:用户反馈原话|他说得对|用户反馈[「（(]|[A-Z
 const internalPathText=/[A-Za-z]:[\\/]工作[\\/]|_ref[\\/]/;
 export function assertReleaseContent(body){
   for(const heading of ['✨ 新增功能','🐛 问题修复','🎨 体验优化','⚠️ 其他变更'])if(!body.includes('### '+heading))throw Error('Missing release section: '+heading);
-  if(privateText.test(body)||/(?:验收|回归\s*\d|\d[\d,]*\s*(?:通过|失败|跳过|断言)|实测|校准|测试结果|测试记录|开发对话|G0[–—-]G10)/.test(body))throw Error('Release contains development records');
+  if(privateText.test(body)||developmentText.test(body))throw Error('Release contains development records');
 }
 export function checkPublicContent(root){
   const failures=[];

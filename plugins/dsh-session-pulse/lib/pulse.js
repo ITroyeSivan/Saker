@@ -105,6 +105,10 @@ export function parseTranscript(jsonlText, limits) {
 			if (text) out.push({ kind: "assistant", seq: Number(ev.seq) || 0, time: Number(ev.time) || 0, text: clip(text, lim.text) });
 		} else if (ev.type === "tool/call") {
 			out.push({ kind: "tool", seq: Number(ev.seq) || 0, time: Number(ev.time) || 0, name: String(ev.data?.name ?? "?").slice(0, 60), brief: clip(String(ev.data?.arguments ?? ""), lim.brief) });
+		} else if (ev.type === "tool/ptc-dispatch-start") {
+			const raw = ev.data?.arguments;
+			const args = typeof raw === "string" ? raw : JSON.stringify(raw ?? "");
+			out.push({ kind: "tool", seq: Number(ev.seq) || 0, time: Number(ev.time) || 0, name: String(ev.data?.name ?? "?").slice(0, 60), brief: clip(args, lim.brief) });
 		}
 	}
 	return out;

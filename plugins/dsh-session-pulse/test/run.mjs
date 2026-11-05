@@ -67,13 +67,15 @@ ok("progressOf：null/空清单返回 null", progressOf(null) === null && progre
 		ev("user/message", 9, { content: [{ type: "text", text: " 你是复核子代理。目标：X " }, { type: "image" }] }),
 		ev("assistant/message", 20, { message: { content: [{ type: "reasoning", text: "思考（不进转写）" }, { type: "text", text: "开始复核" }] } }),
 		ev("tool/call", 21, { callId: "c1", name: "skill", arguments: '{"name": "code-audit"}' }),
+		ev("tool/ptc-dispatch-start", 22, { name: "pwsh", subCallId: "c1:ptc:1", parentCallId: "c1", arguments: { command: "id" } }),
 		ev("assistant/message", 30, { message: { content: [{ type: "reasoning", text: "..." }] } }),
 		ev("assistant/message", 31, { message: { content: [{ type: "text", text: "结论：未发现" }] } }),
 		"不是 json 的一行",
 		ev("tool/result", 40, { message: { source: { callId: "c1" } } })
 	].join("\n");
 	const tr = parseTranscript(jsonl);
-	ok("转写：user/assistant 文本 + tool 行按序、reasoning 与坏行剔除", JSON.stringify(tr.map((e) => e.kind)) === JSON.stringify(["user", "assistant", "tool", "assistant"]) && tr[0].text === "你是复核子代理。目标：X" && tr[2].name === "skill" && tr[2].brief.includes("code-audit"));
+	ok("转写：user/assistant 文本 + tool/PTC 行按序、reasoning 与坏行剔除", JSON.stringify(tr.map((e) => e.kind)) === JSON.stringify(["user", "assistant", "tool", "tool", "assistant"]) && tr[0].text === "你是复核子代理。目标：X" && tr[2].name === "skill" && tr[2].brief.includes("code-audit"));
+	ok("转写：PTC 嵌套工具行带对象参数", tr[3].name === "pwsh" && tr[3].brief.includes("id"));
 	ok("转写：纯 reasoning 的 assistant 步骤不产生空条目", !tr.some((e) => e.kind === "assistant" && e.text === ""));
 	const capped = parseTranscript(ev("user/message", 1, { content: [{ type: "text", text: "长".repeat(2000) }] }), { text: 100 });
 	ok("转写：单条文本截断", capped[0].text.length === 101 && capped[0].text.endsWith("…"));

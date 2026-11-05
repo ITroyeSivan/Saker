@@ -31,8 +31,22 @@ function costUsage(store, sessionId) {
   const rows = store.db.prepare('SELECT kind,record FROM task_cost_events WHERE session_id=?').all(sessionId);
   let toolCalls = 0, modelCalls = 0, unknownUsageCalls = 0;
   let attemptCalls = 0;
+  const parsed = rows.map(row => {
+    try { return { kind: row.kind, record: JSON.parse(row.record) }; } catch { return { kind: row.kind, record: {} }; }
+  });
+  const nativeCalls = new Set(parsed.filter(row => row.kind === 'tool/call')
+    .map(row => String(row.record.callId || '')).filter(Boolean));
   for (const row of rows) {
-    if (row.kind === 'tool/call') { toolCalls += 1; continue; }
+    if (row.kind === 'tool/call') {
+      toolCalls += 1;
+      continue;
+    }
+    if (row.kind === 'tool/ptc-dispatch-start') {
+      let id = '';
+      try { id = String(JSON.parse(row.record).callId || ''); } catch { /* damaged row */ }
+      if (!id || !nativeCalls.has(id)) toolCalls += 1;
+      continue;
+    }
     if (row.kind === 'assistant/message') {
       modelCalls += 1;
       try { if (JSON.parse(row.record).totalTokens === null) unknownUsageCalls += 1; } catch { /* 坏用量行不影响计数 */ }
@@ -103,10 +117,18 @@ export function executionLedger(store, sessionId, options = {}) {
       if (row.kind === 'tool/call') {
         const callId = String(record.callId || '');
         if (callId) toolCalls.set(callId, { seq: row.seq, at: row.at, toolName: String(record.toolName || '') });
+      } else if (row.kind === 'tool/ptc-dispatch-start') {
+        const callId = String(record.callId || '');
+        if (callId && !toolCalls.has(callId)) toolCalls.set(callId, { seq: row.seq, at: row.at, toolName: String(record.toolName || ''),
+          parentCallId: String(record.parentCallId || ''), transport: 'ptc' });
       } else if (row.kind === 'tool/result') {
         const callId = String(record.callId || '');
         if (callId) toolResults.set(callId, { ok: record.ok !== false, error: String(record.error || ''),
           output: String(record.output || '').slice(0, 4000) });
+      } else if (row.kind === 'tool/ptc-dispatch') {
+        const callId = String(record.callId || '');
+        if (callId && !toolResults.has(callId)) toolResults.set(callId, { ok: record.ok !== false, error: String(record.error || ''),
+          output: String(record.output || '').slice(0, 4000), cancelled: record.cancelled === true });
       } else if (row.kind === 'assistant/message') {
         modelMessages.push({ seq: row.seq, at: row.at, record });
       } else if (row.kind === 'assistant/attempt') {
@@ -118,12 +140,15 @@ export function executionLedger(store, sessionId, options = {}) {
   for (const [callId, call] of toolCalls) {
     const result = toolResults.get(callId), at = new Date(call.at).toISOString();
     if (receiptCalls.has(callId) && result?.ok) continue;
+    const cancelled = result?.cancelled === true || /^(?:ABORTED|ABORTED_BEFORE_DISPATCH)$/.test(String(result?.error || ''));
     all.push({ id: 'tool-' + callId, at, source: 'session-tool-call', kind: 'tool',
       target: '', host: '', path: '', hypothesisId: '', requestRef: '', taskId: taskIdFor(at), identity: '',
-      outcome: result ? (result.ok ? 'completed' : 'error') : '', status: result ? (result.ok ? 'ok' : 'error') : null,
-      attempts: null, callState: result ? (result.ok ? 'returned' : 'failed') : 'unknown', elapsedMs: null,
-      result: result ? (result.ok ? 'returned' : 'failed') : 'unknown', impactVerified: false,
-      toolName: call.toolName, callId, detail: result?.error || result?.output || '' });
+      outcome: cancelled ? 'interrupted' : result ? (result.ok ? 'completed' : 'error') : '',
+      status: cancelled ? 'cancelled' : result ? (result.ok ? 'ok' : 'error') : null,
+      attempts: null, callState: cancelled ? 'cancelled' : result ? (result.ok ? 'returned' : 'failed') : 'unknown', elapsedMs: null,
+      result: cancelled ? 'unknown' : result ? (result.ok ? 'returned' : 'failed') : 'unknown', impactVerified: false,
+      toolName: call.toolName, callId, parentCallId: call.parentCallId || '', transport: call.transport || '',
+      detail: result?.error || result?.output || '' });
   }
   for (const message of modelMessages) {
     const at = new Date(message.at).toISOString();

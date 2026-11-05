@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-redteam-results",
-  "version": "1.1.7",
+  "version": "1.1.8",
   "description": "管理自由测试、比赛模式、案例测试、执行证据、发现与交付。",
   "files": [
     "lib",

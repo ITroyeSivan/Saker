@@ -232,9 +232,14 @@ export function createSiteWorkers(ctx, getStore) {
       const baseWorkerTool = name => /^(?:read|glob|grep|skill|saker_material|saker_browser|project_document|project_request|competition_challenge|competition_execution|redteam_execution|oob_probe)$/.test(name);
       const generalWorkerTool = name => /^(?:pwsh|powershell|exec_command|run_shell|run_code|bash|sh|write|edit|read_image|view_image|web_fetch|web_search)$/.test(name);
       const needed = name => baseWorkerTool(name) || (!competitionWorker && generalWorkerTool(name));
+      // `run_code` is the PTC transport, not a registered business capability.
+      // 0.2.2 exposes it only through the selected executor, so it never appears
+      // in schemas(agent); keep that transport in the allow list without adding
+      // it to the visible/business set. Native hosts simply never send it.
+      const allowedTransport = 'run_code';
       // These are host-execution adapters, not model-facing tools. They remain
       // allowed through the dispatch guard while the schema stays hidden.
-      const allow = [...new Set([...available.filter(needed), ...INTERNAL_CAPABILITIES, ...(input.tools || [])])];
+      const allow = [...new Set([...available.filter(needed), allowedTransport, ...INTERNAL_CAPABILITIES, ...(input.tools || [])])];
       // 工作键/租约（第 8.3 节）：同一目标+问题+资料版本跨进程唯一；接手提高 generation，
       // 旧工作者的迟到报告只作历史。
       // 必要资料版本（v6 第 8.3 节）：用资料的 (id, revision) 摘要，而不是条数 ——

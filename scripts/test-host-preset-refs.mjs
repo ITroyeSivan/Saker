@@ -91,9 +91,14 @@ function packageNameOf(specifier) {
 
 const refs = new Set()
 const files = []
+const allPresetFiles = []
 for (const preset of readdirSync(join(ROOT, 'preset'), { withFileTypes: true })) {
   if (!preset.isDirectory()) continue
   const dir = join(ROOT, 'preset', preset.name)
+  for (const name of ['agent.cordis.yml', 'agent.patch.yml']) {
+    const candidate = join(dir, name)
+    if (existsSync(candidate) && statSync(candidate).isFile()) allPresetFiles.push(candidate)
+  }
   const file = ['agent.cordis.yml', 'agent.patch.yml']
     .map(name => join(dir, name))
     .find(candidate => existsSync(candidate) && statSync(candidate).isFile())
@@ -111,4 +116,15 @@ if (missing.length > 0) {
   for (const name of missing) console.log(`  - ${name}`)
   process.exit(1)
 }
+// dsh 0.2.2 keeps this package in the host graph but cannot start it inside an
+// agent preset group; the preset then fails at session/create. Keep the
+// host-plane control rows out until the host exposes a startable preset face.
+const hostPlaneControl = allPresetFiles.filter(file =>
+  /@deepseek-ai\/dsh-tool-subagent-control/.test(readFileSync(file, 'utf8')))
+if (hostPlaneControl.length > 0) {
+  console.log(`FAIL ${hostPlaneControl.length} preset file(s) mount an unstartable host-plane subagent control:`)
+  for (const file of hostPlaneControl) console.log(`  - ${file}`)
+  process.exit(1)
+}
+console.log('ok   presets do not mount the unstartable host-plane subagent control')
 console.log('ok   every agent-preset host package exists in the selected dsh source')

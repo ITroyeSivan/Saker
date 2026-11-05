@@ -1,12 +1,12 @@
 # 桌面端安装与首次配置
 
-当前版本：Saker **0.6.2**。宿主：Windows 官方 DeepSeek Harness Desktop **0.2.2-rc.1**（同时兼容 0.2.1-rc.5、0.2.1-rc.2 与 0.2.0-rc.2）。
+当前版本：Saker **0.6.3**。宿主：Windows 官方 DeepSeek Harness Desktop **0.2.2-rc.1**（同时兼容 0.2.1-rc.5、0.2.1-rc.2 与 0.2.0-rc.2）。
 
 [官方 Desktop](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.2-rc.1) · [源码仓库](https://github.com/ITroyeSivan/Saker)
 
 ## 使用发布包安装
 
-从 [Releases](https://github.com/ITroyeSivan/Saker/releases/latest) 下载并解压 `Saker-0.6.2-desktop.zip`。完成官方 Desktop 的初始化与模型配置，完全退出应用，在解压目录运行：
+从 [Releases](https://github.com/ITroyeSivan/Saker/releases/latest) 下载并解压 `Saker-0.6.3-desktop.zip`。完成官方 Desktop 的初始化与模型配置，完全退出应用，在解压目录运行：
 
 ```powershell
 node scripts/install-desktop.mjs --desktop-dir "C:/实际安装目录/DeepSeek Harness" --check

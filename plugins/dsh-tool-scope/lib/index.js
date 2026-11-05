@@ -17,8 +17,8 @@
 //   · 可关：config.enable 与逐规则开关，随时退回原状。
 export const name = 'dsh-tool-scope'
 
-/** 需要 tools 服务（读全局工具清单 + 在 agent scope 下挂过滤）。 */
-export const inject = { tools: { required: true }, sakerTaskScenario: { required: false }, sakerSceneContext: { required: false } }
+/** 需要 tools 服务（读全局工具清单 + 在 agent scope 下挂过滤）；agents 用于工具热变更时找回存活 Agent。 */
+export const inject = { tools: { required: true }, agents: { required: false }, sakerTaskScenario: { required: false }, sakerSceneContext: { required: false } }
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { computeDeny, computeScenarioDeny, enabledRules, matchByRule, RULES } from './rules.js'
@@ -157,6 +157,7 @@ export function apply(ctx, config = {}) {
   const refreshPacks = (agent, state) => {
     const current = visibleTools(agent)
     state.toolNames = [...new Set([...state.toolNames, ...current])]
+    for (const name of restrictableTools(agent)) state.restrictable.add(name)
     for (const pack of packsForMode(state.mode, packs)) {
       if (state.loadedPacks.has(pack.id)) continue
       try {
@@ -190,7 +191,8 @@ export function apply(ctx, config = {}) {
     const mode = modeOf(agent)
     const deny = computeDeny(mode, known, rules)
     const agentTools = visibleTools(agent)
-    const state = { baseDispose: null, scenarioDispose: null, scenario: '', scenarioSignature: '', packDisposers: new Map(), loadedPacks: new Set(), mode,
+    const state = { baseDispose: null, scenarioDispose: null, scenario: '', scenarioSignature: '', packDisposers: new Map(), loadedPacks: new Set(), mode, refreshing: false,
+      lastKnownNames: new Set(), refreshPending: false, refreshFollowUps: 0,
       toolNames: agentTools, restrictable: restrictableTools(agent) }
     states.set(agent.id, state)
 
@@ -304,18 +306,60 @@ export function apply(ctx, config = {}) {
     try { state.baseDispose?.() } catch { /* 同上 */ }
   })
 
-  ctx.on('tools/change', () => {
-    for (const agentId of states.keys()) {
-      try {
-        const agent = ctx.agents?.get?.(agentId) || ctx.get?.('agents')?.get?.(agentId)
-        if (!agent) continue
-        const state = states.get(agentId)
-        const current = visibleTools(agent)
-        state.toolNames = [...new Set([...state.toolNames, ...current])]
-        refreshScenario(agent, state)
-        refreshPacks(agent, state)
-      } catch { /* agent/fiber may be retiring */ }
+  const sameNameSet = (left, right) => left.size === right.size && [...left].every(name => right.has(name))
+
+  const refreshAgent = (agentId) => {
+    const state = states.get(agentId)
+    if (!state) return
+    if (state.refreshing) {
+      const current = new Set(knownTools())
+      if (!sameNameSet(state.lastKnownNames, current)) state.refreshPending = true
+      return
     }
+    state.refreshing = true
+    const before = new Set(knownTools())
+    state.lastKnownNames = before
+    state.refreshPending = false
+    let agent
+    let available = false
+    try {
+      agent = ctx.agents?.get?.(agentId) || ctx.get?.('agents')?.get?.(agentId)
+      if (!agent) return
+      available = true
+      const current = visibleTools(agent)
+      state.toolNames = [...new Set([...state.toolNames, ...current])]
+      for (const name of restrictableTools(agent)) state.restrictable.add(name)
+      refreshScenario(agent, state)
+      refreshPacks(agent, state)
+    } catch (error) {
+      const msg = `工具变化后刷新失败（保持原工具面）: agent=${agentId} ${String(error?.message ?? error)}`
+      ctx.logger?.warn?.('dsh-tool-scope: %s', msg)
+      console.error('[tool-scope] ' + msg)
+    } finally {
+      state.refreshing = false
+      if (available) {
+        const after = new Set(knownTools())
+        const changed = state.refreshPending || !sameNameSet(before, after)
+        state.refreshPending = false
+        if (changed) {
+          if (state.refreshFollowUps < 8) {
+            state.refreshFollowUps += 1
+            queueMicrotask(() => refreshAgent(agentId))
+          } else {
+            state.refreshFollowUps = 0
+            const msg = `工具刷新未收敛，已停止继续重算: agent=${agentId}`
+            ctx.logger?.warn?.('dsh-tool-scope: %s', msg)
+            console.error('[tool-scope] ' + msg)
+          }
+        } else {
+          state.refreshFollowUps = 0
+        }
+      }
+    }
+  }
+
+  ctx.on('tools/change', () => {
+    for (const agentId of states.keys()) refreshAgent(agentId)
   })
 
   say(

@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-trace-vault",
-  "version": "0.3.11",
+  "version": "0.3.12",
   "description": "保存工具调用和错误记录，供查询及排查中断原因。",
   "files": [
     "lib",

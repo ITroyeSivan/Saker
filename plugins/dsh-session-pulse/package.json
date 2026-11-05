@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-session-pulse",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "description": "兼容旧版会话状态和子代理列表。默认关闭。",
   "files": [
     "lib",

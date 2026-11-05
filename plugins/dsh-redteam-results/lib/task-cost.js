@@ -27,15 +27,24 @@ function dispatchUsage(store, sessionId, since) {
 }
 export function captureTaskCost(store, session, event) {
   if (!session?.id || !Number.isSafeInteger(event?.seq) || !Number.isFinite(event.time)
-    || !['assistant/message', 'assistant/attempt', 'tool/call', 'tool/result', 'turn/start', 'turn/end'].includes(event.type)) return;
+    || !['assistant/message', 'assistant/attempt', 'tool/call', 'tool/result',
+      'tool/ptc-dispatch-start', 'tool/ptc-dispatch', 'turn/start', 'turn/end'].includes(event.type)) return;
   const chunks = (event.data?.stream || []).filter(item => item?.type === 'chunk').map(item => item.chunk);
   const usage = event.data?.usage ?? chunks.findLast(item => item?.type === 'usage')?.usage;
   const finish = chunks.findLast(item => item?.type === 'finish')?.reason;
   const callState = event.data?.interrupted === true || finish?.kind === 'aborted' ? 'interrupted'
     : finish?.kind === 'error' ? 'failed' : event.type === 'assistant/message' ? 'returned'
       : finish ? 'returned' : 'unknown';
-  const toolCallId = event.type === 'tool/call' ? event.data?.callId : event.type === 'tool/result' ? event.data?.message?.toolCallId : undefined;
-  const toolName = event.type === 'tool/call' ? event.data?.name : event.type === 'tool/result' ? event.data?.message?.name : undefined;
+  const ptcStart = event.type === 'tool/ptc-dispatch-start';
+  const ptcSettled = event.type === 'tool/ptc-dispatch';
+  const toolCallId = ptcStart || ptcSettled ? event.data?.subCallId
+    : event.type === 'tool/call' ? event.data?.callId : event.type === 'tool/result' ? event.data?.message?.toolCallId : undefined;
+  const toolName = ptcStart || ptcSettled ? event.data?.name
+    : event.type === 'tool/call' ? event.data?.name : event.type === 'tool/result' ? event.data?.message?.name : undefined;
+  const parentCallId = ptcStart || ptcSettled ? event.data?.parentCallId : undefined;
+  const errorCode = String(event.data?.error?.code ?? event.data?.error?.info?.code ?? event.data?.error?.name ?? '');
+  const toolError = String(event.data?.error?.reason || errorCode || '').slice(0, 200);
+  const cancelled = ptcSettled && (errorCode === 'ABORTED' || errorCode === 'ABORTED_BEFORE_DISPATCH');
   const usageRecord = Object.fromEntries(fields.map(key =>
     [key, Number.isFinite(usage?.[key]) && usage[key] >= 0 ? usage[key] : null]));
   const contentText = value => {
@@ -54,8 +63,16 @@ export function captureTaskCost(store, session, event) {
       : event.type === 'tool/result'
         ? { toolName: String(toolName ?? ''), callId: String(toolCallId ?? ''),
             ok: event.data?.message?.isError !== true,
-            error: event.data?.error ? String(event.data.error.reason || event.data.error.code || event.data.error.name || '').slice(0, 200) : '',
+            error: toolError,
             output: messageText }
+        : ptcStart
+          ? { toolName: String(toolName ?? ''), callId: String(toolCallId ?? ''), parentCallId: String(parentCallId ?? ''), transport: 'ptc' }
+          : ptcSettled
+            ? { toolName: String(toolName ?? ''), callId: String(toolCallId ?? ''), parentCallId: String(parentCallId ?? ''), transport: 'ptc',
+                ok: event.data?.isError !== true,
+                cancelled,
+                error: toolError,
+                output: messageText }
         : event.type === 'assistant/message'
           ? { turn: event.data?.turn ?? null, step: event.data?.step ?? null, messageId: String(event.data?.message?.id ?? ''),
               text: messageText, preview: messageText.slice(0, 4000), truncated: rawMessageText.length > messageText.length,
@@ -146,9 +163,17 @@ export function taskCostOverview(ctx, store, sessionId, since = 0) {
     const starts=new Map(), intervals=[];
     for(const event of all){const turn=JSON.parse(event.record).turn;if(event.kind==='turn/start')starts.set(turn,event.at);else if(event.kind==='turn/end'&&starts.has(turn)){const start=starts.get(turn);starts.delete(turn);if(event.at>=since)intervals.push([Math.max(start,since),event.at]);}}
     for(const start of starts.values())intervals.push([Math.max(start,since),Date.now()]);
+    const nativeCalls = saved.filter(row => row.kind === 'tool/call');
+    const reportedCalls = nativeCalls.map(row => {
+      try { return String(JSON.parse(row.record).callId || '') } catch { return '' }
+    }).filter(Boolean);
+    const reported = new Set(reportedCalls);
+    const ptcCalls = saved.filter(row => row.kind === 'tool/ptc-dispatch-start').filter(row => {
+      try { return !reported.has(String(JSON.parse(row.record).callId || '')) } catch { return true }
+    }).length;
     return { sessionId: id, role: id === sessionId ? 'main' : 'child', available: !!dispatch || saved.length > 0 || !!(session && (session.eventAt || Array.isArray(session.events))),
       accountingSource: 'official-session-events', auxiliaryCalls: null,
-      modelCalls: messages.length + attempts.length, attemptCalls: attempts.length, toolCalls: saved.filter(row => row.kind === 'tool/call').length,
+      modelCalls: messages.length + attempts.length, attemptCalls: attempts.length, toolCalls: nativeCalls.length + ptcCalls,
       unknownUsageCalls: unknownFallback,
       intervals,
       ...fallbackUsage, ...(dispatch ? { ...dispatch,

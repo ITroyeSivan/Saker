@@ -86,6 +86,7 @@ function modeOfSession(ctx, sessionId) {
 
 /** 从 tool/result 事件提取 callId（两形态：message.source.callId 或 content 块的 toolCallId）。 */
 export function callIdOfResult(event) {
+	if (typeof event?.data?.subCallId === "string") return event.data.subCallId;
 	const message = event?.data?.message ?? {};
 	if (message.source?.kind === "tool" && typeof message.source.callId === "string") return message.source.callId;
 	if (Array.isArray(message.content)) {
@@ -97,22 +98,33 @@ export function callIdOfResult(event) {
 
 /** 从 tool/result 事件提取错误位：显式 error 字段或任一 content 块 isError。 */
 export function isErrorResult(event) {
+	if (event?.data?.isError === true) return true;
 	if (event?.data?.error !== undefined) return true;
 	const content = event?.data?.message?.content;
 	return Array.isArray(content) && content.some((b) => b?.isError === true);
+}
+
+/** PTC cancellation is a control outcome, not a business failure. */
+export function isCancelledResult(event) {
+	const error = event?.data?.error;
+	const code = String(error?.code ?? error?.info?.code ?? error?.name ?? "");
+	return code === "ABORTED" || code === "ABORTED_BEFORE_DISPATCH";
 }
 
 /** 事件层装配（导出供测试）：返回 {onCall, onResult} 两个喂入口，配对后落库。 */
 export function createCapture(ctx, st, modeResolver = modeOfSession) {
 	const inflight = new Map();
 	const onCall = (sessionId, event) => {
-		const callId = event?.data?.callId;
+		const callId = event?.data?.callId ?? event?.data?.subCallId;
 		const tool = event?.data?.name;
 		if (typeof callId !== "string" || typeof tool !== "string") return;
 		if (inflight.size >= INFLIGHT_CAP) inflight.clear();
 		const key = `${sessionId}:${callId}`;
 		const mode = modeResolver(ctx, sessionId);
-		const entry = { tool, args: argsTextOf(event.data.arguments), t0: Date.now(), mode };
+		const rawArgs = typeof event.data.arguments === "string"
+			? event.data.arguments
+			: JSON.stringify(event.data.arguments ?? "");
+		const entry = { tool, args: argsTextOf(rawArgs), t0: Date.now(), mode };
 		inflight.set(key, entry);
 		if (MODE_IDS.includes(mode)) beginTrace(st, { id: key, sessionId, mode, tool, args: entry.args });
 	};
@@ -125,11 +137,13 @@ export function createCapture(ctx, st, modeResolver = modeOfSession) {
 		inflight.delete(key);
 		const mode = modeResolver(ctx, sessionId);
 		if (!MODE_IDS.includes(mode)) return; // 仅安全模式入库
-		const result = resultTextOf(event?.data?.message?.content);
+		const result = resultTextOf(event?.data?.content ?? event?.data?.message?.content);
+		const cancelled = isCancelledResult(event);
 		const patch = {
 			id: key,
 			result,
 			isError: isErrorResult(event),
+			...(cancelled ? { outcome: "interrupted" } : {}),
 			durMs: Date.now() - entry.t0,
 			tool: entry.tool,
 			args: entry.args,
@@ -195,7 +209,11 @@ function apply(ctx, config) {
 			if (event?.type === "turn/start") envelopeTurns.set(sessionKey(subject), { turn: event.data?.turn ?? null, frozen: undefined });
 			if (event?.type === "tool/call") {
 				capture.onCall(sessionKey(subject), event);
+			} else if (event?.type === "tool/ptc-dispatch-start") {
+				capture.onCall(sessionKey(subject), event);
 			} else if (event?.type === "tool/result") {
+				capture.onResult(sessionKey(subject), event);
+			} else if (event?.type === "tool/ptc-dispatch") {
 				capture.onResult(sessionKey(subject), event);
 			} else if (event?.type === "user/message") {
 				capture.onHuman(sessionKey(subject), event);
