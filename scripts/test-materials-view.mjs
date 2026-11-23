@@ -47,8 +47,9 @@ try {
     assert.equal(materialsList(store, 'mat', { type: 'file' }).counts.all, 5);
     assert.throws(() => materialsList(store, 'mat', { type: 'knowledge' }), /资料类型/);
   });
-  test('workspace asset-inventory assets appear in the task materials list without duplicating task assets', () => {
-    // 扫描/测绘把资产写进工作区账本；资料列表要把"已收集"的资产列出来（第 7.2 节 / 12.2 C03）。
+  test('workspace asset-inventory assets stay separate until the user explicitly expands them', () => {
+    // 扫描/测绘把资产写进工作区账本；账本属于整个工作区，不是当前任务的授权范围。
+    // 默认不得混进任务资料，展开时才追加并按 URL 去重。
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-materials-inv-'));
     try {
       fs.writeFileSync(path.join(workspace, 'asset-inventory.json'), JSON.stringify({
@@ -60,7 +61,12 @@ try {
           { id: 'inv-new', target: 'https://scan.example.test:9443/admin', host: 'scan.example.test', protocol: 'https', port: 9443, tech: ['Tomcat'], sources: ['nuclei'], authorized: true },
         ],
       }));
-      const withInv = materialsList(store, 'mat', { workspace });
+      const collapsed = materialsList(store, 'mat', { workspace });
+      assert.equal(collapsed.counts.all, 5, '默认只列当前任务资料');
+      assert.deepEqual(collapsed.workspace, { count: 1, included: false });
+      assert(!collapsed.rows.some(r => r.id === 'inventory:inv-new'), '未展开时工作区账本不进入任务资料列表');
+
+      const withInv = materialsList(store, 'mat', { workspace, includeWorkspace: true });
       assert.equal(withInv.counts.asset, 3, '两个任务资产 + 一个新账本资产，重复的账本资产被去重');
       assert.equal(withInv.counts.all, 6);
       const added = withInv.rows.find(r => r.id === 'inventory:inv-new');
@@ -72,7 +78,7 @@ try {
       assert.equal(materialsList(store, 'mat', {}).counts.all, 5);
       // 账本损坏时静默为空，不拖垮列表。
       fs.writeFileSync(path.join(workspace, 'asset-inventory.json'), '{broken');
-      assert.equal(materialsList(store, 'mat', { workspace }).counts.all, 5);
+      assert.equal(materialsList(store, 'mat', { workspace, includeWorkspace: true }).counts.all, 5);
     } finally { fs.rmSync(workspace, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 }); }
   });
   test('requests carry method, host, path, account and response status without copying conclusions', () => {
@@ -154,6 +160,58 @@ try {
     assert.equal(first.preview + second.preview + last.preview, body, '分段拼起来就是原文');
     assert.equal(read(0, 999999).limit, 16384, '单段上限 16KB');
     assert.equal(read(0, 1).limit, 512, '单段下限 512B');
+  });
+  test('中文大材料按 UTF-8 字符边界分段，拼回字节与原文完全一致', () => {
+    const file = path.join(home, 'big-chinese-segment.txt');
+    const line = '这是用于验证六十四KiB以上中文材料分块读取的固定正文，包含换行与安全术语：授权范围、原始请求、响应、证据、回滚、未知。\n';
+    let body = '';
+    let index = 0;
+    while (Buffer.byteLength(body) < 70000) body += line + '编号' + (++index) + '\n';
+    fs.writeFileSync(file, body);
+    store.db.prepare('INSERT OR REPLACE INTO business_materials(session_id,id,source_url,digest,record) VALUES(?,?,?,?,?)')
+      .run('mat', 'material-big-chinese', endpoint + '/big-chinese.txt', 'e'.repeat(64),
+        JSON.stringify({ id: 'material-big-chinese', file, sourceUrl: endpoint + '/big-chinese.txt', hints: [], coverage: {} }));
+    let offset = 0;
+    let reconstructed = '';
+    let chunks = 0;
+    while (offset !== null) {
+      const part = materialsDetail(store, 'mat', { kind: 'file', id: 'material-big-chinese', offset, limit: 8192 });
+      assert(Buffer.byteLength(part.preview) <= part.limit, '每个分段不得超过请求的字节上限');
+      reconstructed += part.preview;
+      chunks += 1;
+      offset = part.nextOffset;
+      assert(chunks < 20, '分段必须收敛');
+    }
+    assert(Buffer.byteLength(body) > 65536);
+    assert(chunks > 8);
+    assert.deepEqual(Buffer.from(reconstructed, 'utf8'), Buffer.from(body, 'utf8'));
+    assert.equal(reconstructed, body);
+  });
+  test('跨页原文遮罩：敏感头跨过页边界时前后两页都不能露出值片段', () => {
+    const sid = 'mask-cross-page';
+    const privateFragment = 'CROSS-PAGE-FRAGMENT';
+    const body = 'P'.repeat(400) + '\nAuthorization: Bearer ' + 'A'.repeat(100)
+      + privateFragment + 'B'.repeat(100) + '\nNormal tail stays readable.\n';
+    const material = importPastedMaterial(store, sid, { name: 'cross-page.txt', text: body }, { home });
+
+    let offset = 0;
+    let local = '';
+    while (offset !== null) {
+      const part = materialsDetail(store, sid, { kind: 'file', id: material.id, offset, limit: 512 });
+      local += part.preview || '';
+      offset = part.nextOffset;
+    }
+    assert(!local.includes(privateFragment), '本地分页不能在下一页露出 Authorization 值片段');
+    assert(local.includes('Normal tail stays readable.'), '普通非敏感文本仍应可读');
+
+    offset = 0;
+    let model = '';
+    for (let page = 0; page < 20 && offset !== null; page += 1) {
+      const part = readMaterialExcerpt(store, sid, { id: material.id, offset, limit: 512 });
+      model += String(part.head || '') + String(part.body || '') + String(part.content || '');
+      offset = part.nextOffset;
+    }
+    assert(!model.includes(privateFragment), '模型分页续读也不能露出 Authorization 值片段');
   });
   test('pasted materials are classified by shape, not guessed', () => {
     assert.equal(detectFormat('GET /api HTTP/1.1\r\nHost: a.test\r\n\r\n'), 'http');
@@ -307,10 +365,13 @@ try {
     assert.match(wideFirst.note, /续读/, '有后续时 note 不能说"没有更多内容"');
     assert.doesNotMatch(wideFirst.note, /没有更多内容/, 'note 不能与 nextOffset 自相矛盾');
     // HTTP：头与体分开给，并标出截断落在哪一段。
-    const httpMaterial = importPastedMaterial(store, sid, { name: 'req.txt', text: 'GET /a HTTP/1.1\r\nHost: app.example.test\r\n\r\nBODY-BYTES' }, { home });
+    const httpMaterial = importPastedMaterial(store, sid, { name: 'req.txt', text: 'GET /a HTTP/1.1\r\nHost: app.example.test\r\nAuthorization: Bearer SECRET-TOKEN\r\nCookie: sid=SECRET-COOKIE\r\n\r\nBODY-BYTES' }, { home });
     const http = readMaterialExcerpt(store, sid, { id: httpMaterial.id });
     assert.equal(http.kind, 'http');
     assert.match(http.head, /^GET \/a HTTP\/1\.1/);
+    assert.match(http.head, /Authorization: \[已遮蔽\]/);
+    assert.match(http.head, /Cookie: \[已遮蔽\]/);
+    assert(!http.head.includes('SECRET-TOKEN') && !http.head.includes('SECRET-COOKIE'), 'model excerpt must not expose credentials');
     assert.equal(http.body, 'BODY-BYTES');
     assert.equal(http.headTruncated, false);
     assert.equal(http.bodyTruncated, false);
@@ -378,6 +439,8 @@ try {
     assert.equal(row.meta.identities, 2, '列表行带身份线索数');
     const detail = materialsDetail(store, sid, { kind: 'file', id: material.id });
     assert.equal(detail.identities.length, 2, '详情给出身份线索，界面据此显示待关联');
+    assert(detail.preview.includes('[已遮蔽]') && !detail.preview.includes('SECRET-TOKEN') && !detail.preview.includes('SECRET-COOKIE-VALUE'),
+      '本地原文预览必须遮蔽 Authorization/Cookie 秘密');
   });
   test('问题引用原文后详情显示关联问题；移除只移除引用，仍被引用时拒绝', () => {
     const sid = 'assoc';

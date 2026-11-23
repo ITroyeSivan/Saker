@@ -25,7 +25,7 @@ const ctx = {
 };
 apply(ctx, {
   log: false,
-  packs: { 'task-workflow': false, 'asset-discovery': false, 'active-scan': false, webshell: false },
+  packs: { 'asset-discovery': false, 'active-scan': false, webshell: false },
 });
 
 function agent(id) {
@@ -103,7 +103,7 @@ const retryCtx = {
   logger: { info: () => {}, warn: () => {} },
   on(name, handler) { retryEvents.set(name, [...(retryEvents.get(name) || []), handler]); },
 };
-apply(retryCtx, { log: false, packs: { 'task-workflow': false, 'asset-discovery': false, 'active-scan': false } });
+apply(retryCtx, { log: false, packs: { 'asset-discovery': false, 'active-scan': false } });
 const retryVisible = () => known.filter(name => ![...retryRestrictions].some(deny => deny.has(name)));
 const retryAgent = {
   id: 'scenario-retry',
@@ -148,7 +148,7 @@ const packCtx = {
   logger: { info: () => {}, warn: () => {} },
   on(name, handler) { packEvents.set(name, [...(packEvents.get(name) || []), handler]); },
 };
-apply(packCtx, { log: false, packs: { 'task-workflow': false, 'asset-discovery': false, webshell: false } });
+apply(packCtx, { log: false, packs: { 'asset-discovery': false, webshell: false } });
 const packAgent = {
   id: 'pack-agent',
   session: { id: 'pack-session', header: { agentPreset: 'pentest' } },

@@ -67,6 +67,28 @@ for (const name of dirs) {
 
 assert.deepEqual(failures, [], `release manifests disagree with the bytes on disk: ${failures.join(', ')}`);
 assert.deepEqual(brokenRefs, [], `release README references media that is not shipped: ${brokenRefs.join(', ')}`);
-assert(frozen, `the frozen matrix baseline ${FROZEN} must be present`);
+const currentVersion = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
+const currentName = `Saker-${currentVersion}-desktop`;
+assert(dirs.includes(currentName), `current release directory is missing: ${currentName}`);
+const currentDir = join(releases, currentName);
+const buildInfo = JSON.parse(readFileSync(join(currentDir, 'build-info.json'), 'utf8'));
+const currentManifest = JSON.parse(readFileSync(join(currentDir, 'packages.json'), 'utf8'));
+const manifestSha256 = createHash('sha256').update(JSON.stringify(currentManifest)).digest('hex');
+assert.equal(buildInfo.version, currentVersion, 'build-info version must match package.json');
+assert.equal(buildInfo.manifestSha256, manifestSha256, 'build-info manifest digest must match packages.json');
+assert.equal(buildInfo.buildId, manifestSha256.slice(0, 12), 'buildId must identify the package manifest');
+const latest = JSON.parse(readFileSync(join(releases, 'LATEST.json'), 'utf8'));
+assert.equal(latest.buildId, buildInfo.buildId, 'LATEST.json must point to the current buildId');
+assert.equal(latest.zip, `${currentName}.zip`, 'LATEST.json must point to the current ZIP');
+assert.equal(sha256(join(releases, latest.zip)), latest.zipSha256, 'LATEST ZIP digest must match disk');
+const checksumText = readFileSync(join(releases, latest.checksum), 'utf8').trim().split(/\s+/)[0];
+assert.equal(checksumText.toUpperCase(), latest.zipSha256.toUpperCase(), 'ZIP .sha256 file must match LATEST.json');
+for (const helper of ['desktop-process.mjs', 'desktop-shortcut-policy.mjs', 'desktop-backup.mjs', 'product-plugins.mjs'])
+  assert(existsSync(join(currentDir, 'scripts', 'lib', helper)), `release is missing install helper: ${helper}`);
 console.log(`ok ${dirs.length} release directories verified, ${checked} artifacts match their recorded sha256`);
-console.log(`ok frozen matrix baseline ${FROZEN}: ${frozen.rootTgz} sha256=${frozen.rootSha256} packages=${frozen.packages} digest=${frozen.digest}`);
+console.log(`ok current release ${currentName}: buildId=${buildInfo.buildId} zipSha256=${latest.zipSha256}`);
+if (frozen) {
+  console.log(`ok frozen matrix baseline ${FROZEN}: ${frozen.rootTgz} sha256=${frozen.rootSha256} packages=${frozen.packages} digest=${frozen.digest}`);
+} else {
+  console.log(`skip frozen matrix baseline ${FROZEN}: artifact directory was removed during workspace disk cleanup; not claiming it was verified`);
+}

@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-scanner-tools",
-  "version": "1.2.1",
+  "version": "1.2.6",
   "description": "调用本机扫描、爬取工具，导入已有扫描结果。",
   "files": [
     "lib",
@@ -34,6 +34,6 @@
   "author": "Saker contributors",
   "engines": {
     "node": ">=24.9.0",
-    "dsh": "0.2.0-rc.2 || 0.2.1-rc.2 || 0.2.1-rc.5 || 0.2.2-rc.1"
+    "dsh": "0.2.0-rc.2 || 0.2.1-rc.2 || 0.2.1-rc.5 || 0.2.2-rc.1 || 0.2.2-rc.2"
   }
 }

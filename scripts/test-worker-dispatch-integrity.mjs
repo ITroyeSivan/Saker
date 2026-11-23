@@ -36,7 +36,7 @@ await test('report policy blocks the real HTTP executor before the loopback serv
         request: 'GET /private HTTP/1.1\r\nHost: ' + new URL(target).host + '\r\n\r\n', response: 'HTTP/1.1 200 OK\r\n\r\nfixture' }] });
     await assert.rejects(executeRecordedRequest(store, spec.childId, { purpose: 'first-contact', requestId: 'r', requestRevision: 'v1' }), /target_network_disabled|关闭/);
     assert.match(taskExecutionGuard(store, spec.childId, 'saker_assist', Date.now(), { args: {} }), /worker_tool_not_allowed/);
-    return { result: Promise.resolve({ stopReason: 'completed', output: [] }), dispose: async () => {} };
+    return { childId: spec.childId, result: Promise.resolve({ stopReason: 'completed', output: [] }), dispose: async () => {} };
   } } }, () => store);
   try { assert.equal((await tasks.run(agent, 'report')).ok, true); assert.equal(hits, 0); }
   finally { await tasks.dispose(); store.close(); await new Promise(resolve => server.close(resolve)); }
@@ -44,9 +44,9 @@ await test('report policy blocks the real HTTP executor before the loopback serv
 await test('uncertain release reserves capacity until a later successful cleanup', async () => {
   const store = openStore(':memory:'), agent = parent(store, 'uncertain');
   let starts = 0, rejectRelease = true;
-  const tasks = createPurposeTasks({ subagents: { async startActivation() {
+  const tasks = createPurposeTasks({ subagents: { async startActivation(spec) {
     starts++;
-    return { result: Promise.resolve({ stopReason: 'completed', output: [] }), dispose: async () => { if (rejectRelease) throw Error('release unknown'); } };
+    return { childId: spec.childId, result: Promise.resolve({ stopReason: 'completed', output: [] }), dispose: async () => { if (rejectRelease) throw Error('release unknown'); } };
   } } }, () => store);
   try {
     const first = await tasks.run(agent, 'review');
@@ -61,7 +61,7 @@ await test('all purpose costs belong to the parent even after release', async ()
   const store = openStore(':memory:'), agent = parent(store, 'cost');
   const tasks = createPurposeTasks({ subagents: { async startActivation(spec) {
     captureTaskCost(store, { id: spec.childId }, { seq: 1, time: Date.now(), type: 'assistant/message', data: { usage: { totalTokens: 90 } } });
-    return { result: Promise.resolve({ stopReason: 'completed', output: [] }), dispose: async () => {} };
+    return { childId: spec.childId, result: Promise.resolve({ stopReason: 'completed', output: [] }), dispose: async () => {} };
   } } }, () => store);
   try {
     captureTaskCost(store, agent.session, { seq: 1, time: Date.now(), type: 'assistant/message', data: { usage: { totalTokens: 10 } } });
@@ -179,7 +179,7 @@ await test('offline review and report accept a parent task with no website addre
     starts++;
     const child = readTaskPolicy(store, spec.childId);
     assert.equal(child.target, ''); assert.equal(child.allowTargetNetwork, false);
-    return { result: Promise.resolve({ stopReason: 'completed', output: [] }), dispose: async () => {} };
+    return { childId: spec.childId, result: Promise.resolve({ stopReason: 'completed', output: [] }), dispose: async () => {} };
   } } }, () => store);
   try {
     const agent = { session: { id: 'offline-purpose', header: { agentPreset: 'pentest' } } };
@@ -213,7 +213,7 @@ await test('saker_assist builds a bounded brief, selects the configured review m
       async startActivation(spec) {
         captured = spec;
         children.set(spec.childId, { session: { id: spec.childId } });
-        return { result: new Promise(() => {}), dispose: async () => { children.delete(spec.childId); } };
+        return { childId: spec.childId, result: new Promise(() => {}), dispose: async () => { children.delete(spec.childId); } };
       },
       async drainChildren(_parent, ids) { for (const id of ids) children.delete(id); },
       listDescendants() { return []; },
@@ -277,7 +277,7 @@ await test('competition preset keeps its managed runner without a duplicate shel
     subagents: {
       async startActivation(spec) {
         children.set(spec.childId, { session: { id: spec.childId } });
-        return { result: new Promise(() => {}), dispose: async () => { children.delete(spec.childId); } };
+        return { childId: spec.childId, result: new Promise(() => {}), dispose: async () => { children.delete(spec.childId); } };
       },
       async drainChildren(_parent, ids) { for (const id of ids) children.delete(id); },
       listDescendants() { return []; },

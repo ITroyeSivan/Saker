@@ -1521,7 +1521,15 @@ try {
   secondServer.closeAllConnections?.();
   await new Promise(resolve => secondServer.close(resolve));
   store.close();
-  fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 });
+  try {
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 });
+  } catch (error) {
+    // Windows can keep an antivirus/indexer handle briefly after servers and
+    // stores close. The assertions already ran; move the residue aside so the
+    // suite reports the real product result instead of a cleanup EPERM.
+    if (!['EPERM', 'EBUSY', 'ENOTEMPTY'].includes(error.code)) throw error;
+    try { fs.renameSync(home, home + '-cleanup-' + Date.now()); } catch { /* leave for temp reaper */ }
+  }
 }
 
 console.log(failed ? failed + ' failed' : 'all passed');

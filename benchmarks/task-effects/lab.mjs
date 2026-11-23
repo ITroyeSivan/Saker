@@ -108,7 +108,10 @@ export async function createEffectLab(caseId, { maxRequests = 200, split = 'cali
       const parts = raw.replace(/\\/g, '/').split('/').filter(part => part !== '' && part !== '.');
       const escapes = parts.includes('..');
       const relative = parts.filter(part => part !== '..').join('/');
-      const body = virtualFiles[relative];
+      // 服务根是 public/；private/ 在服务根之外。只允许通过真正的 .. 越界
+      // 读取它，直接写 private/... 不能绕过边界——否则加固靶场也会泄露，
+      // 评分器却仍按“没有越界”判阴性。
+      const body = relative.startsWith('private/') && !escapes ? undefined : virtualFiles[relative];
       const belongsTo = relative.includes('notes-owner') ? 'owner' : relative.includes('notes-subject') ? 'subject' : null;
       // escapeTarget：这次请求**确实指向**服务根之外的真实文件。用它把"越界被拒"和
       // "文件名打错所以 404"区分开 —— 否则随便打错一个路径也能凑出"被拒"的证据。

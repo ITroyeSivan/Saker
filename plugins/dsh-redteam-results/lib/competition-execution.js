@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { readCompetitionChallenge } from './competition-store.js'
-import { readSceneContext } from './scene-context.js'
+import { readSceneContext, startCompetitionBudget } from './scene-context.js'
 
 const RUNNING = new Map()
 const MAX_MEMORY = 1024 * 1024
@@ -27,7 +27,7 @@ function competitionSettings(store, sessionId) {
   const configured = scene.preferences && typeof scene.preferences === 'object' && Object.keys(scene.preferences).length > 0
   const preferences = configured ? scene.preferences : {}
   const minutes = Number(preferences.budget?.minutes)
-  const startedAt = Date.parse(preferences.budget?.startedAt || preferences.updatedAt || '')
+  const startedAt = Date.parse(preferences.budget?.startedAt || '')
   const deadlineAt = Number.isFinite(minutes) && minutes > 0 && Number.isFinite(startedAt)
     ? startedAt + minutes * 60000
     : null
@@ -98,6 +98,27 @@ function appendOutput(state, stream, chunk) {
   state.memory = Buffer.byteLength(state.stdout) + Buffer.byteLength(state.stderr)
 }
 
+function captureOutputAnchors(state) {
+  const anchor = file => {
+    const stat = fs.statSync(file)
+    if (!stat.isFile()) throw new Error('competition output is not a regular file: ' + file)
+    const bytes = fs.readFileSync(file)
+    return { bytes: stat.size, sha256: createHash('sha256').update(bytes).digest('hex'), capturedAt: nowIso() }
+  }
+  const revision = Math.max(1, Number(state.outputRevision) || 0) + 1
+  const anchors = {
+    revision,
+    capturedAt: nowIso(),
+    environment: state.environment,
+    executorPid: Number.isSafeInteger(Number(state.pid)) ? Number(state.pid) : null,
+    stdout: anchor(state.stdoutFile),
+    stderr: anchor(state.stderrFile),
+  }
+  state.outputRevision = revision
+  state.outputAnchors = anchors
+  return anchors
+}
+
 function processAlive(pid) {
   if (!Number.isSafeInteger(pid) || pid <= 0) return false
   try { process.kill(pid, 0); return true } catch { return false }
@@ -141,7 +162,12 @@ export function recoverCompetitionExecutions(store) {
 export function runCompetitionExecution(store, sessionId, challengeId, input = {}) {
   const challenge = readCompetitionChallenge(store, sessionId, challengeId)
   if (!challenge) throw new Error('competition challenge not found')
-  const settings = competitionSettings(store, sessionId)
+  let settings = competitionSettings(store, sessionId)
+  if (settings?.configured && Number(settings.preferences.budget?.minutes) > 0
+    && !settings.preferences.budget?.startedAt) {
+    startCompetitionBudget(store, sessionId)
+    settings = competitionSettings(store, sessionId)
+  }
   if (settings?.deadlineAt !== null && settings?.deadlineAt !== undefined && Date.now() >= settings.deadlineAt)
     throw new Error('competition time limit exhausted; update the time setting before starting another action')
   if (settings && String(settings.preferences.interaction || 'auto') !== 'auto')
@@ -213,11 +239,14 @@ export function runCompetitionExecution(store, sessionId, challengeId, input = {
   child.on('close', (code, signal) => {
     if (state.deadlineTimer) clearTimeout(state.deadlineTimer)
     if (!['stopping', 'stopped'].includes(state.state)) {
-      state.state = code === 0 ? 'completed' : 'failed'
+      let anchorError = ''
+      try { captureOutputAnchors(state) } catch (error) { anchorError = String(error?.message || error) }
+      state.state = anchorError ? 'unknown' : code === 0 ? 'completed' : 'failed'
       state.exitCode = code
       state.signal = signal
       state.endedAt = nowIso()
       state.updatedAt = state.endedAt
+      if (anchorError) state.outputAnchorError = anchorError
       try { saveExecution(store, state) } catch { /* store may be closing */ }
     }
     RUNNING.delete(executionId)
@@ -227,6 +256,7 @@ export function runCompetitionExecution(store, sessionId, challengeId, input = {
     if (['stopping', 'stopped'].includes(state.state)) return
     state.state = 'failed'
     state.error = error.message
+    try { captureOutputAnchors(state) } catch (anchorError) { state.outputAnchorError = String(anchorError?.message || anchorError) }
     state.endedAt = nowIso()
     state.updatedAt = state.endedAt
     try { saveExecution(store, state) } catch { /* store may be closing */ }
@@ -390,10 +420,13 @@ export function stopCompetitionExecution(store, sessionId, challengeId, executio
     saveExecution(store, live)
     return { ok: false, state: 'running', executionId, error: reason || 'stop-not-confirmed' }
   }
-  live.state = 'stopped'; live.exitCode = null; live.endedAt = nowIso(); live.updatedAt = live.endedAt
+  let anchorError = ''
+  try { captureOutputAnchors(live) } catch (error) { anchorError = String(error?.message || error) }
+  live.state = anchorError ? 'unknown' : 'stopped'; live.exitCode = null; live.endedAt = nowIso(); live.updatedAt = live.endedAt
+  if (anchorError) live.outputAnchorError = anchorError
   saveExecution(store, live)
   RUNNING.delete(executionId)
-  return { ok: true, state: 'stopped', executionId }
+  return { ok: !anchorError, state: live.state, executionId, ...(anchorError ? { error: anchorError } : {}) }
 }
 
 export function stopAllCompetitionExecutions(store, sessionId = '') {

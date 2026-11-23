@@ -13,9 +13,9 @@ const variants=[
   {id:'unknown-is-zero',from:'unknownCalls||unresolvedCalls ? null : knownTokens',to:'knownTokens',fail:'shared root admission'},
   {id:'no-token-hold',from:'heldTokens+=row.reservedTokens ?? 0',to:'heldTokens+=0',fail:'strict token reservations'},
   {id:'trust-estimate',from:"['exact','upper-bound'].includes(counter.quality)",to:"['exact','upper-bound','estimate'].includes(counter.quality)",fail:'estimated, stale or incomplete'},
-  {id:'optional-stop',from:'if(stopped(owner))return stoppedResult();',to:'if((owner.policy.budget.modelCalls!==undefined||owner.policy.budget.tokens!==undefined)&&stopped(owner))return stoppedResult();',fail:'cancellation and deadlines'},
+  {id:'optional-stop',from:'if(stopped(owner))return stoppedResult();',to:'if(((owner.policy.budget.modelCalls!==undefined&&owner.policy.budget.modelCalls!==null)||(owner.policy.budget.tokens!==undefined&&owner.policy.budget.tokens!==null))&&stopped(owner))return stoppedResult();',fail:'cancellation and deadlines'},
   {id:'cancel-child-poisons-root',from:'if(stopped(owner))return stoppedResult();',to:"if(stopped(owner))return block(store,owner,'task_stopped',stoppedResult().message);",fail:'a stopped child cannot poison'},
-  {id:'count-after-stop',from:'if(stopped(owner)){',to:'if(false){',fail:'stopped streams invoke neither'},
+  {id:'count-after-stop',from:'if(!readOnly && stopped(owner)){',to:'if(false){',fail:'stopped streams invoke neither'},
 ];
 try{
   for(const variant of variants){
@@ -23,7 +23,7 @@ try{
     const module=join(directory,variant.id+'.mjs');writeFileSync(module,source.replace(variant.from,variant.to));
     writeFileSync(join(directory,'package.json'),JSON.stringify({type:'module'}));
     writeFileSync(join(directory,'model-transport.js'),transportSource);
-    for (const name of ['task-policy-record.js','row-record.js']) writeFileSync(join(directory,name),readFileSync(join(root,'plugins/dsh-redteam-results/lib',name),'utf8'));
+    for (const name of ['task-policy-record.js','row-record.js','scene-context.js']) writeFileSync(join(directory,name),readFileSync(join(root,'plugins/dsh-redteam-results/lib',name),'utf8'));
     // Keep the actual production store and task policy; redirect only the tested
     // ledger module. Run the targeted sequential cases; race/restart coverage
     // uses the real suite separately, avoiding false reds from temp imports.

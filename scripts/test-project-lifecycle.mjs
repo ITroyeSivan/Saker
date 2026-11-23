@@ -9,9 +9,9 @@ import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
 import { startTaskPolicy } from '../plugins/dsh-redteam-results/lib/task-policy.js';
 import {
   createProjectRun, transitionProjectRun, defineProjectChecks, recordProjectCheck,
-  listProjectActions, readProjectRun,
+  listProjectActions, readProjectRun, readProjectCheck,
 } from '../plugins/dsh-redteam-results/lib/project-store.js';
-import { projectContinuation, markProjectContinuation, resumeProjectRun } from '../plugins/dsh-redteam-results/lib/project-runtime.js';
+import { projectContinuation, markProjectContinuation, resumeProjectRun, selectProjectCheck, captureProjectNativeEvent } from '../plugins/dsh-redteam-results/lib/project-runtime.js';
 import { executeProjectHttp } from '../plugins/dsh-redteam-results/lib/project-execution.js';
 import { recordObservedProjectCheck } from './lib/project-test-fixtures.mjs';
 
@@ -37,6 +37,23 @@ function prepare(sid, requirements = [{ requirement: '检查一' }, { requiremen
   const checks = defineProjectChecks(store, sid, run.runId, requirements);
   return { run: running, checks };
 }
+
+await test('blocked reply without native actions is recorded on the current check', async () => {
+  const sid = 'project-blocked-reply';
+  const { run } = prepare(sid, [{ requirement: '检查一' }]);
+  const check = selectProjectCheck(store, sid, run.runId);
+  assert(check, 'current check must be selectable');
+  const captured = captureProjectNativeEvent(store, sid, {
+    type: 'assistant/message',
+    data: { turn: 1, step: 1, message: { role: 'assistant',
+      content: [{ type: 'text', text: '无法执行：缺少目标地址与身份 A，无法构造请求。' }] } },
+  });
+  assert(captured && captured.checkId === check.checkId, 'reply must bind to the current check');
+  const after = readProjectCheck(store, sid, run.runId, check.checkId);
+  assert.equal(after.executionState, 'ended');
+  assert.equal(after.verdict, 'blocked');
+  assert.match(after.checkedContent, /缺少目标地址/);
+});
 
 try {
   await test('A09 多轮接续：完成一项后产生新进度，再继续下一项', async () => {

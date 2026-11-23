@@ -135,5 +135,17 @@ try {
       data: { name: 'read', subCallId: 'dup', parentCallId: 'root', arguments: {} } });
     assert.equal(executionLedger(store, 'ptc-dup', {}).usage.toolCalls, 1);
   });
+  test('business rejection stays visible even when the host completed the tool call', () => {
+    const at = Date.parse('2026-10-12T00:00:10.000Z');
+    captureTaskCost(store, { id: 'business-error' }, { type: 'tool/call', seq: 1, time: at,
+      data: { name: 'saker_workflow', callId: 'workflow-failed' } });
+    captureTaskCost(store, { id: 'business-error' }, { type: 'tool/result', seq: 2, time: at + 1,
+      data: { message: { name: 'saker_workflow', toolCallId: 'workflow-failed', isError: false,
+        content: [{ type: 'text', text: '工作流操作失败：workflow step not found\n当前可推进步骤：stepId=collect' }] } } });
+    const ledger = executionLedger(store, 'business-error', {});
+    assert.equal(ledger.counts.failed, 1, 'business rejection must not be counted as a completed tool call');
+    assert.equal(ledger.rows[0].callState, 'failed');
+    assert.match(ledger.rows[0].detail, /stepId=collect/);
+  });
 } finally { store.close(); fs.rmSync(home, { recursive: true, force: true }); }
 console.log(`${failed ? failed + ' failed' : 'all passed'}`); if (failed) process.exitCode = 1;

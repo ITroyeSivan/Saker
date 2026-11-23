@@ -37,8 +37,8 @@ const variants = [
     failure: /release manifests disagree with the bytes on disk/ },
   { id: 'missing-artifact', setup: dir => buildRelease(dir, 'Saker-0.0.1-desktop', { omitArtifact: true }),
     failure: /artifact listed but missing on disk/ },
-  { id: 'frozen-baseline-absent', setup: dir => buildRelease(dir, 'Saker-0.0.1-desktop'),
-    failure: /frozen matrix baseline/ },
+  { id: 'empty-release-directory', setup: dir => mkdirSync(join(dir, 'Saker-0.0.1-desktop'), { recursive: true }),
+    failure: /expected at least one release directory|packages\.json missing/ },
   { id: 'missing-readme-media', setup: dir => buildRelease(dir, 'Saker-0.0.1-desktop', { missingMedia: true }),
     failure: /references media that is not shipped/ },
 ];

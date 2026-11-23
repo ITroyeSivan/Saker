@@ -1,4 +1,34 @@
 import { parseRowRecord } from './row-record.js';
+function rootSessionId(store, sessionId) {
+  let root = String(sessionId || '');
+  for (let depth = 0; depth < 4 && root; depth += 1) {
+    let parent = '';
+    try { parent = store.db.prepare('SELECT parent_session FROM site_workers WHERE child_id=?').get(root)?.parent_session || ''; }
+    catch { /* purpose task ownership is checked below */ }
+    if (!parent) {
+      try { parent = store.db.prepare('SELECT parent_session FROM task_policy WHERE session_id=?').get(root)?.parent_session || ''; }
+      catch { /* malformed history has no inheritable root */ }
+    }
+    if (!parent || parent === root) break;
+    root = String(parent);
+  }
+  return root;
+}
+/**
+ * Bump the settings concurrency version only after an effective configuration
+ * change. Usage counters and ordinary progress must never call this helper.
+ */
+export function bumpSettingsRevision(store, sessionId) {
+  const root = rootSessionId(store, sessionId);
+  if (!root) throw new Error('sessionId required');
+  const at = new Date().toISOString();
+  store.db.prepare(`INSERT INTO task_settings_meta
+    (session_id,root_session_id,revision,round_sequence,knowledge_revision,knowledge_enabled,reference_strategy,schema_version,updated_at)
+    VALUES(?,?,1,0,0,0,'web-first',1,?)
+    ON CONFLICT(session_id) DO UPDATE SET revision=revision+1,updated_at=excluded.updated_at`)
+    .run(root, root, at);
+  return store.db.prepare('SELECT revision FROM task_settings_meta WHERE session_id=?').get(root)?.revision ?? 1;
+}
 export function taskTransaction(store, work) {
   const own = !store.db.isTransaction;
   if (own) store.db.exec('BEGIN IMMEDIATE');
@@ -60,10 +90,11 @@ const SETTING_LABELS = {
   workerLimit: '助手上限', allowTargetNetwork: '允许访问网站', readOnly: '不改动网站数据',
   excludedPaths: '排除路径', requestRatePerMinute: '扫描速率', requestConcurrency: '并发上限',
   startMode: '起步方式', workerModel: '协作模型', target: '测试范围', primaryTarget: '主入口',
-  scope: '范围规则', pendingChange: '待确认变更',
+  scope: '范围规则', allowedOrigins: '允许来源', modelConcurrency: '本地模型并发', pendingChange: '待确认变更',
   // 预算也算「设置」（v6 第 4.2 节）：聊天里只能收紧，但收紧同样是用户要看懂的变更。
   'budget.toolCalls': '工具调用上限', 'budget.deadline': '时间上限',
   'budget.unmeteredToolCalls': '未计量通道上限',
+  'budget.modelCalls': '模型调用上限', 'budget.tokens': '模型 token 上限',
 };
 /** 支持 `budget.toolCalls` 这类嵌套字段；取不到按 null 处理，与"未设置"一致。 */
 function fieldValue(record, field) {
@@ -94,6 +125,9 @@ export function writeTaskPolicy(store, sessionId, record, kind = 'policy-updated
     // 设置变更摘要（v6 第 4.2 节）：范围、预算或执行偏好被改动时，把差异记进事件，
     // 界面可以据此在消息旁/概览里回看；没有变化就不记。
     const settings = settingsDiff(previous, next);
+    // Unified settings saves wrap several policy writes in one transaction and
+    // own the revision bump; every legacy or chat path still bumps here.
+    if (settings.length && detail?.skipSettingsRevision !== true) bumpSettingsRevision(store, sessionId);
     taskEvent(store, sessionId, policyRev, kind, settings.length ? { ...detail, settings } : detail);
     return next;
   });

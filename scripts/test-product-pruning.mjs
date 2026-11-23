@@ -68,8 +68,10 @@ for (const file of ['README.md', 'docs/getting-started.md']) {
 }
 const gettingStarted = readFileSync(join(root, 'docs/getting-started.md'), 'utf8')
 const features = readFileSync(join(root, 'docs/features.md'), 'utf8')
-assert.match(gettingStarted, /添加文件 \/ 写提示词 \/ 设置/, 'getting-started 必须描述当前聊天工具栏')
-assert.match(features, /\| 写提示词 \|/, 'features 必须保留当前“写提示词”入口')
+assert.match(gettingStarted, /方法与状态 \/ 提示词 \/ 附件（比赛为题目）\/ 更多/, 'getting-started 必须描述当前单条操作栏入口')
+assert.match(gettingStarted, /更多 → 设置 → 节奏/, 'getting-started 必须指向实际的设置路径')
+assert.match(features, /\| 方法与状态 \|/, 'features 必须描述实际的方法与状态入口')
+assert.match(features, /\| 更多 \|/, 'features 必须说明协作和设置位于更多菜单')
 assert.doesNotMatch(gettingStarted, /提示词模板 \/ 添加测试资料 \/ 测试设置/, '不得恢复旧工具栏名称')
 console.log('ok   published version and entry names match the shipped product')
 const docFixture = mkdtempSync(join(resolve(root, '../_ref/tmp'), 'product-doc-check-'))
@@ -81,6 +83,6 @@ try {
   const good = check(); assert.equal(good.status, 0, good.stdout + good.stderr); assert.match(good.stdout, new RegExp(`实际插件数：${dirs.length}`))
   const script = join(docFixture, 'scripts/check-doc-plugins.mjs'), current = readFileSync(script, 'utf8')
   writeFileSync(script, current.replaceAll('productPluginDirectories(ROOT)', "readdirSync(join(ROOT, 'plugins')).sort()"))
-  const old = check(); assert.notEqual(old.status, 0); assert.match(old.stdout, /表格缺少 dsh-attack-atlas, dsh-campaign-memory, dsh-ctf-observer, dsh-method-stack, dsh-refusal-guard, dsh-route-boost, dsh-webshell-mgr/)
+  const old = check(); assert.notEqual(old.status, 0); assert.match(old.stdout, /表格缺少 dsh-attack-atlas, dsh-auto-advance, dsh-campaign-memory, dsh-ctf-observer, dsh-method-stack, dsh-product-subagents, dsh-refusal-guard, dsh-route-boost, dsh-sec-enforce, dsh-session-pulse, dsh-stage-gate, dsh-webshell-mgr/)
   console.log('ok   documentation checker accepts shipped selection and restoring retired counting fails behaviorally')
 } finally { assert(docFixture.startsWith(resolve(root, '../_ref/tmp') + sep)); rmSync(docFixture, { recursive: true, force: true }) }

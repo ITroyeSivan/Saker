@@ -56,22 +56,26 @@ export function captureTaskCost(store, session, event) {
   };
   const rawMessageText = redactText(contentText(event.data?.message?.content ?? event.data?.content ?? ''));
   const messageText = rawMessageText.slice(0, 200000);
+  const businessRejected = /^(?:错误：|工作流操作失败：)/.test(messageText)
+    || /"ok"\s*:\s*false/.test(messageText.slice(0, 500));
   const record = event.type.startsWith('turn/')
     ? { turn: event.data?.turn ?? null }
     : event.type === 'tool/call'
       ? { toolName: String(toolName ?? ''), callId: String(toolCallId ?? '') }
       : event.type === 'tool/result'
         ? { toolName: String(toolName ?? ''), callId: String(toolCallId ?? ''),
-            ok: event.data?.message?.isError !== true,
-            error: toolError,
+            ok: event.data?.message?.isError !== true && !businessRejected,
+            businessResult: businessRejected ? 'rejected' : event.data?.message?.isError === true ? 'failed' : 'completed',
+            error: businessRejected ? messageText.slice(0, 200) : toolError,
             output: messageText }
         : ptcStart
           ? { toolName: String(toolName ?? ''), callId: String(toolCallId ?? ''), parentCallId: String(parentCallId ?? ''), transport: 'ptc' }
           : ptcSettled
             ? { toolName: String(toolName ?? ''), callId: String(toolCallId ?? ''), parentCallId: String(parentCallId ?? ''), transport: 'ptc',
-                ok: event.data?.isError !== true,
+                ok: event.data?.isError !== true && !businessRejected,
+                businessResult: businessRejected ? 'rejected' : event.data?.isError === true ? 'failed' : 'completed',
                 cancelled,
-                error: toolError,
+                error: businessRejected ? messageText.slice(0, 200) : toolError,
                 output: messageText }
         : event.type === 'assistant/message'
           ? { turn: event.data?.turn ?? null, step: event.data?.step ?? null, messageId: String(event.data?.message?.id ?? ''),
@@ -135,7 +139,8 @@ export function listOrdinaryReports(store, sessionId, { limit = 20 } = {}) {
   const selected = finalReports.length ? finalReports : reports.slice(0, 1);
   return selected.slice(0, take);
 }
-export function taskCostOverview(ctx, store, sessionId, since = 0) {
+export function taskCostOverview(ctx, store, sessionId, since = 0, options = {}) {
+  const backfill = options.backfill !== false;
   const round = policyRecord(store, sessionId)?.startedAt;
   const ids = [...new Set([sessionId, ...siteWorkerRows(store, sessionId).map(row => row.childId),
     ...ownedPurposeTasks(store, sessionId).filter(row => !since || row.parentRound === round).map(row => row.childId)])];
@@ -143,7 +148,7 @@ export function taskCostOverview(ctx, store, sessionId, since = 0) {
   try { sessions = ctx.sessions || ctx.get?.('sessions'); } catch { /* explicit unavailable count below */ }
   const rows = ids.map(id => {
     const session = sessions?.get(id);
-    if (session) {
+    if (session && backfill) {
       if (!backfilled.has(store)) backfilled.set(store, new Map());
       const cursors = backfilled.get(store), length = Number.isSafeInteger(session.seq) ? session.seq : (session.events?.length || 0), previous = cursors.get(id) || 0;
       for (let index = previous <= length ? previous : 0; index < length; index++) {
@@ -184,6 +189,28 @@ export function taskCostOverview(ctx, store, sessionId, since = 0) {
           ? (dispatch[key] ?? 0) + (fallbackUsage[key] ?? 0) : null])),
       } : {}) };
   });
+  let curationRows = [];
+  try {
+    curationRows = store.db.prepare(`SELECT usage,created_at,wire_attempts FROM knowledge_curations
+      WHERE root_session=? AND created_at>=? AND wire_attempts>0`).all(sessionId, since).map(row => {
+      let usage = {};
+      try { usage = JSON.parse(row.usage || '{}'); } catch { usage = { unknown: true }; }
+      return { usage, wireAttempts: Number(row.wire_attempts) || 0 };
+    });
+  } catch { /* older stores without curation schema read as zero */ }
+  if (curationRows.length) {
+    const wires = curationRows.reduce((total, row) => total + row.wireAttempts, 0);
+    const known = curationRows.filter(row => !row.usage.unknown && fields.every(key => Number.isFinite(row.usage[key])));
+    const unknown = curationRows.filter(row => row.usage.unknown || !fields.every(key => Number.isFinite(row.usage[key])));
+    rows.push({
+      sessionId: 'knowledge-curation', role: 'knowledge-curation', available: true,
+      accountingSource: 'knowledge-curation-ledger', auxiliaryCalls: wires,
+      modelCalls: wires, attemptCalls: wires, toolCalls: 0,
+      unknownUsageCalls: unknown.length, intervals: [],
+      ...Object.fromEntries(fields.map(key => [key, known.length
+        ? known.reduce((total, row) => total + row.usage[key], 0) : null])),
+    });
+  }
   const intervals=rows.flatMap(row=>row.intervals).sort((a,b)=>a[0]-b[0]), merged=[];
   for(const interval of intervals){const last=merged.at(-1);if(last&&interval[0]<=last[1])last[1]=Math.max(last[1],interval[1]);else merged.push([...interval]);}
   return { source: rows.some(row => row.accountingSource === 'model-dispatch-ledger') ? 'model-dispatch-ledger-with-session-fallback' : 'official-session-events', scope: since ? 'current-round' : 'session-and-owned-children',

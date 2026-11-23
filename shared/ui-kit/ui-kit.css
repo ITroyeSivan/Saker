@@ -5,10 +5,10 @@
 .saker-ui-input{height:36px;border-radius:6px}
 .saker-ui-select{height:32px;border-radius:6px}
 .saker-ui-table td{height:38px}
-.saker-ui-badge{border-radius:6px;font-size:12px;line-height:1.5}
+.saker-ui-badge{border-radius:6px;font-size:var(--dsh-content-font-size-secondary,13px);line-height:1.5}
 .saker-ui-drawer{border-radius:12px}
-.saker-ui-notice{border-radius:6px;font-size:13px;line-height:1.5}
-.saker-ui-empty{border-radius:6px;font-size:13px;line-height:1.5}
+.saker-ui-notice{border-radius:6px;font-size:var(--dsh-content-font-size-secondary,13px);line-height:1.5}
+.saker-ui-empty{border-radius:6px;font-size:var(--dsh-content-font-size-secondary,13px);line-height:1.5}
 /* 现有插件类别名：与 canonical 类共用同一套尺寸 */
 .dsh-chat-panel-head button,.dsh-chat-actions button,.dsh-chat-task-status button,.dsh-task-nav button,.dsh-task-actions button{height:32px;display:inline-flex;align-items:center;justify-content:center}
 .dsh-prompt-io button,.dsh-prompt-more,.dsh-prompt-scopes button,.dsh-prompt-modes button,.dsh-prompt-foot button{height:32px;display:inline-flex;align-items:center;justify-content:center}

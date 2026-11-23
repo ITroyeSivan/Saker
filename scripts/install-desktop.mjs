@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { preserveDesktopArtifact } from './lib/desktop-artifacts.mjs'
 import { backupDesktopProfile, dataPathsFor } from './lib/desktop-backup.mjs'
@@ -36,6 +36,7 @@ if (!directory || directory.startsWith('--') || !profileName) {
   console.error('Usage: node scripts/install-desktop.mjs --desktop-dir "C:/path/to/DeepSeek Harness" [--profile desktop|web] [--check]')
   process.exit(1)
 }
+if (!/^[a-zA-Z0-9_-]+$/.test(profileName)) throw new Error(`Invalid Desktop profile name: ${profileName}`)
 if (process.platform !== 'win32') throw new Error('This installer currently supports the verified Windows desktop runtime only.')
 const desktop = resolve(directory)
 const executable = join(desktop, 'DeepSeek Harness.exe')
@@ -44,6 +45,8 @@ if (!existsSync(executable) || !existsSync(dshCommand)) {
   throw new Error('Select the official Desktop installation directory containing its executable and bundled dsh command.')
 }
 const home = resolve(process.env.DSH_HOME || join(homedir(), '.dsh'))
+const artifactHome = resolve(home, 'saker-desktop-artifacts', profileName)
+if (!artifactHome.startsWith(resolve(home) + sep)) throw new Error('Persistent artifact directory escapes DSH_HOME')
 
 // Query process ownership by full executable path. Do not kill or guess by process name.
 const processQuery = `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq '${executable.replaceAll("'", "''")}' } | Select-Object ProcessId | ConvertTo-Json -Compress`
@@ -66,7 +69,7 @@ function invoke(args) {
   return result.stdout.trim()
 }
 const version = invoke(['--version'])
-const VERIFIED_DESKTOP_VERSIONS = new Set(['0.2.0-rc.2', '0.2.1-rc.2', '0.2.1-rc.5', '0.2.2-rc.1'])
+const VERIFIED_DESKTOP_VERSIONS = new Set(['0.2.0-rc.2', '0.2.1-rc.2', '0.2.1-rc.5', '0.2.2-rc.1', '0.2.2-rc.2'])
 if (!VERIFIED_DESKTOP_VERSIONS.has(version)) {
   throw new Error(`Desktop ${version} has not been verified by this installer; expected one of ${[...VERIFIED_DESKTOP_VERSIONS].join(', ')}.`)
 }
@@ -82,6 +85,16 @@ const packages = [...directories.map(name => join(root, 'plugins', name)), root]
   if (!existsSync(artifact)) throw new Error(`Missing ${artifact}; run node scripts/pack-all.mjs first.`)
   return { name: pkg.name, version: pkg.version, artifact, dir, files: pkg.files ?? [] }
 })
+const releaseManifestPath = join(root, 'packages.json')
+if (existsSync(releaseManifestPath)) {
+  const releaseManifest = JSON.parse(readFileSync(releaseManifestPath, 'utf8'))
+  for (const pkg of packages) {
+    const expected = releaseManifest.find(item => item.name === pkg.name && item.version === pkg.version)
+    if (!expected) throw new Error(`Release manifest is missing ${pkg.name}@${pkg.version}`)
+    const actual = createHash('sha256').update(readFileSync(pkg.artifact)).digest('hex')
+    if (actual !== expected.sha256) throw new Error(`Release artifact digest mismatch: ${pkg.name}@${pkg.version}`)
+  }
+}
 console.log(`Desktop ${version}: ${packages.length} packages; profile ${manifestPath}`)
 if (checkOnly) {
   for (const pkg of packages) console.log(`${pkg.name}@${pkg.version}`)
@@ -90,7 +103,7 @@ if (checkOnly) {
 // One official transaction avoids loading a partially assembled root bundle.
 // A changed tarball gets a different immutable file: dependency. Same-version
 // re-add and even --force otherwise reuse pnpm's previous local tarball snapshot.
-const outputDirectory = join(root, 'dist', 'desktop')
+const outputDirectory = artifactHome
 const artifacts = packages.map(pkg => preserveDesktopArtifact(pkg.artifact, outputDirectory))
 // 更新前备份（v6 第 13 节）：先把配置/MCP/匹配构建留档，再动任何包。
 if (skipBackup) console.log('Pre-update backup skipped (--no-backup).')
@@ -125,6 +138,24 @@ for (const pkg of packages) {
   // Official operations preserve a previously disabled plugin. Do not silently enable it.
   if (!manifest.dsh?.profile?.bundles?.includes(pkg.name)) console.log(`Disabled selection preserved: ${pkg.name}; enable it in Desktop's Plugins page when needed.`)
 }
+for (const pkg of packages) {
+  const spec = manifest.dependencies?.[pkg.name]
+  if (typeof spec !== 'string' || !spec.startsWith('file:')) throw new Error(`Profile dependency is not a local package: ${pkg.name}`)
+  const target = resolve(dirname(manifestPath), spec.slice(5))
+  if (!existsSync(target) || !statSync(target).isFile()) throw new Error(`Profile package is missing: ${pkg.name}`)
+  const digest = createHash('sha256').update(readFileSync(target)).digest('hex')
+  const expected = packages.find(item => item.name === pkg.name)
+  const sourceDigest = createHash('sha256').update(readFileSync(expected.artifact)).digest('hex')
+  if (digest !== sourceDigest) throw new Error(`Profile package digest differs from release input: ${pkg.name}`)
+}
+const lockPath = join(dirname(manifestPath), 'pnpm-lock.yaml')
+if (existsSync(lockPath)) {
+  const lock = readFileSync(lockPath, 'utf8')
+  for (const pkg of packages) {
+    const expectedName = basename(artifacts[packages.indexOf(pkg)])
+    if (!lock.includes(expectedName)) throw new Error(`Lockfile does not reference installed package: ${pkg.name}`)
+  }
+}
 console.log('Desktop plugin installation verified. Reopen Desktop to load the updated packages.')
 // 隔离 home 安装（验证用）绝不能改日常快捷方式：那会把用户的入口指到临时目录。
 const shortcutPolicy = profileName === 'desktop'
@@ -136,6 +167,6 @@ if (profileName !== 'desktop') {
   console.log(`Daily shortcut left unchanged: installed into ${shortcutPolicy.home}, not the daily home ${shortcutPolicy.dailyHome}.`
     + ' Pass --refresh-shortcut if you really mean to repoint the daily entry.')
 } else {
-  const shortcut = refreshDesktopShortcut({ desktopDirectory: desktop })
+  const shortcut = refreshDesktopShortcut({ desktopDirectory: desktop, launcherDirectory: join(home, 'saker-desktop-launcher') })
   console.log(`Desktop shortcut refreshed: ${shortcut.shortcut}`)
 }

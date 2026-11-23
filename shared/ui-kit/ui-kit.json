@@ -11,7 +11,7 @@
     "InlineNotice",
     "EmptyState"
   ],
-  "fontSizes": [12, 13, 14, 16],
+  "fontSizes": [11, 12, 13, 14, 16],
   "lineHeight": 1.5,
   "spacing": [0, 4, 8, 12, 16, 24],
   "radius": {

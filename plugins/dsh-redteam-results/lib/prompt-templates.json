@@ -27,13 +27,13 @@
       "label": "使用哪个账号",
       "type": "identity-picker",
       "placeholder": "选择已保存的账号名称；密码和 Cookie 不填在这里",
-      "default": "沿用我已提供的账号，缺少其他账号时集中告诉我"
+      "default": "使用本次已提供的账号"
     },
     "focus": {
       "label": "检查重点",
       "type": "textarea",
       "placeholder": "例如订单、导出、账号权限或某个接口",
-      "default": "优先检查和当前业务及材料相关的问题"
+      "default": "按当前线索确定"
     },
     "product": {
       "label": "产品名称",
@@ -56,14 +56,14 @@
     "query": {
       "label": "FOFA 原生查询",
       "type": "textarea",
-      "placeholder": "domain=\"example.test\"",
+      "placeholder": "粘贴完整 FOFA 表达式；保留括号、或条件和排除条件",
       "default": ""
     },
     "signature": {
       "label": "已知产品或网站特征",
       "type": "textarea",
       "placeholder": "产品、标题、响应头、图标哈希或现有入口",
-      "default": "暂无已核实的产品特征，先从本任务请求和文件中核对"
+      "default": "还没有，先从已知系统提取"
     },
     "repo": {
       "label": "要检查的代码",
@@ -99,7 +99,7 @@
     "sources": {
       "label": "漏洞资料来源",
       "type": "source-picker",
-      "placeholder": "选择知识库来源，或填写公开公告/仓库地址",
+      "placeholder": "公开公告、GitHub 仓库或本任务参考资料",
       "default": ""
     },
     "limits": {
@@ -137,6 +137,12 @@
       "type": "textarea",
       "placeholder": "要重测的检查项，以及本次环境变化",
       "default": "重测当前选中的检查项"
+    },
+    "organization": {
+      "label": "机构与归属线索",
+      "type": "textarea",
+      "placeholder": "机构全称、简称、品牌、备案号或已知网站；填写已知部分即可",
+      "default": ""
     }
   },
   "templates": [
@@ -152,13 +158,14 @@
         "focus",
         "identities"
       ],
-      "text": "请测试 {{target}}，范围是 {{scope}}。{{focus}}。先看现有请求和文件，挑值得检查的问题验证。写清哪个入口有问题、实际影响和判断依据。账号：{{identities}}。",
+      "text": "帮我测 {{target}}，范围：{{scope}}。账号：{{identities}}。\n重点：{{focus}}。已有请求和材料先用起来，缺入口再补信息收集。优先找能复现、有实际影响的中高危问题，发现疑点就深入验证，不用等全站扫完。",
       "keywords": [
         "网站",
         "常规",
         "自动",
         "全面"
-      ]
+      ],
+      "common": true
     },
     {
       "id": "S02",
@@ -171,7 +178,7 @@
         "scope",
         "focus"
       ],
-      "text": "请根据 {{materials}} 开始检查。{{focus}}。先分析现有请求、响应和业务关系，资料足够就直接验证，缺关键条件再集中告诉我。目标操作沿用 {{scope}}。",
+      "text": "从这些材料开始：{{materials}}。测试范围：{{scope}}。\n重点：{{focus}}。先顺着请求、代码和业务操作找可疑点，能验证的直接验证。最后把复现方法和实际影响写清楚，缺什么条件再问我。",
       "keywords": [
         "HAR",
         "请求",
@@ -179,7 +186,8 @@
         "Yakit",
         "流量",
         "已有"
-      ]
+      ],
+      "common": true
     },
     {
       "id": "S03",
@@ -192,14 +200,15 @@
         "identities",
         "focus"
       ],
-      "text": "请检查 {{target}} 登录后的功能。账号：{{identities}}。{{focus}}。结合实际页面和接口判断访问权限及敏感操作，登录失效时说明受影响的部分，保留已经完成的结果。",
+      "text": "测试 {{target}} 登录后的功能，账号：{{identities}}。\n重点：{{focus}}。从页面操作找到实际接口，优先看账号权限、敏感数据和状态变更。登录过期就告诉我需要补哪一步，已经查过的内容保留下来。",
       "keywords": [
         "登录",
         "账号",
         "session",
         "认证",
         "权限"
-      ]
+      ],
+      "common": false
     },
     {
       "id": "S04",
@@ -212,7 +221,7 @@
       "optional": [
         "limits"
       ],
-      "text": "请围绕 {{target}} 的以下问题检查：{{focus}}。利用本次现有请求和文件，验证与这个问题直接相关的条件和影响。额外限制：{{limits}}。最后说明查到了什么、排除了什么、还缺什么。",
+      "text": "这次只测 {{target}} 的这个问题：{{focus}}。\n用现有请求和材料复现，必要时做正常请求对照，确认到底影响什么。限制：{{limits}}。最后直接说能否复现、依据是什么。",
       "keywords": [
         "单点",
         "SQL",
@@ -222,7 +231,8 @@
         "会话",
         "重点",
         "自定义"
-      ]
+      ],
+      "common": false
     },
     {
       "id": "R01",
@@ -234,13 +244,14 @@
       "optional": [
         "focus"
       ],
-      "text": "请整理 {{scope}} 内的 Web 资产和入口。先合并现有请求和文件，再补必要的子域名、端口、服务、站点指纹和接口信息。{{focus}}。给出带来源的资产列表与值得优先检查的入口，本次先完成收集和筛选。",
+      "text": "整理 {{scope}} 的 Web 资产，重点：{{focus}}。\n先合并已有清单，再补子域名、端口和站点指纹。把后台、登录口、独立业务系统和可继续测试的接口挑出来，附上来源。这次先收集和筛选。",
       "keywords": [
         "资产",
         "侦察",
         "recon",
         "测绘"
-      ]
+      ],
+      "common": false
     },
     {
       "id": "R02",
@@ -252,12 +263,13 @@
       "optional": [
         "limits"
       ],
-      "text": "请收集 {{scope}} 内的子域名，合并已保存的结果，标出来源、解析情况和相关 Web 入口。额外限制：{{limits}}。把范围外关联项单列，不自动开展后续漏洞验证。",
+      "text": "收集 {{scope}} 的子域名，和已有结果去重合并。\n标出来源、解析结果，以及对应的 Web 入口。范围外的关联域名单独列出，本次不继续测漏洞。限制：{{limits}}。",
       "keywords": [
         "子域",
         "DNS",
         "域名"
-      ]
+      ],
+      "common": false
     },
     {
       "id": "R03",
@@ -269,14 +281,15 @@
       "optional": [
         "limits"
       ],
-      "text": "请识别 {{scope}} 内的开放端口和服务。沿用当前扫描强度，优先复用已保存的结果，区分 Web、其他服务和无法确认的项。额外限制：{{limits}}。输出真实协议、端口、识别依据和可用入口。",
+      "text": "查清 {{scope}} 开了哪些端口、跑了什么服务。\n复用已有扫描结果，按当前强度补查。给出协议、端口、服务识别依据和 Web 入口，识别不准的直接注明。限制：{{limits}}。",
       "keywords": [
         "端口",
         "nmap",
         "服务",
         "IP",
         "CIDR"
-      ]
+      ],
+      "common": false
     },
     {
       "id": "R04",
@@ -288,13 +301,14 @@
       "optional": [
         "signature"
       ],
-      "text": "请在 {{scope}} 内查找后台、独立登录口和管理系统。已知线索：{{signature}}。结合已有页面、JS、资产和资产平台结果筛选，保存每个入口的发现依据，区分真实入口、历史页面与通用登录页。",
+      "text": "找 {{scope}} 里遗漏的后台、登录口和管理系统。已有线索：{{signature}}。\n从页面、JS、跳转和 FOFA 结果继续找系统名及特征，尝试不同条件组合。把可用入口和只在历史索引里出现的地址分开，附实际查询。",
       "keywords": [
         "后台",
         "登录口",
         "管理入口",
         "隐藏"
-      ]
+      ],
+      "common": true
     },
     {
       "id": "R05",
@@ -306,13 +320,14 @@
       "optional": [
         "scope"
       ],
-      "text": "请使用 FOFA 原生查询：{{query}}。整理与 {{scope}} 有关的结果，保留原查询、来源时间、协议、端口、分页状态和实际获取数量。本次先查询和筛选，不自动访问全部命中目标。",
+      "text": "执行这条 FOFA 原生查询：\n{{query}}\n保留括号、或条件和排除条件，先保存被动候选。实际测试范围是 {{scope}}，范围外的结果不要直接访问。告诉我用了什么查询、取了多少结果、还有没有下一页。",
       "keywords": [
         "FOFA",
         "原生",
         "query",
         "搜索"
-      ]
+      ],
+      "common": false
     },
     {
       "id": "R06",
@@ -325,7 +340,7 @@
       "optional": [
         "focus"
       ],
-      "text": "请在 {{scope}} 内，用 FOFA 查找符合以下线索的资产：{{signature}}。用有来源的产品或页面特征组合查询，优先核对与相关 Nday 条件、后台或实际业务入口有关的结果。{{focus}}。输出候选及命中依据，不把搜索命中当成漏洞确认。",
+      "text": "在 {{scope}} 中找使用这些产品或特征的系统：{{signature}}。\n重点：{{focus}}。从已知页面、响应头、图标和证书组合 FOFA 查询，记录指纹来源。命中后先核对是不是这个产品，再判断值得测什么。",
       "keywords": [
         "FOFA",
         "指纹",
@@ -333,7 +348,8 @@
         "产品",
         "FID",
         "图标"
-      ]
+      ],
+      "common": true
     },
     {
       "id": "R07",
@@ -345,14 +361,191 @@
       "optional": [
         "scope"
       ],
-      "text": "请从 {{target}} 收集与当前功能有关的 JS 和 API 入口。复用已有文件，区分实际请求、代码中的路径和暂未证实的线索，整理参数、调用位置及可能需要的身份。目标操作范围：{{scope}}。",
+      "text": "从 {{target}} 的 JS 和请求中找 API 入口，范围：{{scope}}。\n整理接口、参数、调用位置和登录要求。已经发出的请求和只在代码里出现的路径分开列，重点留下后续能验证的业务接口。",
       "keywords": [
         "JS",
         "API",
         "接口",
         "前端",
         "路由"
-      ]
+      ],
+      "common": false
+    },
+    {
+      "id": "R08",
+      "title": "用 FOFA 找机构的隐藏系统",
+      "group": "信息收集",
+      "scene": [
+        "free"
+      ],
+      "required": [
+        "organization"
+      ],
+      "optional": [
+        "focus",
+        "scope"
+      ],
+      "text": "用 FOFA 找 {{organization}} 遗漏的系统，重点：{{focus}}。\n从机构全称、简称、备案、证书和已知站点提取线索，用括号分组、或条件及排除条件组合查询，优先找后台、独立登录口和 IP 入口。零命中就检查条件是否过窄，噪声多就换更具体的特征。\n别把所有被动查询都锁在现有域名里，否则可能漏掉其他域名和 IP 上的系统。结果附实际查询及关联理由，已确认归属和待核对项分开；主动访问只限 {{scope}}。",
+      "keywords": [
+        "FOFA",
+        "隐藏系统",
+        "隐藏资产",
+        "机构",
+        "公司",
+        "备案",
+        "反查"
+      ],
+      "common": true
+    },
+    {
+      "id": "R09",
+      "title": "从一个网站反查关联入口",
+      "group": "信息收集",
+      "scene": [
+        "free"
+      ],
+      "required": [
+        "target"
+      ],
+      "optional": [
+        "scope"
+      ],
+      "text": "从 {{target}} 反查关联后台、IP 入口和其他域名上的部署。\n先看公开页面、JS、证书和图标，再用 FOFA 组合搜索。相同图标、共享证书只能算线索，找出能说明归属的其他依据。先列候选，实际测试范围：{{scope}}。",
+      "keywords": [
+        "FOFA",
+        "反查",
+        "图标",
+        "favicon",
+        "关联资产",
+        "IP入口"
+      ],
+      "common": false
+    },
+    {
+      "id": "R10",
+      "title": "用证书、备案等线索找候选",
+      "group": "信息收集",
+      "scene": [
+        "free"
+      ],
+      "required": [
+        "signature"
+      ],
+      "optional": [
+        "scope"
+      ],
+      "text": "用这些线索找关联系统：{{signature}}。\n结合证书、备案、机构名和已有网站设计 FOFA 查询，不只查现有域名。注意共享证书、服务商和通用页面造成的误关联。结果给出地址、关联理由和待确认之处，主动测试限 {{scope}}。",
+      "keywords": [
+        "FOFA",
+        "证书",
+        "备案",
+        "组织",
+        "ASN",
+        "关联",
+        "候选"
+      ],
+      "common": false
+    },
+    {
+      "id": "R11",
+      "title": "从已知系统提取并反查指纹",
+      "group": "信息收集",
+      "scene": [
+        "free"
+      ],
+      "required": [
+        "target"
+      ],
+      "optional": [
+        "signature",
+        "scope"
+      ],
+      "text": "从 {{target}} 提取能反查同类系统的指纹。已知特征：{{signature}}。\n优先找有区分度的页面文字、响应头、图标或产品特征，核对哈希算法和来源，再组合 FOFA 查询。先整理相似部署，实际测试限 {{scope}}。",
+      "keywords": [
+        "FOFA",
+        "指纹",
+        "ICO",
+        "favicon",
+        "icon_hash",
+        "FID",
+        "相似部署"
+      ],
+      "common": false
+    },
+    {
+      "id": "R12",
+      "title": "按漏洞线索寻找机构相关系统",
+      "group": "信息收集",
+      "scene": [
+        "free"
+      ],
+      "required": [
+        "organization",
+        "cve"
+      ],
+      "optional": [
+        "scope"
+      ],
+      "text": "根据 {{cve}}，找 {{organization}} 可能受影响的系统。\n先读公告和 PoC，确定产品、版本、入口及必要条件，再把可靠的产品指纹和机构线索组合成 FOFA 查询。缺指纹就继续找来源，别编 app 名。命中只是候选，是否有漏洞还要验证；主动测试限 {{scope}}。",
+      "keywords": [
+        "FOFA",
+        "Nday",
+        "CVE",
+        "EXP",
+        "近期漏洞",
+        "指纹",
+        "机构"
+      ],
+      "common": true
+    },
+    {
+      "id": "R13",
+      "title": "改进零结果或噪声多的 FOFA 查询",
+      "group": "信息收集",
+      "scene": [
+        "free"
+      ],
+      "required": [
+        "query"
+      ],
+      "optional": [
+        "materials"
+      ],
+      "text": "帮我改这条 FOFA 查询：\n{{query}}\n已有结果：{{materials}}。\n先判断是条件太窄、特征太泛，还是语法、字段权限、额度或分页的问题。给我几条改写后的查询，逐条解释改了哪里。这次只改查询，不执行、不消耗查询额度。",
+      "keywords": [
+        "FOFA",
+        "零结果",
+        "无结果",
+        "噪声",
+        "高级语法",
+        "查询优化",
+        "语法"
+      ],
+      "common": false
+    },
+    {
+      "id": "R14",
+      "title": "核对候选资产归属再继续测试",
+      "group": "信息收集",
+      "scene": [
+        "free"
+      ],
+      "required": [
+        "materials"
+      ],
+      "optional": [
+        "scope"
+      ],
+      "text": "核对这批候选是不是目标机构的资产：{{materials}}。\n用官网、证书主体、备案、业务内容和跳转交叉判断。把本机构、第三方托管、历史关联及待确认项分开列，说明哪些可纳入 {{scope}}，不要直接对全部结果扫描。",
+      "keywords": [
+        "FOFA",
+        "候选",
+        "资产归属",
+        "第三方",
+        "误关联",
+        "范围"
+      ],
+      "common": false
     },
     {
       "id": "N01",
@@ -363,7 +556,7 @@
         "cve"
       ],
       "optional": [],
-      "text": "请根据 {{cve}} 检查 {{target}}。读取实际公告和必要代码，结合当前环境判断并验证；已有材料足够就直接使用，不先整理漏洞库。结果说明实际影响、支持依据和未完成部分。",
+      "text": "用 {{cve}} 检查 {{target}}。\n先看公告和 PoC 的实际代码，核对目标是否满足条件，再做验证。重点给出能否复现、实际影响、请求响应或命令输出；代码跑完不等于漏洞成立。",
       "keywords": [
         "CVE",
         "Nday",
@@ -371,7 +564,8 @@
         "公告",
         "EXP",
         "仓库"
-      ]
+      ],
+      "common": true
     },
     {
       "id": "N02",
@@ -385,13 +579,14 @@
         "version",
         "identities"
       ],
-      "text": "请检查 {{target}} 使用的 {{product}} 相关 Nday。已知版本：{{version}}。账号：{{identities}}。根据实际入口和原始资料筛选少量相关候选，核对条件后验证，说明每个候选的结果和未完成条件。",
+      "text": "检查 {{target}} 上 {{product}} 的相关 Nday。版本：{{version}}；账号：{{identities}}。\n结合实际版本、配置和入口找对应公告与 PoC，优先验证条件吻合、影响较大的漏洞。逐项说清已复现、未复现或缺什么条件。",
       "keywords": [
         "产品",
         "组件",
         "版本",
         "Nday"
-      ]
+      ],
+      "common": false
     },
     {
       "id": "N03",
@@ -401,14 +596,15 @@
         "materials"
       ],
       "optional": [],
-      "text": "请审阅 {{materials}} 中的 PoC、公告和技术说明。整理产品、版本、身份、配置前提、实际验证内容及可能副作用，核对代码与说明是否一致。本次先做资料和代码分析，给出适用条件、缺项和验证建议。",
+      "text": "先审一下 {{materials}} 里的 PoC 和公告，这次不执行。\n看它测的是什么、适用哪些版本和配置、是否要登录，代码有没有额外行为或副作用。告诉我当前环境能否用，以及验证前还缺什么。",
       "keywords": [
         "PoC",
         "仓库",
         "GitHub",
         "审阅",
         "代码"
-      ]
+      ],
+      "common": false
     },
     {
       "id": "N04",
@@ -421,13 +617,14 @@
       "optional": [
         "focus"
       ],
-      "text": "请对照 {{repo}} 与 {{change}} 分析安全修复。说明修复了哪条输入或权限路径，检查相同代码模式及相邻分支是否存在遗漏。{{focus}}。区分已经证明的问题、代码线索和需要运行验证的条件。",
+      "text": "对照 {{repo}} 和 {{change}} 看这次安全修复。重点：{{focus}}。\n沿补丁涉及的入口、权限判断和数据处理查找同类代码，看看其他分支是否漏修。给出具体文件位置，分清源码疑点和已经复现的问题。",
       "keywords": [
         "补丁",
         "diff",
         "绕过",
         "变体"
-      ]
+      ],
+      "common": false
     },
     {
       "id": "Z01",
@@ -440,13 +637,14 @@
         "focus",
         "identities"
       ],
-      "text": "请深入检查 {{target}} 中尚未确定的问题。{{focus}}。账号：{{identities}}。从实际页面、请求、JS 和业务差异中提出并验证问题，根据结果调整方向；已知漏洞检索作为补充，最终结论注明依据与未知项。",
+      "text": "深入测 {{target}}，重点：{{focus}}。账号：{{identities}}。\n从业务操作、接口、JS 和返回差异找问题，看到有价值的线索就跟进。优先验证能影响数据、权限或服务端行为的缺陷，别只跑通用扫描清单。",
       "keywords": [
         "0day",
         "黑盒",
         "深挖",
         "未知"
-      ]
+      ],
+      "common": false
     },
     {
       "id": "Z02",
@@ -459,14 +657,15 @@
       "optional": [
         "focus"
       ],
-      "text": "请结合 {{repo}} 和 {{target}} 检查安全问题。{{focus}}。把源码中的可达路径与实际接口、配置和身份对应起来，优先验证有影响的线索，区分代码推测与已经观察到的结果。",
+      "text": "结合 {{repo}} 和运行中的 {{target}} 找漏洞。重点：{{focus}}。\n从可访问的入口跟到权限检查和敏感操作，核对线上配置与身份。找到代码疑点后尝试实际复现，写清代码位置和触发条件。",
       "keywords": [
         "白盒",
         "灰盒",
         "源码",
         "运行",
         "0day"
-      ]
+      ],
+      "common": false
     },
     {
       "id": "Z03",
@@ -479,14 +678,15 @@
         "identities",
         "workflow"
       ],
-      "text": "请检查 {{materials}} 中对象和角色之间的权限。账号：{{identities}}。业务操作：{{workflow}}。比较正常允许的访问与跨账号、跨角色访问，核对对象归属和实际影响，区分正常共享与权限问题。",
+      "text": "检查 {{materials}} 中的对象权限和角色权限。账号：{{identities}}；业务操作：{{workflow}}。\n先做一次正常访问，再对照跨账号、跨角色的请求，看是否真的读到别人的数据或完成了越权操作。正常共享也要核对，别只凭状态码判断。",
       "keywords": [
         "越权",
         "IDOR",
         "BOLA",
         "RBAC",
         "多账号"
-      ]
+      ],
+      "common": true
     },
     {
       "id": "Z04",
@@ -496,14 +696,15 @@
         "workflow"
       ],
       "optional": [],
-      "text": "请检查以下业务操作中的安全问题：{{workflow}}。结合本次请求、页面和业务说明，关注前提、顺序、对象归属及状态变化，选择最有依据的问题验证。结果说明操作前后发生了什么变化，以及影响成立的条件。",
+      "text": "检查这段业务流程：{{workflow}}。\n结合页面和请求，重点看能否绕过前置步骤、重复操作，或让订单、审批、额度等状态出现不一致。验证时对比操作前后的数据，说明成立条件和业务影响。",
       "keywords": [
         "逻辑",
         "业务",
         "工作流",
         "竞态",
         "状态"
-      ]
+      ],
+      "common": false
     },
     {
       "id": "Z05",
@@ -515,14 +716,15 @@
       "optional": [
         "focus"
       ],
-      "text": "请检查 {{materials}} 中的上传、下载、预览和文件处理功能。{{focus}}。结合存储位置、访问权限、处理方式和实际返回内容判断影响，保留正常行为与异常行为的差异，说明尚未验证的条件。",
+      "text": "检查 {{materials}} 里的上传、下载、预览和文件处理，重点：{{focus}}。\n弄清文件存到哪里、谁能访问、服务器怎么处理，再验证可疑点。保留实际返回或处理结果，区分只是上传成功和真正能造成影响。",
       "keywords": [
         "文件",
         "上传",
         "下载",
         "路径",
         "预览"
-      ]
+      ],
+      "common": false
     },
     {
       "id": "Z06",
@@ -534,7 +736,7 @@
       "optional": [
         "focus"
       ],
-      "text": "请检查 {{materials}} 中接口输入如何进入查询、模板、命令或其他处理过程。{{focus}}。根据实际处理路径选择验证，核对响应变化或其他可观察影响，区分普通报错、参数被忽略与真正的安全问题。",
+      "text": "检查 {{materials}} 的输入处理，重点：{{focus}}。\n从实际请求或代码判断参数进入了哪种查询、模板、命令或其他处理，再选对应方法验证。拿正常请求作对照，报错或回显本身不要直接当漏洞。",
       "keywords": [
         "输入",
         "SQL",
@@ -542,7 +744,8 @@
         "命令",
         "注入",
         "解析"
-      ]
+      ],
+      "common": false
     },
     {
       "id": "Z07",
@@ -554,7 +757,7 @@
       "optional": [
         "focus"
       ],
-      "text": "请检查 {{materials}} 涉及的浏览器和前端安全问题。{{focus}}。核对输入到页面或 DOM 的实际路径、浏览器行为和相关防护，区分文本回显与可成立的影响。运行验证时保留当前页面、来源和浏览器观察。",
+      "text": "检查 {{materials}} 的前端安全，重点：{{focus}}。\n从输入点跟到页面和 DOM，放在真实浏览器里验证是否能触发预期行为。给出页面、触发步骤和影响，单纯文本回显单独说明。",
       "keywords": [
         "XSS",
         "DOM",
@@ -562,7 +765,8 @@
         "CSP",
         "前端",
         "浏览器"
-      ]
+      ],
+      "common": false
     },
     {
       "id": "Z08",
@@ -574,13 +778,14 @@
       "optional": [
         "focus"
       ],
-      "text": "请检查 {{materials}} 中服务端发起请求、加载远程资源或读取本地资源的功能。{{focus}}。核对谁实际发起访问、重定向和解析后的目标，以及能观察到的影响；将客户端可访问与服务端访问分开判断。",
+      "text": "检查 {{materials}} 中的远程资源加载和本地资源读取，重点：{{focus}}。\n确认请求究竟由浏览器还是服务端发出，跟踪解析和跳转后的地址，再验证实际能访问到什么。用可观察结果说明影响。",
       "keywords": [
         "SSRF",
         "服务端",
         "请求",
         "远程资源"
-      ]
+      ],
+      "common": false
     },
     {
       "id": "A01",
@@ -592,7 +797,7 @@
       "optional": [
         "focus"
       ],
-      "text": "请分析 {{materials}} 中的 HTTP 请求和流量。{{focus}}。整理接口、参数、身份及业务关联，指出最值得继续核对的异常，引用具体请求或响应。本次先分析现有请求和文件。",
+      "text": "分析这批请求和响应：{{materials}}。重点：{{focus}}。\n把接口、参数、账号和业务操作对应起来，挑出值得继续验证的异常，引用具体报文。这次先分析已有流量。",
       "keywords": [
         "HTTP",
         "HAR",
@@ -600,7 +805,8 @@
         "Yakit",
         "流量",
         "离线"
-      ]
+      ],
+      "common": false
     },
     {
       "id": "A02",
@@ -612,13 +818,14 @@
       "optional": [
         "focus"
       ],
-      "text": "请分析 {{materials}} 中的 JS 和前端文件。{{focus}}。整理接口、调用关系、敏感配置和可疑输入路径，保留文件位置及判断依据，区分可达功能和未使用代码。本次先分析已有文件。",
+      "text": "分析这些 JS 和前端文件：{{materials}}。重点：{{focus}}。\n找 API、调用关系、敏感配置及可疑输入点，附文件位置。把正在使用的功能和残留代码分开，列出最值得继续验证的接口。",
       "keywords": [
         "JS",
         "前端",
         "文件",
         "sourcemap"
-      ]
+      ],
+      "common": false
     },
     {
       "id": "A03",
@@ -630,13 +837,14 @@
       "optional": [
         "focus"
       ],
-      "text": "请审阅 {{repo}} 的源码和配置。{{focus}}。沿实际入口、权限和数据流寻找问题，引用文件与位置，说明成立条件及建议的运行验证。本次先完成代码分析。",
+      "text": "审一下 {{repo}}，重点：{{focus}}。\n从真实入口跟踪权限和数据流，找到问题就给文件位置、成立条件及复现思路。这次先做代码审计。",
       "keywords": [
         "源码",
         "审计",
         "配置",
         "白盒"
-      ]
+      ],
+      "common": false
     },
     {
       "id": "A04",
@@ -648,14 +856,15 @@
       "optional": [
         "focus"
       ],
-      "text": "请整理 {{materials}} 中扫描器或外部工具的结果。{{focus}}。去重并核对命中依据，区分明显误报、值得验证的候选和资料不足的项；按影响与验证成本给出有理由的顺序。",
+      "text": "帮我筛选 {{materials}} 中的扫描结果。重点：{{focus}}。\n先去重，再核对命中依据和目标条件。明显误报剔除，优先留下影响大、容易复核的项目，并说明该怎么验证。",
       "keywords": [
         "Nuclei",
         "扫描",
         "误报",
         "结果",
         "triage"
-      ]
+      ],
+      "common": false
     },
     {
       "id": "A05",
@@ -667,7 +876,7 @@
       "optional": [
         "focus"
       ],
-      "text": "请分析 {{materials}} 中的 API 描述、接口定义和业务约束。{{focus}}。整理对象、输入、角色及敏感操作，指出需要运行验证的问题，引用对应接口定义。本次先分析现有请求和文件。",
+      "text": "分析 {{materials}} 里的 API 定义，重点：{{focus}}。\n梳理对象、角色和敏感操作，找出权限、参数及业务约束上值得验证的问题，附对应接口。这次不发测试请求。",
       "keywords": [
         "OpenAPI",
         "Swagger",
@@ -675,7 +884,8 @@
         "RPC",
         "接口",
         "设计"
-      ]
+      ],
+      "common": false
     },
     {
       "id": "A06",
@@ -685,14 +895,15 @@
         "question"
       ],
       "optional": [],
-      "text": "请围绕以下问题查阅公开技术资料或本任务文件：{{question}}。保留原始链接、版本和引用范围，区分明确事实、条件差异和仍未知的部分；不要建立或更新知识库。",
+      "text": "查一下这个技术问题：{{question}}。\n优先看官方文档、原始公告和源码，附链接与适用版本；不同资料说法不一致的地方说明原因。",
       "keywords": [
         "资料",
         "原理",
         "学习",
         "文档",
         "检索"
-      ]
+      ],
+      "common": false
     },
     {
       "id": "F01",
@@ -704,12 +915,13 @@
       "optional": [
         "identities"
       ],
-      "text": "请复核 {{finding}}。账号：{{identities}}。先检查原始依据与声称的影响是否一致，再补必要对照，区分已确认、误报与缺少条件。沿用当前任务范围和用量，保留原始记录。",
+      "text": "复核这条疑似漏洞：{{finding}}。账号：{{identities}}。\n从原始请求和结果重现一次，补正常访问对照，确认声称的影响。最后给出结论：已确认、误报，或还缺什么条件；附复现依据。",
       "keywords": [
         "复核",
         "疑似",
         "误报"
-      ]
+      ],
+      "common": true
     },
     {
       "id": "F02",
@@ -721,13 +933,14 @@
       "optional": [
         "change"
       ],
-      "text": "请复测 {{finding}} 的修复情况。本次修复说明：{{change}}。对照原来的对象、身份和影响条件，记录当前环境与变化；给出仍可复现、本次未复现或无法确认，并说明判断依据。保留原发现和历次复测。",
+      "text": "复测 {{finding}}。修复说明：{{change}}。\n用原来的账号、对象和触发条件在当前环境重做，记录与修复前的差别。结论写仍可复现、本次未复现或无法确认，保留原发现。",
       "keywords": [
         "修复",
         "回归",
         "retest",
         "复测"
-      ]
+      ],
+      "common": false
     },
     {
       "id": "F03",
@@ -737,13 +950,14 @@
       "optional": [
         "focus"
       ],
-      "text": "请继续本次任务。先使用已保存的资料、设置和未完成项，核对最后一次调用的实际状态，再推进。{{focus}}。已完成的扫描和已证明的结果沿用，未知写操作先查状态再决定是否重试。",
+      "text": "继续上次没做完的测试，重点：{{focus}}。\n先看已保存的材料和最后执行结果，接着未完成项做。已有有效结果直接用；不确定是否完成的写操作，先查状态再重试。",
       "keywords": [
         "继续",
         "暂停",
         "恢复",
         "中断"
-      ]
+      ],
+      "common": false
     },
     {
       "id": "F04",
@@ -753,13 +967,14 @@
       "optional": [
         "output"
       ],
-      "text": "请根据本次已保存的发现整理报告。{{output}}。已确认问题写清入口、影响、复现条件、依据和修复建议；疑似问题与未完成项单列。先展示导出预览，账号凭据和不必要的业务数据脱敏。",
+      "text": "整理本次漏洞报告，格式：{{output}}。\n已确认的问题写清地址、影响、复现步骤、关键请求响应和修复建议，疑似问题另列。导出前给我看预览，遮蔽账号凭据和无关业务数据。",
       "keywords": [
         "报告",
         "导出",
         "修复",
         "总结"
-      ]
+      ],
+      "common": false
     },
     {
       "id": "F05",
@@ -769,170 +984,332 @@
         "question"
       ],
       "optional": [],
-      "text": "请结合本次实际记录解释：{{question}}。说明为什么选择这些检查、结果支持什么结论、哪些替代解释还存在；用具体请求、代码或观察举例，最后列出适合我继续核对的资料。",
+      "text": "结合这次测试讲一下：{{question}}。\n用实际请求、代码或输出解释为什么这么测、结果说明了什么，以及还可能有哪些原因。给我能继续学习的原始资料。",
       "keywords": [
         "学习",
         "讲解",
         "复盘",
         "原理"
-      ]
+      ],
+      "common": false
     },
     {
       "id": "P01",
       "title": "按文档逐项测试",
-      "group": "分析资料",
+      "group": "案例测试",
       "required": [
         "materials"
       ],
       "optional": [],
-      "text": "请根据 {{materials}} 中的环境说明和测试案例逐项测试，沿用文档中的顺序和前置条件。先读全测试要求；不清楚的地方结合原文核对，确实缺少账号或关键信息时集中告诉我，其余独立项继续。记录实际检查内容、结果、未完成部分及对应证据，最后给出检查表和报告。",
+      "text": "按 {{materials}} 中的环境说明和测试案例执行。\n先读全要求，再按原顺序和前置条件逐项测试。缺账号、测试数据或环境条件时集中告诉我，其他独立项继续。最后按原案例列出实际操作、结果和依据。",
       "keywords": [
         "文档",
         "案例",
         "逐项",
         "检查表",
         "测试报告"
-      ]
+      ],
+      "common": true
     },
     {
       "id": "competition.solve.v1",
       "title": "根据题面完成本题",
       "group": "比赛模式",
-      "scene": ["competition"],
-      "required": ["challenge"],
-      "optional": ["instance", "focus"],
-      "text": "根据 {{challenge}} 完成本题。{{instance}}。{{focus}}。按题目实际条件选择工具，保留有用脚本、原始输出和答案来源。",
-      "keywords": ["比赛", "CTF", "解题", "题面"]
+      "scene": [
+        "competition"
+      ],
+      "required": [
+        "challenge"
+      ],
+      "optional": [
+        "instance",
+        "focus"
+      ],
+      "text": "解这道题：{{challenge}}。实例：{{instance}}。重点：{{focus}}。\n先用已有附件和工具，找到思路就跑起来验证。保留能复现的脚本、输出和答案。",
+      "keywords": [
+        "比赛",
+        "CTF",
+        "解题",
+        "题面"
+      ],
+      "common": true
     },
     {
       "id": "competition.continue-script.v1",
       "title": "接着现有脚本做",
       "group": "比赛模式",
-      "scene": ["competition"],
-      "required": ["challenge", "progress"],
+      "scene": [
+        "competition"
+      ],
+      "required": [
+        "challenge",
+        "progress"
+      ],
       "optional": [],
-      "text": "从 {{challenge}} 和 {{progress}} 继续，不先推倒重写。修改后在当前环境实际验证，保留脚本和输出。",
-      "keywords": ["比赛", "脚本", "继续", "报错"]
+      "text": "接着解 {{challenge}}。当前进展：{{progress}}。\n先用现有脚本和输出，找到卡点后继续改，改完实际运行验证。",
+      "keywords": [
+        "比赛",
+        "脚本",
+        "继续",
+        "报错"
+      ],
+      "common": true
     },
     {
       "id": "competition.web.v1",
       "title": "Web 题",
       "group": "比赛模式",
-      "scene": ["competition"],
-      "required": ["challenge", "instance"],
-      "optional": ["focus"],
-      "text": "根据 {{challenge}} 和 {{instance}} 解这道 Web 题。{{focus}}。沿实际页面、请求和源码线索验证，不要求遍历通用漏洞清单。",
-      "keywords": ["比赛", "Web", "HTTP", "浏览器"]
+      "scene": [
+        "competition"
+      ],
+      "required": [
+        "challenge",
+        "instance"
+      ],
+      "optional": [
+        "focus"
+      ],
+      "text": "解这道 Web 题：{{challenge}}。实例：{{instance}}。\n重点：{{focus}}。从请求、源码和环境找突破口，尽快验证猜想，留下可复现脚本。",
+      "keywords": [
+        "比赛",
+        "Web",
+        "HTTP",
+        "浏览器"
+      ],
+      "common": false
     },
     {
       "id": "competition.pwn.v1",
       "title": "Pwn 题",
       "group": "比赛模式",
-      "scene": ["competition"],
-      "required": ["challenge"],
-      "optional": ["instance"],
-      "text": "分析 {{challenge}}，结合当前运行环境完成本地或远程验证。{{instance}}。保存利用脚本，并写清本地与远程条件差异。",
-      "keywords": ["比赛", "Pwn", "二进制", "利用"]
+      "scene": [
+        "competition"
+      ],
+      "required": [
+        "challenge"
+      ],
+      "optional": [
+        "instance"
+      ],
+      "text": "解这道 Pwn 题：{{challenge}}。实例：{{instance}}。\n检查文件、保护和运行环境，调试关键路径，完成利用脚本并验证。本地和远程条件不同的地方注明。",
+      "keywords": [
+        "比赛",
+        "Pwn",
+        "二进制",
+        "利用"
+      ],
+      "common": false
     },
     {
       "id": "competition.reverse.v1",
       "title": "逆向题",
       "group": "比赛模式",
-      "scene": ["competition"],
-      "required": ["challenge", "output"],
+      "scene": [
+        "competition"
+      ],
+      "required": [
+        "challenge",
+        "output"
+      ],
       "optional": [],
-      "text": "分析 {{challenge}}，得到 {{output}}。保存必要的还原代码或求解脚本，并说明结果如何实际验证。",
-      "keywords": ["比赛", "逆向", "分析", "反编译"]
+      "text": "逆向分析 {{challenge}}，目标：{{output}}。\n围绕关键校验和数据变换还原逻辑，写脚本求解，并用题目程序验证结果。",
+      "keywords": [
+        "比赛",
+        "逆向",
+        "分析",
+        "反编译"
+      ],
+      "common": false
     },
     {
       "id": "competition.crypto.v1",
       "title": "密码题",
       "group": "比赛模式",
-      "scene": ["competition"],
-      "required": ["challenge", "output"],
+      "scene": [
+        "competition"
+      ],
+      "required": [
+        "challenge",
+        "output"
+      ],
       "optional": [],
-      "text": "根据 {{challenge}} 完成 {{output}}。核对构造与参数，保存求解脚本和实际结果。",
-      "keywords": ["比赛", "密码", "Crypto", "密文"]
+      "text": "解这道密码题：{{challenge}}。目标：{{output}}。\n分析算法、参数和已知信息，写脚本验证思路，保留实际求解结果。",
+      "keywords": [
+        "比赛",
+        "密码",
+        "Crypto",
+        "密文"
+      ],
+      "common": false
     },
     {
       "id": "competition.forensics.v1",
       "title": "取证与隐写",
       "group": "比赛模式",
-      "scene": ["competition"],
-      "required": ["challenge", "output"],
+      "scene": [
+        "competition"
+      ],
+      "required": [
+        "challenge",
+        "output"
+      ],
       "optional": [],
-      "text": "分析 {{challenge}}，定位 {{output}}。保留提取过程及产物，区分真实提取的数据和推测。",
-      "keywords": ["比赛", "取证", "隐写", "流量", "图片"]
+      "text": "分析 {{challenge}}，目标：{{output}}。\n先识别文件和数据结构，再沿有效线索提取；保留提取命令、脚本和产物。",
+      "keywords": [
+        "比赛",
+        "取证",
+        "隐写",
+        "流量",
+        "图片"
+      ],
+      "common": false
     },
     {
       "id": "competition.other.v1",
       "title": "其他题型",
       "group": "比赛模式",
-      "scene": ["competition"],
-      "required": ["challenge"],
-      "optional": ["focus"],
-      "text": "根据 {{challenge}} 解题。{{focus}}。按实际条件选择工具，保留结果及验证过程。",
-      "keywords": ["比赛", "其他", "杂项", "Misc"]
+      "scene": [
+        "competition"
+      ],
+      "required": [
+        "challenge"
+      ],
+      "optional": [
+        "focus"
+      ],
+      "text": "解题：{{challenge}}。重点：{{focus}}。\n先检查材料和环境，选最有希望的方向验证，保留脚本、结果和答案。",
+      "keywords": [
+        "比赛",
+        "其他",
+        "杂项",
+        "Misc"
+      ],
+      "common": false
     },
     {
       "id": "competition.hint.v1",
       "title": "只给提示",
       "group": "比赛模式",
-      "scene": ["competition"],
-      "required": ["challenge", "progress"],
+      "scene": [
+        "competition"
+      ],
+      "required": [
+        "challenge",
+        "progress"
+      ],
       "optional": [],
-      "text": "根据 {{challenge}} 和 {{progress}} 提示下一步方向。只解释，不运行程序，也不直接给出答案。",
-      "keywords": ["比赛", "提示", "只解释", "不给答案"]
+      "text": "题目：{{challenge}}。进展：{{progress}}。\n给我下一步提示，解释该看哪里。这次不运行程序，也不直接给答案。",
+      "keywords": [
+        "比赛",
+        "提示",
+        "只解释",
+        "不给答案"
+      ],
+      "common": false
     },
     {
       "id": "competition.writeup.v1",
       "title": "整理 Writeup",
       "group": "比赛模式",
-      "scene": ["competition"],
-      "required": ["challenge"],
-      "optional": ["output"],
-      "text": "根据 {{challenge}} 的已有记录整理可复现的 Writeup。{{output}}。保留命令、脚本与答案来源；没有记录的内容标明缺失，不编造过程。",
-      "keywords": ["比赛", "Writeup", "报告", "复盘"]
+      "scene": [
+        "competition"
+      ],
+      "required": [
+        "challenge"
+      ],
+      "optional": [
+        "output"
+      ],
+      "text": "整理 {{challenge}} 的 Writeup，要求：{{output}}。\n按实际解题记录写清关键思路、命令、脚本和答案；缺记录的地方注明，不补写没有执行过的过程。",
+      "keywords": [
+        "比赛",
+        "Writeup",
+        "报告",
+        "复盘"
+      ],
+      "common": false
     },
     {
       "id": "cases.list.v1",
       "title": "只整理案例清单",
       "group": "案例测试",
-      "scene": ["cases"],
-      "required": ["materials"],
+      "scene": [
+        "cases"
+      ],
+      "required": [
+        "materials"
+      ],
       "optional": [],
-      "text": "从 {{materials}} 整理测试清单，保留原文和出处，区分要求、环境说明和待核对内容。先不执行测试。",
-      "keywords": ["案例", "清单", "整理", "不执行"]
+      "text": "从 {{materials}} 整理测试清单。\n保留原顺序、要求和出处，环境说明单独放，疑问集中列出。本次只整理，不执行。",
+      "keywords": [
+        "案例",
+        "清单",
+        "整理",
+        "不执行"
+      ],
+      "common": false
     },
     {
       "id": "cases.continue.v1",
       "title": "继续未完成项",
       "group": "案例测试",
-      "scene": ["cases"],
-      "required": ["selection"],
+      "scene": [
+        "cases"
+      ],
+      "required": [
+        "selection"
+      ],
       "optional": [],
-      "text": "接着本次记录处理 {{selection}}。沿用已有有效条件，已完成内容不无故重做；新的缺口继续保留。",
-      "keywords": ["案例", "继续", "未完成", "缺口"]
+      "text": "继续执行 {{selection}}。\n接着本次记录做，复用仍然有效的账号和环境；缺条件的注明原因，其他能做的继续。",
+      "keywords": [
+        "案例",
+        "继续",
+        "未完成",
+        "缺口"
+      ],
+      "common": true
     },
     {
       "id": "cases.retest.v1",
       "title": "重测选中项",
       "group": "案例测试",
-      "scene": ["cases"],
-      "required": ["selection"],
-      "optional": ["change"],
-      "text": "重新执行 {{selection}}，结合 {{change}} 核对结果。建立本次重测记录，保留原结论，不把本次子集当成整个项目已完成。",
-      "keywords": ["案例", "重测", "选中", "复测"]
+      "scene": [
+        "cases"
+      ],
+      "required": [
+        "selection"
+      ],
+      "optional": [
+        "change"
+      ],
+      "text": "重测 {{selection}}，修复或变更说明：{{change}}。\n单独保存这次结果，保留原结论；本次只测所选项，不把整个项目标成完成。",
+      "keywords": [
+        "案例",
+        "重测",
+        "选中",
+        "复测"
+      ],
+      "common": true
     },
     {
       "id": "cases.summary.v1",
       "title": "整理案例结果",
       "group": "案例测试",
-      "scene": ["cases"],
-      "required": ["output"],
+      "scene": [
+        "cases"
+      ],
+      "required": [
+        "output"
+      ],
       "optional": [],
-      "text": "按 {{output}} 整理当前案例结果，包含要求、实际结果、必要材料和未完成项。只整理已有记录，不重新执行测试。",
-      "keywords": ["案例", "结果", "导出", "整理"]
+      "text": "整理当前案例结果，要求：{{output}}。\n按原案例对应列出实际结果、依据和未完成项。这次只整理，不重新测试。",
+      "keywords": [
+        "案例",
+        "结果",
+        "导出",
+        "整理"
+      ],
+      "common": false
     },
     {
       "id": "U01",
@@ -948,8 +1325,129 @@
         "其他",
         "通用",
         "空白"
-      ]
+      ],
+      "common": true
+    },
+    {
+      "id": "S05",
+      "title": "从一批资产开始发现并复核问题",
+      "group": "开始测试",
+      "scene": [
+        "free"
+      ],
+      "required": [
+        "scope"
+      ],
+      "optional": [
+        "materials",
+        "focus"
+      ],
+      "text": "测试 {{scope}} 的这批资产。已有材料：{{materials}}。重点：{{focus}}。\n先用指纹和业务信息挑值得深入的入口，有疑点就及时复核，不必等所有资产扫完。相同问题合并，最后给能复现的结果和实际影响。",
+      "keywords": [
+        "批量",
+        "SRC",
+        "护网",
+        "资产清单",
+        "优先级",
+        "复核"
+      ],
+      "common": true
+    },
+    {
+      "id": "Z09",
+      "title": "检查租户隔离与单点登录",
+      "group": "深入研究",
+      "scene": [
+        "free"
+      ],
+      "required": [
+        "target"
+      ],
+      "optional": [
+        "identities",
+        "focus"
+      ],
+      "text": "检查 {{target}} 的租户隔离、单点登录和账号绑定。账号：{{identities}}。重点：{{focus}}。\n沿登录跳转、身份映射和业务接口验证，确认能否进入其他租户或绑定到别人的账号。缺对照身份时说清需要什么。",
+      "keywords": [
+        "多租户",
+        "SSO",
+        "OAuth",
+        "OIDC",
+        "账号绑定",
+        "租户隔离"
+      ],
+      "common": false
+    },
+    {
+      "id": "A07",
+      "title": "从移动端或小程序请求继续检查",
+      "group": "分析资料",
+      "scene": [
+        "free"
+      ],
+      "required": [
+        "materials"
+      ],
+      "optional": [
+        "scope",
+        "identities"
+      ],
+      "text": "从 {{materials}} 中的 App 或小程序请求开始测，范围：{{scope}}；账号：{{identities}}。\n先用已有抓包和前端包定位接口，核对账号与业务对象关系。没有客户端时先完成能独立做的接口验证。",
+      "keywords": [
+        "移动端",
+        "小程序",
+        "APP",
+        "接口",
+        "抓包"
+      ],
+      "common": false
+    },
+    {
+      "id": "cases.conditions.v1",
+      "title": "核对项目测试前的账号与条件",
+      "group": "案例测试",
+      "scene": [
+        "cases"
+      ],
+      "required": [
+        "materials"
+      ],
+      "optional": [
+        "identities"
+      ],
+      "text": "读一下 {{materials}} 中的环境和案例要求，账号：{{identities}}。\n核对入口、角色、测试数据和前置条件，列清还缺什么、会影响哪些案例。这次先核对条件，不执行测试。",
+      "keywords": [
+        "项目",
+        "账号",
+        "环境",
+        "前置条件",
+        "Excel"
+      ],
+      "common": false
+    },
+    {
+      "id": "competition.offline.v1",
+      "title": "在离线环境中完成本题",
+      "group": "比赛模式",
+      "scene": [
+        "competition"
+      ],
+      "required": [
+        "challenge"
+      ],
+      "optional": [
+        "progress"
+      ],
+      "text": "离线解题：{{challenge}}。进展：{{progress}}。\n使用本地附件、工具和已有脚本，参考资料需要时再读。缺依赖或算力就说明卡在哪里，先做其余部分；不连接云端模型、不下载依赖。",
+      "keywords": [
+        "离线",
+        "本地模型",
+        "低上下文",
+        "CTF",
+        "依赖"
+      ],
+      "common": true
     }
   ],
-  "designRevision": 2
+  "designRevision": "2026-11-06-editor"
 }

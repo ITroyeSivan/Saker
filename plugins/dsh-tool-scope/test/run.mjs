@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { RULES, computeDeny, enabledRules, matchByRule, DEFAULT_MODES } from "../lib/rules.js";
+import { RULES, computeDeny, computeScenarioDeny, enabledRules, matchByRule, DEFAULT_MODES } from "../lib/rules.js";
 import { PACKS, deferredPackTools, enabledPacks, findPack, packTools, packsForMode } from "../lib/packs.js";
 import { apply } from "../lib/index.js";
 
@@ -19,12 +19,12 @@ const known = [
   "read", "write", "pwsh",
   "webshell_connect", "webshell_exec", "webshell_list", "webshell_db", "webshell_file",
   "ctf_challenge", "ctf_dispatch", "ctf_state", "ctf_steer",
-  "redteam_finding_register", "redteam_context", "campaign_memory_write", "gates_list", "trace_recent",
+  "redteam_finding_register", "redteam_context", "campaign_memory_write", "trace_recent",
   "nmap_portscan", "sqlmap_inject", "oob_probe", "asset_search", "asset_search_batch",
-  "redteam_atlas_target", "redteam_coverage_mark", "operation_goal",
+  "redteam_atlas_target", "redteam_coverage_mark",
   "subagent", "subagent_fork", "workflow", "attack_plan", "attack_gate",
   "netexec_scan", "crackmapexec_scan", "impacket_suite", "access_confirm", "memshell_cli",
-  "tool_pack",
+  "tool_pack", "seatbelt_posture", "ad_export_ingest", "js_deobfuscate", "version_reproduce",
 ];
 
 {
@@ -35,20 +35,25 @@ const known = [
     ["redteam_atlas_target", "redteam_coverage_mark", "netexec_scan", "crackmapexec_scan", "impacket_suite",
       "access_confirm", "memshell_cli", "campaign_memory_write", "trace_recent", "subagent", "workflow"].every((name) => pentest.includes(name)));
   ok("pentest retains current evidence, scan and OOB tools",
-    ["redteam_finding_register", "redteam_context", "nmap_portscan", "sqlmap_inject", "oob_probe", "asset_search"].every((name) => !pentest.includes(name)));
+    ["redteam_finding_register", "redteam_context", "nmap_portscan", "sqlmap_inject", "oob_probe", "asset_search",
+      "seatbelt_posture", "ad_export_ingest", "js_deobfuscate", "version_reproduce"].every((name) => !pentest.includes(name)));
 
   const codeAudit = computeDeny("code-audit", known, RULES);
   ok("code-audit hides webshell and CTF tools", codeAudit.includes("webshell_exec") && codeAudit.includes("ctf_state"));
   ok("code-audit retains shared evidence tools", !codeAudit.includes("redteam_finding_register") && !codeAudit.includes("trace_recent"));
-  ok("code-audit retains host and scanner tools", !codeAudit.includes("read") && !codeAudit.includes("nmap_portscan"));
+  ok("code-audit retains host and scanner tools", !codeAudit.includes("read") && !codeAudit.includes("nmap_portscan")
+    && !codeAudit.includes("seatbelt_posture") && !codeAudit.includes("ad_export_ingest")
+    && !codeAudit.includes("js_deobfuscate") && !codeAudit.includes("version_reproduce"));
   ok("code-audit hides the pentest-only pack entry", codeAudit.includes("tool_pack"));
 
   const ctf = computeDeny("ctf-solver", known, RULES);
   ok("ctf-solver retains CTF tools", !ctf.includes("ctf_challenge"));
-  ok("ctf-solver hides pentest-only tools while retaining the shared tool pack selector", ctf.includes("webshell_exec") && !ctf.includes("tool_pack") && ctf.includes("operation_goal"));
+  ok("ctf-solver hides pentest-only tools while retaining the shared tool pack selector", ctf.includes("webshell_exec")
+    && ctf.includes("seatbelt_posture") && ctf.includes("ad_export_ingest") && ctf.includes("js_deobfuscate")
+    && ctf.includes("version_reproduce") && !ctf.includes("tool_pack"));
 
   const standard = computeDeny("", known, RULES);
-  ok("default mode hides scoped plugin tools", ["webshell_exec", "ctf_state", "operation_goal", "tool_pack"].every((name) => standard.includes(name)));
+  ok("default mode hides scoped plugin tools", ["webshell_exec", "ctf_state", "tool_pack", "seatbelt_posture", "ad_export_ingest", "js_deobfuscate", "version_reproduce"].every((name) => standard.includes(name)));
   ok("default mode retains host and unguarded tools", !standard.includes("read") && !standard.includes("nmap_portscan"));
   ok("empty tool list is harmless", computeDeny("code-audit", [], RULES).length === 0);
   ok("deny output is stable, unique and sorted", (() => {
@@ -71,7 +76,7 @@ const known = [
   const tools = [
     "webshell_connect", "webshell_exec", "nmap_portscan", "dirsearch_dirs", "ffuf_fuzz",
     "nuclei_scan", "afrog_scan", "sqlmap_inject", "katana_crawl", "gau_urls",
-    "whatweb_fingerprint", "wafw00f_detect", "asset_search", "tool_pack",
+    "whatweb_fingerprint", "wafw00f_detect", "asset_search", "tls_probe", "tool_pack",
   ];
   const deferred = deferredPackTools("pentest", tools, PACKS);
   ok("pentest defers current scanner and fingerprint packs",
@@ -81,15 +86,15 @@ const known = [
   ok("pentest keeps the pack entry visible", !deferred.includes("tool_pack"));
   ok("code-audit gets no pentest pack filtering", deferredPackTools("code-audit", tools, PACKS).length === 0);
   ok("PACKS contains only supported product packs",
-    PACKS.map((pack) => pack.id).join(",") === "task-workflow,asset-discovery,active-scan");
-  ok("packs are scoped to pentest", packsForMode("pentest", PACKS).length === 3 && packsForMode("code-audit", PACKS).length === 0);
+    PACKS.map((pack) => pack.id).join(",") === "asset-discovery,active-scan");
+  ok("packs are scoped to pentest", packsForMode("pentest", PACKS).length === 2 && packsForMode("code-audit", PACKS).length === 0);
   ok("packs can be disabled by id", enabledPacks({ "active-scan": false }).length === PACKS.length - 1);
   ok("findPack rejects retired and unknown ids", findPack("webshell", PACKS) === null && findPack("nday", PACKS) === null);
   ok("retired WebShell installs still have a defensive hidden rule",
     RULES.find((rule) => rule.id === "webshell")?.modes.length === 1);
   ok("active-scan excludes fingerprint and asset tools",
     JSON.stringify(packTools(tools, findPack("active-scan", PACKS))) ===
-      JSON.stringify(["afrog_scan", "dirsearch_dirs", "ffuf_fuzz", "gau_urls", "katana_crawl", "nmap_portscan", "nuclei_scan", "sqlmap_inject"]));
+      JSON.stringify(["afrog_scan", "dirsearch_dirs", "ffuf_fuzz", "gau_urls", "katana_crawl", "nmap_portscan", "nuclei_scan", "sqlmap_inject", "tls_probe"]));
 }
 
 {
@@ -120,20 +125,28 @@ const known = [
   }
   ok("retired knowledge and Nday products are absent from active rules",
     !RULES.some((rule) => rule.prefixes.some((prefix) => /knowledge|nday/.test(prefix))));
+
+  const competitionKnown = ["competition_challenge", "competition_answer", "competition_execution", "competition_knowledge",
+    "redteam_execution", "redteam_checks", "project_document", "subagent"];
+  const competitionDeny = computeScenarioDeny("competition", competitionKnown);
+  ok("competition keeps challenge and answer tools visible",
+    !competitionDeny.includes("competition_challenge") && !competitionDeny.includes("competition_answer")
+      && !competitionDeny.includes("competition_execution"));
+  ok("competition still hides free/project/redundant tools",
+    competitionDeny.includes("redteam_execution") && competitionDeny.includes("project_document")
+      && competitionDeny.includes("subagent") && competitionDeny.includes("competition_knowledge"));
 }
 
 {
   const toolNames = [
     "read", "nmap_portscan", "dirsearch_dirs", "ffuf_fuzz", "nuclei_scan", "afrog_scan",
     "sqlmap_inject", "katana_crawl", "gau_urls", "whatweb_fingerprint", "asset_search",
-    "ctf_state", "webshell_connect", "webshell_exec", "tool_pack", "redteam_context",
-    "operation_goal", "operation_scope", "operation_intent", "operation_task",
-    "operation_progress", "operation_constraints", "operation_conclude",
+    "tls_probe", "ctf_state", "webshell_connect", "webshell_exec", "tool_pack", "redteam_context",
   ];
   const handlers = {};
   const registered = [];
   const layers = new Map();
-  const deferredScanners = ["nmap_portscan", "dirsearch_dirs", "ffuf_fuzz", "nuclei_scan", "afrog_scan", "sqlmap_inject", "katana_crawl", "gau_urls"];
+  const deferredScanners = ["nmap_portscan", "dirsearch_dirs", "ffuf_fuzz", "nuclei_scan", "afrog_scan", "sqlmap_inject", "katana_crawl", "gau_urls", "tls_probe"];
   let scannerToolsReady = false;
   let layerId = 0;
   const denied = (name) => [...layers.values()].some((set) => set.has(name));
@@ -173,18 +186,15 @@ const known = [
 
   const toolPack = registered.find((tool) => tool.name === "tool_pack");
   ok("tool_pack is registered", Boolean(toolPack));
-  const taskTools = toolNames.filter((name) => name.startsWith("operation_"));
-  ok("task workflow starts hidden", taskTools.length === 7 && taskTools.every(denied));
-  const loaded = await toolPack.execute({ action: "load", pack: "task-workflow" }, { agent });
-  ok("task workflow can be loaded", loaded.ok && taskTools.every((name) => !denied(name)));
-  await toolPack.execute({ action: "unload", pack: "task-workflow" }, { agent });
-  ok("task workflow unloads again", taskTools.every(denied));
-
   const assetLoaded = await toolPack.execute({ action: "load", pack: "asset-discovery" }, { agent });
   ok("asset discovery restores asset tools only", assetLoaded.ok && !denied("asset_search") && !denied("whatweb_fingerprint") && denied("nmap_portscan"));
+  ok("asset discovery load returns the native tool names", Array.isArray(assetLoaded.tools) && assetLoaded.tools.includes("asset_search"));
+  const assetLoadText = toolPack.output.render({ action: "load" }, { ok: true, pack: "asset-discovery", loaded: true, tools: assetLoaded.tools })[0].text;
+  ok("load text says to call native tools instead of mcp_call",
+    assetLoadText.includes("不要用 mcp_call") && assetLoadText.includes("asset_search"));
   await toolPack.execute({ action: "unload", pack: "asset-discovery" }, { agent });
   const scansLoaded = await toolPack.execute({ action: "load", pack: "active-scan" }, { agent });
-  ok("active scan restores scanner tools", scansLoaded.ok && !denied("nmap_portscan") && !denied("nuclei_scan"));
+  ok("active scan restores scanner tools", scansLoaded.ok && !denied("nmap_portscan") && !denied("nuclei_scan") && !denied("tls_probe"));
   const list = await toolPack.execute({ action: "list" }, { agent });
   ok("list reports supported packs and no retired Nday or WebShell pack",
     list.ok && list.packs.some((pack) => pack.id === "active-scan" && pack.loaded)

@@ -23,6 +23,7 @@ import os from "node:os";
 import fs from "node:fs";
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { Worker } from 'node:worker_threads';
 import { buildDeliveryFiles, zipDelivery } from './bundle.js';
 import { saveTaskContext, readTaskContext, readTaskRecord, taskContextView } from './task-context.js';
 import { stageMethodPackage, readMethodPackage, methodPackageState, recordMethodReview, activateMethodPackage, listMethodPackages, activeMethodPackage } from './method-packages.js';
@@ -51,26 +52,63 @@ import { builtinTemplates, promptFields, searchTemplates, renderTemplate, missin
 import { listUserTemplates, upsertUserTemplate, deleteUserTemplate, saveAsTemplate, readDraft, listDrafts, saveDraft } from './prompt-store.js';
 import { materialsList, materialsDetail, searchMaterials, readMaterialExcerpt, removeMaterial } from './materials-view.js';
 import { importPastedMaterial } from './materials-import.js';
+import { deriveRequest, importRequestMaterial } from './request-import.js';
+import { componentStatus, evaluateComponent, importComponentAdvisory, observeComponent } from './component-research.js';
+import { mapComponentUpstream, researchComponentUpstream, componentUpstreamStatus } from './component-upstream.js';
 import { listWorkDependingOnMaterial } from './work-lease.js';
 import { executionLedger } from './execution-view.js';
 import { readPentestSession } from './session-read.js';
 import { createPurposeTasks } from './purpose-tasks.js';
+import { createRoleOrchestrator, createRoleSpec, createWorkItem, readRoleSpec, readWorkItem, roleStatus as readRoleStatus, reconcileOrphanedRoles } from './role-orchestration.js';
 import { breakdownFromEvents, maskedRecord, diagnosticsDelta } from './request-diagnostics.js';
 import { redactText, redactValue } from './redaction.js';
 import { recordMaterialRead, recordMaterialView, materialReadKey } from './material-reads.js';
 import { captureTaskCost, taskCostOverview, listOrdinaryReports } from './task-cost.js';
-import { registerModelAdmission, recoverModelRuntime, modelBudgetOverview } from './model-budget.js';
+import { registerModelAdmission, recoverModelRuntime, modelBudgetOverview, normalizedModelUsage } from './model-budget.js';
 import { readSettingsSection } from 'dsh-saker/settings-compat';
-import { createSiteWorkers, siteWorkerView, siteWorkerRows, siteWorkerParent, hostWorkerLimit } from './site-workers.js';
+import { createSiteWorkers, siteWorkerView, siteWorkerRows, siteWorkerParent, hostWorkerLimit, reconcileOrphanedSiteWorkers } from './site-workers.js';
 import { indexBusinessMaterials, businessMaterialView } from './business-materials.js';
 import { runComparisonJob, readComparisonJob, comparisonFindingInput } from './comparison-jobs.js';
 import { recordImpactReview } from './impact-reviews.js';
+import { saveFindingEvidenceReview } from './finding-evidence-reviews.js';
 import { PROOF_KINDS, parseReproduction, renderReproduction, renderFindingDelivery } from './delivery.js';
 import { registerTaskPrompt } from './task-prompt.js';
+import { registerWorkflowTools } from './workflow/tools.js';
+import { deleteWorkflowDefinition, latestWorkflowRun, listWorkflowDefinitions,
+  readWorkflowDefinition, saveWorkflowDefinition, selectWorkflow, selectedWorkflow,
+  selectedWorkflowPrompt } from './workflow/store.js';
 import { writeTaskPolicy, listTaskEvents, taskTransaction } from './task-policy-record.js';
 import { taskScopeAllowsUrl, taskScopeAllowsAsset, isPassiveBrowserDependency } from './task-scope.js';
+import { settingsView, saveTaskSettings, readSettingsRequest, legacySaveTaskSettings } from './task-settings.js';
 import { SAKER_SCENES, isSakerPreset, normalizeScene, scenePreset } from 'dsh-saker/scene-context';
-import { readSceneContext, reconcileSceneFromTask, setCompetitionKnowledge, setCompetitionPreferences, setSceneContinuation, writeSceneContext } from './scene-context.js';
+import { readSceneContext, sceneRootSession, reconcileSceneFromTask, setSceneContinuation, writeSceneContext } from './scene-context.js';
+import { resolveScopeDescriptor, scopeError, sessionWorkspaceIdentity } from './scope-resolution.js';
+import {
+  deleteKnowledgeEntry,
+  importLegacyCompetitionKnowledge,
+  indexKnowledgeEntry,
+  knowledgeEntryIdentity,
+  knowledgeIndexStatus,
+  listKnowledgeEntries,
+  migrateKnowledgeProject,
+  readKnowledgeIndexRef,
+  readKnowledgeSource,
+  searchKnowledgeIndex,
+} from './knowledge-index.js';
+import { readWebReference, runReferenceSearch, decodeWebRef } from './reference-router.js';
+import { legacyKnowledgeStatus, mergeKnowledgeSearch, readLegacyKnowledgeRef, searchLegacyKnowledge } from './legacy-knowledge.js';
+import {
+  cancelKnowledgeCuration,
+  createManualKnowledgeCuration,
+  curationSystemPrompt,
+  curationUserPrompt,
+  discardKnowledgeCuration,
+  getKnowledgeCuration,
+  recoverKnowledgeCurations,
+  saveKnowledgeCuration,
+  startKnowledgeCuration,
+  updateKnowledgeCuration,
+} from './knowledge-curation.js';
 import { addCompetitionAnswer, competitionPromptState, competitionSummary, createCompetitionChallenge, listCompetitionAnswers, listCompetitionChallenges, readCompetitionChallenge, readCurrentCompetitionChallenge, setCurrentCompetitionChallenge, updateCompetitionAnswer, updateCompetitionChallenge } from './competition-store.js';
 import { ensureDirs, listCompetitionExecutions, readCompetitionExecution, readCompetitionOutput, recoverCompetitionExecutions, runCompetitionExecution, stopAllCompetitionExecutions, stopCompetitionExecution, writeCompetitionInput } from './competition-execution.js';
 import { deleteKnowledgeSource, importKnowledgeBuffer, importKnowledgePath, importKnowledgeText, listKnowledgeSources, readKnowledge, searchKnowledge } from './competition-knowledge.js';
@@ -78,6 +116,8 @@ import { defineTool } from "@deepseek-ai/dsh-tools";
 import { sessionWorkingDirectory, ensureWorkingDirectory } from 'dsh-saker/working-directory';
 import { readInventory } from 'dsh-saker/asset-inventory';
 import { saveChecks, readChecks, compactChecks, renderCheckedTsv } from './checked.js';
+import { workbenchQuery, workbenchCommand } from './workbench.js';
+import { pauseRootForNativeStop } from './native-stop.js';
 import { openStore, registerFinding, updateFinding, removeFinding, getFinding, allFindings, listFindings, listFindingsAll, groupByTarget, groupByTargetAll, computeStats, computeStatsAll, modeCounts, modeCountsAll, ledgerOverview, ledgerOverviewAll, getMeta, setMeta, SEVERITIES, STATUSES, REGISTER_STATUSES, MODE_STATUSES, ALL_STATUSES, EVIDENCE_LEVELS, SOURCE_ORIGINS, SECOND_RATINGS, secondReviewError, secondReviewVerdict, statusesOf } from "./store.js";
 
 const name = "dsh-redteam-results";
@@ -98,6 +138,7 @@ const VERIFY_SENT = new Map();
 const VERIFY_WINDOW_MS = 10 * 60 * 1000;
 const workerManagers = new WeakMap();
 const purposeManagers = new WeakMap();
+const roleManagers = new WeakMap();
 const modelAdmissions = new WeakMap();
 const projectBrowsers = new Map();
 function modelTokenBudgetAvailable(ctx) {
@@ -490,6 +531,21 @@ function presetOfSession(session) {
 	return typeof preset === 'string' ? preset : '';
 }
 
+/**
+ * 成果归属按“当前选中的方法”修正：宿主目前只暴露 pentest 预设，
+ * 用户点“审查一段代码”后选中的是 code-review（mode=code-audit）。
+ * 如果仍按 session.mode 记账，代码审计成果会落到渗透测试页。
+ */
+export function findingModeOf(store, session) {
+  if (!session) return '';
+  if (session.mode !== 'pentest') return session.mode;
+  try {
+    const workflow = selectedWorkflow(store, session.id, session.mode);
+    if (workflow && workflow.mode === 'code-audit') return 'code-audit';
+  } catch { /* 选择表不可读时退回宿主模式 */ }
+  return session.mode;
+}
+
 // A purpose task owns a bounded child policy but reads the parent task's
 // evidence snapshot. Only the parent recorded at admission is readable, and
 // the parent round must still match, so a stale child cannot read a new round.
@@ -668,9 +724,425 @@ function requestDiagnosticsView(session, sessionId) {
       + '敏感字段已遮蔽，原始记录在私有目录。' };
 }
 
+function settingsHost(ctx) {
+  return {
+    maxWorkers: hostWorkerLimit(ctx),
+    modelAdmission: modelAdmissions.get(ctx)?.available !== false,
+    tokens: modelTokenBudgetAvailable(ctx),
+  };
+}
+
+const legacyKnowledgeIndexed = new Set();
+const migratedKnowledgeProjects = new Set();
+function legacyKnowledgeRevision(store, sessionId) {
+  const row = store.db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(k.revision),0) AS revisions,
+    COALESCE(MAX(k.updated_at),'') AS latest FROM competition_knowledge k
+    WHERE k.session_id=? AND COALESCE(json_extract(k.record,'$.hidden'),0)=0
+    AND k.revision=(SELECT MAX(k2.revision) FROM competition_knowledge k2
+      WHERE k2.session_id=k.session_id AND k2.source_id=k.source_id
+      AND COALESCE(json_extract(k2.record,'$.hidden'),0)=0)`).get(sessionId);
+  return [Number(row?.count) || 0, Number(row?.revisions) || 0, String(row?.latest || '')].join(':');
+}
+function legacyKnowledgeKey(store, rootSession, projectKey) {
+  return [rootSession, projectKey, legacyKnowledgeRevision(store, rootSession)].join('\0');
+}
+function ensureKnowledgeProjectMigrated(store, rootSession, projectKey) {
+  if (!rootSession || !projectKey || rootSession === projectKey) return { updated: 0, merged: 0, conflicts: 0 };
+  const key = rootSession + '\0' + projectKey;
+  if (migratedKnowledgeProjects.has(key)) return null;
+  const result = migrateKnowledgeProject(rootSession, projectKey);
+  migratedKnowledgeProjects.add(key);
+  return result;
+}
+function knowledgeScope(store, sessionId, ctx, { migrate = false } = {}) {
+  const id = String(sessionId || '');
+  const root = sceneRootSession(store, id) || id;
+  let session;
+  try {
+    const sessions = ctx?.sessions || ctx?.get?.('sessions');
+    session = sessions?.get?.(root) || sessions?.get?.(id);
+  } catch { /* session lookup is optional for direct store tests */ }
+  const identity = session?.workspaceId || session?.projectId || session?.cwd
+    || session?.header?.workspaceId || session?.header?.projectId || session?.header?.cwd
+    || session?.projectionValues?.workspaceId || session?.projectionValues?.cwd;
+  const projectKey = identity ? 'workspace:' + crypto.createHash('sha256').update(String(identity)).digest('hex').slice(0, 32) : root;
+  if (migrate) ensureKnowledgeProjectMigrated(store, root, projectKey);
+  return { rootSession: root, projectKey };
+}
+function knowledgeProjectKey(store, sessionId, ctx, options = { migrate: true }) {
+  return knowledgeScope(store, sessionId, ctx, options).projectKey;
+}
+
+function scopeResolveQuery(ctx, store, payload = {}) {
+  const context = payload.context || {};
+  const entrySessionId = String(context.entrySessionId || context.sessionId || payload.entrySessionId || '');
+  const workspaceId = String(context.workspaceId || payload.workspaceId || '');
+  let sessions = null;
+  try { sessions = ctx.get?.('sessions') || ctx.sessions; } catch { sessions = null; }
+  const session = entrySessionId ? sessions?.get?.(entrySessionId) : null;
+  let workspaceAccessible = false;
+  if (workspaceId) {
+    try {
+      const workspaces = ctx.get?.('workspaces') || null;
+      workspaceAccessible = !!workspaces?.get?.(workspaceId);
+    } catch { workspaceAccessible = false; }
+  }
+  const rootSession = sceneRootSession(store, entrySessionId) || entrySessionId;
+  const projectKey = knowledgeScope(store, entrySessionId, ctx, { migrate: false }).projectKey;
+  let rootProjectKey = '';
+  try {
+    rootProjectKey = String(store.db.prepare(
+      'SELECT project_key FROM saker_business_roots WHERE root_id=? OR host_root_session=? ORDER BY updated_at DESC LIMIT 1',
+    ).get(rootSession, rootSession)?.project_key || '');
+  } catch { /* older stores may not have the root table yet */ }
+  const data = resolveScopeDescriptor({
+    entrySessionId,
+    workspaceId,
+    session,
+    rootSession,
+    projectKey,
+    rootProjectKey,
+    workspaceAccessible,
+    cwd: sessionWorkingDirectory(ctx, session, ''),
+  });
+  return {
+    ok: true,
+    data,
+    sourceRevision: data.scopeRevision,
+    revisionVector: { saker: data.scopeRevision },
+    updatedAt: new Date().toISOString(),
+    stale: false,
+    page: { nextCursor: null, hasMore: false, total: 1, totalKnown: true },
+    capabilities: {},
+    notices: data.classification === 'legacy-unassigned'
+      ? [{ kind: 'legacy-unassigned', message: '历史任务的项目归属无法确认，只在显式历史列表中展示。' }]
+      : [],
+  };
+}
+
+function assertWorkbenchEntryScope(ctx, store, payload = {}) {
+  const context = payload.context || {};
+  const entrySessionId = String(context.entrySessionId || context.sessionId || '');
+  if (!entrySessionId) return undefined;
+  let sessions = null;
+  try { sessions = ctx.get?.('sessions') || ctx.sessions; } catch { sessions = null; }
+  const session = sessions?.get?.(entrySessionId);
+  // Business-root UUIDs are not Host sessions. Only enforce when the supplied
+  // entry is a real Host session; otherwise keep the existing root route.
+  if (!session) return undefined;
+  const projectKey = knowledgeScope(store, entrySessionId, ctx, { migrate: false }).projectKey;
+  const descriptor = resolveScopeDescriptor({
+    entrySessionId,
+    session,
+    rootSession: sceneRootSession(store, entrySessionId) || entrySessionId,
+    projectKey,
+    cwd: sessionWorkingDirectory(ctx, session, ''),
+  });
+  const expected = String(context.scopeRevision || '');
+  if (expected && expected !== descriptor.scopeRevision) {
+    throw scopeError('项目范围已变化，请刷新后重试');
+  }
+  const rootId = String(context.rootId || '');
+  if (!rootId) return;
+  let rootProjectKey = '';
+  try {
+    rootProjectKey = String(store.db.prepare(
+      'SELECT project_key FROM saker_business_roots WHERE root_id=? OR host_root_session=? ORDER BY updated_at DESC LIMIT 1',
+    ).get(rootId, rootId)?.project_key || '');
+  } catch { rootProjectKey = ''; }
+  if (!rootProjectKey && sessions?.get?.(rootId)) {
+    try { rootProjectKey = knowledgeScope(store, rootId, ctx, { migrate: false }).projectKey; } catch { rootProjectKey = ''; }
+  }
+  if (rootProjectKey && rootProjectKey !== descriptor.projectKey) {
+    throw scopeError('该记录不属于当前项目');
+  }
+  return descriptor;
+}
+
+async function assertDomainEntryScope(ctx, store, endpoint, payload = {}) {
+  if (!/^(?:curation|knowledge|account)\./.test(String(endpoint || ''))) return;
+  let sessions = null;
+  try { sessions = ctx.get?.('sessions') || ctx.sessions; } catch { sessions = null; }
+  // Minimal test hosts and pure dispatch fixtures may not mount the Host
+  // session service. Production Desktop always does; when it is absent there is
+  // no session authority to validate against, so keep the existing handler.
+  if (typeof sessions?.get !== 'function') return;
+  const context = payload.context || {};
+  const sessionId = String(payload.sessionId || context.sessionId || '');
+  // Cold persisted sessions are validated by the domain handler's own
+  // readPentestSession() lease. This scope gate only adds project checks when a
+  // live Host session is available; it must not consume a second lease.
+  const live = sessionId ? sessions.get(sessionId) : null;
+  if (sessionId && !live) return;
+  if (!sessionId || !sessionWorkspaceIdentity(live)) return;
+  const resolved = scopeResolveQuery(ctx, store, {
+    context: { sessionId, workspaceId: payload.workspaceId || context.workspaceId },
+  }).data;
+  if (payload.projectKey && String(payload.projectKey) !== resolved.projectKey) {
+    throw scopeError('该记录不属于当前项目');
+  }
+  if (payload.workspaceKey && String(payload.workspaceKey) !== resolved.workspaceKey) {
+    throw scopeError('工作区不属于当前会话');
+  }
+  if (payload.scopeRevision && String(payload.scopeRevision) !== resolved.scopeRevision) {
+    throw scopeError('项目范围已变化，请刷新后重试');
+  }
+}
+function referenceKnowledgeState(store, sessionId) {
+  const scene = readSceneContext(store, sessionId);
+  return settingsView(store, sessionId, { sceneId: scene?.sceneId }).effective.knowledge;
+}
+function webService(ctx) {
+  try { return ctx.web || ctx.get?.('web') || null; } catch { return null; }
+}
+function referenceAdapters(ctx, store, sessionId) {
+  const { projectKey, rootSession } = knowledgeScope(store, sessionId, ctx, { migrate: false });
+  const projectMigrationKey = rootSession + '\0' + projectKey;
+  const migrateProject = rootSession !== projectKey && !migratedKnowledgeProjects.has(projectMigrationKey);
+  const legacyKey = legacyKnowledgeKey(store, rootSession, projectKey);
+  const migrateLegacy = !legacyKnowledgeIndexed.has(legacyKey);
+  const web = webService(ctx);
+  function runWorkerSearch(request, signal) {
+    return new Promise((resolve, reject) => {
+      const worker = new Worker(new URL('./knowledge-search-worker.js', import.meta.url), {
+        workerData: { projectKey, sourceSessionId: rootSession, request, storePath: store.dbPath || '',
+          migrateProject, migrateLegacy },
+      });
+      let done = false;
+      const finish = (error, value) => {
+        if (done) return;
+        done = true;
+        signal?.removeEventListener('abort', onAbort);
+        if (error) reject(error); else resolve(value);
+      };
+      const onAbort = () => { try { worker.terminate(); } catch { /* already gone */ }
+        finish(Object.assign(new Error('local knowledge search cancelled'), { code: 'cancelled' })); };
+      signal?.addEventListener('abort', onAbort, { once: true });
+      worker.once('message', message => {
+        if (message?.ok) {
+          if (message.projectMigrated) migratedKnowledgeProjects.add(projectMigrationKey);
+          if (message.legacyMigrated) legacyKnowledgeIndexed.add(legacyKey);
+          finish(null, { ...message.result, workerSearch: true });
+        }
+        else finish(new Error(message?.error || 'local knowledge search failed'));
+        try { worker.terminate(); } catch { /* exiting */ }
+      });
+      worker.once('error', error => finish(error));
+      worker.once('exit', code => { if (!done) finish(new Error('local knowledge search worker exited ' + code)); });
+    });
+  }
+  return {
+    projectKey,
+    localSearch(request, signal) {
+      if (store.dbPath && store.dbPath !== ':memory:') return runWorkerSearch(request, signal).catch(error => {
+        throw Object.assign(new Error('本地资料检索暂时不可用，请重试：' + String(error?.message || error)),
+          { code: signal?.aborted ? 'cancelled' : 'index_unavailable' });
+      });
+      if (migrateProject) {
+        ensureKnowledgeProjectMigrated(store, rootSession, projectKey);
+      }
+      if (migrateLegacy) {
+        try {
+          const legacyImport = importLegacyCompetitionKnowledge(store, rootSession, { destinationProjectKey: projectKey });
+          if (!legacyImport.failed) legacyKnowledgeIndexed.add(legacyKey);
+        } catch { /* the legacy table remains visible to the caller */ }
+      }
+      const current = searchKnowledgeIndex(projectKey, request);
+      let legacy = null;
+      try { legacy = searchLegacyKnowledge(request.query, request); } catch { legacy = null; }
+      return mergeKnowledgeSearch(current, legacy);
+    },
+    webSearch(request, signal) {
+      if (!web || typeof web.search !== 'function') throw new Error('宿主 web 搜索服务不可用');
+      return web.search(request, signal);
+    },
+    webFetch(request, signal) {
+      if (!web || typeof web.fetch !== 'function') throw new Error('宿主网页抓取服务不可用');
+      return web.fetch(request, signal);
+    },
+  };
+}
+export async function referenceSearchForSession(ctx, store, sessionId, input, signal) {
+  const knowledge = referenceKnowledgeState(store, sessionId);
+  if (knowledge.enabled !== true)
+    return { ok: false, code: 'knowledge_disabled', status: 'disabled',
+      error: '本会话知识查询已关闭', text: JSON.stringify({ ok: false, code: 'knowledge_disabled', error: '本会话知识查询已关闭' }) };
+  const adapters = referenceAdapters(ctx, store, sessionId);
+  const result = await runReferenceSearch(adapters, {
+    projectKey: adapters.projectKey,
+    strategy: knowledge.strategy,
+    query: input.query,
+    limit: input.limit,
+    cursor: input.cursor,
+    product: input.product,
+    version: input.version,
+    fallbackReason: input.fallbackReason,
+  }, signal);
+  const latest = referenceKnowledgeState(store, sessionId);
+  if (latest.enabled !== true || latest.revision !== knowledge.revision)
+    return { ok: false, code: 'cancelled', status: 'cancelled',
+      error: '知识查询已在执行中关闭或改变；迟到结果未交付',
+      text: JSON.stringify({ ok: false, code: 'cancelled', error: '知识查询已在执行中关闭或改变；迟到结果未交付' }) };
+  return { ...result, text: JSON.stringify(result) };
+}
+export async function referenceReadForSession(ctx, store, sessionId, input, signal) {
+  const knowledge = referenceKnowledgeState(store, sessionId);
+  if (knowledge.enabled !== true)
+    return { ok: false, code: 'knowledge_disabled', status: 'disabled',
+      error: '本会话知识查询已关闭', text: JSON.stringify({ ok: false, code: 'knowledge_disabled', error: '本会话知识查询已关闭' }) };
+  const adapters = referenceAdapters(ctx, store, sessionId);
+  const webRef = decodeWebRef(input.ref);
+  if (webRef && knowledge.strategy === 'knowledge-only')
+    return { ok: false, code: 'knowledge_only_web_read_denied', status: 'error',
+      error: '当前策略只查本地资料，不能读取网页正文', text: JSON.stringify({ ok: false,
+        code: 'knowledge_only_web_read_denied', error: '当前策略只查本地资料，不能读取网页正文' }) };
+  const result = webRef
+    ? await readWebReference(input.ref, { ...input, requireAuthorized: true, projectKey: adapters.projectKey,
+      strategy: knowledge.strategy }, adapters, signal)
+    : String(input.ref || '').startsWith('legacy:')
+      ? readLegacyKnowledgeRef(input.ref, input)
+      : readKnowledgeIndexRef(input.ref, input, { projectKey: adapters.projectKey });
+  const latest = referenceKnowledgeState(store, sessionId);
+  if (latest.enabled !== true || latest.revision !== knowledge.revision)
+    return { ok: false, code: 'cancelled', status: 'cancelled',
+      error: '知识查询已在读取中关闭或改变；迟到内容未交付',
+      text: JSON.stringify({ ok: false, code: 'cancelled', error: '知识查询已在读取中关闭或改变；迟到内容未交付' }) };
+  return { ...result, text: JSON.stringify(result) };
+}
+function assistantTextOfEvent(event) {
+  const blocks = event?.data?.message?.content ?? event?.data?.content ?? [];
+  if (typeof blocks === 'string') return blocks;
+  if (!Array.isArray(blocks)) return '';
+  return blocks.filter(block => block?.type === 'text').map(block => block.text || '').join('');
+}
+function latestAssistantAnswer(session) {
+  let events = [];
+  try {
+    events = typeof session?.ownEvents === 'function' ? [...session.ownEvents()]
+      : typeof session?.snapshotEvents === 'function' ? [...session.snapshotEvents()] : [];
+  } catch { events = []; }
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    if (events[index]?.type !== 'assistant/message') continue;
+    const text = assistantTextOfEvent(events[index]);
+    if (text.trim()) return { text, event: events[index] };
+  }
+  return null;
+}
+function assistantAnswerById(session, messageId) {
+  const wanted = String(messageId || '');
+  if (!wanted) return null;
+  let events = [];
+  try {
+    events = typeof session?.ownEvents === 'function' ? [...session.ownEvents()]
+      : typeof session?.snapshotEvents === 'function' ? [...session.snapshotEvents()] : [];
+  } catch { events = []; }
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    if (events[index]?.type !== 'assistant/message') continue;
+    const data = events[index].data || {};
+    if (String(data.message?.id || data.id || '') !== wanted) continue;
+    const text = assistantTextOfEvent(events[index]);
+    if (text.trim()) return { text, event: events[index] };
+  }
+  return null;
+}
+function currentAgentModel(agent) {
+  try {
+    const direct = agent?.model?.current?.();
+    if (direct?.provider && direct.model) return direct;
+  } catch { /* fall back to the durable request header */ }
+  try {
+    const config = agent?.session?.requestHeader?.()?.config;
+    if (config?.provider && config.model) return {
+      provider: config.provider, model: config.model,
+      ...(config.reasoningEffort ? { reasoningEffort: config.reasoningEffort } : {}),
+    };
+  } catch { /* no recorded route */ }
+  return null;
+}
+function curationModel(store, sessionId, agent, selected) {
+  if (selected?.provider && selected?.model) return {
+    provider: String(selected.provider), model: String(selected.model),
+    ...(selected.reasoningEffort ? { reasoningEffort: String(selected.reasoningEffort) } : {}),
+  };
+  const configured = settingsView(store, sessionId).effective.reportModel;
+  if (configured?.provider && configured?.model) return configured;
+  return currentAgentModel(agent);
+}
+function curationGenerate(ctx) {
+  const llm = (() => { try { return ctx.llm || ctx.get?.('llm') || null; } catch { return null; } })();
+  if (!llm || typeof llm.stream !== 'function') return null;
+  return async ({ text, evidence, model, signal, onWire }) => {
+    let output = '', usage = null, finish = null, sawTool = false;
+    const stream = llm.stream({
+      provider: model.provider,
+      model: model.model,
+      ...(model.reasoningEffort ? { reasoningEffort: model.reasoningEffort } : {}),
+      messages: [{ role: 'user', content: [{ type: 'text', text: curationUserPrompt(text, evidence) }] }],
+      system: curationSystemPrompt(),
+      maxTokens: 8192,
+      temperature: 0,
+      purpose: 'knowledge-curation',
+      curationOnWire: onWire,
+      signal,
+    });
+    for await (const chunk of stream) {
+      if (chunk?.type === 'text-delta') output += String(chunk.text || '');
+      else if (chunk?.type === 'usage') usage = chunk.usage || usage;
+      else if (chunk?.type === 'finish') finish = chunk.reason || chunk;
+      else if (chunk?.type === 'tool-call' || chunk?.type === 'tool_use') sawTool = true;
+      if (Buffer.byteLength(output, 'utf8') > 256 * 1024) throw new Error('整理输出超过 256KiB，已停止接收');
+      if (signal?.aborted) break;
+    }
+    if (sawTool) throw new Error('独立整理收到工具调用；已拒绝执行');
+    if (finish?.kind === 'error') throw new Error(finish?.failure?.message || finish?.failure?.code || '整理生成失败');
+    if (signal?.aborted) throw signal.reason || Object.assign(new Error('整理已取消'), { name: 'AbortError' });
+    return { text: output, usage: normalizedModelUsage(usage) || usage };
+  };
+}
+
+function legacySettingsPatch(endpoint, payload) {
+  const p = payload || {};
+  const patch = {};
+  for (const key of ['interaction', 'reporting', 'explain', 'workers', 'workerModel', 'reviewModel',
+    'reportModel', 'target', 'scope', 'allowedOrigins', 'allowTargetNetwork', 'readOnly',
+    'excludedPaths', 'requestRatePerMinute', 'requestConcurrency', 'modelConcurrency', 'knowledge']) {
+    if (p[key] !== undefined) patch[key] = p[key];
+  }
+  if (p.direction !== undefined) patch.direction = p.direction;
+  if (endpoint === 'task.mode' && p.mode !== undefined) patch.direction = p.mode;
+  if (endpoint === 'task.choose' && p.mode !== undefined) patch.direction = p.mode;
+  const budget = {};
+  for (const key of ['minutes', 'toolCalls', 'modelCalls', 'tokens', 'unmeteredToolCalls']) {
+    if (p[key] !== undefined) budget[key] = p[key];
+    if (p.budget?.[key] !== undefined) budget[key] = p.budget[key];
+  }
+  if (Object.keys(budget).length) patch.budget = budget;
+  return patch;
+}
+
 /** 通道端点分发（纯逻辑，供路由与测试复用）。 */
 export async function dispatch(ctx, st, endpoint, payload) {
   const p = payload ?? {};
+  if (endpoint === 'workbench.query' && String(p.kind || '') === 'scope.resolve') return scopeResolveQuery(ctx, st, p);
+  if (endpoint === 'workbench.query') {
+    assertWorkbenchEntryScope(ctx, st, p);
+    return workbenchQuery(ctx, st, p);
+  }
+  if (endpoint === 'workbench.command') {
+    const scope = assertWorkbenchEntryScope(ctx, st, p);
+    if (String(p.kind || '') === 'root.start' && scope) {
+      p.context = Object.assign({}, p.context || {}, {
+        projectKey: scope.projectKey,
+        workspaceKey: scope.workspaceKey,
+        scopeRevision: scope.scopeRevision,
+      });
+    }
+    return workbenchCommand(ctx, st, p, {
+      roleRuntime: roleManagers.get(ctx),
+      agentFor: id => (ctx.agents || ctx.get?.('agents'))?.get(id),
+    });
+  }
+  await assertDomainEntryScope(ctx, st, endpoint, p);
   if (endpoint === 'scene.get') {
     const sessionId = String(p.sessionId || '');
     const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
@@ -780,9 +1252,12 @@ export async function dispatch(ctx, st, endpoint, payload) {
     const sessionId = String(p.sessionId || '');
     const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
     if (!session || presetOfSession(session) !== 'ctf-solver') throw new Error('competition scene required');
-    const value = setCompetitionKnowledge(st, sessionId, p.enabled === true, { expectedRevision: p.expectedRevision })
+    legacySaveTaskSettings(st, sessionId, { knowledge: { enabled: p.enabled === true } }, settingsHost(ctx), p.requestId);
+    const view = settingsView(st, sessionId, { sceneId: 'competition', host: settingsHost(ctx) });
+    const value = { ...readSceneContext(st, sessionId, 'ctf-solver'),
+      knowledgeEnabled: view.effective.knowledge.enabled };
     try { ctx.emit?.('tools/change') } catch { /* next inbox insertion still refreshes */ }
-    return { ok: true, scene: value };
+    return { ok: true, scene: value, settingsView: view };
   }
   if (endpoint === 'scene.continuation') {
     const sessionId = String(p.sessionId || '');
@@ -793,17 +1268,16 @@ export async function dispatch(ctx, st, endpoint, payload) {
   if (String(endpoint).startsWith('competition.') || String(endpoint).startsWith('knowledge.')) {
     const sessionId = String(p.sessionId || '');
     const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
-    if (String(endpoint).startsWith('knowledge.') && (!session || presetOfSession(session) !== 'ctf-solver'))
-      return { ok: false, code: 'feature_removed', error: '知识库功能已移除；比赛模式只按需读取用户导入的本地资料。' };
-    if (!session || presetOfSession(session) !== 'ctf-solver') throw new Error('competition scene required');
-    const scene = readSceneContext(st, sessionId, 'ctf-solver');
-    if (!scene || scene.sceneId !== 'competition') throw new Error('competition scene context required');
+    const knowledgeEndpoint = String(endpoint).startsWith('knowledge.');
+    if (!session || !isSakerPreset(presetOfSession(session))) throw new Error('请选择当前可用的 Saker 会话');
+    const scene = readSceneContext(st, sessionId, presetOfSession(session));
+    if (!knowledgeEndpoint && scene?.sceneId !== 'competition') throw new Error('competition scene context required');
     if (endpoint === 'competition.status') {
       const currentChallenge = readCurrentCompetitionChallenge(st, sessionId)
       return { ok: true, scene, summary: competitionSummary(st, sessionId),
         currentChallengeId: currentChallenge?.challengeId || '',
         challenges: listCompetitionChallenges(st, sessionId, p),
-        knowledge: listKnowledgeSources(st, sessionId, {
+        knowledge: listKnowledgeEntries(knowledgeProjectKey(st, sessionId, ctx), {
           limit: p.knowledgeLimit ?? 20, offset: p.knowledgeOffset ?? 0, query: p.knowledgeQuery || '',
         }) };
     }
@@ -878,31 +1352,56 @@ export async function dispatch(ctx, st, endpoint, payload) {
       return stopCompetitionExecution(st, sessionId, String(p.challengeId || ''), String(p.executionId || ''));
     }
     if (endpoint === 'knowledge.import-path') {
-      return { ok: true, source: await importKnowledgePath(st, sessionId, p) };
+      return { ok: true, source: await importKnowledgePath(st, sessionId, { ...p, projectKey: knowledgeProjectKey(st, sessionId, ctx) }) };
     }
     if (endpoint === 'knowledge.import-text') {
-      return { ok: true, source: await importKnowledgeText(st, sessionId, p) };
+      return { ok: true, source: await importKnowledgeText(st, sessionId, { ...p, projectKey: knowledgeProjectKey(st, sessionId, ctx) }) };
     }
     if (endpoint === 'knowledge.import-base64') {
       const buffer = Buffer.from(String(p.base64 || ''), 'base64')
       if (!buffer.length) throw new Error('knowledge content is empty')
       return { ok: true, source: await importKnowledgeBuffer(st, sessionId, { ...p,
-        buffer, path: String(p.name || ''), title: p.title || p.name || '导入的资料' }) };
+        buffer, path: String(p.name || ''), title: p.title || p.name || '导入的资料', projectKey: knowledgeProjectKey(st, sessionId, ctx) }) };
     }
     if (endpoint === 'knowledge.list') {
-      return { ok: true, ...listKnowledgeSources(st, sessionId, p) };
+      return { ok: true, ...listKnowledgeEntries(knowledgeProjectKey(st, sessionId, ctx), p) };
     }
     if (endpoint === 'knowledge.search') {
-      return { ok: true, ...searchKnowledge(st, sessionId, p) };
+      const current = searchKnowledgeIndex(knowledgeProjectKey(st, sessionId, ctx), p, { strategy: 'management' });
+      let legacy = null;
+      try { legacy = searchLegacyKnowledge(p.query, p); } catch { legacy = null; }
+      return { ok: true, ...mergeKnowledgeSearch(current, legacy) };
     }
     if (endpoint === 'knowledge.read') {
-      return { ok: true, ...readKnowledge(st, sessionId, p) };
+      const projectKey = knowledgeProjectKey(st, sessionId, ctx);
+      if (!p.ref && p.sourceId) {
+        return { ok: true, ...readKnowledgeSource(projectKey, p.sourceId, p, { projectKey }) };
+      }
+      if (String(p.ref || '').startsWith('legacy:')) return { ok: true, ...readLegacyKnowledgeRef(p.ref, p) };
+      return { ok: true, ...readKnowledgeIndexRef(p.ref, p, { projectKey }) };
     }
     if (endpoint === 'knowledge.delete') {
-      return { ok: true, ...deleteKnowledgeSource(st, sessionId, String(p.sourceId || '')) };
+      const projectKey = knowledgeProjectKey(st, sessionId, ctx);
+      const sourceId = String(p.sourceId || '');
+      const identity = knowledgeEntryIdentity(projectKey, sourceId);
+      const legacyRoot = String(identity?.metadata?.legacyRootSessionId || '');
+      const legacySource = String(identity?.metadata?.legacySourceId || '');
+      try {
+        deleteKnowledgeSource(st, legacyRoot || sessionId, legacySource || sourceId);
+      } catch (error) {
+        if (!/not found/i.test(String(error?.message || error))) throw error;
+      }
+      return { ok: true, ...deleteKnowledgeEntry(projectKey, sourceId) };
     }
     if (endpoint === 'knowledge.toggle') {
-      return { ok: true, scene: setCompetitionKnowledge(st, sessionId, p.enabled === true, { expectedRevision: p.expectedRevision }) };
+      legacySaveTaskSettings(st, sessionId, { knowledge: { enabled: p.enabled === true } }, settingsHost(ctx), p.requestId);
+      const updatedScene = readSceneContext(st, sessionId, presetOfSession(session));
+      const view = settingsView(st, sessionId, { sceneId: updatedScene?.sceneId, host: settingsHost(ctx) });
+      return { ok: true, scene: { ...updatedScene, knowledgeEnabled: view.effective.knowledge.enabled },
+        settingsView: view };
+    }
+    if (endpoint === 'knowledge.status') {
+      return { ok: true, ...knowledgeIndexStatus(knowledgeProjectKey(st, sessionId, ctx)), legacy: legacyKnowledgeStatus() };
     }
     throw new Error('unknown competition endpoint: ' + endpoint);
   }
@@ -916,6 +1415,11 @@ export async function dispatch(ctx, st, endpoint, payload) {
       st.db.exec('COMMIT');
       return { ok: true, id: updated.id, review: getFinding(st, sid, finding.id).executionEvidence.effectEvidence };
     } catch (error) { st.db.exec('ROLLBACK'); throw error; }
+  }
+  if (endpoint === 'finding.evidence-review.save') {
+    const sid = String(p.sessionId || '');
+    if (!sid) throw new Error('sessionId required');
+    return saveFindingEvidenceReview(st, sid, p, 'desktop-action');
   }
   if (endpoint === 'workers.findings') {
     const row = siteWorkerRows(st, String(p.sessionId || '')).find(worker => worker.childId === p.childId);
@@ -932,6 +1436,43 @@ export async function dispatch(ctx, st, endpoint, payload) {
     const session = ctx.sessions?.get(sessionId);
     if (!session || presetOfSession(session) !== 'pentest') throw new Error('请选择当前可用的Saker 会话');
     return { ok: true, ...methodAction(st, p, 'desktop-user') };
+  }
+  if (String(endpoint).startsWith('workflow.')) {
+    const sessionId = String(p.sessionId || '');
+    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    if (!session || !isSakerPreset(presetOfSession(session))) throw new Error('请选择当前可用的 Saker 会话');
+    const st = theStore();
+    if (endpoint === 'workflow.catalog') {
+      return { ok: true, workflows: listWorkflowDefinitions(st, sessionId),
+        selected: selectedWorkflow(st, sessionId, presetOfSession(session)), run: latestWorkflowRun(st, sessionId) };
+    }
+    if (endpoint === 'workflow.detail') {
+      const id = String(p.id || selectedWorkflow(st, sessionId, presetOfSession(session)).id);
+      const workflow = readWorkflowDefinition(st, id, sessionId);
+      if (!workflow) throw new Error('工作流不存在或已删除');
+      return { ok: true, workflow, selected: selectedWorkflow(st, sessionId, presetOfSession(session)), run: latestWorkflowRun(st, sessionId) };
+    }
+    if (endpoint === 'workflow.select') {
+      const selected = selectWorkflow(st, sessionId, p.id);
+      return { ok: true, selected, workflows: listWorkflowDefinitions(st, sessionId),
+        run: latestWorkflowRun(st, sessionId) };
+    }
+    if (endpoint === 'workflow.save') {
+      const scope = p.scope === 'session' ? 'session' : 'personal';
+      const saved = saveWorkflowDefinition(st, p.workflow || {}, {
+        scope, sessionId, requestedId: p.id || p.workflow?.id || '',
+      });
+      if (p.select !== false) selectWorkflow(st, sessionId, saved.id);
+      return { ok: true, workflow: saved, selected: selectedWorkflow(st, sessionId, presetOfSession(session)),
+        workflows: listWorkflowDefinitions(st, sessionId) };
+    }
+    if (endpoint === 'workflow.delete') {
+      const removed = deleteWorkflowDefinition(st, p.id, { scope: p.scope === 'session' ? 'session' : 'personal',
+        sessionId, mode: presetOfSession(session) });
+      return { ok: true, ...removed, selected: selectedWorkflow(st, sessionId, presetOfSession(session)),
+        workflows: listWorkflowDefinitions(st, sessionId) };
+    }
+    throw new Error('unknown workflow endpoint: ' + endpoint);
   }
   if (['chat.settings', 'chat.defaults', 'chat.draft', 'chat.templates', 'chat.models'].includes(endpoint)) {
     const sessionId = String(p.sessionId || '');
@@ -959,13 +1500,106 @@ export async function dispatch(ctx, st, endpoint, payload) {
     synchronizeStoppedProjectRun(st, sessionId);
     const state = taskPolicyStatus(st, sessionId), workers = siteWorkerView(st, sessionId);
     const competitionPreferences = scene?.sceneId === 'competition' ? scene.preferences || null : null;
+    const selectedMethod = selectedWorkflow(st, sessionId, presetId);
+    const latestRun = latestWorkflowRun(st, sessionId);
+    const latestNodes = latestRun?.data?.nodes || [];
+    const latestNode = latestNodes[latestRun?.current_index || 0];
+    const workflowStatus = {
+      selected: {
+        id: selectedMethod.id,
+        title: selectedMethod.title,
+        nodes: selectedMethod.nodes.length,
+        source: selectedMethod.builtin ? 'builtin' : selectedMethod.source || 'personal',
+      },
+      run: latestRun ? {
+        id: latestRun.run_id,
+        state: latestRun.state,
+        currentIndex: latestRun.current_index,
+        revision: latestRun.revision,
+        outcome: latestRun.data?.outcome || '',
+        total: latestNodes.length,
+        stageTitle: latestNode?.title || '',
+        updatedAt: latestRun.updated_at,
+      } : null,
+    };
     return { ok: true, ...state, scene, ...(competitionPreferences ? { options: competitionPreferences, policy: null } : {}), overview: taskOverview(st, sessionId), active: workers.active, hostWorkerLimit: hostWorkerLimit(ctx), defaults: chatDefaults(st),
+      workerRows: workers.workers || [],
       browserTakeover: browserTakeoverView(projectBrowsers.get(sessionId)),
       attention: taskAttention(st, sessionId),
       currentAction: taskCurrentAction(st, sessionId),
       // 「暂停中」：已请求停止但代理还在收尾（v6 第 8.2 节）；收尾结束才是「已暂停」。
       phase: state.phase === 'paused' && (ctx.agents || ctx.get?.('agents'))?.get(sessionId)?.status === 'running' ? 'pausing' : state.phase,
-      agentRunning: (ctx.agents || ctx.get?.('agents'))?.get(sessionId)?.status === 'running' };
+      agentRunning: (ctx.agents || ctx.get?.('agents'))?.get(sessionId)?.status === 'running',
+      settingsView: settingsView(st, sessionId, { sceneId: scene?.sceneId, phase: state.phase, host: settingsHost(ctx) }),
+      modelBudget: state.policy ? modelBudgetOverview(st, sessionId) : null,
+      workflowStatus };
+  }
+  if (String(endpoint).startsWith('curation.')) {
+    const sessionId = String(p.sessionId || '');
+    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    if (!session || !isSakerPreset(presetOfSession(session))) throw new Error('请选择当前可用的 Saker 会话');
+    const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
+    const knowledge = knowledgeScope(st, sessionId, ctx);
+    const projectKey = knowledge.projectKey;
+    const scope = { projectKey, rootSession: knowledge.rootSession };
+    if (endpoint === 'curation.available') {
+      const model = curationModel(st, sessionId, agent, p.model);
+      const route = model ? (/(?:local|ollama|lmstudio|llama|vllm|llm-studio)/i.test(model.provider) ? 'local' : 'cloud') : '';
+      return { ok: true, available: !!curationGenerate(ctx) && !!model, model,
+        route, routeLabel: route === 'local' ? '本地模型' : route === 'cloud' ? '云端模型' : '',
+        reason: curationGenerate(ctx) ? (model ? '' : '当前会话没有可用的模型路线') : '宿主没有可用的 llm.stream 服务' };
+    }
+    if (endpoint === 'curation.latest') {
+      const latest = latestAssistantAnswer(session);
+      if (!latest) return { ok: false, code: 'nothing_to_curate', error: '没有可整理的回答正文' };
+      const digest = crypto.createHash('sha256').update(latest.text).digest('hex').slice(0, 24);
+      return { ok: true, text: latest.text, sourceRef: 'assistant:' + digest,
+        model: curationModel(st, sessionId, agent, p.model) };
+    }
+    if (endpoint === 'curation.message') {
+      const found = assistantAnswerById(session, p.messageId);
+      if (!found) return { ok: false, code: 'message_not_found', error: '这条回答已不可读取，请重新选择' };
+      return { ok: true, text: found.text, sourceRef: 'assistant:' + String(p.messageId),
+        model: curationModel(st, sessionId, agent, p.model) };
+    }
+    if (endpoint === 'curation.start') {
+      const generate = curationGenerate(ctx);
+      if (!generate) return { ok: false, code: 'curation_unavailable', error: '此桌面版本暂不支持独立 AI 整理；仍可手动编辑原文并保存' };
+      const latest = p.selectedText ? null : latestAssistantAnswer(session);
+      const selectedText = String(p.selectedText || latest?.text || '');
+      if (!selectedText.trim()) throw new Error('请选择一段回答或发现正文');
+      const model = curationModel(st, sessionId, agent, p.model);
+      if (!model) throw new Error('当前会话没有可用的模型路线；请先选择模型');
+      const sourceRef = String(p.sourceRef || (latest
+        ? 'assistant:' + crypto.createHash('sha256').update(selectedText).digest('hex').slice(0, 24)
+        : 'selection:' + crypto.createHash('sha256').update(selectedText).digest('hex').slice(0, 24)));
+      return { ok: true, curation: startKnowledgeCuration(st, {
+        requestId: p.requestId, sessionId, selectedText, evidenceText: p.evidenceText,
+        sourceRef, model, projectKey,
+      }, generate) };
+    }
+    if (endpoint === 'curation.manual') {
+      const latest = p.selectedText ? null : latestAssistantAnswer(session);
+      const selectedText = String(p.selectedText || latest?.text || '');
+      if (!selectedText.trim()) throw new Error('请选择一段回答或发现正文');
+      return { ok: true, curation: createManualKnowledgeCuration(st, {
+        requestId: p.requestId, sessionId, selectedText, evidenceText: p.evidenceText,
+        sourceRef: p.sourceRef || ('manual:' + crypto.createHash('sha256').update(selectedText).digest('hex').slice(0, 24)),
+        projectKey,
+      }) };
+    }
+    if (endpoint === 'curation.get') return { ok: true, curation: getKnowledgeCuration(st, String(p.requestId || ''), scope) };
+    if (endpoint === 'curation.update') return { ok: true,
+      curation: updateKnowledgeCuration(st, String(p.requestId || ''), p.draft || p.patch || {}, { ...scope,
+        expectedEditRevision: p.expectedEditRevision }) };
+    if (endpoint === 'curation.cancel') return { ok: true,
+      curation: cancelKnowledgeCuration(st, String(p.requestId || ''), scope) };
+    if (endpoint === 'curation.discard') return { ok: true,
+      curation: discardKnowledgeCuration(st, String(p.requestId || ''), scope) };
+    if (endpoint === 'curation.save') return { ok: true,
+      curation: saveKnowledgeCuration(st, String(p.requestId || ''), p, { ...scope,
+        expectedEditRevision: p.expectedEditRevision }) };
+    throw new Error('unknown curation endpoint: ' + endpoint);
   }
   // v6 5.5「登录账号（可选）」：列表只给名称与状态，秘密单独保存、永不随列表返回。
   if (['account.list', 'account.save', 'account.remove'].includes(endpoint)) {
@@ -1096,6 +1730,13 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
     await readPentestSession(ctx, sessionId);
     return { ok: true, ...listTaskEvents(st, sessionId, { afterCursor: Number.isInteger(p.afterCursor) ? p.afterCursor : 0, limit: Number.isInteger(p.limit) ? p.limit : 50 }) };
   }
+  if (endpoint === 'component.status') {
+    const sessionId = String(p.sessionId || '');
+    const session = (ctx.sessions || ctx.get?.('sessions'))?.get(sessionId);
+    if (!session || !['pentest', 'code-audit'].includes(presetOfSession(session)))
+      throw new Error('请选择当前可用的 Saker 测试或代码审计会话');
+    return { ok: true, ...componentStatus(st, sessionId) };
+  }
   if (endpoint === 'test.content') {
     return { ok: false, code: 'feature_removed', error: '固定测试内容清单已移除；请直接用本轮问题说明测试重点。' };
   }
@@ -1114,7 +1755,20 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
     writeSceneContext(st, sessionId, sceneId, { presetId: 'pentest', expectedRevision: p.expectedSceneRevision, requestId: p.requestId })
     return { ok: true, scenario: sceneId, legacyScenario };
   }
-  if (['task.status', 'task.choose', 'task.settings', 'task.start', 'task.cancel', 'task.resume', 'task.cleanup', 'task.new-round', 'task.interaction', 'task.workers', 'task.explain', 'task.limits', 'task.mode', 'task.budget', 'task.pending-apply', 'task.pending-cancel', 'task.continue', 'task.continue-current', 'task.takeover', 'task.takeover-resume'].includes(endpoint)) {
+  if (endpoint === 'role.status') {
+    const sessionId = String(p.sessionId || '');
+    if (!sessionId) throw new Error('sessionId required');
+    let sessions;
+    try { sessions = ctx.sessions || ctx.get?.('sessions'); } catch { /* unavailable */ }
+    const session = sessions?.get(sessionId);
+    if (!session || !isSakerPreset(presetOfSession(session))) throw new Error('请选择当前可用的Saker 会话');
+    const rootId = siteWorkerParent(st, sessionId) || sessionId;
+    const manager = roleManagers.get(ctx);
+    const agent = (ctx.agents || ctx.get?.('agents'))?.get(rootId);
+    if (manager && agent) return manager.status(agent);
+    return { ok: true, rootId, ...readRoleStatus(st, rootId), workers: siteWorkerView(st, rootId) };
+  }
+  if (['task.status', 'task.choose', 'task.settings', 'task.settings-result', 'task.start', 'task.cancel', 'task.resume', 'task.cleanup', 'task.new-round', 'task.interaction', 'task.workers', 'task.explain', 'task.limits', 'task.mode', 'task.budget', 'task.pending-apply', 'task.pending-cancel', 'task.continue', 'task.continue-current', 'task.takeover', 'task.takeover-resume', 'task.review'].includes(endpoint)) {
     const sessionId = String(p.sessionId || '');
     if (!sessionId) throw new Error('sessionId required');
     let sessions;
@@ -1123,37 +1777,13 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
     if (endpoint === 'task.status' && session?.header?.agentPreset === 'ctf-solver') {
       const scene = readSceneContext(st, sessionId, 'ctf-solver')
       return { ok: true, configured: true, phase: 'ready', policy: null, options: scene?.preferences || {},
-        scene, overview: null, active: false, hostWorkerLimit: hostWorkerLimit(ctx) }
+        scene, overview: null, active: false, hostWorkerLimit: hostWorkerLimit(ctx),
+        settingsView: settingsView(st, sessionId, { sceneId: 'competition', phase: 'ready', host: settingsHost(ctx) }) }
     }
     if (endpoint !== 'task.status') {
       const competitionSession = session?.header?.agentPreset === 'ctf-solver';
       if (!session || (!competitionSession && presetOfSession(session) !== 'pentest')) throw new Error('请选择当前可用的Saker 会话');
-      if (typeof ctx.tools?.guard !== 'function') throw new Error('桌面宿主缺少任务预算守卫');
-      if (competitionSession && ['task.choose', 'task.settings', 'task.interaction', 'task.workers', 'task.explain', 'task.budget'].includes(endpoint)) {
-        if (!['task.choose', 'task.settings', 'task.interaction', 'task.workers', 'task.explain', 'task.budget'].includes(endpoint))
-          throw new Error('该任务控制不适用于比赛模式');
-        const unsupported = ['target', 'allowTargetNetwork', 'readOnly', 'excludedPaths', 'allowedOrigins',
-          'requestRatePerMinute', 'requestConcurrency'].filter(key => p[key] !== undefined)
-        if (unsupported.length) return {
-          ok: false, code: 'competition-setting-unsupported',
-          error: '比赛模式不适用这些网站访问设置：' + unsupported.join('、'), unsupported,
-        }
-        const scene = readSceneContext(st, sessionId, 'ctf-solver')
-        const sceneRevision = scene?.sceneRevision
-        const updatedScene = setCompetitionPreferences(st, sessionId, {
-          expectedRevision: p.expectedRevision ?? sceneRevision,
-          workers: p.workers, interaction: p.interaction, reporting: p.reporting,
-          explain: p.explain, minutes: p.minutes ?? p.budget?.minutes,
-          toolCalls: p.toolCalls ?? p.budget?.toolCalls,
-          modelCalls: p.modelCalls ?? p.budget?.modelCalls,
-          tokens: p.tokens ?? p.budget?.tokens,
-          workerModel: p.workerModel,
-          reviewModel: p.reviewModel,
-          reportModel: p.reportModel,
-          modelConcurrency: p.modelConcurrency,
-        })
-        return { ok: true, scene: updatedScene, preferences: updatedScene.preferences }
-      }
+      if (endpoint !== 'task.settings-result' && typeof ctx.tools?.guard !== 'function') throw new Error('桌面宿主缺少任务预算守卫');
       if (endpoint === 'task.takeover') {
         const policy = readTaskPolicy(st, sessionId);
         if (!policy?.startedAt) throw new Error('当前没有可接管的测试任务');
@@ -1272,59 +1902,35 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
           policy: resumedPolicy, observationRef, page: redactValue(page), ...(run ? { run } : {}),
         };
       }
-      if (endpoint === 'task.choose') {
-        const hostLimit = hostWorkerLimit(ctx);
-        if (p.workers !== undefined && Number(p.workers) > hostLimit) throw new Error(`worker limit exceeds host maxActiveSubagents (${hostLimit}); allowed 0 and ${hostLimit}`);
-        chooseTaskMode(st, sessionId, p.mode, { workflow: p.workflow, workers: p.workers, interaction: p.interaction, reporting: p.reporting, startMode: p.startMode, explain: p.explain,
-          workerModel: p.workerModel, reviewModel: p.reviewModel, reportModel: p.reportModel,
-          target: p.target, scope: p.scope, allowedOrigins: p.allowedOrigins, allowTargetNetwork: p.allowTargetNetwork,
-          readOnly: p.readOnly, excludedPaths: p.excludedPaths, requestRatePerMinute: p.requestRatePerMinute, requestConcurrency: p.requestConcurrency });
+      if (endpoint === 'task.settings-result')
+        return readSettingsRequest(st, sessionId, p.requestId);
+      if (endpoint === 'task.review') {
+        const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
+        const manager = purposeManagers.get(ctx);
+        if (!agent || !manager) throw new Error('当前会话或复核助手不可用；请刷新后再试');
+        const state = taskPolicyStatus(st, sessionId);
+        if (!state.configured || state.stopped) throw new Error('先启动当前测试任务，再请求独立复核');
+        if (Number(state.policy.workerLimit || 0) < 1)
+          throw new Error('当前协作人数为 0；先在“多助手”里至少启用 1 个，再请求独立复核');
+        const result = await manager.run(agent, 'review', p.signal);
+        if (!result.ok) throw new Error(result.error || '独立复核未完成');
+        return { ok: true, childId: result.childId, purpose: 'review', model: result.model,
+          output: result.output || '', stopReason: result.stopReason || 'completed',
+          workers: siteWorkerView(st, sessionId) };
       }
-      else if (endpoint === 'task.settings') {
-        const before = readTaskPolicy(st, sessionId)
-        if (!before) throw new Error('task not started')
-        if (Number(p.expectedRevision) !== before.policyRev)
-          throw Object.assign(new Error('设置已发生变化，请刷新后重新编辑'), {
-            code: 'task-settings-conflict', details: { expectedRevision: p.expectedRevision, actualRevision: before.policyRev },
-          })
-        taskTransaction(st, () => {
-          if (p.interaction !== undefined || p.reporting !== undefined)
-            setTaskInteraction(st, sessionId, p.interaction ?? before.interaction, 'desktop-user', p.reporting ?? before.reporting)
-          if (p.workers !== undefined) {
-            const hostLimit = hostWorkerLimit(ctx)
-            if (Number(p.workers) > hostLimit) throw new Error(`worker limit exceeds host maxActiveSubagents (${hostLimit}); allowed 0 and ${hostLimit}`)
-            setTaskWorkers(st, sessionId, p.workers, 'desktop-user')
-          }
-          if (p.explain !== undefined) setTaskExplain(st, sessionId, p.explain === true, 'desktop-user')
-          if (p.direction !== undefined) setTaskMode(st, sessionId, p.direction, 'desktop-user')
-          const modelPatch = Object.fromEntries(['workerModel', 'reviewModel', 'reportModel']
-            .filter(key => p[key] !== undefined).map(key => [key, p[key]]))
-          if (Object.keys(modelPatch).length) updateTaskFromChat(st, sessionId, modelPatch, 'desktop-user')
-          if (p.target !== undefined || p.allowedOrigins !== undefined || p.allowTargetNetwork !== undefined
-            || p.readOnly !== undefined || p.excludedPaths !== undefined || p.requestRatePerMinute !== undefined
-            || p.requestConcurrency !== undefined)
-            setTaskActionLimits(st, sessionId, {
-              target: p.target, allowedOrigins: p.allowedOrigins, allowTargetNetwork: p.allowTargetNetwork,
-              readOnly: p.readOnly, excludedPaths: p.excludedPaths,
-              requestRatePerMinute: p.requestRatePerMinute, requestConcurrency: p.requestConcurrency,
-            }, 'desktop-user')
-          const budgetPatch = Object.fromEntries(['minutes', 'toolCalls', 'unmeteredToolCalls', 'modelCalls', 'tokens']
-            .filter(key => p[key] !== undefined).map(key => [key, p[key]]))
-          if (Object.keys(budgetPatch).length) setTaskBudget(st, sessionId, budgetPatch, 'desktop-user')
-        })
+      if (['task.choose', 'task.settings', 'task.interaction', 'task.workers', 'task.explain',
+        'task.limits', 'task.mode', 'task.budget'].includes(endpoint)) {
+        const patch = p.patch !== undefined ? p.patch : legacySettingsPatch(endpoint, p);
+        const host = settingsHost(ctx);
+        const request = p.patch !== undefined
+          ? { requestId: p.requestId, expected: p.expected || {}, patch }
+          : { requestId: p.requestId || ('legacy-settings-' + crypto.randomUUID()),
+            expected: null, patch };
+        const result = request.expected === null
+          ? legacySaveTaskSettings(st, sessionId, patch, host, request.requestId)
+          : saveTaskSettings(st, sessionId, request, host);
+        return result;
       }
-      else if (endpoint === 'task.interaction') setTaskInteraction(st, sessionId, p.interaction, 'desktop-user', p.reporting);
-      else if (endpoint === 'task.workers') {
-        const hostLimit = hostWorkerLimit(ctx);
-        if (Number(p.workers) > hostLimit) throw new Error(`worker limit exceeds host maxActiveSubagents (${hostLimit}); allowed 0 and ${hostLimit}`);
-        setTaskWorkers(st, sessionId, p.workers, 'desktop-user');
-      }
-      else if (endpoint === 'task.explain') setTaskExplain(st, sessionId, p.explain, 'desktop-user');
-      else if (endpoint === 'task.limits') setTaskActionLimits(st, sessionId,
-        { target: p.target, scope: p.scope, allowTargetNetwork: p.allowTargetNetwork, readOnly: p.readOnly, excludedPaths: p.excludedPaths, allowedOrigins: p.allowedOrigins,
-          requestRatePerMinute: p.requestRatePerMinute, requestConcurrency: p.requestConcurrency }, 'desktop-user');
-      else if (endpoint === 'task.mode') setTaskMode(st, sessionId, p.mode, 'desktop-user');
-      else if (endpoint === 'task.budget') setTaskBudget(st, sessionId, p, 'desktop-user');
       else if (endpoint === 'task.pending-apply') applyPendingTaskChange(st, sessionId, 'desktop-user');
       else if (endpoint === 'task.pending-cancel') cancelPendingTaskChange(st, sessionId, 'desktop-user');
       else if (endpoint === 'task.continue' || endpoint === 'task.continue-current') {
@@ -1355,9 +1961,12 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
         }
       }
       else if (endpoint === 'task.start') {
-        if((p.policy?.budget?.modelCalls!==undefined || p.policy?.budget?.tokens!==undefined) && !modelAdmissions.get(ctx)?.available)
+        const draftView = settingsView(st, sessionId, { host: settingsHost(ctx) });
+        const startModelCalls = p.policy?.budget?.modelCalls??draftView.effective.budget.modelCalls;
+        const startTokens = p.policy?.budget?.tokens??draftView.effective.budget.tokens;
+        if((startModelCalls!==undefined&&startModelCalls!==null||startTokens!==undefined&&startTokens!==null) && !modelAdmissions.get(ctx)?.available)
           throw new Error('宿主缺少模型请求准入钩子，不能执行共享模型额度');
-        if(p.policy?.budget?.tokens!==undefined && !modelTokenBudgetAvailable(ctx))
+        if(startTokens!==undefined&&startTokens!==null && !modelTokenBudgetAvailable(ctx))
           throw new Error('宿主缺少可靠的模型输入计数钩子，不能执行严格 token 额度');
         const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
         if (typeof agent?.followup !== 'function') throw new Error('当前代理不可用，任务尚未开始；请打开该会话后重试');
@@ -1399,6 +2008,11 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
           const purposeManager = purposeManagers.get(ctx);
           if (!purposeManager) throw new Error('用途助手管理器尚未就绪，释放未确认');
           const retained = await purposeManager.cleanup(agent, p.childId);
+          const roleManager = roleManagers.get(ctx);
+          if (roleManager) await roleManager.stop(agent, {
+            ...(p.childId ? { instanceId: p.childId } : { all: true }),
+            reason: endpoint === 'task.cancel' ? 'desktop-user cancelled' : 'desktop-user cleanup',
+          }, AbortSignal.timeout(15000));
           if (!p.childId || !readTaskPolicy(st, p.childId)?.purposeTask)
             await manager.cleanup(agent, p.childId, endpoint === 'task.cancel' ? 'desktop-user cancelled' : 'desktop-user cleanup');
           if (retained.length) throw new Error('部分助手释放未确认，名额已保留；请重试清理');
@@ -1418,6 +2032,10 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
       phase: overview.phase === 'paused' && agent?.status === 'running' ? 'pausing' : overview.phase,
       roundCost: overview.policy ? taskCostOverview(ctx, st, sessionId, overview.policy.startedAt) : null,
       modelBudget: overview.policy ? modelBudgetOverview(st,sessionId) : null,
+      settingsView: settingsView(st, sessionId, {
+        phase: overview.phase === 'paused' && agent?.status === 'running' ? 'pausing' : overview.phase,
+        host: settingsHost(ctx),
+      }),
       previousRounds: st.db.prepare('SELECT count(*) AS n FROM task_rounds WHERE session_id=?').get(sessionId).n,
       elapsedSeconds: overview.policy ? Math.max(0, Math.floor((Math.min(Date.now(), overview.policy.finishedAt ?? Infinity, overview.policy.budget.deadline ?? Infinity) - overview.policy.startedAt) / 1000)) : 0 };
   }
@@ -1482,10 +2100,64 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
 		const sessionId = String(p.sessionId ?? '');
 		if (!sessionId) throw new Error('sessionId required');
 		const reports = listOrdinaryReports(st, sessionId, { limit: 50 });
-		const bundle = buildDeliveryFiles(allFindings(st, sessionId, 'pentest'), readChecks(st, sessionId), reports);
-		return { ok: true, filename: 'saker-delivery.zip', archive: zipDelivery(bundle.files).toString('base64'),
+		const findings = allFindings(st, sessionId, 'pentest');
+		const checks = readChecks(st, sessionId);
+		const bundle = buildDeliveryFiles(findings, checks, reports);
+		const policy = readTaskPolicy(st, sessionId) || {};
+		let gaps = [];
+		try { gaps = taskOverview(st, sessionId).gaps || []; } catch { gaps = []; }
+		const identities = [...new Set([
+			...findings.map(item => String(item.identity || '').trim()).filter(Boolean),
+			...checks.map(item => String(item.authContext || '').trim()).filter(Boolean),
+		])].slice(0, 20);
+		const fileIndex = Object.entries(bundle.files).map(([file, text]) => ({
+			path: file, bytes: Buffer.byteLength(text, 'utf8'),
+			sha256: crypto.createHash('sha256').update(text, 'utf8').digest('hex'),
+		}));
+		// 报告索引追加引用质量摘要：同一批发现、同一版本计划导出时，引用定位或质量变化
+		// 会让快照失效，避免用旧预览下载新证据；正文不在摘要里。
+		const evidenceQualityAll = findings.flatMap(finding => (finding.evidenceRefQuality || []).map(ref => ({
+			findingId: String(finding.id || ''), kind: String(ref.kind || ''), id: String(ref.id || ''),
+			revision: String(ref.revision || ''), location: String(ref.location || ''),
+			quality: String(ref.quality || ''), reasonCode: String(ref.reasonCode || ''),
+		}))).filter(row => row.findingId && row.id)
+			.sort((a, b) => a.findingId.localeCompare(b.findingId) || a.kind.localeCompare(b.kind)
+				|| a.id.localeCompare(b.id) || a.revision.localeCompare(b.revision)
+				|| a.quality.localeCompare(b.quality) || a.reasonCode.localeCompare(b.reasonCode));
+		const evidenceQuality = evidenceQualityAll.slice(0, 500);
+		const qualityCounts = evidenceQualityAll.reduce((counts, row) => {
+			counts[row.quality || 'unknown'] = (counts[row.quality || 'unknown'] || 0) + 1;
+			return counts;
+		}, {});
+		const userEvidenceReviews = findings.reduce((counts, finding) => {
+			const review = finding.userEvidenceReview;
+			if (!review || !review.decision) { counts.none += 1; return counts; }
+			counts.total += 1;
+			counts.records += Number(review.reviewTotal) || 0;
+			counts[review.decision] = (counts[review.decision] || 0) + 1;
+			if (review.current) counts.current += 1; else counts.stale += 1;
+			return counts;
+		}, { total: 0, records: 0, current: 0, stale: 0, none: 0, supported: 0, insufficient: 0, superseded: 0 });
+		const snapshot = crypto.createHash('sha256')
+			.update(JSON.stringify({ files: fileIndex, evidenceQuality: evidenceQualityAll, userEvidenceReviews })).digest('hex');
+		if (p.expectedSnapshot && String(p.expectedSnapshot) !== snapshot) {
+			throw Object.assign(new Error('导出内容已变化，请刷新预览后再下载'), { code: 'delivery-preview-stale' });
+		}
+		const shared = {
 			confirmedFindings: bundle.confirmedFindings, incompleteRecords: bundle.incompleteRecords,
-			checkedCount: bundle.checkedCount, ordinaryReports: bundle.ordinaryReportCount };
+			checkedCount: bundle.checkedCount, ordinaryReports: bundle.ordinaryReportCount,
+			files: Object.keys(bundle.files), fileIndex, evidenceQuality, evidenceQualityTotal: evidenceQualityAll.length,
+			qualityCounts, userEvidenceReviews, snapshot,
+			scope: String(policy.primaryTarget || policy.target || '未记录'),
+			identities,
+			identityUnknown: findings.filter(item => !String(item.identity || '').trim()).length + checks.filter(item => !String(item.authContext || '').trim()).length,
+			gaps: gaps.slice(0, 20),
+			preview: String(bundle.files['delivery/findings.md'] || '').slice(0, 120000),
+			previewBytes: Buffer.byteLength(String(bundle.files['delivery/findings.md'] || ''), 'utf8'),
+			previewTruncated: Buffer.byteLength(String(bundle.files['delivery/findings.md'] || ''), 'utf8') > 120000,
+		};
+		if (p.preview === true) return { ok: true, filename: 'saker-delivery.zip', archive: null, ...shared };
+		return { ok: true, filename: 'saker-delivery.zip', archive: zipDelivery(bundle.files).toString('base64'), ...shared };
 	}
 	if (endpoint === 'checks.list' || endpoint === 'checks.export') {
 		const rows = readChecks(st, String(p.sessionId ?? ''));
@@ -1644,6 +2316,9 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
       if (started.existing) {
         return { ok: true, existing: true, run, counts: projectCounts(listProjectChecks(st, sessionId, run.runId)) };
       }
+      // 先把“当前检查”落到 run 上：模型可能一次原生工具都不调，
+      // 没有 currentCheckId 时后续答复无法归属到任何检查项。
+      try { selectProjectCheck(st, sessionId, run.runId); } catch { /* 无检查时保持原状 */ }
       if (p.autoStart !== false) {
         const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
         if (typeof agent?.followup !== 'function' || agent.status === 'running') {
@@ -1693,6 +2368,7 @@ const woken = material.reused ? [] : wakeWorkersForMaterial(ctx, st, sessionId, 
       const agent = (ctx.agents || ctx.get?.('agents'))?.get(sessionId);
       if (typeof agent?.followup !== 'function' || agent.status === 'running') throw new Error('模型仍在收尾或不可用，请稍后继续');
       const resumed = resumeProjectRun(st, sessionId, run.runId, p.expectedControlRev, modelAdmissions.get(ctx)?.runtimeId || '');
+      try { selectProjectCheck(st, sessionId, resumed.runId); } catch { /* 无检查时保持原状 */ }
       try {
         // 注入安全：由同源 Desktop RPC 恢复空闲代理，不在 Session.append 临界区内。
         await agent.followup({ id: `saker-project-resume-${resumed.runId}-${resumed.controlRev}`, role: 'user', source: { kind: 'user' },
@@ -2252,6 +2928,41 @@ function autoChecksFromStructuredSources(sources) {
       }
     }
   }
+  // 纯文本/Markdown 要求没有表格单元格：按编号或项目符号逐行生成检查项，
+  // 否则粘贴文本启动的项目运行会 0 个 project_checks（2026-11-16 实测）。
+  if (!checks.length) {
+    for (const source of sources) {
+      if (source.kind === 'xlsx') continue;
+      const preparation = source.preparation && typeof source.preparation === 'object' ? source.preparation : {};
+      const role = preparation.sourceRole || source.sourceRole || '';
+      if (role === 'environment') continue;
+      for (const section of source.sections || []) {
+        const lines = String(section.text || '').split(/\r?\n/);
+        for (const [lineIndex, line] of lines.entries()) {
+          const match = /^\s*(?:\d+[.、)]|[-*•])\s*(.{6,})$/.exec(line);
+          if (!match) continue;
+          const requirement = match[1].trim().slice(0, 4000);
+          const digest = crypto.createHash('sha256')
+            .update(JSON.stringify([source.sourceId, source.sourceRevision, section.sectionId, requirement]))
+            .digest('hex').slice(0, 20);
+          const checkId = 'auto-' + digest;
+          const sourceRefs = [{ sourceId: source.sourceId, sourceRevision: source.sourceRevision, sectionId: section.sectionId }];
+          checks.push({
+            checkId,
+            requirement,
+            sourceLocation: [source.displayName || source.sourceId, '第' + (lineIndex + 1) + '行', '文本要求']
+              .filter(Boolean).join(' / ').slice(0, 1000),
+            sourceRefs,
+            order: checks.length,
+          });
+          for (const ref of sourceRefs) sourceDecisions.push({
+            ...ref, decision: 'requirements',
+            rationale: '文本中的编号/项目符号行按出现顺序生成检查项。', checkIds: [checkId],
+          });
+        }
+      }
+    }
+  }
   if (checks.length) {
     const decided = new Set(sourceDecisions.map(item => [item.sourceId, item.sourceRevision, item.sectionId].join('|')));
     for (const source of sources) {
@@ -2327,6 +3038,11 @@ function startProjectFromSources(store, sessionId, input = {}) {
 }
 
 function apply(ctx) {
+  try {
+    recoverKnowledgeCurations(theStore());
+  } catch (error) {
+    ctx.logger?.warn?.('knowledge curation recovery: %s', error?.message || error);
+  }
   // Tool visibility needs the product scenario before a task policy exists.
   // Read the same persisted choice used by the UI instead of inferring it from
   // preset name (both free and document scenarios share the pentest preset).
@@ -2354,8 +3070,10 @@ function apply(ctx) {
     knowledgeEnabled(sessionId) {
       try {
         const session = (ctx.sessions || ctx.get?.('sessions'))?.get(String(sessionId || ''));
-        if (presetOfSession(session) !== 'ctf-solver') return false;
-        return readSceneContext(theStore(), String(sessionId), 'ctf-solver')?.knowledgeEnabled === true;
+        const preset = presetOfSession(session);
+        if (!isSakerPreset(preset)) return false;
+        return settingsView(theStore(), String(sessionId), { sceneId: readSceneContext(theStore(), String(sessionId), preset)?.sceneId })
+          .effective.knowledge.enabled === true;
       } catch { return false; }
     },
     continuationPaused(sessionId) {
@@ -2375,6 +3093,14 @@ function apply(ctx) {
     if (!scene || scene.sceneId !== 'competition') throw new Error('当前比赛场景上下文不可用');
     return { ...session, id: scene.contextId || scene.rootSession || session.id, childId: session.id };
   };
+  registerWorkflowTools(ctx, {
+    sessionOf: exec => sessionOf(ctx, exec),
+    store: theStore,
+    defineTool,
+    liveTools: () => {
+      try { return ctx.tools.schemas().map(item => item.name) } catch { return [] }
+    },
+  });
   ctx.tools.register(defineTool({
     name: 'competition_challenge',
     description: '读取或保存赛题；候选答案不结束比赛。',
@@ -2414,7 +3140,7 @@ function apply(ctx) {
   }));
   ctx.tools.register(defineTool({
     name: 'competition_answer',
-    description: '保存候选答案原文和来源；不能标记已通过。',
+    description: '候选答案原文与来源；不得标为通过。',
     parameters: {
       action: { type: 'string', required: true, enum: ['add', 'list', 'reject', 'unknown'] },
       challengeId: { type: 'string', required: true },
@@ -2481,10 +3207,11 @@ function apply(ctx) {
   }));
   ctx.tools.register(defineTool({
     name: 'competition_knowledge',
-    description: '开启本地资料后搜索和分段读取。',
+    description: '旧比赛资料入口；先查统一开关。',
     parameters: {
       action: { type: 'string', required: true, enum: ['search', 'read'] },
       query: { type: 'string' },
+      ref: { type: 'string' },
       sourceId: { type: 'string' },
       revision: { type: 'integer' },
       cursor: { type: 'string' },
@@ -2493,20 +3220,15 @@ function apply(ctx) {
     },
     output: {
       schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
-      render: (_args, value) => [{ type: 'text', text: value.ok ? JSON.stringify({
-        sourceId: value.sourceId, revision: value.revision, query: value.query,
-        rows: value.rows, text: value.text, offset: value.offset,
-        nextOffset: value.nextOffset, nextCursor: value.nextCursor,
-        totalBytes: value.totalBytes, totalHits: value.totalHits, complete: value.complete,
-      }, null, 2) : value.error }],
+      render: (_args, value) => [{ type: 'text', text: value.ok
+        ? (typeof value.text === 'string' ? value.text : JSON.stringify(value, null, 2)) : value.error }],
     },
-    execute(args, exec) {
+    async execute(args, exec) {
       try {
         const session = competitionSession(exec), store = theStore();
-        const scene = readSceneContext(store, session.id, 'ctf-solver');
-        if (scene?.knowledgeEnabled !== true) throw new Error('本地资料未开启');
-        if (args.action === 'search') return Promise.resolve({ ok: true, ...searchKnowledge(store, session.id, args) });
-        return Promise.resolve({ ok: true, ...readKnowledge(store, session.id, args) });
+        if (args.action === 'search') return await referenceSearchForSession(ctx, store, session.id, args, exec.signal);
+        if (!args.ref) throw new Error('旧入口读取需要 ref；先执行 search');
+        return await referenceReadForSession(ctx, store, session.id, args, exec.signal);
       } catch (error) { return Promise.resolve({ ok: false, error: error.message }); }
     },
   }));
@@ -2525,13 +3247,26 @@ function apply(ctx) {
     if (!isSakerPreset(presetOfSession(session)) && !siteWorkerParent(theStore(), session?.id || '')
       && !readTaskPolicy(theStore(), session?.id || '')?.purposeTask) return;
     captureTaskCost(theStore(), session, event);
+    if (event?.type === 'turn/end' && event.data?.reason?.kind === 'aborted'
+      && readTaskPolicy(theStore(), session?.id || '')?.scenario !== 'project') {
+      try { pauseRootForNativeStop(theStore(), session?.id || ''); }
+      catch (error) { ctx.logger?.warn?.('native stop persistence: %s', error.message); }
+    }
     try { captureProjectNativeEvent(theStore(), session?.id || '', event); }
     catch (error) { ctx.logger?.warn?.('project native fact association: %s', error.message); }
   });
   ctx.on?.('agent/turn-stopping', ({ agent, signal }) => {
     const session = sessionOf(ctx, { agent });
-    if (!session || session.mode !== 'pentest' || signal?.aborted || typeof agent.steer !== 'function') return;
+    if (!session || session.mode !== 'pentest') return;
     const store = theStore();
+    if (signal?.aborted) {
+      // 原生“停止生成”走的是 agent.cancel；turn-stopping 带 aborted signal。
+      // 对受管 root 立即持久化暂停，防止下一轮/后台继续沿着旧许可执行。
+      try { pauseRootForNativeStop(store, session.id); }
+      catch (error) { ctx.logger?.warn?.('native stop persistence: %s', error.message); }
+      return;
+    }
+    if (typeof agent.steer !== 'function') return;
     if (readTaskPolicy(store, session.id)?.scenario === 'project') {
       try {
         const latestUserText = latestExplicitUserText(agent);
@@ -2600,6 +3335,47 @@ function apply(ctx) {
   workerManagers.set(ctx, siteWorkers);
   const purposeTasks = createPurposeTasks(ctx, theStore);
   purposeManagers.set(ctx, purposeTasks);
+  const roleRuntime = createRoleOrchestrator({
+    ctx,
+    getStore: theStore,
+    siteWorkers,
+    taskStatus: taskPolicyStatus,
+    siteParent: siteWorkerParent,
+  });
+  roleManagers.set(ctx, roleRuntime);
+  siteWorkers.setSettledHandler((row, workerState) => roleRuntime.settleWorker(row, workerState));
+  // A Desktop restart drops the in-memory Host agents before the durable
+  // role/worker ledger is settled. Reconcile after the root agent has had a
+  // moment to restore its child sessions. A child that is genuinely running is
+  // left alone; a missing/idle child is recorded as unknown and never replayed.
+  const restartReconcileTimers = new Map();
+  ctx.on?.('agent/created', ({ agent }) => {
+    const sessionId = String(agent?.session?.id || '');
+    if (!sessionId || siteWorkerParent(theStore(), sessionId)) return;
+    clearTimeout(restartReconcileTimers.get(sessionId));
+    restartReconcileTimers.set(sessionId, setTimeout(() => {
+      try {
+        const agents = resolveAgents(ctx);
+        const isLive = childId => {
+          const child = agents?.get?.(childId);
+          return !!child && child.status === 'running';
+        };
+        const roles = reconcileOrphanedRoles(theStore(), sessionId, isLive);
+        const workers = reconcileOrphanedSiteWorkers(theStore(), sessionId, isLive);
+        if (roles.changed || workers.changed) {
+          pauseTaskPolicy(theStore(), sessionId, {
+            code: 'needs-user',
+            reason: 'Desktop restarted while managed child agents were active; outcomes unknown',
+            evidence: 'roles=' + roles.changed + ';workers=' + workers.changed,
+          }, 'restart-reconcile');
+        }
+      } catch (error) {
+        ctx.logger?.warn?.('restart reconcile: %s', error?.message || error);
+      } finally {
+        restartReconcileTimers.delete(sessionId);
+      }
+    }, 1500));
+  });
   // 受控工具面（效果基准或宿主限制）只暴露 exercise_request/exercise_submit 时，
   // 常驻提示必须跟着实际工具面走，不能继续引用被隐藏的 Saker 工具。
   const controlledInterface = agent => {
@@ -2633,8 +3409,11 @@ function apply(ctx) {
       try {
         const store = theStore();
         const state = taskPolicyStatus(store, session.id);
+        const knowledge = referenceKnowledgeState(store, session.id);
         return taskPromptStable(state, { controlledInterface: controlledInterface(assembly?.agent) })
-          + materialIndexPrompt(store, session.id);
+          + materialIndexPrompt(store, session.id)
+          + '\n' + selectedWorkflowPrompt(store, session.id, 'pentest')
+          + '\n参考资料查询=' + (knowledge.enabled ? '开（' + knowledge.strategy + '；用 saker_material source=reference）' : '关。不查询索引、缓存或正文。');
       }
       catch { return '本会话任务状态无法读取，停止目标操作并报告原因；不要重建或重置历史。'; }
     });
@@ -2647,12 +3426,14 @@ function apply(ctx) {
         const scene = readSceneContext(store, session.id, 'ctf-solver');
         if (!scene || scene.sceneId !== 'competition') return '';
         const state = competitionPromptState(store, session.id);
+        const knowledge = referenceKnowledgeState(store, session.id);
         return state.state
-          + '；本地资料=' + (scene.knowledgeEnabled ? '开' : '关') + '。'
+          + '；参考资料查询=' + (knowledge.enabled ? '开（' + knowledge.strategy + '）' : '关') + '。'
           + state.promptLine
           + state.instanceLine
           + state.attachmentLine
-          + (scene.knowledgeEnabled ? materialIndexPrompt(store, session.id) : '')
+          + (knowledge.enabled ? materialIndexPrompt(store, session.id) : '')
+          + '\n' + selectedWorkflowPrompt(store, session.id, 'ctf-solver')
           + '候选答案只保存原文和来源，不等于判题通过；实例变化时增加版本；恢复会话先核对遗留进程。';
       } catch { return '比赛状态无法读取；停止派发新动作并报告原因。'; }
     }, {
@@ -2660,8 +3441,28 @@ function apply(ctx) {
       contextName: 'saker-competition-task-state',
       stableRule: 'Saker 比赛模式以当前题面、附件、实例和保存的过程为准。先核对用户提供的数据身份，再选择工具；候选答案不等于判题通过，不得自动结束整场比赛。交互程序使用 competition_execution，读取原始输出和进程状态；本地资料只在开关开启时按需查询。',
     });
+  registerTaskPrompt(ctx, assembly => sessionOf(ctx, { agent: assembly?.agent })?.mode === 'code-audit',
+    assembly => {
+      const session = sessionOf(ctx, { agent: assembly?.agent });
+      if (!session || session.mode !== 'code-audit') return '';
+      try {
+        const store = theStore();
+        return taskPromptStable(taskPolicyStatus(store, session.id), { controlledInterface: controlledInterface(assembly?.agent) })
+          + materialIndexPrompt(store, session.id)
+          + '\n' + selectedWorkflowPrompt(store, session.id, 'code-audit')
+          + '；先读真实源码和版本，再决定复现或验证。';
+      } catch { return '本会话任务状态无法读取，停止目标操作并报告原因；不要重建或重置历史。'; }
+    }, {
+      sectionName: 'saker-code-audit-task',
+      contextName: 'saker-code-audit-task-state',
+      stableRule: 'Saker 代码审计以当前源码、版本、构建条件和证据为准。先从实际入口和调用链判断可达性，再做受管复现；本地复现与目标影响分开记录。',
+    });
   const enforcementAvailable = typeof ctx.tools.guard === 'function';
   if (enforcementAvailable) ctx.tools.guard(exec => {
+    // Workflow planning/state is not a target operation and may run before
+    // the first agent/task policy exists. Target tools below still pass the
+    // task guard; do not probe exec.agent for this meta tool.
+    if (exec.name === 'saker_workflow') return undefined;
     const session = sessionOf(ctx, exec);
     if (!session || session.mode !== 'pentest') return undefined;
     try {
@@ -2719,6 +3520,7 @@ function apply(ctx) {
     await siteWorkers.dispose();
     workerManagers.delete(ctx);
     purposeManagers.delete(ctx);
+    roleManagers.delete(ctx);
     await modelAdmission.dispose();
     modelAdmissions.delete(ctx);
     if (store) recoverModelRuntime(store, modelAdmission.runtimeId);
@@ -2733,21 +3535,21 @@ function apply(ctx) {
 			severity: { type: "string", enum: SEVERITIES, description: "等级；漏洞型必填，默认 medium" },
 			target: { type: "string", required: true, description: "地址/目标/位置" },
 			summary: { type: "string", required: true, description: "一句话简介" },
-			type: { type: "string", description: "类型标签；词表见 finding-fields.md" },
+			type: { type: "string", description: "类型" },
 			description: { type: "string", description: "描述（影响与成因）" },
-			poc: { type: "string", description: "测试过程与完整EXP；复杂场景保存复现脚本" },
-			proofKind: { type: "string", enum: PROOF_KINDS, description: "证据类型；interaction 不代表 execution" },
-			reproduction: { type: "string", description: "旧完整方法JSON；已有对照优先用comparisonId" },
+			poc: { type: "string", description: "测试过程/EXP" },
+			proofKind: { type: "string", enum: PROOF_KINDS, description: "证据类型" },
+			reproduction: { type: "string", description: "旧方法JSON；优先 comparisonId" },
 			evidenceRefs: { type: "string", description: 'JSON：[{kind:"request"|"file",id}]，引用原文' },
       comparisonId: { type: 'string', description: '对照记录ID。' },
-			chain: { type: "string", description: "调用链 entry→sink（审计双链之一，每行一链）" },
+			chain: { type: "string", description: "调用链 entry→sink；每行一链" },
 			chainTracer: { type: "string", description: "追踪员独立重追链（双链另一侧）" },
 			chainVerdict: { type: "string", description: "双链结论：一致 / 不一致+差异" },
 			snippetEntry: { type: "string", description: "entry 关键代码片段" },
 			snippetSink: { type: "string", description: "sink 关键代码片段" },
 			cwe: { type: "string", description: "CWE 编号" },
 			patch: { type: "string", description: "修复 diff 建议（可选）" },
-			sourceOrigin: { type: "string", enum: SOURCE_ORIGINS, description: "来源；语义见 finding-fields.md" },
+			sourceOrigin: { type: "string", enum: SOURCE_ORIGINS, description: "来源" },
 			sampleHash: { type: "string", description: "样本 SHA256（二进制）" },
 			family: { type: "string", description: "家族/变种（二进制）" },
 			packer: { type: "string", description: "壳/保护（二进制）" },
@@ -2767,8 +3569,8 @@ function apply(ctx) {
 			identity: { type: "string", description: "利用身份（云）" },
 			permission: { type: "string", description: "权限（云）" },
 			resource: { type: "string", description: "目标资源（云）" },
-			status: { type: "string", enum: REGISTER_STATUSES, description: "状态。" },
-			evidenceLevel: { type: "string", enum: EVIDENCE_LEVELS, description: "证据等级；语义见 finding-fields.md" },
+			status: { type: "string", enum: REGISTER_STATUSES, description: "状态" },
+			evidenceLevel: { type: "string", enum: EVIDENCE_LEVELS, description: "证据等级" },
 			auditMode: { type: "string", enum: ["static", "dynamic"], description: "static|dynamic" }
 		},
 		output: {
@@ -2787,7 +3589,8 @@ function apply(ctx) {
 			if (!session) return { ok: false, id: "", error: "无法解析当前会话（工具需在会话内调用）" };
       try {
         const input = args.comparisonId ? comparisonFindingInput(theStore(), session.id, args) : args;
-        const policyError = findingAdmissionError(session.mode, input);
+        const mode = findingModeOf(theStore(), session);
+        const policyError = findingAdmissionError(mode, input);
         if (policyError) return { ok: false, id: '', error: policyError };
         if (input.reproduction) {
           try { parseReproduction(input.reproduction); }
@@ -2795,13 +3598,107 @@ function apply(ctx) {
             recovery: 'reproduction须为JSON方法对象，不能填编号文本。一次补齐：kind="method"；mechanism/methodVersion/endpoint/successCriterion/reviewSteps/recovery为非空字符串；prerequisites/dependencies/parameters/steps为字符串数组（steps须含实际可操作步骤）；verification为嵌套对象，含status="verified"或"not-run"及evidenceIds字符串数组。verified必须有实际复现依据，不得补造；宿主执行及独立影响复核仍另行校验。普通步骤文本放poc；已有run-pair用comparisonId。无法补齐时保留原始依据并停止登记重试。' }; }
         }
         if (args.comparisonId) {
-          const saved = allFindings(theStore(), session.id, session.mode).find(row => row.reproduction === input.reproduction);
+          const saved = allFindings(theStore(), session.id, mode).find(row => row.reproduction === input.reproduction);
           if (saved) return { ok: true, id: saved.id, seq: saved.seq, title: saved.title, mode: saved.mode, severity: saved.severity, reused: true };
         }
-        const finding = registerFinding(theStore(), session.id, session.mode, findingWithProjectEvidence(theStore(), session.id, input));
+        const finding = registerFinding(theStore(), session.id, mode, findingWithProjectEvidence(theStore(), session.id, input));
         return { ok: true, id: finding.id, seq: finding.seq, title: finding.title, mode: finding.mode, severity: finding.severity };
       } catch (error) { return { ok: false, id: '', error: error.message }; }
 		}
+	}));
+
+	ctx.tools.register(defineTool({
+		name: 'saker_component',
+		description: '组件事实、公告与上游；命中非漏洞。',
+		parameters: {
+			action: { type: 'string', required: true, enum: ['observe', 'advisory', 'evaluate', 'upstream', 'research_upstream', 'upstreams', 'status'] },
+			document: { type: 'string', description: 'JSON 参数。' },
+		},
+		output: {
+			schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
+			render: (_args, value) => [{ type: 'text', text: value.ok ? JSON.stringify(value, null, 2) : '错误：' + value.error }],
+		},
+		execute(args, exec) {
+			const session = sessionOf(ctx, exec);
+			if (!session || !['pentest', 'code-audit'].includes(session.mode))
+				return Promise.resolve({ ok: false, error: '仅当前 Saker 测试或代码审计会话可记录组件事实' });
+			try {
+				const input = args.document ? JSON.parse(args.document) : {};
+				if (args.action === 'observe') return Promise.resolve(observeComponent(theStore(), session.id, input));
+				if (args.action === 'advisory') return Promise.resolve(importComponentAdvisory(theStore(), session.id, input));
+				if (args.action === 'evaluate') return Promise.resolve(evaluateComponent(theStore(), session.id, input));
+				if (args.action === 'upstream') return mapComponentUpstream(theStore(), session.id, input);
+				if (args.action === 'research_upstream') return researchComponentUpstream(theStore(), session.id, input);
+				if (args.action === 'upstreams') return Promise.resolve(componentUpstreamStatus(theStore(), session.id, input.factId));
+				if (args.action === 'status') return Promise.resolve(componentStatus(theStore(), session.id));
+				throw new Error('invalid component action');
+			} catch (error) { return Promise.resolve({ ok: false, error: error.message }); }
+		},
+	}));
+
+	ctx.tools.register(defineTool({
+		name: 'saker_test_module',
+		description: '测试模块：检索、任务包、调用记录。',
+		parameters: {
+			action: { type: 'string', required: true, enum: ['list', 'describe', 'define', 'revise', 'begin', 'status', 'finish', 'cancel'] },
+			document: { type: 'string', description: 'JSON 参数。' },
+		},
+		output: {
+			schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
+			render: (_args, value) => [{ type: 'text', text: value.ok ? JSON.stringify(value, null, 2) : '错误：' + value.error }],
+		},
+		async execute(args, exec) {
+			const session = sessionOf(ctx, exec);
+			if (!session) return { ok: false, error: '仅当前 Saker 会话可调用测试模块' };
+			try {
+				const input = args.document ? JSON.parse(args.document) : {};
+				const st = theStore();
+				const context = {
+					rootId: session.id,
+					generation: Number(input.generation || 0) || 0,
+					sessionId: session.id,
+					workspaceKey: String(input.workspaceKey || ''),
+					projectKey: String(input.projectKey || ''),
+				};
+				if (args.action === 'list') {
+					const response = workbenchQuery(ctx, st, { kind: 'modules.list', context,
+						filter: input.filter || { text: input.text || '', categoryId: input.categoryId || '', family: input.family || '' },
+						page: input.page || {} });
+					return { ok: true, modules: response.data.items, taxonomy: response.data.taxonomy,
+						facetCounts: response.data.facetCounts, aliasIndex: response.data.aliasIndex, page: response.data.page };
+				}
+				if (args.action === 'describe') {
+					const response = workbenchQuery(ctx, st, { kind: 'modules.detail', context: { ...context, moduleId: input.id || input.moduleRef?.id,
+						version: input.version || input.moduleRef?.version, ownerKey: input.ownerKey || input.moduleRef?.ownerKey }, moduleRef: input.moduleRef });
+					return { ok: true, module: response.data };
+				}
+				if (args.action === 'status') {
+					if (input.invocationId || input.invocationRef?.id) {
+						const response = workbenchQuery(ctx, st, { kind: 'modules.invocations.detail',
+							context: { ...context, invocationId: input.invocationId || input.invocationRef?.id } });
+						return { ok: true, invocation: response.data };
+					}
+					const response = workbenchQuery(ctx, st, { kind: 'modules.invocations.list', context,
+						filter: input.filter || {}, page: input.page || {} });
+					return { ok: true, invocations: response.data.items, page: response.data.page };
+				}
+				const kinds = { define: 'module.define', revise: 'module.revise', begin: 'module.begin', finish: 'module.finish', cancel: 'module.cancel' };
+				const kind = kinds[args.action];
+				if (!kind) return { ok: false, error: 'invalid module action' };
+				const response = await workbenchCommand(ctx, st, {
+					commandId: input.commandId || 'cmd-module-' + crypto.randomUUID(),
+					kind,
+					context,
+					expected: input.expected || {},
+					subjectRef: input.subjectRef || null,
+					payload: input.payload || input,
+				});
+				return { ok: true, commandId: response.commandId, result: response.result };
+			} catch (error) {
+				return { ok: false, error: String(error?.message || error), code: error?.code || 'MODULE_ERROR',
+					...(error?.details ? { details: error.details } : {}) };
+			}
+		},
 	}));
 
 	ctx.tools.register(defineTool({
@@ -2846,7 +3743,7 @@ function apply(ctx) {
 			retestNote: { type: "string", description: "复测注记（结论+依据）" },
 			retestVerdict: { type: "string", enum: RETEST_VERDICTS, description: "复测结论。" },
 			retestExecutionId: { type: "string", description: "本次复测的执行回执 ID" },
-			retestControlExecutionId: { type: "string", description: "「本次未复现」必填：正常功能对照回执 ID" },
+			retestControlExecutionId: { type: "string", description: "「本次未复现」必填：正常对照回执ID" },
 			evidence: { type: "string" },
 			fix: { type: "string" },
 			timelineAt: { type: "string", description: "攻击时间节点（ISO 或 YYYY-MM-DD HH:MM）" },
@@ -2872,9 +3769,10 @@ function apply(ctx) {
 			const session = sessionOf(ctx, exec);
 			if (!session) return Promise.resolve({ ok: false, error: "无法解析当前会话" });
 			const store = theStore();
+			const mode = findingModeOf(store, session);
 			if (args.severity !== undefined) {
 				const current = getFinding(store, session.id, args.id);
-				const policyError = findingAdmissionError(session.mode, { ...(current || {}), ...args });
+				const policyError = findingAdmissionError(mode, { ...(current || {}), ...args });
 				if (policyError) return Promise.resolve({ ok: false, error: policyError });
 			}
 			let finding, retest;
@@ -2885,10 +3783,10 @@ function apply(ctx) {
 						note: args.retestNote || args.verifyNote || '', executionId: args.retestExecutionId,
 						controlExecutionId: args.retestControlExecutionId });
 				}
-				finding = updateFinding(store, session.id, session.mode, args.id, findingWithProjectEvidence(store, session.id, args, getFinding(store, session.id, args.id)));
+				finding = updateFinding(store, session.id, mode, args.id, findingWithProjectEvidence(store, session.id, args, getFinding(store, session.id, args.id)));
 				if (finding === undefined) {
 					store.db.exec('ROLLBACK');
-					return Promise.resolve({ ok: false, error: "finding " + args.id + " 不存在（本会话 " + session.mode + " 页）" });
+					return Promise.resolve({ ok: false, error: "finding " + args.id + " 不存在（本会话 " + mode + " 页）" });
 				}
 				store.db.exec('COMMIT');
 			} catch (error) {
@@ -2922,7 +3820,7 @@ function apply(ctx) {
 	//#region Web 通道路由（better-sidebar 同款：webServer 自注册 + 同源栅栏）
   ctx.tools.register(defineTool({
     name: 'redteam_method',
-    description: '方法包：读取固定版本；激活/回退需成果页审阅。',
+    description: '方法包读取、激活与回退。',
     parameters: {
       action: { type: 'string', required: true, enum: ['list', 'detail', 'active', 'stage', 'review', 'verify'], description: '方法资料操作，契约见README' },
       digest: { type: 'string', description: '固定版本SHA256摘要' },
@@ -2946,7 +3844,7 @@ function apply(ctx) {
     description: '执行已存请求与对照；回执非漏洞。',
     parameters: {
       action: { type: 'string', required: true, enum: ['direct', 'run', 'detail', 'run-pair', 'pair-detail', 'run-effect', 'job-detail', 'verify-effect', 'effect-detail', 'oob-issue', 'oob-check', 'browser-run'] },
-      document: { type: 'string', description: 'direct/pair/effect/verify 的参数 JSON' },
+      document: { type: 'string', description: 'direct/run派生/pair/effect/verify 参数 JSON' },
       url: { type: 'string', description: 'direct：完整 HTTP(S) URL' },
       method: { type: 'string', description: 'direct：HTTP方法，默认GET' },
       headers: { type: 'object', additionalProperties: true, description: 'direct：请求头对象' },
@@ -2967,7 +3865,7 @@ function apply(ctx) {
     },
     output: {
       schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
-      render: (args, value) => [{ type: 'text', text: value.ok ? JSON.stringify(['direct', 'run'].includes(args.action) ? { ok: true, ...executionReceiptSummary(value) } : value) : value.error }]
+      render: (args, value) => [{ type: 'text', text: value.ok ? JSON.stringify(['direct', 'run'].includes(args.action) ? { ok: true, ...executionReceiptSummary(value) } : value) : '错误：' + value.error }]
     },
     async execute(args, exec) {
       const session = sessionOf(ctx, exec);
@@ -2980,7 +3878,27 @@ function apply(ctx) {
           const merged = { ...doc, ...Object.fromEntries(['url', 'method', 'headers', 'body', 'identityRef', 'authSource'].filter(key => args[key] !== undefined).map(key => [key, args[key]])) };
           return { ok: true, ...await executeDirectRequest(store, session.id, { ...merged, timeoutMs: args.timeoutMs, maxBytes: args.maxBytes, callId: exec.callId }, exec.signal) };
         }
-        if (args.action === 'run') return { ok: true, ...await executeRecordedRequest(store, session.id, { ...args, callId: exec.callId }, undefined, exec.signal) };
+        if (args.action === 'run') {
+          const doc = args.document ? JSON.parse(args.document) : {};
+          const sourceRequestId = doc.sourceRequestId || args.requestId || doc.requestId;
+          const wantsDerivation = doc.sourceRequestId || doc.sourceRequestRef || doc.query || doc.endpoint || doc.method !== undefined || doc.body !== undefined;
+          if (wantsDerivation && sourceRequestId) {
+            const derived = deriveRequest(store, session.id, {
+              ...doc,
+              sourceRequestId,
+              sourceRequestRevision: doc.sourceRequestRevision || args.requestRevision || doc.requestRevision,
+            });
+            return { ok: true, derived,
+              ...await executeRecordedRequest(store, session.id, {
+                ...doc, requestId: derived.requestId, requestRevision: derived.requestRevision,
+                authSource: doc.authSource || args.authSource, timeoutMs: doc.timeoutMs || args.timeoutMs,
+                maxBytes: doc.maxBytes || args.maxBytes, callId: exec.callId,
+              }, undefined, exec.signal) };
+          }
+          if (wantsDerivation)
+            return { ok: false, error: '派生请求需要外层 requestId/requestRevision，或 document.sourceRequestId/sourceRequestRevision' };
+          return { ok: true, ...await executeRecordedRequest(store, session.id, { ...args, callId: exec.callId }, undefined, exec.signal) };
+        }
         if (args.action === 'run-pair') return { ok: true, ...await runComparisonJob(store, session.id, { ...JSON.parse(args.document), callId: exec.callId }, exec.signal) };
         if (args.action === 'pair-detail') return { ok: true, ...readComparisonJob(store, readId, args.id) };
         if (args.action === 'detail') {
@@ -3017,6 +3935,7 @@ function apply(ctx) {
           const denied = taskExecutionGuard(store, session.id, 'recorded-browser-execution', Date.now(), { args: { url: doc.url } });
           if (denied) return { ok: false, error: denied };
           const receipt = await runBrowserExecution({ url: doc.url, marker: doc.marker, executablePath: doc.executablePath, timeoutMs: doc.timeoutMs });
+          receipt.identityRef = String(doc.identityRef ?? args.identityRef ?? '').trim();
           const stored = recordBrowserReceipt(store, session.id, receipt);
           return { ok: true, ...stored, note: '宿主真开浏览器留下的回执；仅回显、被转义或被 CSP 拦下都不会让 probe 生效。执行现象不等于权限或 RCE。' };
         }
@@ -3029,13 +3948,13 @@ function apply(ctx) {
     description: '研究具体问题并保留对照；结论须独立复核。',
     parameters: {
       action: { type: 'string', required: true, enum: ['groups', 'list', 'detail', 'create', 'observe', 'assess', 'close'], description: '契约见README' },
-      id: { type: 'string', description: 'detail/observe/assess/close必填：方向ID，不是观察id' },
+      id: { type: 'string', description: '方向ID（非观察id）。' },
       document: { type: 'string', description: 'observe/assess/close 的参数 JSON' },
       observationId: { type: 'string', description: 'assess：run-pair返回的观察ID，不重发请求' },
-      outcome: { type: 'string', enum: ['support', 'counterevidence', 'no-information'], description: 'assess：支持/反证/无新信息；difference不能作为结论' },
-      interpretation: { type: 'string', description: 'assess：效果如何支持或反驳；不另填阴性台账' },
+      outcome: { type: 'string', enum: ['support', 'counterevidence', 'no-information'], description: 'assess：支持、反证或无新信息。' },
+      interpretation: { type: 'string', description: 'assess：效果支持或反驳。' },
       nextInformation: { type: 'string', description: 'assess：下一项必要信息或待独立复核' },
-      restriction: { type: 'string', enum: ['safety-policy', 'tool-policy'], description: '仅close：说明安全或工具策略中断；不伪造报文' },
+      restriction: { type: 'string', enum: ['safety-policy', 'tool-policy'], description: '仅close：安全/工具中断；不伪造报文' },
       offset: { type: 'integer', description: 'list索引偏移，每页20条' }
     },
     output: {
@@ -3062,6 +3981,80 @@ function apply(ctx) {
       } catch (error) { return Promise.resolve({ ok: false, error: error.message }); }
     }
   }));
+	ctx.tools.register(defineTool({
+		name: 'saker_role',
+		description: '按障碍定义角色与工作，root 启动真实实例。',
+		parameters: {
+			action: { type: 'string', enum: ['propose', 'start', 'message', 'handoff', 'stop', 'resume', 'status', 'save'], required: true },
+			document: { type: 'string', description: 'JSON：角色与工作参数。' },
+		},
+		output: {
+			schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
+			render: (_args, value) => {
+				let body
+				if (value.ok) {
+					body = _args.action === 'status'
+						? {
+							ok: true,
+							workItems: (value.workItems || []).slice(0, 50).map(work => ({ workId: work.workId, state: work.state, title: work.title, executionState: work.executionState, releaseState: work.releaseState, instance: work.instance && { childId: work.instance.childId, state: work.instance.state, releaseState: work.instance.releaseState }, queue: work.queue && { queueRef: work.queue.queueRef, state: work.queue.state } })),
+							instances: (value.instances || []).slice(0, 50).map(instance => ({ childId: instance.childId, roleId: instance.roleId, workId: instance.workId, state: instance.state, releaseState: instance.releaseState, releaseAttempt: instance.releaseAttempt, releaseError: instance.releaseError, stopIntentId: instance.stopIntentId, generation: instance.generation, startedAt: instance.startedAt, settlement: instance.settlement, worker: instance.worker && { state: instance.worker.state } })),
+							messages: (value.messages || []).slice(-30).map(message => ({ messageId: message.messageId, fromInstance: message.fromInstance, toInstance: message.toInstance, kind: message.kind, state: message.state, text: String(message.text || '').slice(0, 200) })),
+							queue: value.queue || [],
+							settlementPending: value.settlementPending,
+						}
+						: { ok: true, queued: value.queued, status: value.status, role: value.role && { roleId: value.role.roleId, version: value.role.version, title: value.role.title }, work: value.work && { workId: value.work.workId, state: value.work.state, executionState: value.work.executionState, releaseState: value.work.releaseState }, instance: value.instance && { childId: value.instance.childId, state: value.instance.state, releaseState: value.instance.releaseState, logicalParent: value.instance.logicalParent }, message: value.message && { messageId: value.message.messageId, state: value.message.state, kind: value.message.kind }, resumed: value.resumed, stopped: value.stopped?.map(item => ({ childId: item.childId, state: item.state, releaseState: item.releaseState })), pending: value.pending?.map(item => ({ childId: item.childId, state: item.state, releaseState: item.releaseState, releaseAttempt: item.releaseAttempt, releaseError: item.releaseError, workState: item.workState })), already: value.already, alreadyCompleted: value.alreadyCompleted, releaseAttempts: value.releaseAttempts }
+				} else if (value.pending?.length) {
+					body = { ok: false, pending: value.pending.map(item => ({ childId: item.childId, state: item.state, releaseState: item.releaseState, releaseAttempt: item.releaseAttempt, releaseError: item.releaseError, workState: item.workState })), message: '停止尚未确认；保留占用，可显式重试同一停止意图' }
+				} else {
+					return [{ type: 'text', text: `角色编排失败：${value.error || '未知错误'}` }]
+				}
+				return [{ type: 'text', text: JSON.stringify(body, null, 2) }]
+			}
+		},
+		async execute(args, exec) {
+			const session = sessionOf(ctx, exec);
+			if (!session || !isSakerPreset(session.mode)) return { ok: false, error: '仅当前Saker 会话可使用动态角色' };
+			try {
+				const manager = roleManagers.get(ctx);
+				if (!manager) throw new Error('角色运行时尚未初始化');
+				const input = args.document ? JSON.parse(args.document) : {};
+				if (args.action === 'propose') return await manager.propose(exec.agent, input);
+				if (args.action === 'start') {
+					const store = theStore();
+					const state = taskPolicyStatus(store, session.id);
+					if (!state.configured) {
+						startTaskPolicy(store, session.id, {
+							mode: 'regular', scenario: 'pentest',
+							question: '按当前会话中的用户要求工作',
+							allowTargetNetwork: false, readOnly: true,
+							budget: { workers: 2 },
+						});
+					}
+					return await manager.start(exec.agent, input, exec.signal);
+				}
+				if (args.action === 'message') return await manager.message(exec.agent, input, exec.signal);
+				if (args.action === 'handoff') {
+					const sent = await manager.message(exec.agent, { ...input, kind: 'handoff' }, exec.signal);
+					if (input.stopSource === true) {
+						const stopped = await manager.stop(exec.agent, { instanceId: input.fromInstance || session.id, reason: input.reason || 'handoff completed' }, exec.signal);
+						return { ...sent, stopped: stopped.stopped };
+					}
+					return sent;
+				}
+				if (args.action === 'stop') return await manager.stop(exec.agent, input, exec.signal);
+				if (args.action === 'resume') return await manager.resumeQueued(exec.agent, input, exec.signal);
+				if (args.action === 'status') return await manager.status(exec.agent);
+				if (args.action === 'save') {
+					if (siteWorkerParent(theStore(), session.id)) throw new Error('只有根会话可以保存可复用角色');
+					const role = createRoleSpec(theStore(), session.id, { ...(input.role || input), scope: input.scope || 'root', source: input.source || 'user' }).role;
+					return { ok: true, status: 'saved', role };
+				}
+				throw new Error('invalid role action');
+			} catch (error) {
+				return { ok: false, error: error?.message || String(error) };
+			}
+		},
+	}));
 	ctx.tools.register(defineTool({
 		name: 'saker_assist',
 		description: '执行具体独立工作并自动交回。',
@@ -3136,25 +4129,52 @@ function apply(ctx) {
 	}));
 	ctx.tools.register(defineTool({
 		name: 'saker_material',
-		description: '列出、搜索或读取本地资料与当前题目。',
+    description: '附件、按需参考资料与当前题目。',
 		parameters: {
 			action: { type: 'string', required: true, enum: ['list', 'search', 'read', 'current'] },
+      source: { type: 'string', enum: ['attachment', 'reference'], description: 'attachment（默认）或 reference。' },
 			id: { type: 'string', description: '读取资料时的材料 ID。' },
+      ref: { type: 'string', description: '搜索返回的不透明引用。' },
 			query: { type: 'string', description: '搜索关键词。' },
+      product: { type: 'string', description: '可选产品或版本约束。' },
+      version: { type: 'string', description: '版本文本；未知标 unknown。' },
+      fallbackReason: { type: 'string', description: '首来源不适用时补查另一来源一次。' },
+      cursor: { type: 'string', description: '分页游标。' },
 			offset: { type: 'integer' },
 			limit: { type: 'integer' },
+      maxBytes: { type: 'integer', description: '正文上限，默认和最大 8192 字节。' },
 		},
 		output: {
 			schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
 			render: (_args, value) => [{ type: 'text', text: value.ok ? value.text : value.error }],
 		},
-		execute(args, exec) {
+        async execute(args, exec) {
 			const session = sessionOf(ctx, exec);
 			if (!session || !isSakerPreset(session.mode))
 				return { ok: false, error: '仅当前 Saker 会话可读取资料' };
 			try {
 				const store = theStore();
 				const action = String(args.action || '');
+        const source = args.source === 'reference' ? 'reference' : 'attachment';
+        if (source === 'reference') {
+          if (action === 'search') return await referenceSearchForSession(ctx, store, session.id, args, exec.signal);
+          if (action === 'read') {
+            if (!args.ref) return { ok: false, code: 'ref_required', error: 'reference read 需要 search 返回的 ref' };
+            return await referenceReadForSession(ctx, store, session.id, {
+              ref: args.ref, cursor: args.cursor, maxBytes: args.maxBytes,
+            }, exec.signal);
+          }
+          if (action === 'list') {
+            const knowledge = referenceKnowledgeState(store, session.id);
+            if (!knowledge.enabled) return { ok: false, code: 'knowledge_disabled', error: '本会话知识查询已关闭',
+              text: JSON.stringify({ ok: false, code: 'knowledge_disabled', error: '本会话知识查询已关闭' }) };
+            const value = listKnowledgeEntries(knowledgeProjectKey(store, session.id, ctx), {
+              offset: Math.max(0, Number(args.offset) || 0), limit: Math.max(1, Math.min(20, Number(args.limit) || 20)),
+            });
+            return { ok: true, ...value, text: JSON.stringify(value) };
+          }
+          return { ok: false, error: 'reference 资料不支持 current；题面与附件仍用 source=attachment' };
+        }
 				const scene = readSceneContext(store, session.id, session.mode);
 				const ownerSessionId = scene?.contextId || scene?.rootSession || session.id;
 				if (action === 'list') {
@@ -3222,7 +4242,7 @@ function apply(ctx) {
 			toolCalls: { type: 'integer', description: '整轮共享工具上限1–10000' },
 			modelCalls: { type: 'integer', description: '主/子代理、重试、压缩、标题共享上限。' },
 			minutes: { type: 'integer', description: '时间上限1–10080分钟' },
-			workers: { type: 'integer', description: '子代理0–16，≤桌面上限；按独立问题数量决定' },
+			workers: { type: 'integer', description: '0–16，受桌面和任务上限。' },
 			unmeteredToolCalls: { type: 'integer', description: '未计量工具调用上限，0–1000' },
 			stop: { type: 'string', enum: ['budget', 'queue', 'first-high', 'first-rce'] },
 			policy: { type: 'string', description: '旧JSON，与独立字段互斥' },
@@ -3277,7 +4297,7 @@ function apply(ctx) {
 				else if (args.action === 'cancel') {
           updateTaskProgress(theStore(), session.id, { cancelled: true });
           if (siteWorkerParent(theStore(), session.id)) await siteWorkers.report(exec.agent, { state: 'blocked', summary: '子任务已取消；保留实际证据并释放子代理。' }, exec.signal);
-          else { await purposeTasks.cleanup(exec.agent); await siteWorkers.cleanup(exec.agent, undefined, 'cancelled'); }
+          else { await purposeTasks.cleanup(exec.agent); await roleRuntime.stop(exec.agent, { all: true, reason: 'cancelled' }, exec.signal); await siteWorkers.cleanup(exec.agent, undefined, 'cancelled'); }
         }
 				else if (!['status', 'next'].includes(args.action)) throw new Error('invalid task action');
 				const state = taskPolicyStatus(theStore(), session.id);
@@ -3289,7 +4309,7 @@ function apply(ctx) {
 	}));
 	ctx.tools.register(defineTool({
 		name: 'redteam_context',
-		description: '保存或读取本会话资产、请求与方法上下文。',
+		description: '资产、请求、方法与原始请求导入。',
 		parameters: {
 			context: { type: 'string', description: '旧快照JSON；assets/requests增量；省略读索引' },
       assets: { type: 'array', items: { type: 'object', additionalProperties: true, properties: {
@@ -3302,22 +4322,31 @@ function apply(ctx) {
         method: { type: 'string' }, headers: { type: 'object', additionalProperties: true },
         body: { type: 'string' }, request: { type: 'string' }, valid: { type: 'boolean' }, responseReceiptId: { type: 'string' }
       } } },
-			kind: { type: 'string', description: 'asset/request/method详情；finding按id；material索引或原文' },
+      importRequest: { type: 'string', description: '已导入 .http 材料 ID' },
+      identityRef: { type: 'string', description: '可选账号名' },
+			kind: { type: 'string', description: '按kind和id读取上下文详情。' },
       materials: { type: 'string', description: 'JSON：site、files[{path,url}]' },
 			id: { type: 'string', description: '详情记录ID，仅本会话' },
 			version: { type: 'string', description: '请求revision或方法version；多版本时必填' },
 			search: { type: 'string', description: '在测试资料中按关键词定位' },
-			read: { type: 'integer', description: 'material/finding正文UTF-8偏移，默认0；续读用nextOffset' },
+			read: { type: 'integer', description: '正文UTF-8偏移；续读用nextOffset。' },
 			offset: { type: 'integer', description: '索引偏移；search 时是下一页游标' }
 		},
 		output: {
 			schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
-			render: (_args, value) => [{ type: 'text', text: value.ok ? value.text : value.error }]
+			render: (_args, value) => [{ type: 'text', text: value.ok ? value.text : '错误：' + value.error }]
 		},
 		execute(args, exec) {
 			const session = sessionOf(ctx, exec);
 			if (!session || session.mode !== 'pentest') return Promise.resolve({ ok: false, error: '仅当前Saker 会话可读写共享上下文' });
 		try {
+        if (args.importRequest !== undefined) {
+          if ([args.context, args.assets, args.requests, args.materials, args.search, args.importRequest === undefined ? undefined : args.id, args.version]
+            .some(value => value !== undefined))
+            throw new Error('importRequest 只传已导入材料 ID，可附 identityRef；不要和快照、资产、搜索或详情混用');
+          const result = importRequestMaterial(theStore(), session.id, { materialId: args.importRequest, identityRef: args.identityRef });
+          return Promise.resolve({ ...result, text: JSON.stringify(result) });
+        }
         if (args.assets !== undefined || args.requests !== undefined) {
           if (args.context !== undefined) throw new Error('assets/requests 与旧 context 不可同时提供');
           const patch = { ...(readTaskContext(theStore(), session.id) || {}) };
@@ -3480,7 +4509,7 @@ function apply(ctx) {
 			action: { type: 'string', required: true, enum: ['list', 'search', 'read'] },
 			query: { type: 'string' }, sourceId: { type: 'string' }, sourceRevision: { type: 'string' },
 			sectionId: { type: 'string' },
-      sectionIds: { type: 'array', description: '批量读取同源1–20段；与sectionId/cursor互斥。', items: { type: 'string' } },
+      sectionIds: { type: 'array', description: '读取同源1–20段；与sectionId/cursor互斥。', items: { type: 'string' } },
       cursor: { type: 'integer', description: '续读起点，UTF-8字节偏移。' },
       limit: { type: 'integer', description: 'UTF-8字节数。' }
 		},
@@ -3583,7 +4612,7 @@ function apply(ctx) {
         provides: { type: 'array', description: '本检查可向前项提供的事实名', items: { type: 'string' } },
         requiresFacts: { type: 'array', description: '要求依赖项实际提供的事实名', items: { type: 'string' } },
       } } },
-      batchId: { type: 'string', description: '稳定批次幂等键；响应丢失后重试应复用相同值' },
+      batchId: { type: 'string', description: '幂等键；丢响应后重试复用。' },
       sectionDecisions: { type: 'array', description: '来源整理决定', items: { type: 'object', additionalProperties: false, properties: {
         sourceId: { type: 'string', required: true }, sourceRevision: { type: 'string', required: true },
         sectionId: { type: 'string', required: true, description: '来源段落 ID；无段落用 #source。' },
@@ -3596,7 +4625,7 @@ function apply(ctx) {
 			checkedContent: { type: 'string', description: '实际检查、观察及其他说明。' },
       gaps: { type: 'string', description: '未完成部分或缺少条件；无缺口留空。' },
 			findingRefs: { type: 'array', items: { type: 'string' } },
-      evidenceRefs: { type: 'array', description: 'project_evidence 返回的文件、命令或源码依据ID', items: { type: 'string' } },
+      evidenceRefs: { type: 'array', description: 'project_evidence 的文件/命令/源码依据ID', items: { type: 'string' } },
 			reusedObservations: { type: 'array', description: '复用已有动作观察时提供 actionId 和具体理由', items: {
 				type: 'object', additionalProperties: false, properties: {
 					actionId: { type: 'string', required: true }, reason: { type: 'string', required: true },
@@ -4131,7 +5160,7 @@ function apply(ctx) {
 				// 工作租约被别人持有都属于"现状和你手上的版本对不上"，客户端要能据此刷新重试，
 				// 而不是当成普通的参数错误。其余业务错误仍是 400。
 				const code = e?.code === undefined ? "" : String(e.code);
-				const status = /-conflict$/.test(code) || code === "work-lease-held" ? 409 : 400;
+				const status = /-conflict$/.test(code) || /_CONFLICT$/.test(code) || code === "work-lease-held" ? 409 : 400;
 				send(status, { ok: false, ...(code ? { code } : {}), error: e?.message ?? String(e),
 					hint: recoverableHint(code), ...(e?.details ? { details: e.details } : {}) });
 			}

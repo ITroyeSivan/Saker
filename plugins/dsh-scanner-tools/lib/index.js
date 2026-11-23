@@ -15,16 +15,20 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { randomBytes } from "node:crypto";
+import tls from "node:tls";
+import { createHash, randomBytes } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { readSettingsSection } from "dsh-saker/settings-compat";
 import { sessionWorkingDirectory } from "dsh-saker/working-directory";
+import { markToolAvailable, markToolUnavailable } from "dsh-saker/tool-availability";
 import { hasBin, configuredToolPaths, configuredPathForTool, resolveToolBin, resolveToolInvocation } from "dsh-saker/tool-runtime";
 export { hasBin, configuredToolPaths, configuredPathForTool, resolveToolBin, resolveToolInvocation };
 import { matchesScope, upsertAssets } from "dsh-saker/asset-inventory";
 import { TOOL_DEFS, buildArgs, tiersLine } from "./registry.js";
 import { parseAssetPayload } from "./ingest.js";
+import { parseAdExport, summarizeAdExport } from "./ad-export.js";
+import { runVersionReproduce } from "./version-reproduce.js";
 import { readOobConfig, runOobProbe } from "./oob-probe.js";
 
 function sessionIdOf(exec) {
@@ -77,6 +81,26 @@ function withTaskId(result) {
  */
 function stamp() {
 	return new Date().toISOString().replace(/[-:.]/g, "").slice(0, 17) + "-" + randomBytes(6).toString("hex");
+}
+
+function hashFile(file) {
+	return createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+}
+
+function listFiles(root) {
+	const out = [];
+	const stack = [root];
+	while (stack.length > 0) {
+		const dir = stack.pop();
+		let entries;
+		try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+		for (const entry of entries) {
+			const file = path.join(dir, entry.name);
+			if (entry.isDirectory()) stack.push(file);
+			else if (entry.isFile()) out.push(file);
+		}
+	}
+	return out.sort();
 }
 
 const RATE_DEFAULTS = { nuclei: 15, httpx: 25, ffuf: 50 }; // 保守默认；显式覆盖会留痕
@@ -296,7 +320,7 @@ function cappedCollector(limit) {
  * scan (up to 15 minutes for nuclei), which also froze the UI and every other
  * session sharing the process.
  */
-function runProcess(bin, args, { timeoutMs, maxBuffer }) {
+function runProcess(bin, args, { timeoutMs, maxBuffer, cwd }) {
 	return new Promise((resolve) => {
 		let settled = false;
 		let timedOut = false;
@@ -304,7 +328,7 @@ function runProcess(bin, args, { timeoutMs, maxBuffer }) {
 		const stderr = cappedCollector(maxBuffer);
 		let child;
 		try {
-			child = spawn(bin, args, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+			child = spawn(bin, args, { cwd, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
 		} catch (error) {
 			resolve({ status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0), error });
 			return;
@@ -395,6 +419,15 @@ export async function runScan({ bin, args, workspace, tool, rate, defaultRate, a
 		return { ok: false, error: `${invocation?.error ? invocation.error + "；" : ""}${pathHint}${BIN_HINT}`, bin };
 	}
 	const resolvedBin = invocation.file;
+	// PATH 里常有同名 Python httpx（pip install httpx），它不接受 ProjectDiscovery 参数，
+	// 直接调用只会在扫描时抛选项错误。先做版本识别，给出可执行的安装/配置指引。
+	if (tool === "httpx") {
+		const probe = await runProcess(invocation.bin, [...invocation.prefix, "-version"], { timeoutMs: 15000, maxBuffer: 1024 * 1024 });
+		const versionText = `${probe.stdout || ""}${probe.stderr || ""}`.toLowerCase();
+		if (!versionText.includes("projectdiscovery")) {
+			return { ok: false, error: "当前 httpx 不是 ProjectDiscovery 版本（可能是 Python httpx CLI，不接受 -title/-tech-detect）。请安装 projectdiscovery/httpx，或在「工具与模型」里为 httpx 配置正确路径；本工具不自动安装。", bin };
+		}
+	}
 	if (active) {
 		const reg = checkRegistered(fs, workspace, target);
 		if (!reg.ok) return { ok: false, error: reg.hint, bin };
@@ -600,21 +633,26 @@ function liveConfiguredToolPaths(ctx) {
 }
 
 function liveConfiguredToolRoots(ctx) {
+	const roots = [];
 	try {
 		const section = readSettingsSection(ctx.settings, "sec-config");
-		return Array.isArray(section?.roots) ? section.roots : [];
-	} catch {
-		return [];
-	}
+		if (Array.isArray(section?.roots)) roots.push(...section.roots.filter((item) => typeof item === "string" && item.trim()));
+	} catch { /* settings may be unavailable during startup checks */ }
+	const fromEnv = String(process.env.SAKER_TOOL_ROOTS || "")
+		.split(path.delimiter).map((item) => item.trim()).filter(Boolean);
+	roots.push(...fromEnv);
+	return [...new Set(roots)];
 }
 
 function apply(ctx, config = {}) {
 	const activeScanToolNames = [
 		"nmap_portscan", "dirsearch_dirs", "ffuf_fuzz", "nuclei_scan",
 		"afrog_scan", "sqlmap_inject", "katana_crawl", "gau_urls",
+		"tls_probe",
 	];
 	const allToolNames = new Set([
 		"nuclei_scan", "httpx_probe", "ffuf_fuzz", "asset_ingest", "oob_probe",
+		"tls_probe", "ad_export_ingest", "js_deobfuscate", "version_reproduce",
 		...Object.values(TOOL_DEFS).map((def) => def.name),
 	]);
 	if (config?.exposedTools !== undefined && !Array.isArray(config.exposedTools)) {
@@ -640,7 +678,12 @@ function apply(ctx, config = {}) {
 			deferredDefinitions.set(tool.name, tool);
 			return;
 		}
-		ctx.tools.register(tool);
+		const dispose = ctx.tools.register(tool);
+		markToolAvailable(tool.name);
+		return () => {
+			markToolUnavailable(tool.name);
+			return typeof dispose === "function" ? dispose() : undefined;
+		};
 	};
 	// Optional tools are registered at plugin load, so their availability probe
 	// must consider the sec-config path map as well as PATH. The same live map
@@ -710,6 +753,73 @@ function apply(ctx, config = {}) {
 				return runScan({ bin: "ffuf", args: args2, workspace, tool: "ffuf", rate: args.rate, defaultRate: RATE_DEFAULTS.ffuf, active: true, target: args.url, parse: ffufParse, outFile, configured: liveConfiguredToolPaths(ctx), roots: liveConfiguredToolRoots(ctx) });
 			});
 			return withTaskId(tracked);
+		}
+	}));
+	registerScannerTool(defineTool({
+		name: "tls_probe",
+		description: "Read-only TLS handshake probe (certificate/protocol/cipher/ALPN). Requires the target registered in assets.md or cloud-assets.md (防盲打). Does not send an HTTP request or change the target.",
+		parameters: {
+			target: { type: "string", required: true, description: "Host or URL, e.g. https://example.com or example.com:443 (must be registered)" },
+			workspace: { type: "string", required: true, description: "Task workspace root" },
+			servername: { type: "string", description: "Optional SNI name (defaults to target hostname)" },
+			timeoutMs: { type: "integer", description: "Handshake timeout in milliseconds (default 10000)" }
+		},
+		output: { schema: { type: "object", additionalProperties: true }, render: (_a, v) => [{ type: "text", text: v.ok ? `tls: ${v.summary?.protocol || ""} ${v.summary?.cipher?.name || ""} ${v.summary?.authorized ? "cert-ok" : "cert-warning"}（证据 ${v.evidenceId}；${v.artifact}）` : `tls 拒绝/失败：${v.error}` }] },
+		async execute(args, exec) {
+			const workspace = resolveWorkspaceArg(args.workspace, exec);
+			const target = String(args.target || "").trim();
+			if (!target) return { ok: false, error: "target 不能为空" };
+			const registered = checkRegistered(fs, workspace, target);
+			if (!registered.ok) return { ok: false, error: registered.hint };
+			let parsed;
+			try {
+				parsed = new URL(target.includes("://") ? target : `https://${target}`);
+			} catch {
+				return { ok: false, error: "target 不是合法 URL/host:port" };
+			}
+			const host = parsed.hostname;
+			const port = Number(parsed.port || 443);
+			if (!host || !Number.isInteger(port) || port <= 0 || port > 65535) return { ok: false, error: "target 端口无效" };
+			const timeoutMs = Math.max(1000, Math.min(30000, Number(args.timeoutMs) || 10000));
+			const servername = String(args.servername || host);
+			try {
+				const summary = await new Promise((resolve, reject) => {
+					const socket = tls.connect({ host, port, servername, rejectUnauthorized: false, timeout: timeoutMs });
+					const timer = setTimeout(() => { try { socket.destroy(); } catch {} ; reject(new Error("TLS 握手超时")); }, timeoutMs + 500);
+					socket.once("secureConnect", () => {
+						clearTimeout(timer);
+						const cert = socket.getPeerCertificate(true) || {};
+						const result = {
+							host, port, servername,
+							protocol: socket.getProtocol(),
+							cipher: socket.getCipher(),
+							authorized: socket.authorized === true,
+							authorizationError: socket.authorizationError ? String(socket.authorizationError) : "",
+							alpnProtocol: socket.alpnProtocol || null,
+							certificate: {
+								subject: cert.subject || null,
+								issuer: cert.issuer || null,
+								validFrom: cert.valid_from || "",
+								validTo: cert.valid_to || "",
+								fingerprint256: cert.fingerprint256 || "",
+								serialNumber: cert.serialNumber || "",
+								subjectAltName: cert.subjectaltname || ""
+							}
+						};
+						socket.end();
+						resolve(result);
+					});
+					socket.once("error", (error) => { clearTimeout(timer); reject(error); });
+				});
+				ensureDirs(workspace);
+				const evidenceId = nextEvidenceId(workspace);
+				const artifact = path.join(workspace, "artifacts", "scans", `tls-${stamp()}.json`);
+				fs.writeFileSync(artifact, JSON.stringify({ target, ...summary }, null, 2));
+				appendEvidence(workspace, evidenceId, `tls_probe ${target}`, path.relative(workspace, artifact).replace(/\\/g, "/"));
+				return { ok: true, target, evidenceId, artifact: path.relative(workspace, artifact).replace(/\\/g, "/"), summary };
+			} catch (error) {
+				return { ok: false, error: String(error?.message || error) };
+			}
 		}
 	}));
 	registerScannerTool(defineTool({
@@ -784,6 +894,172 @@ function apply(ctx, config = {}) {
 			};
 		},
 	}));
+	registerScannerTool(defineTool({
+		name: "ad_export_ingest",
+		description: "导入 SharpHound/Adalanche JSON 并做只读归一化；不采集、不把对象属性或图边当可利用。",
+		parameters: {
+			workspace: { type: "string", required: true, description: "Task workspace root" },
+			file: { type: "string", description: "Workspace-relative SharpHound/Adalanche JSON path (alternative to text)" },
+			text: { type: "string", description: "Raw JSON export (alternative to file)" },
+			source: { type: "string", enum: ["auto", "sharphound", "adalanche"], description: "Input format (default auto)" },
+			label: { type: "string", description: "Optional source label for the evidence row" },
+		},
+		output: {
+			schema: { type: "object", additionalProperties: true },
+			render: (_a, v) => [{ type: "text", text: v.ok ? v.text : `ad_export_ingest 失败：${v.error}` }],
+		},
+		execute(args, exec) {
+			const hasFile = typeof args.file === "string" && args.file.trim() !== "";
+			const hasText = typeof args.text === "string" && args.text.trim() !== "";
+			if (hasFile === hasText) return { ok: false, error: "file 与 text 必须且只能提供一个" };
+			if (!String(args.workspace || "").trim()) return { ok: false, error: "workspace 不能为空" };
+			const workspace = resolveWorkspaceArg(args.workspace, exec);
+			let text = String(args.text || "");
+			let rawFile = "";
+			if (hasFile) {
+				const target = path.resolve(workspace, String(args.file));
+				if (target !== workspace && !target.startsWith(workspace + path.sep)) return { ok: false, error: "file 越出 workspace" };
+				let stat;
+				try { stat = fs.statSync(target); } catch (error) { return { ok: false, error: `无法读取导出文件：${String(error?.message || error)}` }; }
+				if (!stat.isFile()) return { ok: false, error: "file 不是文件" };
+				if (stat.size > 50 * 1024 * 1024) return { ok: false, error: "导出文件超过 50MB，请先按范围裁剪" };
+				text = fs.readFileSync(target, "utf8");
+				rawFile = path.relative(workspace, target).replace(/\\/g, "/");
+			}
+			let parsed;
+			try {
+				parsed = parseAdExport(text, { source: args.source || "auto" });
+			} catch (error) {
+				return { ok: false, error: `解析失败：${String(error?.message || error)}` };
+			}
+			const label = String(args.label || args.source || "ad-export").trim() || "ad-export";
+			const dir = path.join(workspace, "artifacts", "imports");
+			fs.mkdirSync(dir, { recursive: true });
+			const artifact = path.join(dir, `ad-export-${stamp()}.json`);
+			fs.writeFileSync(artifact, JSON.stringify({ label, rawFile, ...parsed }, null, 2));
+			const relative = path.relative(workspace, artifact).replace(/\\/g, "/");
+			const evidenceId = nextEvidenceId(workspace);
+			appendEvidence(workspace, evidenceId, `ad_export_ingest ${label} ${rawFile || "text"}`, relative);
+			return {
+				ok: true,
+				evidenceId,
+				artifact: relative,
+				format: parsed.format,
+				counts: parsed.counts,
+				observations: parsed.observations.slice(0, 20),
+				warnings: parsed.warnings,
+				text: `${summarizeAdExport(parsed)}\n证据 ${evidenceId}；归一化结果 ${relative}\n${parsed.observations.slice(0, 12).map(item => `- ${item.kind}: ${item.subject} ${item.detail}`).join("\n")}`,
+			};
+		},
+	}));
+	registerScannerTool(defineTool({
+		name: "js_deobfuscate",
+		description: "用 webcrack 静态解包/反混淆工作区 JS；不执行目标代码，输入/输出 hash 与产物落盘。",
+		parameters: {
+			workspace: { type: "string", required: true, description: "Task workspace root" },
+			file: { type: "string", required: true, description: "Workspace-relative JS/JSX file" },
+			mangle: { type: "boolean", description: "Let webcrack rename variables" },
+			unpack: { type: "boolean", description: "Extract bundle modules (default true)" },
+		},
+		output: {
+			schema: { type: "object", additionalProperties: true },
+			render: (_a, v) => [{ type: "text", text: v.ok ? v.text : `js_deobfuscate 失败：${v.error}` }],
+		},
+		async execute(args, exec) {
+			if (!String(args.workspace || "").trim()) return { ok: false, error: "workspace 不能为空" };
+			const workspace = resolveWorkspaceArg(args.workspace, exec);
+			const input = path.resolve(workspace, String(args.file || ""));
+			if (input !== workspace && !input.startsWith(workspace + path.sep)) return { ok: false, error: "file 越出 workspace" };
+			if (!/\.(?:js|mjs|cjs|jsx)$/i.test(input)) return { ok: false, error: "只接受 .js/.mjs/.cjs/.jsx 文件" };
+			let stat;
+			try { stat = fs.statSync(input); } catch (error) { return { ok: false, error: `无法读取输入：${String(error?.message || error)}` }; }
+			if (!stat.isFile()) return { ok: false, error: "file 不是文件" };
+			if (stat.size > 5 * 1024 * 1024) return { ok: false, error: "输入超过 5MB，请先按范围裁剪" };
+			const configured = liveConfiguredToolPaths(ctx);
+			const roots = liveConfiguredToolRoots(ctx);
+			const invocation = resolveToolInvocation("webcrack", configured.webcrack || "", { configured, roots });
+			if (!invocation || invocation.error) {
+				return { ok: false, error: invocation?.error || "未解析到 webcrack；请在安全配置中登记 webcrack 的 cli-wrapper.js 或工具根" };
+			}
+			const outDir = path.join(workspace, "artifacts", "js-deobfuscation", `run-${stamp()}`);
+			fs.mkdirSync(outDir, { recursive: true });
+			const cliArgs = [];
+			if (args.mangle === true) cliArgs.push("-m");
+			if (args.unpack === false) cliArgs.push("--no-unpack");
+			cliArgs.push("-o", outDir, "-f", input);
+			const proc = await runProcess(invocation.bin, [...invocation.prefix, ...cliArgs], {
+				timeoutMs: 180_000, maxBuffer: 16 * 1024 * 1024, cwd: workspace,
+			});
+			const files = listFiles(outDir);
+			const outputs = files.map(file => ({
+				path: path.relative(workspace, file).replace(/\\/g, "/"),
+				bytes: fs.statSync(file).size,
+				sha256: hashFile(file),
+			}));
+			const summary = {
+				engine: "webcrack",
+				input: { path: path.relative(workspace, input).replace(/\\/g, "/"), bytes: stat.size, sha256: hashFile(input) },
+				exitStatus: proc.status,
+				args: cliArgs.map(value => value === input ? path.relative(workspace, input).replace(/\\/g, "/") : value),
+				stdoutBytes: proc.stdout?.length || 0,
+				stderrBytes: proc.stderr?.length || 0,
+				outputs,
+				error: proc.error ? String(proc.error.message || proc.error) : "",
+				stderrPreview: proc.stderr ? proc.stderr.toString().slice(0, 1200) : "",
+			};
+			const summaryFile = path.join(outDir, "summary.json");
+			fs.writeFileSync(summaryFile, JSON.stringify(summary, null, 2));
+			const summaryRelative = path.relative(workspace, summaryFile).replace(/\\/g, "/");
+			const evidenceId = nextEvidenceId(workspace);
+			appendEvidence(workspace, evidenceId, `js_deobfuscate webcrack ${summary.input.path}`, summaryRelative);
+			if (proc.error) return { ok: false, error: summary.error, evidenceId, artifact: summaryRelative, outputs };
+			if (outputs.length === 0) return { ok: false, error: "webcrack 没有生成输出；保留总结与原件 hash", evidenceId, artifact: summaryRelative };
+			return {
+				ok: proc.status === 0,
+				evidenceId,
+				artifact: summaryRelative,
+				outputs,
+				text: `js_deobfuscate：exit ${proc.status}；输入 ${summary.input.path}（${stat.size} 字节）；产物 ${outputs.length} 个，证据 ${evidenceId}；总结 ${summaryRelative}${proc.status === 0 ? "" : "；stderr 见总结"}`,
+			};
+		},
+	}));
+	if (process.env.SAKER_LAB_CONFIG && fs.existsSync(process.env.SAKER_LAB_CONFIG)) {
+		registerScannerTool(defineTool({
+			name: "version_reproduce",
+			description: "在隔离 VM 的双 Docker 容器中运行两版本命令，记录 exit/输出/差异；网络关闭，差异不等于漏洞。",
+			parameters: {
+				workspace: { type: "string", required: true, description: "Task workspace root" },
+				imageA: { type: "string", required: true, description: "Version A Docker image" },
+				commandA: { type: "string", required: true, description: "Version A shell command" },
+				imageB: { type: "string", required: true, description: "Version B Docker image" },
+				commandB: { type: "string", required: true, description: "Version B shell command" },
+				files: { type: "string", description: "Optional JSON object of relative path to text, mounted at /work" },
+				timeoutSec: { type: "integer", description: "Per-variant timeout, 10-180 seconds" },
+			},
+			output: {
+				schema: { type: "object", additionalProperties: true },
+				render: (_a, v) => [{ type: "text", text: v.ok ? v.text : `version_reproduce 失败：${v.error}` }],
+			},
+			async execute(args, exec) {
+				if (!String(args.workspace || "").trim()) return { ok: false, error: "workspace 不能为空" };
+				const workspace = resolveWorkspaceArg(args.workspace, exec);
+				let files;
+				if (args.files) {
+					try { files = JSON.parse(args.files); } catch (error) { return { ok: false, error: "files 不是合法 JSON：" + error.message }; }
+				}
+				try {
+					return await runVersionReproduce({
+						workspace,
+						args: { ...args, files },
+						nextEvidenceId,
+						appendEvidence,
+					});
+				} catch (error) {
+					return { ok: false, error: String(error?.message || error) };
+				}
+			},
+		}));
+	}
 	registerScannerTool(defineTool({
 		name: "oob_probe",
 		description: "DNSLog 带外验证：new 分配可归因子域，batch 为多个资产分别分配，check 回查平台并归因。回连只证明目标触发外连，不等于权限或影响。",

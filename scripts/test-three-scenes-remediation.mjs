@@ -15,6 +15,7 @@ import { localModelServiceKey, modelBudgetOverview, modelBudgetOwner, modelConcu
 import { identityRequestHeaders } from '../plugins/dsh-redteam-results/lib/identity-binding.js'
 import { startTaskPolicy, taskExecutionGuard } from '../plugins/dsh-redteam-results/lib/task-policy.js'
 import { findingDeliveryState } from '../plugins/dsh-redteam-results/lib/delivery.js'
+import { settingsView } from '../plugins/dsh-redteam-results/lib/task-settings.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const tempRoot = path.resolve(here, '..', '..', '_ref', 'tmp')
@@ -127,8 +128,11 @@ try {
 
   await test('R14 scene knowledge toggles use revision CAS', () => {
     const initial = writeSceneContext(store, 'knowledge-cas', 'competition', { presetId: 'ctf-solver' })
+    const beforeSettings = settingsView(store, 'knowledge-cas', { sceneId: 'competition' })
     const changed = setCompetitionKnowledge(store, 'knowledge-cas', true, { expectedRevision: initial.sceneRevision })
-    assert.equal(changed.sceneRevision, initial.sceneRevision + 1)
+    assert.equal(changed.sceneRevision, initial.sceneRevision, 'ordinary knowledge preference does not bump scene revision')
+    assert.equal(settingsView(store, 'knowledge-cas', { sceneId: 'competition' }).effective.knowledge.enabled, true)
+    assert(settingsView(store, 'knowledge-cas', { sceneId: 'competition' }).settingsRevision > beforeSettings.settingsRevision)
     assert.throws(() => setCompetitionKnowledge(store, 'knowledge-cas', false, { expectedRevision: initial.sceneRevision }), /changed/)
   })
 
@@ -234,13 +238,16 @@ try {
     assert.equal(scene.preferences.budget.tokens, 1000)
     assert.equal(modelBudgetOverview(store, sid).limits.tokens, 1000)
     scene = setCompetitionPreferences(store, sid, { toolCalls: 1, minutes: 5 })
-    const round = scene.preferences.budget.roundStartedAt
-    const started = scene.preferences.budget.startedAt
-    assert(round)
-    assert(started)
+    assert.equal(scene.preferences.budget.roundStartedAt, undefined, 'saving a competition cap does not start a billing round')
+    assert.equal(scene.preferences.budget.startedAt, undefined, 'opening/reading settings does not consume competition time')
     const challenge = createCompetitionChallenge(store, sid, { title: 'budget CAS', environment: { kind: 'host' } })
     const first = runCompetitionExecution(store, sid, challenge.challengeId, { command: 'echo FIRST', environment: 'host' })
     assert(first.executionId)
+    const live = readSceneContext(store, sid, 'ctf-solver')
+    const round = live.preferences.budget.roundStartedAt
+    const started = live.preferences.budget.startedAt
+    assert(round, 'the first managed competition execution starts the round')
+    assert(started, 'the first managed competition execution starts the clock')
     await new Promise(resolve => setTimeout(resolve, 250))
     scene = setCompetitionPreferences(store, sid, { toolCalls: 2, modelCalls: 3, minutes: 8 })
     assert.equal(scene.preferences.budget.roundStartedAt, round, 'raising a cap must not create a new billing round')
@@ -455,31 +462,34 @@ try {
     )
   })
 
-  await test('R18 fresh task uses zero helpers while explicit choice survives', () => {
+  await test('R18 fresh task uses two bounded helper slots', () => {
     const sid = 'worker-default'
     const policy = startTaskPolicy(store, sid, { mode: 'regular', question: 'default helpers' })
-    assert.equal(policy.workerLimit, 0)
+    assert.equal(policy.workerLimit, 2)
   })
 
   await test('R18 competition deadline has a stable start and stops an in-flight execution', async () => {
     const sid = 'competition-deadline'
     writeSceneContext(store, sid, 'competition', { presetId: 'ctf-solver' })
-    const configured = setCompetitionPreferences(store, sid, { minutes: 0.005, workers: 0, interaction: 'auto' })
-    const startedAt = configured.preferences.budget.startedAt
+    const configured = setCompetitionPreferences(store, sid, { minutes: 1, workers: 0, interaction: 'auto' })
+    assert.equal(configured.preferences.budget.startedAt, undefined)
     const updated = setCompetitionPreferences(store, sid, { toolCalls: 4 })
-    assert.equal(updated.preferences.budget.startedAt, startedAt, 'editing another setting must not extend the deadline')
+    assert.equal(updated.preferences.budget.startedAt, undefined, 'editing another setting before execution starts no clock')
     const challenge = createCompetitionChallenge(store, sid, { title: 'deadline' })
     const script = path.join(home, 'competition-timeout.mjs')
     fs.writeFileSync(script, "setTimeout(()=>process.stdout.write('TOO_LATE'), 1000)\n")
     const execution = runCompetitionExecution(store, sid, challenge.challengeId, {
       command: JSON.stringify(process.execPath) + ' ' + JSON.stringify(script), environment: 'host',
     })
-    assert.equal(execution.deadlineAt, Date.parse(startedAt) + 300)
-    await new Promise(resolve => setTimeout(resolve, 900))
-    const output = readCompetitionOutput(store, sid, challenge.challengeId, execution.executionId)
-    assert.equal(output.timedOut, true)
-    assert.equal(output.stopReason, 'time_limit_exhausted')
-    assert.notEqual(output.state, 'running')
+    const startedAt = readSceneContext(store, sid, 'ctf-solver').preferences.budget.startedAt
+    assert(startedAt)
+    assert.equal(execution.deadlineAt, Date.parse(startedAt) + 60000)
+    setCompetitionPreferences(store, sid, { reporting: 'notable' })
+    assert.equal(readSceneContext(store, sid, 'ctf-solver').preferences.budget.startedAt, startedAt,
+      'editing another setting after execution must not extend the deadline')
+    stopAllCompetitionExecutions(store)
+    const output = readCompetitionExecution(store, sid, challenge.challengeId, execution.executionId)
+    assert.equal(output.state, 'stopped')
   })
 
   await test('R18 competition rejects unsupported confirmation and enforces its concurrent execution limit', async () => {

@@ -114,7 +114,7 @@ try {
       const verdict = verifyEffect(store, sid, { methodId: method.id, methodVersion: method.version, rounds: [{ trigger, browser: stored.id }] });
       assert.equal(verdict.verified, false);
       assert.match(String(verdict.reason), /origin does not match/);
-    } finally { await new Promise(resolve => other.close(resolve)); }
+    } finally { other.closeAllConnections?.(); await new Promise(resolve => other.close(resolve)); }
   });
 
   await test('本地 file 环境：直接拒绝（不作为浏览器执行证据）', async () => {
@@ -130,6 +130,7 @@ try {
     assert.equal(fs.statSync(found).isFile(), true);
   });
 } finally {
+  page.closeAllConnections?.();
   await new Promise(resolve => page.close(resolve));
   store.close(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 });
 }

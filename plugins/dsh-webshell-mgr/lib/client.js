@@ -137,7 +137,7 @@ function ConfirmModal(props) {
 	if (!props.open) return null;
 	return h(Modal, { open: true, onClose: props.onCancel },
 		h("h3", null, props.title || "确认操作"),
-		h("div", { style: { fontSize: 13, lineHeight: 1.7, whiteSpace: "pre-wrap" } }, props.message || ""),
+		h("div", { style: { fontSize:'inherit', lineHeight: 1.7, whiteSpace: "pre-wrap" } }, props.message || ""),
 		h("div", { className: "dsh-wsm-row", style: { justifyContent: "flex-end" } },
 			h(Btn, { onClick: props.onCancel }, "取消"),
 			h(Btn, { primary: true, danger: true, onClick: props.onConfirm }, props.confirmLabel || "确定")));
@@ -153,11 +153,11 @@ function installStyles() {
 	if (!document.getElementById("dsh-rt-tokens")) {
 		var tok = document.createElement("style");
 		tok.id = "dsh-rt-tokens";
-		tok.textContent = "body{--rt-sev-critical:#c2182f;--rt-sev-high:#ff4d4d;--rt-sev-medium:#d9b00c;--rt-sev-low:#3b7dd8;--rt-sev-critical-bright:#ff8fa0;--rt-sev-high-bright:#ff6b8a;--rt-sev-medium-bright:#ffd43b;--rt-sev-low-bright:#4dabf7;--rt-ok:#2f9e44;--rt-dead:#c92a2a;--rt-ok-bright:#36f1b0;--rt-dead-bright:#ff8787;--rt-accent:var(--dsw-alias-state-business-primary,#4c6ef5);--rt-surface-card:var(--dsw-alias-bg-base,#fff);--rt-surface-tint:color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 4%,var(--dsw-alias-bg-base,#fff));--rt-border:var(--dsw-alias-border-l1,#e9e9ec);--rt-mono:ui-monospace,\"SF Mono\",SFMono-Regular,Menlo,Consolas,monospace;--rt-navy-bg:rgba(8,24,46,.96);--rt-navy-bg-soft:rgba(12,32,62,.6);--rt-navy-line:rgba(58,157,255,.45);--rt-navy-line-soft:rgba(58,157,255,.28);--rt-navy-text:#e8f3ff;--rt-navy-text-2:#cfe6ff;--rt-navy-body:#b9d2ee;--rt-navy-dim:#7d97b8;--rt-navy-dim-2:#8fb4d9;--rt-navy-accent:#38d4ff;--rt-navy-accent-2:#3a9dff}";
+		tok.textContent = "body{--rt-sev-critical:#c2182f;--rt-sev-high:#ff4d4d;--rt-sev-medium:#c2650a;--rt-sev-low:#3b7dd8;--rt-sev-critical-bright:#ff8fa0;--rt-sev-high-bright:#ff6b8a;--rt-sev-medium-bright:#ffb454;--rt-sev-low-bright:#4dabf7;--rt-ok:#2f9e44;--rt-dead:#c92a2a;--rt-ok-bright:#36f1b0;--rt-dead-bright:#ff8787;--rt-accent:var(--dsw-alias-state-business-primary,#4c6ef5);--rt-surface-card:var(--dsw-alias-bg-base,#fff);--rt-surface-tint:color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 4%,var(--dsw-alias-bg-base,#fff));--rt-border:var(--dsw-alias-border-l1,#e9e9ec);--rt-mono:ui-monospace,\"SF Mono\",SFMono-Regular,Menlo,Consolas,monospace;--rt-navy-bg:rgba(8,24,46,.96);--rt-navy-bg-soft:rgba(12,32,62,.6);--rt-navy-line:rgba(58,157,255,.45);--rt-navy-line-soft:rgba(58,157,255,.28);--rt-navy-text:#e8f3ff;--rt-navy-text-2:#cfe6ff;--rt-navy-body:#b9d2ee;--rt-navy-dim:#7d97b8;--rt-navy-dim-2:#8fb4d9;--rt-navy-accent:#38d4ff;--rt-navy-accent-2:#3a9dff}";
 		document.head.appendChild(tok);
 	}
 	var css = [
-		".dsh-wsm-root{height:100%;display:flex;flex-direction:column;min-height:0;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#1a1a1a);font-size:13px}",
+		".dsh-wsm-root{height:100%;display:flex;flex-direction:column;min-height:0;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#1a1a1a);font-size:inherit}",
 		".dsh-wsm-head{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--dsw-alias-border-l2,#e4e4e7);flex-wrap:wrap}",
 		".dsh-wsm-title{font-size:15px;font-weight:600}",
 		".dsh-wsm-sub{font-size:12px;color:var(--dsw-alias-label-tertiary,#8a8a8f)}",
@@ -176,7 +176,7 @@ function installStyles() {
 		".dsh-wsm-dot.is-ok{background:var(--rt-ok,#2f9e44)}.dsh-wsm-dot.is-dead{background:var(--rt-dead,#c92a2a)}",
 		".dsh-wsm-work{flex:1;min-width:0;display:flex;flex-direction:column}",
 		".dsh-wsm-tabs{display:flex;gap:2px;border-bottom:1px solid var(--dsw-alias-border-l2,#e4e4e7);padding:0 12px}",
-		".dsh-wsm-tab{border:none;background:none;padding:8px 12px;font-size:13px;cursor:pointer;color:var(--dsw-alias-label-secondary,#5b5b60);border-bottom:2px solid transparent}",
+		".dsh-wsm-tab{border:none;background:none;padding:8px 12px;font-size:inherit;cursor:pointer;color:var(--dsw-alias-label-secondary,#5b5b60);border-bottom:2px solid transparent}",
 		".dsh-wsm-tab.is-active{color:var(--rt-accent,#4c6ef5);font-weight:600;border-bottom-color:var(--rt-accent,#4c6ef5);background:color-mix(in srgb,var(--rt-accent,#4c6ef5) 5%,transparent)}",
 		".dsh-wsm-pane{flex:1;min-height:0;overflow:auto;padding:14px 16px;display:flex;flex-direction:column;gap:12px}",
 		".dsh-wsm-btn{border:1px solid var(--dsw-alias-border-l1,#e9e9ec);background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#1a1a1a);border-radius:7px;padding:6px 12px;font-size:12.5px;cursor:pointer;white-space:nowrap}",
@@ -186,7 +186,7 @@ function installStyles() {
 		".dsh-wsm-btn.is-small{padding:3px 8px;font-size:12px}",
 		".dsh-wsm-btn:disabled{opacity:.45;cursor:not-allowed}",
 		".dsh-wsm-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}",
-		".dsh-wsm-input,.dsh-wsm-select,.dsh-wsm-textarea{border:1px solid var(--dsw-alias-border-l1,#e9e9ec);border-radius:7px;padding:7px 10px;font-size:13px;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#1a1a1a);font-family:inherit}",
+		".dsh-wsm-input,.dsh-wsm-select,.dsh-wsm-textarea{border:1px solid var(--dsw-alias-border-l1,#e9e9ec);border-radius:7px;padding:7px 10px;font-size:inherit;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#1a1a1a);font-family:inherit}",
 		".dsh-wsm-input.mono,.dsh-wsm-textarea{font-family:monospace;font-size:12.5px}",
 		".dsh-wsm-textarea{width:100%;resize:vertical;min-height:90px}",
 		".dsh-wsm-pill{display:inline-block;border:1px solid var(--rt-border,#e9e9ec);border-radius:10px;padding:1px 8px;font-size:11px;color:var(--dsw-alias-label-secondary,#5b5b60);margin-right:4px}",
@@ -883,7 +883,7 @@ function FilesPane(props) {
 		}) : null,
 		h(Modal, { open: !!v, wide: true, onClose: function () { viewer[1](null); } },
 			v ? h(React.Fragment, null,
-				h("h3", { className: "dsh-wsm-mono", style: { fontSize: 13 } }, v.path),
+				h("h3", { className: "dsh-wsm-mono", style: { fontSize:'inherit' } }, v.path),
 				v.text === null ? h(Notice, { msg: "二进制文件——不支持文本编辑，请用下载。", kind: "info" }) :
 					h("textarea", {
 						className: "dsh-wsm-textarea", style: { minHeight: "46vh", fontSize: 12 },
@@ -1403,7 +1403,7 @@ function errOf(r) {
 }
 // ===== WebShell 设置页（内置库 v2：无目录配置 / 内容可编辑 / 分类可管理 / 口令明文）=====
 var wsCard = { border: "1px solid var(--dsw-alias-border-l1,#e4e4e7)", borderRadius: 10, padding: "12px 14px", marginBottom: 12, background: "var(--dsw-alias-bg-base,#fff)" };
-var wsTitle = { fontSize: 13, fontWeight: 700, margin: "0 0 2px" };
+var wsTitle = { fontSize:'inherit', fontWeight: 700, margin: "0 0 2px" };
 var wsHint = { fontSize: 11, color: "#6e6e73", marginBottom: 8, lineHeight: 1.6 };
 var wsInput = { padding: "5px 8px", borderRadius: 6, border: "1px solid var(--dsw-alias-border-l1,#d9d9de)", fontSize: 12, boxSizing: "border-box" };
 var wsBtn = { padding: "5px 12px", borderRadius: 6, fontSize: 12, cursor: "pointer", border: "1px solid #d9d9de", background: "#fff", color: "#1a1a1a" };
@@ -1464,7 +1464,7 @@ function ShellEditor(props) {
 		}).catch(function (e) { setMsg("保存失败：" + String((e && e.message) || e)); });
 	}
 	var card = h("div", { style: { width: 780, maxWidth: "94vw", background: "#fff", borderRadius: 12, padding: 14, border: "1px solid #e4e4e7", boxShadow: "0 12px 34px rgba(0,0,0,0.18)" } },
-		h("div", { style: { fontSize: 14, fontWeight: 700 } }, "编辑 webshell 内容：", props.shell.name, "（", props.shell.file, "）"),
+		h("div", { style: { fontSize:'inherit', fontWeight: 700 } }, "编辑 webshell 内容：", props.shell.name, "（", props.shell.file, "）"),
 		content === null
 			? h("div", { style: { fontSize: 12, color: "#9a9aa0", padding: 20, textAlign: "center" } }, msg || "加载中…")
 			: h("textarea", { value: content, onChange: function (e) { setContent(e.target.value); }, spellCheck: false, style: { width: "100%", boxSizing: "border-box", height: "46vh", marginTop: 8, fontFamily: "ui-monospace, Consolas, monospace", fontSize: 12, lineHeight: 1.6, padding: 8, borderRadius: 8, border: "1px solid #d9d9de", background: "#fbfbfc", whiteSpace: "pre", overflow: "auto" } }),
@@ -1590,7 +1590,7 @@ function TplEditor(props) {
 		h("button", { type: "button", onClick: save, style: wsBtnPrimary }, "保存模板"),
 		h("button", { type: "button", onClick: props.onClose, style: wsBtn }, "关闭"));
 	var card = h("div", { style: { width: 480, maxWidth: "92vw", background: "#fff", borderRadius: 12, padding: 16, border: "1px solid #e4e4e7", maxHeight: "82vh", overflow: "auto" } },
-		h("div", { style: { fontSize: 14, fontWeight: 700, marginBottom: 2 } }, "形态模板：", props.item.kind),
+		h("div", { style: { fontSize:'inherit', fontWeight: 700, marginBottom: 2 } }, "形态模板：", props.item.kind),
 		h("div", { style: { fontSize: 12, color: "#6e6e73", marginBottom: 10 } }, props.item.label),
 		rows, btnRow);
 	return h("div", { style: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 2100, display: "flex", alignItems: "center", justifyContent: "center" } }, card);
@@ -1755,7 +1755,7 @@ function WebShellSettings(props) {
 					var open = collapsed[g.lang] !== true;
 					var n = 0; g.groups.forEach(function (og) { n += og.items.length; });
 					return h("div", { key: g.lang },
-						h("div", { style: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", padding: "6px 0", fontWeight: 700, fontSize: 13 }, onClick: function () { var n2 = Object.assign({}, collapsed); n2[g.lang] = open; setCollapsed(n2); } },
+						h("div", { style: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", padding: "6px 0", fontWeight: 700, fontSize:'inherit' }, onClick: function () { var n2 = Object.assign({}, collapsed); n2[g.lang] = open; setCollapsed(n2); } },
 							h("span", null, (open ? "▾" : "▸") + " " + g.lang),
 							h("span", { style: { fontSize: 11, color: "#6e6e73", fontWeight: 400 } }, n + " 项")),
 						open ? g.groups.map(function (og) {

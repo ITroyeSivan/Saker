@@ -50,6 +50,7 @@ function prepareProject(sid, tag = '') {
 }
 
 const source = fs.readFileSync(new URL('../plugins/dsh-redteam-results/lib/client.js', import.meta.url), 'utf8');
+const modeSource = fs.readFileSync(new URL('../plugins/dsh-mode-group/lib/client.js', import.meta.url), 'utf8');
 const start = source.indexOf('function ProjectPanel('), end = source.indexOf('function TaskPanel(', start);
 assert(start > 0 && end > start, 'ProjectPanel source located');
 const chatStart = source.indexOf('function ProjectChatStatus('), chatEnd = source.indexOf('function TaskPanel(', chatStart);
@@ -58,8 +59,8 @@ const taskStart = source.indexOf('function TaskPanel('), taskEnd = source.indexO
 assert(taskStart > 0 && taskEnd > taskStart, 'TaskPanel source located');
 assert(source.slice(taskStart, taskEnd).includes("status[1](null);error[1]('');records[1]({rows:[],stats:null,loading:true,error:''})"),
   '切换到新会话时必须先清空上一会话的项目状态，不能显示旧检查');
-assert(source.includes("key:props.sessionId+'-budget-'+String(!!props.blank)"),
-  '空白新会话必须使用独立任务面板实例，不能复用旧会话项目状态');
+assert(!source.includes("props.sessionId+'-budget-'"),
+  '设置抽屉不再内嵌第二个任务面板实例，避免复用旧会话项目状态');
 assert(source.includes("String(run.sessionId)!==String(props.sessionId)"),
   '项目状态必须拒绝显示其他会话的运行');
 assert(source.includes('var live=props.session') && source.includes('var blank=props.blank===true||live?.blank===true'),
@@ -184,12 +185,10 @@ try {
     closeModal.props.onClick();
     assert(!nodes(ui.render()).some(node => node.props && node.props.className === 'dsh-project-modal'), '关闭后弹窗必须消失');
     assert(source.includes("React.createElement(ProjectChatStatus,{sessionId:props.sessionId,status:current})"), '项目状态行必须真正挂到聊天设置上方');
-    assert(source.includes("||activeScenario==='cases')?React.createElement(ProjectChatStatus"),
-      '没有当前任务但场景仍是案例测试时，历史结果入口也必须挂载');
-assert(source.includes("policy&&(current.stopped||current.idle)&&!policy.blocker&&!policy.awaitingConfirmation&&!policy.parentSession?React.createElement('button'")
-  && source.indexOf("policy&&(current.stopped||current.idle)&&!policy.blocker&&!policy.awaitingConfirmation&&!policy.parentSession?") < source.indexOf("policy&&policy.scenario!=='project'&&!policy.awaitingConfirmation?"),
-  '案例任务正常停止后必须保留“新建测试”入口，不能只在自由测试中提供');
-    assert(source.includes('检查结果、历史和导出入口在对话上方的项目状态行'), '设置区不能继续复制完整检查表');
+    assert(source.includes("activeScenario==='cases'&&taskDetailsOpen[0]?React.createElement(ProjectChatStatus"),
+      '项目历史入口必须放在按需任务详情中');
+    assert(source.includes('onClick:startNewRound'), '案例任务结束后必须保留新建测试入口');
+    assert(source.includes('taskScopeDisplay(overview.scope,policy.target)'), '设置区不能继续复制完整检查表');
     assert(source.includes('用量口径：会话事件调用'), '调用统计必须解释会话事件与准入记账的差异');
     assert.equal(readTaskPolicy(store, 'ui-project').used.toolCalls, 0, '查看与刷新项目状态不能产生目标工具调用');
   });
@@ -445,8 +444,9 @@ assert(source.includes("policy&&(current.stopped||current.idle)&&!policy.blocker
   });
 
   await test('聊天入口提供案例测试并接入项目来源导入', () => {
-    assert(source.includes("projectMode?'案例测试':'自由测试'"), '测试场景必须显示案例测试');
-    assert(source.includes("['execution', '执行记录'], ['findings', '发现的问题'], ['materials', '测试资料']"), '结果页必须有单一内部的执行、发现和资料分类');
+    assert(modeSource.includes('label: "按清单检查"'), '场景选择器必须提供按清单检查');
+    assert(!source.includes("projectMode?'案例测试':'自由测试'"), '聊天工具条不得重复渲染场景选择器');
+ assert(source.includes("['research', '正在验证'], ['execution', '执行记录'], ['findings', '发现'], ['materials', '附件']"), '结果页必须有单一内部的问题、执行、发现和附件分类');
     assert(source.includes("api('project.import'"), '项目文档必须走真实导入接口');
     assert(source.includes("scenario:activeScenario"), '资料入口必须知道当前是项目场景');
     assert(source.includes("projectMode?'开始案例测试':'开始测试'"), '项目开始按钮必须有明确动作');

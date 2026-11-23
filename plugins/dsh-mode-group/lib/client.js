@@ -8,7 +8,7 @@ window.__ModuleLoader__.load({ id: "@dsh-external/dsh-mode-group", factory: (req
 var module = { exports: {} }; var exports = module.exports;
 "use strict";
 /* SAKER-UI-KIT:BEGIN */
-var SAKER_UI_KIT_CSS = "/* 5.7 共享组件层：Button / Input / Select / Badge / DataTable / Drawer / InlineNotice / EmptyState\n   单一来源：shared/ui-kit/ui-kit.css（令牌见 shared/ui-kit/ui-kit.json）。\n   由 scripts/sync-ui-kit.mjs 注入到各产品插件；插件里的同类尺寸规则应删除，避免双写。 */\n.saker-ui-btn{height:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px}\n.saker-ui-input{height:36px;border-radius:6px}\n.saker-ui-select{height:32px;border-radius:6px}\n.saker-ui-table td{height:38px}\n.saker-ui-badge{border-radius:6px;font-size:12px;line-height:1.5}\n.saker-ui-drawer{border-radius:12px}\n.saker-ui-notice{border-radius:6px;font-size:13px;line-height:1.5}\n.saker-ui-empty{border-radius:6px;font-size:13px;line-height:1.5}\n/* 现有插件类别名：与 canonical 类共用同一套尺寸 */\n.dsh-chat-panel-head button,.dsh-chat-actions button,.dsh-chat-task-status button,.dsh-task-nav button,.dsh-task-actions button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-prompt-io button,.dsh-prompt-more,.dsh-prompt-scopes button,.dsh-prompt-modes button,.dsh-prompt-foot button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-tools button,.dsh-materials-types button,.dsh-materials-foot button,.dsh-materials-table td button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-new button,.dsh-materials-import-actions button,.dsh-execution-tools>button,.dsh-test-content-actions button,.dsh-rtr-btn{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-task-nav select,.dsh-materials-tools select,.dsh-rtr-select{height:32px}\n.dsh-prompt-saveas input,.dsh-prompt-list input[type=search],.dsh-prompt-field input{height:36px}\n.dsh-materials-tools input[type=search],.dsh-materials-import input,.dsh-task-field input,.dsh-rtr-search{height:36px}\n.dsh-materials-table td{height:38px}\n.dsh-chat-setup svg,.dsh-task-workspace svg{width:16px;height:16px}\n.dsh-hnt-btn,.dsh-hnt-tab{height:32px}\n.dsh-hnt-input{height:36px}\n.dsh-hnt-select{height:32px}\n.dsh-mcs-btn,.dsh-mcs-iconbtn,.dsh-mcs-toolscount--btn{height:32px}\n.dsh-mcs-field input,.dsh-mcs-pairrow input,.dsh-mcs-search{height:36px}\n.dsh-mcs-field select,.dsh-mcs-seg button{height:32px}\n.dsh-sp-chip.is-btn{height:32px}\n.dsh-mg-chip{height:32px}\n/* 内联 style 插件（sec-config / skill-browse）：根容器打 data-saker-ui，\n   控件尺寸由共享层统一给，插件自己的 helper 不再写 height。 */\n[data-saker-ui] button{height:32px}\n[data-saker-ui] input:not([type=checkbox]):not([type=radio]):not([type=file]){height:36px}";
+var SAKER_UI_KIT_CSS = "/* 5.7 共享组件层：Button / Input / Select / Badge / DataTable / Drawer / InlineNotice / EmptyState\n   单一来源：shared/ui-kit/ui-kit.css（令牌见 shared/ui-kit/ui-kit.json）。\n   由 scripts/sync-ui-kit.mjs 注入到各产品插件；插件里的同类尺寸规则应删除，避免双写。 */\n.saker-ui-btn{height:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px}\n.saker-ui-input{height:36px;border-radius:6px}\n.saker-ui-select{height:32px;border-radius:6px}\n.saker-ui-table td{height:38px}\n.saker-ui-badge{border-radius:6px;font-size:12px;line-height:1.5}\n.saker-ui-drawer{border-radius:12px}\n.saker-ui-notice{border-radius:6px;font-size:inherit;line-height:1.5}\n.saker-ui-empty{border-radius:6px;font-size:inherit;line-height:1.5}\n/* 现有插件类别名：与 canonical 类共用同一套尺寸 */\n.dsh-chat-panel-head button,.dsh-chat-actions button,.dsh-chat-task-status button,.dsh-task-nav button,.dsh-task-actions button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-prompt-io button,.dsh-prompt-more,.dsh-prompt-scopes button,.dsh-prompt-modes button,.dsh-prompt-foot button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-tools button,.dsh-materials-types button,.dsh-materials-foot button,.dsh-materials-table td button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-new button,.dsh-materials-import-actions button,.dsh-execution-tools>button,.dsh-test-content-actions button,.dsh-rtr-btn{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-task-nav select,.dsh-materials-tools select,.dsh-rtr-select{height:32px}\n.dsh-prompt-saveas input,.dsh-prompt-list input[type=search],.dsh-prompt-field input{height:36px}\n.dsh-materials-tools input[type=search],.dsh-materials-import input,.dsh-task-field input,.dsh-rtr-search{height:36px}\n.dsh-materials-table td{height:38px}\n.dsh-chat-setup svg,.dsh-task-workspace svg{width:16px;height:16px}\n.dsh-hnt-btn,.dsh-hnt-tab{height:32px}\n.dsh-hnt-input{height:36px}\n.dsh-hnt-select{height:32px}\n.dsh-mcs-btn,.dsh-mcs-iconbtn,.dsh-mcs-toolscount--btn{height:32px}\n.dsh-mcs-field input,.dsh-mcs-pairrow input,.dsh-mcs-search{height:36px}\n.dsh-mcs-field select,.dsh-mcs-seg button{height:32px}\n.dsh-sp-chip.is-btn{height:32px}\n.dsh-mg-chip{height:32px}\n/* 内联 style 插件（sec-config / skill-browse）：根容器打 data-saker-ui，\n   控件尺寸由共享层统一给，插件自己的 helper 不再写 height。 */\n[data-saker-ui] button{height:32px}\n[data-saker-ui] input:not([type=checkbox]):not([type=radio]):not([type=file]){height:36px}";
 /* SAKER-UI-KIT:END */
 var React = require("react");
 var useState = React.useState, useEffect = React.useEffect, useRef = React.useRef, useCallback = React.useCallback;
@@ -194,9 +194,9 @@ function Chip(props) {
 }
 
 var SCENE_DEFS = [
-	{ id: "free", label: "自由测试", desc: "按你的目标和思路开展测试。", preset: "pentest" },
-	{ id: "competition", label: "比赛模式", desc: "根据题面、附件和实例解题。", preset: "ctf-solver" },
-	{ id: "cases", label: "案例测试", desc: "按已有案例或测试要求逐项执行。", preset: "pentest" }
+	{ id: "free", label: "直接开始", desc: "输入目标，边测边说明。", preset: "pentest" },
+	{ id: "cases", label: "按清单检查", desc: "按清单逐项验证并记录。", preset: "pentest" },
+	{ id: "competition", label: "做比赛题", desc: "粘贴题目或实例地址，按比赛要求解题。", preset: "ctf-solver" }
 ];
 var SCENE_IDS = SCENE_DEFS.map(function (s) { return s.id; });
 var SCENE_BY_PRESET = { pentest: "free", "ctf-solver": "competition" };
@@ -405,6 +405,14 @@ function sceneController(remote, sessions, uiWorkspace, workspaceList, currentSe
 		return work.then(function (sessionId) {
 			if (generation !== selectGeneration) return;
 			set({ busy: false, error: null });
+			// 广播给同一页面里的 Saker 插件：场景 chip 只改宿主 preset，
+			// Saker 的“测试文档/开始检查”仍按自己的 scene 读；不广播就会停在旧场景。
+			if (SCENE_IDS.indexOf(target) >= 0) {
+				try {
+					window.__sakerSelectedScene = target;
+					window.dispatchEvent(new CustomEvent("saker-scene-selected", { detail: { scene: target } }));
+				} catch { /* 非浏览器环境忽略 */ }
+			}
 			if (sessionId === s.id) return refresh();
 		}).catch(function (error) { set({ busy: false, error: msgOf(error) }); });
 	}
@@ -445,6 +453,16 @@ function SceneChip(props) {
 	var menu = useState(false), open = menu[0], setOpen = menu[1];
 	var btnRef = useRef(null), menuRef = useRef(null);
 	useEffect(function () { var off = ctl.subscribe(set); ctl.refresh(); return off; }, []);
+	// 首次加载/刷新时把当前场景同步给 Saker 插件；只在 select 时广播会漏掉
+	// “页面重开后宿主已是 cases、但 Saker 仍按 free 渲染”的情况。
+	useEffect(function () {
+		var id = snap.currentScene;
+		if (!id || typeof window === "undefined" || window.__sakerSelectedScene === id) return;
+		try {
+			window.__sakerSelectedScene = id;
+			window.dispatchEvent(new CustomEvent("saker-scene-selected", { detail: { scene: id } }));
+		} catch { /* 非浏览器环境忽略 */ }
+	}, [snap.currentScene]);
 	useEffect(function () {
 		if (open && menuRef.current && btnRef.current) place(menuRef.current, btnRef.current, "root");
 		if (!open) return;
@@ -459,7 +477,10 @@ function SceneChip(props) {
 	}, [open]);
 	var current = snap.currentScene && SCENE_DEFS.find(function (s) { return s.id === snap.currentScene; });
 	var preset = snap.presets.find(function (p) { return p.id === snap.currentPreset; });
-	var label = current ? current.label : (preset ? preset.name : (snap.currentPreset || "选择场景"));
+	var knownScene = SCENE_DEFS.find(function (item) { return item.id === SCENE_BY_PRESET[snap.currentPreset]; });
+	// 宿主偶尔返回没有名字的内部 preset；它既选不明白也不该占一条空菜单。
+	var extras = snap.presets.filter(function (item) { return item && item.id && String(item.name || '').trim() && !SCENE_DEFS.some(function (scene) { return scene.preset === item.id; }); });
+	var label = current ? current.label : (preset ? preset.name : (knownScene ? knownScene.label : (snap.currentPreset || "选择场景")));
 	useEffect(function () { if (snap.pendingTaskChoice) setOpen(true); }, [snap.pendingTaskChoice]);
 	return React.createElement(React.Fragment, null,
 		React.createElement("button", { ref: btnRef, type: "button", className: "dsh-mg-chip", title: snap.error || label, disabled: snap.busy, onClick: function () { setOpen(!open); } },
@@ -469,24 +490,24 @@ function SceneChip(props) {
 				return React.createElement("button", { key: scene.id, type: "button", role: "menuitem", className: "dsh-mg-item" + (scene.id === snap.currentScene ? " is-cur" : ""), onClick: function () { setOpen(false); ctl.select(scene.id); } },
 					React.createElement("span", { className: "dsh-mg-name" }, scene.label), React.createElement("span", { className: "dsh-mg-desc" }, scene.desc));
 			}),
-			snap.presets.length ? React.createElement("div", { className: "dsh-mg-desc", style: { padding: "8px 12px 0", borderTop: "1px solid var(--dsw-alias-border-l1,#e9e9ec)", marginTop: "8px" } }, "宿主预设") : null,
-			snap.presets.map(function (item) {
-				return React.createElement("button", { key: item.id, type: "button", role: "menuitem", className: "dsh-mg-item" + (!snap.currentScene && item.id === snap.currentPreset ? " is-cur" : ""), onClick: function () { setOpen(false); ctl.select(item.id); } },
-					React.createElement("span", { className: "dsh-mg-name" }, item.name), item.description ? React.createElement("span", { className: "dsh-mg-desc" }, item.description) : null);
-			})) : null,
+			extras.length ? React.createElement("details", { className: "dsh-mg-more" }, React.createElement("summary", null, "其他模式"),
+				extras.map(function (item) {
+					return React.createElement("button", { key: item.id, type: "button", role: "menuitem", className: "dsh-mg-item" + (!snap.currentScene && item.id === snap.currentPreset ? " is-cur" : ""), onClick: function () { setOpen(false); ctl.select(item.id); } },
+						React.createElement("span", { className: "dsh-mg-name" }, item.name), item.description ? React.createElement("span", { className: "dsh-mg-desc" }, item.description) : null);
+				})) : null,
 			snap.pendingTaskChoice ? React.createElement("div", { role: "dialog", "aria-label": "切换场景时如何处理正在运行的任务", style: { padding: "10px 12px 4px", borderTop: "1px solid var(--dsw-alias-border-l1,#e9e9ec)", marginTop: "8px" } },
 				React.createElement("p", { style: { margin: "0 0 8px", fontSize: "12px" } }, "旧任务仍在运行。选择切换后的处理方式："),
 				React.createElement("button", { type: "button", className: "dsh-mg-item", onClick: function () { ctl.resolveTaskChoice("continue"); } }, "保留旧任务继续，在新会话打开所选场景"),
 				React.createElement("button", { type: "button", className: "dsh-mg-item", onClick: function () { ctl.resolveTaskChoice("pause"); } }, "暂停旧任务后切换"),
 				React.createElement("button", { type: "button", className: "dsh-mg-item", onClick: function () { ctl.resolveTaskChoice("cancel"); } }, "取消旧任务后切换")) : null,
 		snap.error ? React.createElement("div", { role: "alert", className: "dsh-mg-desc", style: { padding: "8px 12px" } }, snap.error) : null
-	);
+		) : null);
 }
 
 function installStyles() {
 	if (document.getElementById("dsh-mg-style")) return function () {};
 	var css = [
-		".dsh-mg-chip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--dsw-alias-border-l1,#e9e9ec);background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#1a1a1a);border-radius:6px;padding:5px 10px;font-size:13px;cursor:pointer;max-width:min(260px,60vw);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;transition:background .12s ease}",
+		".dsh-mg-chip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--dsw-alias-border-l1,#e9e9ec);background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#1a1a1a);border-radius:6px;padding:5px 10px;font-size:inherit;cursor:pointer;max-width:min(260px,60vw);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;transition:background .12s ease}",
 		".dsh-mg-chip:hover{background:var(--dsw-alias-interactive-bg-hover,#f4f4f5)}",
 		".dsh-mg-chip:disabled{opacity:.5;cursor:default}",
 		".dsh-mg-chip:focus-visible,.dsh-mg-item:focus-visible{outline:2px solid var(--dsw-alias-accent,#4c6ef5);outline-offset:1px}",
@@ -494,9 +515,12 @@ function installStyles() {
 		".dsh-mg-menu{position:fixed;z-index:300;width:min(max-content,92vw);min-width:min(300px,92vw);max-width:min(440px,92vw);overflow:auto;overscroll-behavior:contain;background:var(--dsw-specific-menu,var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-base,#fff)));border:1px solid var(--dsw-alias-border-l2,#e4e4e7);border-radius:12px;box-shadow:0 10px 32px rgba(0,0,0,.14);padding:8px;display:none;animation:dsh-mg-in .1s ease}",
 		"@keyframes dsh-mg-in{from{opacity:0;transform:translateY(2px)}to{opacity:1;transform:none}}",
 		".dsh-mg-sub{min-width:min(320px,92vw)}",
-		".dsh-mg-item{display:flex;flex-direction:column;gap:4px;width:100%;text-align:left;border:none;background:none;border-radius:6px;padding:7px 10px;cursor:pointer;font-size:13px;color:var(--dsw-alias-label-primary,#1a1a1a)}",
+		".dsh-mg-item{display:flex;flex-direction:column;gap:4px;width:100%;text-align:left;border:none;background:none;border-radius:6px;padding:7px 10px;cursor:pointer;font-size:inherit;color:var(--dsw-alias-label-primary,#1a1a1a)}",
 		".dsh-mg-item:hover{background:var(--dsw-alias-interactive-bg-hover,#f4f4f5)}",
 		".dsh-mg-item.is-cur{outline:1px solid color-mix(in srgb,var(--dsw-alias-accent,#4c6ef5) 45%,transparent)}",
+		".dsh-mg-more{margin-top:8px;padding-top:8px;border-top:1px solid var(--dsw-alias-border-l1,#e9e9ec)}",
+		".dsh-mg-more>summary{cursor:pointer;padding:4px 8px;font-size:12px;color:var(--dsw-alias-label-secondary,#666);list-style:none}",
+		".dsh-mg-more>summary::-webkit-details-marker{display:none}.dsh-mg-more>summary:before{content:'›';display:inline-block;margin-right:8px}.dsh-mg-more[open]>summary:before{transform:rotate(90deg)}",
 		".dsh-mg-group{position:relative;align-items:baseline;flex-direction:row;justify-content:space-between;gap:8px}",
 		".dsh-mg-group .dsh-mg-desc{flex:1}",
 		".dsh-mg-name{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}",

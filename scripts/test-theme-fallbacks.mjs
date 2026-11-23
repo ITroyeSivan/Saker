@@ -93,10 +93,10 @@ if (violations.length) {
 }
 if (tokenViolations.length) {
   failed = 1;
-  console.log('FAIL 字号不在 5.7 令牌里（正文 13–14 / 分区标题 16 / 辅助 12）：');
+    console.log('FAIL 字号不在共享令牌里（正文 12–14 / 分区标题 16 / 辅助 11–12）：');
   for (const v of tokenViolations) console.log('   ' + v.plugin + ' fontSize: ' + v.size + (v.selector ? '  @ ' + v.selector : ''));
 } else {
-  console.log('ok   产品客户端的字号都在 5.7 令牌里（内联与 CSS 字符串都查，12 / 13 / 14 / 16）');
+  console.log('ok   产品客户端的字号都在共享令牌里（内联与 CSS 字符串都查，11 / 12 / 13 / 14 / 16）');
 }
 console.log('ok   宿主变量名单 ' + hostDefined.size + ' 个（来源：' + fixture.source + '）');
 process.exitCode = failed;

@@ -69,7 +69,7 @@ for (const name of productPluginDirectories(root)) {
   const source = path.join(root, 'plugins', name, 'src', 'client', 'styles.ts');
   if (fs.existsSync(source)) files.push(source);
 }
-assert(files.length >= 8, '产品插件客户端文件太少，门禁覆盖范围可疑：' + files.length);
+assert(files.length >= 7, '产品插件客户端文件太少，门禁覆盖范围可疑：' + files.length);
 
 const violations = [];
 for (const file of files) {

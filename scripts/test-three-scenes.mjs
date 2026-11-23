@@ -55,9 +55,14 @@ try {
     const known = ['redteam_execution', 'project_check', 'project_evidence', 'competition_challenge', 'competition_knowledge']
     assert.deepEqual(computeScenarioDeny('free', known), ['competition_challenge', 'competition_knowledge', 'project_check', 'project_evidence'])
     assert.deepEqual(computeScenarioDeny('cases', known), ['competition_challenge', 'competition_knowledge', 'project_check', 'project_evidence', 'redteam_execution'])
-    assert.deepEqual(computeScenarioDeny('competition', known, { knowledgeEnabled: false }), ['competition_challenge', 'competition_knowledge', 'project_check', 'project_evidence', 'redteam_execution'])
-    assert.deepEqual(computeScenarioDeny('competition', known, { knowledgeEnabled: true }), ['competition_challenge', 'project_check', 'project_evidence', 'redteam_execution'])
+    // 比赛场景必须保留题面/候选答案入口，否则模型只能写工作流材料、
+    // competition_answers 永远没有记录（2026-11-15 Desktop 实测）。
+    assert.deepEqual(computeScenarioDeny('competition', known, { knowledgeEnabled: false }), ['competition_knowledge', 'project_check', 'project_evidence', 'redteam_execution'])
+    assert.deepEqual(computeScenarioDeny('competition', known, { knowledgeEnabled: true }), ['competition_knowledge', 'project_check', 'project_evidence', 'redteam_execution'])
     assert.deepEqual(computeScenarioDeny('unknown', known), [])
+    const freeEntryTools = ['redteam_context', 'redteam_finding_register', 'redteam_finding_update', 'redteam_execution']
+    assert.deepEqual(computeScenarioDeny('free', freeEntryTools), [],
+      'request import, candidate registration and execution must stay visible in the free scene')
   })
 
   await test('competition preserves exact answers and never lets the model mark accepted', () => {

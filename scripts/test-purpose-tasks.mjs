@@ -26,7 +26,7 @@ await test('review uses the explicitly selected model, bounded child policy and 
     const result = await tasks.run(parent('parent'), 'review');
     assert.equal(starts.length, 1);
     assert.equal(starts[0].delivery, 'caller');
-    assert.deepEqual(starts[0].request.agentOptions, { provider: 'opencode-go', model: 'deepseek-v4.1-flash' });
+    assert.deepEqual(starts[0].agentOptions, { provider: 'opencode-go', model: 'deepseek-v4.1-flash' });
     assert.equal(readTaskPolicy(store, starts[0].childId).parentSession, 'parent');
     assert.equal(result.output, 'review ok');
     assert.equal(result.model.provider, 'opencode-go');
@@ -46,8 +46,8 @@ await test('empty report model inherits the current session model and report pro
     } } };
     const tasks = createPurposeTasks(ctx, () => store);
     await tasks.run(parent('parent2'), 'report');
-    assert.equal(starts[0].request.agentOptions, undefined, 'empty selection must inherit');
-    assert.match(starts[0].request.prompt[0].text, /禁止新发任何目标请求/);
+    assert.equal(starts[0].agentOptions, undefined, 'empty selection must inherit');
+    assert.match(starts[0].prompt[0].text, /禁止新发任何目标请求/);
   } finally { store.close(); }
 });
 
@@ -63,9 +63,9 @@ await test('explicit purpose model keeps its reasoning effort alongside provider
       return { childId: spec.childId, dispose: async () => {}, result: Promise.resolve({ stopReason: 'completed', output: [] }) };
     } } };
     await createPurposeTasks(ctx, () => store).run(parent('parent-reasoning'), 'review');
-    assert.equal(starts[0].request.agentOptions.provider, 'opencode-go');
-    assert.equal(starts[0].request.agentOptions.model, 'deepseek-v4.1-flash');
-    assert.equal(starts[0].request.agentOptions.reasoningEffort, 'low');
+    assert.equal(starts[0].agentOptions.provider, 'opencode-go');
+    assert.equal(starts[0].agentOptions.model, 'deepseek-v4.1-flash');
+    assert.equal(starts[0].agentOptions.reasoningEffort, 'low');
   } finally { store.close(); }
 });
 
@@ -153,19 +153,19 @@ await test('purpose input states actual empty counts so empty work needs no spec
   const store = openStore(':memory:');
   const starts = [];
   const tasks = createPurposeTasks({ subagents: { async startActivation(spec) {
-    starts.push(spec); return { result: Promise.resolve({ stopReason: 'completed', output: [] }), dispose: async () => {} };
+    starts.push(spec); return { childId: spec.childId, result: Promise.resolve({ stopReason: 'completed', output: [] }), dispose: async () => {} };
   } } }, () => store);
   try {
     chooseTaskMode(store, 'empty-parent', 'regular', { workers: 1 });
     startTaskPolicy(store, 'empty-parent', { mode: 'regular', budget: { toolCalls: 12, workers: 1 } });
     await tasks.run(parent('empty-parent'), 'report');
-    const prompt = starts[0].request.prompt[0].text;
+    const prompt = starts[0].prompt[0].text;
     assert(prompt.includes('"findings":0,"requests":0,"assets":0,"checks":0,"materials":0,"receipts":0'));
     assert(prompt.includes('全为0表示没有可整理的记录'));
     assert(prompt.includes('kind=finding')); assert(prompt.includes('不调用redteam_delivery'));
     registerFinding(store, 'empty-parent', 'pentest', { title: '父任务中的本地示例', severity: 'low', summary: '只作读取验证' });
     await tasks.run(parent('empty-parent'), 'review');
-    assert(starts[1].request.prompt[0].text.includes('"findings":1'), '统计来自当前父记录而不是固定空值');
+    assert(starts[1].prompt[0].text.includes('"findings":1'), '统计来自当前父记录而不是固定空值');
   } finally { await tasks.dispose(); store.close(); }
 });
 await test('finding reads stay scoped, paginate indexes, and return bounded lossless UTF-8 detail chunks', () => {

@@ -130,11 +130,11 @@ test('项目启动不要求 mode 或 toolCalls；null 上限不会被当成已�
   } finally { store.close(); }
 });
 
-test('旧实战启动仍要求 mode，但 toolCalls 可留空', () => {
+test('旧实战启动仍要求 mode，未填预算采用有界默认值', () => {
   const store = openStore(':memory:');
   try {
     assert.throws(() => startTaskPolicy(store, 's-legacy-missing', { question: 'x', budget: { toolCalls: 5 } }), /invalid task mode/);
-    assert.equal(startTaskPolicy(store, 's-legacy-budget', { mode: 'regular', question: 'x' }).budget.toolCalls, null);
+    assert.equal(startTaskPolicy(store, 's-legacy-budget', { mode: 'regular', question: 'x' }).budget.toolCalls, 60);
     const policy = startTaskPolicy(store, 's-legacy', { mode: 'regular', question: 'x', budget: { toolCalls: 5 } });
     assert.equal(policy.scenario, 'pentest');
     assert.equal(policy.mode, 'regular');

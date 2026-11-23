@@ -4,7 +4,8 @@
 // 这里只给列表字段与引用；知识文章与账号不属于本页。
 import path from 'node:path';
 import fs from 'node:fs';
-import { readTaskContext } from './task-context.js';
+import { createHash } from 'node:crypto';
+import { readTaskContext, readTaskRecord } from './task-context.js';
 import { readInventory } from 'dsh-saker/asset-inventory';
 import { listMaterialReads, listMaterialViews, materialReadKey } from './material-reads.js';
 import { findingsReferencing } from './store.js';
@@ -113,6 +114,7 @@ export function materialsList(store, sessionId, options = {}) {
 
   const context = readTaskContext(store, sessionId);
   const rows = [];
+  const includeWorkspace = options.includeWorkspace === true;
   const seenAssetUrls = new Set();
   for (const asset of context?.assets || []) {
     const key = assetKey(asset?.url);
@@ -128,11 +130,18 @@ export function materialsList(store, sessionId, options = {}) {
         account: request.authContext, status: statusOf(request.response), valid: request.valid === true, revision: request.revision } });
   }
   rows.push(...fileRows(store, sessionId));
-  // 工作区账本里"已收集但任务资料还没登记"的资产（去重后）也进列表，避免独立孤岛。
-  rows.push(...inventoryAssetRows(options.workspace, seenAssetUrls));
-
   const counts = { all: rows.length, asset: 0, request: 0, file: 0 };
   for (const row of rows) counts[row.kind] += 1;
+
+  // 工作区账本属于整个工作区，不是当前任务的授权范围。默认不混进任务资料；
+  // 用户主动展开时再追加，并单独给出数量，避免把别处扫描到的资产误认为本任务证据。
+  const workspaceRows = inventoryAssetRows(options.workspace, new Set(seenAssetUrls));
+  const workspace = { count: workspaceRows.length, included: includeWorkspace };
+  if (includeWorkspace) {
+    rows.push(...workspaceRows);
+    counts.all += workspaceRows.length;
+    counts.asset += workspaceRows.length;
+  }
 
   // 「模型是否读过」（v6 第 5.4 节）：只认模型真的通过工具读过原文的那一次；
   // 本地浏览详情、引用到输入框都不算（它们不增加模型输入）。
@@ -159,7 +168,7 @@ export function materialsList(store, sessionId, options = {}) {
 
   const total = filtered.length, offset = options.offset === undefined ? (page - 1) * pageSize : Math.max(0, Number(options.offset) || 0);
   const pageRows = filtered.slice(offset, offset + pageSize);
-  return { type, sort, read: readFilter, page, pageSize, offset, total, counts, rows: pageRows,
+  return { type, sort, read: readFilter, page, pageSize, offset, total, counts, rows: pageRows, workspace,
     nextOffset: offset + pageRows.length < total ? offset + pageRows.length : null,
     more: Math.max(0, total - offset - pageRows.length),
     note: '列表正文只用于定位；实际读取原文才会计入模型输入。' };
@@ -246,8 +255,10 @@ export function readMaterialExcerpt(store, sessionId, { id, offset = 0, limit } 
   const base = { id: target, name, kind, offset, limit: budget, totalBytes: bytes.length };
   if (kind === 'http') {
     // 头/体分开给：只有头被截断、还是体被截断，必须一眼能分清，避免把半截体当完整报文。
-    const text = slice.toString('utf8');
+    const text = maskSecretsInByteRange(bytes, sliced.start, sliced.end);
     const split = text.indexOf('\r\n\r\n');
+    // The model-facing excerpt must not become a second way to read the raw
+    // Authorization/Cookie bytes that request import deliberately hid.
     const head = split >= 0 ? text.slice(0, split) : text;
     const body = split >= 0 ? text.slice(split + 4) : '';
     const payload = { ...base, head, body, headTruncated: split < 0, bodyTruncated: split >= 0 && byteTruncated,
@@ -257,11 +268,13 @@ export function readMaterialExcerpt(store, sessionId, { id, offset = 0, limit } 
   }
   if (kind === 'code') {
     // 代码先到限制：字节预算或 80 行，哪个先到算哪个。
-    const lines = slice.toString('utf8').split('\n');
+    const rawText = slice.toString('utf8');
+    const lines = rawText.split('\n');
     const capped = lines.length > CODE_LINE_LIMIT;
     const kept = capped ? lines.slice(0, CODE_LINE_LIMIT) : lines;
-    const content = kept.join('\n');
-    const nextOffset = capped ? sliced.start + Buffer.byteLength(content + '\n', 'utf8') : (byteTruncated ? sliced.end : null);
+    const rawContent = kept.join('\n');
+    const nextOffset = capped ? sliced.start + Buffer.byteLength(rawContent + '\n', 'utf8') : (byteTruncated ? sliced.end : null);
+    const content = maskSecretsInByteRange(bytes, sliced.start, capped ? nextOffset : sliced.end);
     // 先到限制可能是行数（80 行）也可能是字节（8192）：note 必须说清到底被哪个截断，
     // 否则 nextOffset 非空却写"没有更多内容"，模型会以为读完了。
     const note = capped ? '代码最多 80 行，本段先到行数上限；用 nextOffset 续读。'
@@ -271,7 +284,7 @@ export function readMaterialExcerpt(store, sessionId, { id, offset = 0, limit } 
       note };
     return { ...payload, text: JSON.stringify(payload) };
   }
-  const payload = { ...base, content: slice.toString('utf8'), nextOffset: byteTruncated ? sliced.end : null,
+  const payload = { ...base, content: maskSecretsInByteRange(bytes, sliced.start, sliced.end), nextOffset: byteTruncated ? sliced.end : null,
     note: '默认每段最多 8192 字节；用 nextOffset 续读。' };
   return { ...payload, text: JSON.stringify(payload) };
 }
@@ -280,6 +293,34 @@ export function readMaterialExcerpt(store, sessionId, { id, offset = 0, limit } 
 function maskSecrets(text) {
   return String(text || '')
     .replace(/^(authorization|proxy-authorization|cookie|set-cookie):[^\r\n]*/gim, (line) => line.split(':')[0] + ': [已遮蔽]');
+}
+
+/**
+ * 分页读取时按原始字节范围遮蔽，而不是先切片再对片段做正则。
+ * 如果页起点落在敏感头行中间，下一页没有 `Authorization:` 前缀，单独处理
+ * 该片段就会把值尾当成普通正文。这里先定位页起点所在整行，命中敏感头时
+ * 直接遮蔽本页覆盖部分；跨过该行后再处理其余正文。
+ */
+function maskSecretsInByteRange(bytes, start, end) {
+  if (!bytes || end <= start) return '';
+  const lineStart = start > 0 ? bytes.lastIndexOf(0x0a, start - 1) + 1 : 0;
+  const nextNewline = bytes.indexOf(0x0a, start);
+  const lineEnd = nextNewline >= 0 ? nextNewline : bytes.length;
+  if (lineStart < start) {
+    const lineText = bytes.subarray(lineStart, lineEnd).toString('utf8');
+    if (/^(authorization|proxy-authorization|cookie|set-cookie):/i.test(lineText)) {
+      if (lineEnd >= end) return '[已遮蔽]';
+      return '[已遮蔽]' + maskSecrets(bytes.subarray(lineEnd, end).toString('utf8'));
+    }
+  }
+  return maskSecrets(bytes.subarray(start, end).toString('utf8'));
+}
+
+function utf8ChunkEnd(bytes, start, requestedEnd) {
+  if (requestedEnd >= bytes.length) return bytes.length
+  let end = Math.max(start, requestedEnd)
+  while (end > start && (bytes[end] & 0xC0) === 0x80) end -= 1
+  return end
 }
 
 /**
@@ -299,15 +340,22 @@ export function materialsDetail(store, sessionId, { kind, id, offset, limit } = 
   }
   if (kind === 'request') {
     const [requestId, revision] = String(id).split(':');
-    const row = (context?.requests || []).find(item => item.id === requestId && item.revision === revision);
+    let row = (context?.requests || []).find(item => item.id === requestId && item.revision === revision);
+    let historical = false;
+    if (!row) {
+      row = readTaskRecord(store, sessionId, 'request', requestId, revision);
+      historical = !!row;
+    }
     if (!row) throw new Error('请求不存在或已移除');
     const relatedChecks = (context?.checks || []).filter(check => check.endpoint === row.endpoint && check.authContext === row.authContext)
       .map(check => ({ entryId: check.entryId, requestValid: check.requestValid === true, methodReviewed: check.methodReviewed === true }));
-    return { kind, id, endpoint: row.endpoint, authContext: row.authContext, revision: row.revision, valid: row.valid === true,
+    return { kind, id, ownerSessionId: sessionId, historical, endpoint: row.endpoint, authContext: row.authContext,
+      revision: row.revision, valid: row.valid === true,
       request: maskSecrets(row.request), response: maskSecrets(row.response),
+      requestDigest: createHash('sha256').update(JSON.stringify([requestId, revision, String(row.request || ''), String(row.response || '')])).digest('hex'),
       inputs: Array.isArray(row.inputs) ? row.inputs.map(input => ({ name: input.name, location: input.location })) : [],
       relatedChecks, relatedFindings: findingsReferencing(store, sessionId, 'request', id),
-      note: '原文按保存时的字节返回；密钥已遮蔽。回执不等于影响成立。' };
+      note: '原文按保存时的字节返回；密钥已遮蔽。' + (historical ? '这是历史版本，须核对当前身份后使用。' : '回执不等于影响成立。') };
   }
   if (kind === 'file') {
     const raw = store.db.prepare('SELECT record FROM business_materials WHERE session_id=? AND id=?').get(sessionId, id);
@@ -318,14 +366,21 @@ export function materialsDetail(store, sessionId, { kind, id, offset, limit } = 
     // 调用方可以续读。单段上限 16KB，避免一次灌爆上下文。
     const start = Number.isInteger(offset) && offset >= 0 ? offset : 0;
     const size = Number.isInteger(limit) ? Math.max(512, Math.min(limit, 16384)) : EXCERPT_DEFAULT_BYTES;
-    let preview = null, truncated = false, missing = false, totalBytes = null, nextOffset = null, bytes = null;
+    let preview = null, truncated = false, missing = false, totalBytes = null, nextOffset = null, bytes = null, actualDigest = '';
+    let fileType = '';
     try {
+      fileType = fs.statSync(record.file).isFile() ? 'file' : 'other';
+      if (fileType !== 'file') throw new Error('not a regular file');
       bytes = fs.readFileSync(record.file);
       totalBytes = bytes.length;
-      preview = bytes.subarray(start, start + size).toString('utf8');
-      nextOffset = start + size < bytes.length ? start + size : null;
+      actualDigest = createHash('sha256').update(bytes).digest('hex');
+      const end = utf8ChunkEnd(bytes, start, start + size)
+      preview = maskSecretsInByteRange(bytes, start, end);
+      nextOffset = end < bytes.length ? end : null;
       truncated = nextOffset !== null;
     } catch { missing = true; }
+    const registeredDigest = String(record.digest || '');
+    const integrityValid = !missing && registeredDigest ? actualDigest === registeredDigest : null;
     let importSummary = record.summary && typeof record.summary === 'object' ? {
       format: record.summary.format || '',
       entries: Number.isInteger(record.summary.entries) ? record.summary.entries : null,
@@ -354,6 +409,7 @@ export function materialsDetail(store, sessionId, { kind, id, offset, limit } = 
       // 导入摘要（v6 第 10.5 节 UI05「错误可定位」）：条目数、坏记录数，以及坏的是第几条、为什么。
       importSummary,
       coverage: record.coverage || null, missing, truncated, preview,
+      registeredDigest, actualDigest, integrityValid, fileType,
       offset: start, limit: size, totalBytes, nextOffset,
       relatedFindings: findingsReferencing(store, sessionId, 'file', id),
       note: '分段本地查看；用 nextOffset 续读，预览不证明接口可用，也不会自动送入模型。' };

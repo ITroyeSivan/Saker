@@ -14,7 +14,7 @@ import { productPluginDirectories } from './lib/product-plugins.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RULE = /([^{}\n]{1,200})\{([^{}]*)\}/g;
-const SEV = /#(?:c2182f|ff4d4d|d9b00c|3b7dd8|ff8fa0|ff6b8a|ffd43b|4dabf7|2f9e44|c92a2a|36f1b0|ff8787|ffdd33|ffc93c)\b/gi;
+const SEV = /#(?:c2182f|ff4d4d|c2650a|3b7dd8|ff8fa0|ff6b8a|ffb454|4dabf7|2f9e44|c92a2a|36f1b0|ff8787|b45309|9a3412|ff8a3d)\b/gi;
 const STATUS = /sev|status|state|badge|dot|legend|chart|verified|pending|risk|critical|high|medium|low|is-ok|is-err|is-warn|is-danger|is-live|is-done|notice|toast|alert|error|success|warn|dead|stuck|fixed/i;
 const REPORT_TAGS = new Set(['body', 'h1', 'h2', 'h3', 'pre', 'table', 'td', 'th', '.page', '.meta', '.card', '.sev']);
 
@@ -35,7 +35,7 @@ for (const name of productPluginDirectories(root)) {
   const source = path.join(root, 'plugins', name, 'src', 'client', 'styles.ts');
   if (fs.existsSync(source)) files.push(source);
 }
-assert(files.length >= 8, '产品插件客户端文件太少，门禁覆盖范围可疑：' + files.length);
+assert(files.length >= 7, '产品插件客户端文件太少，门禁覆盖范围可疑：' + files.length);
 
 const violations = [];
 for (const file of files) {

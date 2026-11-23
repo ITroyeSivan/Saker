@@ -1,10 +1,12 @@
+// Saker workbench client source. Runtime output: plugins/dsh-redteam-results/lib/client.js
+// Rebuild: node scripts/build-client.mjs
 window.__ModuleLoader__.load({ id: "@dsh-external/dsh-redteam-results", factory: (require) => {
 var module = { exports: {} }; var exports = module.exports;
 // dsh-redteam-results client — 执行记录、发现与测试资料的直接入口。
 // 默认按 sessionId 隔离；只有历史页请求 scope=all。模式隔离由服务端双键强制。
 "use strict";
 /* SAKER-UI-KIT:BEGIN */
-var SAKER_UI_KIT_CSS = "/* 5.7 共享组件层：Button / Input / Select / Badge / DataTable / Drawer / InlineNotice / EmptyState\n   单一来源：shared/ui-kit/ui-kit.css（令牌见 shared/ui-kit/ui-kit.json）。\n   由 scripts/sync-ui-kit.mjs 注入到各产品插件；插件里的同类尺寸规则应删除，避免双写。 */\n.saker-ui-btn{height:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px}\n.saker-ui-input{height:36px;border-radius:6px}\n.saker-ui-select{height:32px;border-radius:6px}\n.saker-ui-table td{height:38px}\n.saker-ui-badge{border-radius:6px;font-size:12px;line-height:1.5}\n.saker-ui-drawer{border-radius:12px}\n.saker-ui-notice{border-radius:6px;font-size:13px;line-height:1.5}\n.saker-ui-empty{border-radius:6px;font-size:13px;line-height:1.5}\n/* 现有插件类别名：与 canonical 类共用同一套尺寸 */\n.dsh-chat-panel-head button,.dsh-chat-actions button,.dsh-chat-task-status button,.dsh-task-nav button,.dsh-task-actions button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-prompt-io button,.dsh-prompt-more,.dsh-prompt-scopes button,.dsh-prompt-modes button,.dsh-prompt-foot button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-tools button,.dsh-materials-types button,.dsh-materials-foot button,.dsh-materials-table td button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-new button,.dsh-materials-import-actions button,.dsh-execution-tools>button,.dsh-test-content-actions button,.dsh-rtr-btn{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-task-nav select,.dsh-materials-tools select,.dsh-rtr-select{height:32px}\n.dsh-prompt-saveas input,.dsh-prompt-list input[type=search],.dsh-prompt-field input{height:36px}\n.dsh-materials-tools input[type=search],.dsh-materials-import input,.dsh-task-field input,.dsh-rtr-search{height:36px}\n.dsh-materials-table td{height:38px}\n.dsh-chat-setup svg,.dsh-task-workspace svg{width:16px;height:16px}\n.dsh-hnt-btn,.dsh-hnt-tab{height:32px}\n.dsh-hnt-input{height:36px}\n.dsh-hnt-select{height:32px}\n.dsh-mcs-btn,.dsh-mcs-iconbtn,.dsh-mcs-toolscount--btn{height:32px}\n.dsh-mcs-field input,.dsh-mcs-pairrow input,.dsh-mcs-search{height:36px}\n.dsh-mcs-field select,.dsh-mcs-seg button{height:32px}\n.dsh-sp-chip.is-btn{height:32px}\n.dsh-mg-chip{height:32px}\n/* 内联 style 插件（sec-config / skill-browse）：根容器打 data-saker-ui，\n   控件尺寸由共享层统一给，插件自己的 helper 不再写 height。 */\n[data-saker-ui] button{height:32px}\n[data-saker-ui] input:not([type=checkbox]):not([type=radio]):not([type=file]){height:36px}";
+var SAKER_UI_KIT_CSS = "/* 5.7 共享组件层：Button / Input / Select / Badge / DataTable / Drawer / InlineNotice / EmptyState\n   单一来源：shared/ui-kit/ui-kit.css（令牌见 shared/ui-kit/ui-kit.json）。\n   由 scripts/sync-ui-kit.mjs 注入到各产品插件；插件里的同类尺寸规则应删除，避免双写。 */\n.saker-ui-btn{height:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px}\n.saker-ui-input{height:36px;border-radius:6px}\n.saker-ui-select{height:32px;border-radius:6px}\n.saker-ui-table td{height:38px}\n.saker-ui-badge{border-radius:6px;font-size:var(--dsh-content-font-size-secondary,13px);line-height:1.5}\n.saker-ui-drawer{border-radius:12px}\n.saker-ui-notice{border-radius:6px;font-size:var(--dsh-content-font-size-secondary,13px);line-height:1.5}\n.saker-ui-empty{border-radius:6px;font-size:var(--dsh-content-font-size-secondary,13px);line-height:1.5}\n/* 现有插件类别名：与 canonical 类共用同一套尺寸 */\n.dsh-chat-panel-head button,.dsh-chat-actions button,.dsh-chat-task-status button,.dsh-task-nav button,.dsh-task-actions button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-prompt-io button,.dsh-prompt-more,.dsh-prompt-scopes button,.dsh-prompt-modes button,.dsh-prompt-foot button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-tools button,.dsh-materials-types button,.dsh-materials-foot button,.dsh-materials-table td button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-new button,.dsh-materials-import-actions button,.dsh-execution-tools>button,.dsh-test-content-actions button,.dsh-rtr-btn{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-task-nav select,.dsh-materials-tools select,.dsh-rtr-select{height:32px}\n.dsh-prompt-saveas input,.dsh-prompt-list input[type=search],.dsh-prompt-field input{height:36px}\n.dsh-materials-tools input[type=search],.dsh-materials-import input,.dsh-task-field input,.dsh-rtr-search{height:36px}\n.dsh-materials-table td{height:38px}\n.dsh-chat-setup svg,.dsh-task-workspace svg{width:16px;height:16px}\n.dsh-hnt-btn,.dsh-hnt-tab{height:32px}\n.dsh-hnt-input{height:36px}\n.dsh-hnt-select{height:32px}\n.dsh-mcs-btn,.dsh-mcs-iconbtn,.dsh-mcs-toolscount--btn{height:32px}\n.dsh-mcs-field input,.dsh-mcs-pairrow input,.dsh-mcs-search{height:36px}\n.dsh-mcs-field select,.dsh-mcs-seg button{height:32px}\n.dsh-sp-chip.is-btn{height:32px}\n.dsh-mg-chip{height:32px}\n/* 内联 style 插件（sec-config / skill-browse）：根容器打 data-saker-ui，\n   控件尺寸由共享层统一给，插件自己的 helper 不再写 height。 */\n[data-saker-ui] button{height:32px}\n[data-saker-ui] input:not([type=checkbox]):not([type=radio]):not([type=file]){height:36px}";
 /* SAKER-UI-KIT:END */
 var React = require("react");
 var useState = React.useState, useEffect = React.useEffect, useCallback = React.useCallback, useRef = React.useRef;
@@ -716,15 +718,15 @@ function toSimpleHtml(md) {
 
 function htmlReport(meta, stats, rows, mode) {
 	var label = MODE_META[mode] ? MODE_META[mode].label : mode;
-	var sevColor = { critical: "#e5484d", high: "#e87d2e", medium: "#b58a00", low: "#3b7dd8" };
+	var sevColor = { critical: "#e5484d", high: "#e87d2e", medium: "#c2650a", low: "#3b7dd8" };
 	var h = ['<!doctype html><html><head><meta charset="utf-8"><title>' + esc(label) + '报告</title><style>'];
 	h.push('body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;margin:0;background:#f6f7f9;color:#1a1a1a;line-height:1.65}');
 	h.push('.page{max-width:880px;margin:0 auto;padding:40px 44px;background:#fff;min-height:100vh}');
 	h.push('h1{font-size:24px;border-bottom:2px solid #1a1a1a;padding-bottom:10px}h2{font-size:17px;margin-top:34px;border-left:4px solid #4c6ef5;padding-left:10px}h3{font-size:14px;margin:18px 0 6px;color:#555}');
-	h.push('.meta{color:#666;font-size:13px;margin:6px 0 2px}.card{border:1px solid #e5e5ea;border-radius:10px;padding:18px 20px;margin:18px 0;background:#fff}');
-	h.push('.sev{display:inline-block;font-size:12px;font-weight:600;padding:2px 10px;border-radius:10px;color:#fff;margin-right:8px}');
+	h.push('.meta{color:#666;font-size:14px;margin:6px 0 2px}.card{border:1px solid #e5e5ea;border-radius:10px;padding:18px 20px;margin:18px 0;background:#fff}');
+	h.push('.sev{display:inline-block;font-size:13px;font-weight:600;padding:2px 10px;border-radius:10px;color:#fff;margin-right:8px}');
 	h.push('pre{background:#f4f4f6;border:1px solid #e9e9ec;border-radius:8px;padding:12px;white-space:pre-wrap;word-break:break-word;font-size:12.5px;overflow-x:auto}');
-	h.push('table{border-collapse:collapse;width:100%;font-size:13px}td,th{border:1px solid #e5e5ea;padding:6px 10px;text-align:left}th{background:#f6f7f9}');
+	h.push('table{border-collapse:collapse;width:100%;font-size:14px}td,th{border:1px solid #e5e5ea;padding:6px 10px;text-align:left}th{background:#f6f7f9}');
 	h.push('</style></head><body><div class="page">');
 	h.push('<h1>' + esc(label) + '报告</h1>');
 	h.push('<p class="meta">' + esc(MODE_META[mode] ? MODE_META[mode].metaLabels[0] : "对象") + '：' + esc(meta.targetLabel || "—") + ' ｜ ' + esc(MODE_META[mode] ? MODE_META[mode].metaLabels[1] : "版本") + '：' + esc(meta.version || "—") + ' ｜ scope：' + esc(meta.scope || "—") + '</p>');
@@ -752,9 +754,9 @@ function htmlReport(meta, stats, rows, mode) {
 		h.push(assetView
 			? '<div class="card"><h2>#' + f.seq + ' ' + esc(f.title) + ' <span class="sev" style="background:#3a7d5f">' + esc(f.type || (mode === "binary-analysis" ? "产物" : "战果")) + '</span></h2>'
 			: mode === "ctf-solver"
-			? '<div class="card"><h2>#' + f.seq + ' ' + esc(f.title) + ' <span class="sev" style="background:' + (f.status === "verified" ? "#3a7d5f" : f.status === "stuck" ? "#c2182f" : "#b58a00") + '">' + esc(CTF_STATUS_LABEL[f.status] || f.status) + '</span></h2>'
+			? '<div class="card"><h2>#' + f.seq + ' ' + esc(f.title) + ' <span class="sev" style="background:' + (f.status === "verified" ? "#3a7d5f" : f.status === "stuck" ? "#c2182f" : "#c2650a") + '">' + esc(CTF_STATUS_LABEL[f.status] || f.status) + '</span></h2>'
 			: mode === "incident-response"
-			? '<div class="card"><h2>#' + f.seq + ' ' + esc(f.title) + ' <span class="sev" style="background:' + (f.status === "verified" ? "#3a7d5f" : f.status === "fixed" ? "#3b7dd8" : f.status === "false-positive" ? "#8a8a8f" : "#b58a00") + '">' + esc(TIMELINE_STATUS_LABEL[f.status] || f.status) + '</span></h2>'
+			? '<div class="card"><h2>#' + f.seq + ' ' + esc(f.title) + ' <span class="sev" style="background:' + (f.status === "verified" ? "#3a7d5f" : f.status === "fixed" ? "#3b7dd8" : f.status === "false-positive" ? "#8a8a8f" : "#c2650a") + '">' + esc(TIMELINE_STATUS_LABEL[f.status] || f.status) + '</span></h2>'
 			: '<div class="card"><h2>#' + f.seq + ' ' + esc(f.title) + ' <span class="sev" style="background:' + (sevColor[f.severity] || "#888") + '">' + esc(SEVERITY_LABEL[f.severity] || f.severity) + '</span></h2>');
 		h.push('<div class="md">' + toSimpleHtml(mdReport(f, mode)) + '</div></div>');
 	});
@@ -769,7 +771,7 @@ function htmlReport(meta, stats, rows, mode) {
 
 "".length; // noop
 var CSS_SCREEN = [
-	".dsh-rtr-screen{position:relative;height:100%;overflow:auto;width:100%;min-width:0;box-sizing:border-box;background:radial-gradient(900px 480px at 50% -10%,rgba(58,157,255,.10),transparent 60%),#050f1f;color:#e6f2ff;font-size:13px}",
+	".dsh-rtr-screen{position:relative;height:100%;overflow:auto;width:100%;min-width:0;box-sizing:border-box;background:radial-gradient(900px 480px at 50% -10%,rgba(58,157,255,.10),transparent 60%),#050f1f;color:#e6f2ff;font-size:var(--dsh-content-font-size,1em)}",
 	".dsh-rtr-screen::before{content:\"\";position:absolute;inset:0;pointer-events:none;background-image:linear-gradient(rgba(58,157,255,.08) 1px,transparent 1px),linear-gradient(90deg,rgba(58,157,255,.08) 1px,transparent 1px);background-size:40px 40px}",
 	".dsh-rtr-screen::after{content:\"\"}",
 	".dsh-scr-inner{position:relative;z-index:2;display:flex;flex-direction:column;gap:14px;container-type:inline-size;container-name:scrinner;padding:clamp(10px,1.6vw,20px) clamp(12px,1.8vw,24px) 26px;min-height:100%;box-sizing:border-box;max-width:1680px;margin:0 auto;width:100%}",
@@ -803,8 +805,8 @@ var CSS_SCREEN = [
 	".dsh-scr-hleft{display:flex;align-items:center;gap:14px;min-width:0}",
 	".dsh-scr-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px 16px;min-width:0;padding:12px 24px;border:1px solid rgba(58,157,255,.45);border-radius:10px;background:rgba(10,30,60,.45);backdrop-filter:blur(10px);box-shadow:0 0 20px rgba(58,157,255,.15)}",
 	".dsh-scr-title{font-size:22px;font-weight:700;letter-spacing:3px;background:linear-gradient(90deg,#7cc8ff,#ffffff,#7cc8ff);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:#7cc8ff}",
-	".dsh-scr-title small{display:block;font-size:12px;letter-spacing:4px;color:#8fb4d9;font-weight:600;margin-top:2px;-webkit-text-fill-color:#8fb4d9}",
-	".dsh-scr-live{display:flex;align-items:center;gap:8px;font-size:14px;color:#36f1b0;letter-spacing:1px}",
+	".dsh-scr-title small{display:block;font-size:var(--dsh-content-font-size-secondary,0.93em);letter-spacing:4px;color:#8fb4d9;font-weight:600;margin-top:2px;-webkit-text-fill-color:#8fb4d9}",
+	".dsh-scr-live{display:flex;align-items:center;gap:8px;font-size:var(--dsh-content-font-size,1em);color:#36f1b0;letter-spacing:1px}",
 	".dsh-scr-dot{width:10px;height:10px;border-radius:50%;background:#36f1b0;box-shadow:0 0 8px #36f1b0;animation:dshPulse 2s ease-in-out infinite}",
 	"@keyframes dshPulse{0%,100%{opacity:1}50%{opacity:.5}}",
 	".dsh-scr-clock{font-family:monospace;font-size:22px;color:#3a9dff;letter-spacing:.08em}",
@@ -817,7 +819,7 @@ var CSS_SCREEN = [
 	".dsh-scr-table td,.dsh-scr-table th{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
 	"@container scrinner (max-width:700px){.dsh-scr-grid{grid-template-columns:1fr}}",
 	"@container scrinner (max-width:620px){.dsh-scr-nums{grid-template-columns:repeat(2,minmax(84px,1fr))}.dsh-scr-title{font-size:15px}.dsh-scr-clock{font-size:15px}}",
-	"@container scrinner (max-width:460px){.dsh-scr-nums{grid-template-columns:repeat(auto-fit,minmax(72px,1fr))}.dsh-scr-bar .lbl{width:56px;font-size:11px}.dsh-scr-num b{font-size:24px}}",
+	"@container scrinner (max-width:460px){.dsh-scr-nums{grid-template-columns:repeat(auto-fit,minmax(72px,1fr))}.dsh-scr-bar .lbl{width:56px;font-size:var(--dsh-content-font-size-secondary,0.93em)}.dsh-scr-num b{font-size:24px}}",
 	"@media (max-width:980px){.dsh-scr-grid{grid-template-columns:1fr}}",
 	"@media (max-width:640px){.dsh-scr-nums{grid-template-columns:repeat(2,1fr)}.dsh-scr-title{font-size:15px}}",
 	".dsh-scr-panel{position:relative;min-width:0;overflow:hidden;border:1px solid rgba(58,157,255,.45);border-radius:10px;background:rgba(10,30,60,.45);padding:16px 20px;backdrop-filter:blur(10px);box-shadow:0 0 15px rgba(58,157,255,.1)}",
@@ -837,7 +839,7 @@ var CSS_SCREEN = [
 	"@keyframes dshShimmer{from{background-position:200% 0}to{background-position:-200% 0}}",
 	"@keyframes dshNumGlow{0%,100%{text-shadow:0 0 12px rgba(64,196,255,.35)}50%{text-shadow:0 0 28px rgba(64,196,255,.8)}}",
 	".dsh-scr-clockwrap{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}",
-	".dsh-scr-range,.dsh-scr-date{background:rgba(58,157,255,.15);color:#fff;border:1px solid rgba(58,157,255,.45);border-radius:6px;padding:6px 12px;font-size:12px;outline:none;color-scheme:dark;backdrop-filter:blur(8px);transition:border-color .2s,box-shadow .2s}",
+	".dsh-scr-range,.dsh-scr-date{background:rgba(58,157,255,.15);color:#fff;border:1px solid rgba(58,157,255,.45);border-radius:6px;padding:6px 12px;font-size:var(--dsh-content-font-size-secondary,0.93em);outline:none;color-scheme:dark;backdrop-filter:blur(8px);transition:border-color .2s,box-shadow .2s}",
 	".dsh-scr-range:hover,.dsh-scr-date:hover{border-color:rgba(120,200,255,.75)}",
 	".dsh-scr-range:focus,.dsh-scr-date:focus{border-color:rgba(140,220,255,.9);box-shadow:0 0 0 3px rgba(58,157,255,.18)}",
 	".dsh-rtr-screen .dsh-rtr-btn{background:rgba(58,157,255,.15);color:#e6f2ff;border-color:rgba(58,157,255,.45);backdrop-filter:blur(8px);transition:background .2s,border-color .2s,color .2s}",
@@ -861,7 +863,7 @@ var CSS_SCREEN = [
 	"@keyframes dshPlanetSpin{from{transform:rotateY(0deg) rotateX(0deg)}to{transform:rotateY(360deg) rotateX(360deg)}}",
 	"@keyframes dshEarthTex{from{background-position:0 0}to{background-position:-260px 0}}",
 	"@keyframes dshTwinkle{0%,100%{opacity:.1}50%{opacity:1}}",
-	".dsh-scr-herotag{position:absolute;bottom:-4px;left:50%;transform:translateX(-50%);font-size:11px;letter-spacing:.2em;color:#8fb4d9;white-space:nowrap}",
+	".dsh-scr-herotag{position:absolute;bottom:-4px;left:50%;transform:translateX(-50%);font-size:var(--dsh-content-font-size-secondary,0.93em);letter-spacing:.2em;color:#8fb4d9;white-space:nowrap}",
 	"@keyframes dshGrat{from{background-position:0 0,0 0}to{background-position:190px 0,0 0}}",
 	"@keyframes dshSweep{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}",
 	"@keyframes dshOrbitSpin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}",
@@ -871,42 +873,42 @@ var CSS_SCREEN = [
 	".dsh-rtr-distsec{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1 1 220px}",
 	".dsh-rtr-disthead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}",
 	".dsh-rtr-distlegend{display:flex;gap:8px 12px;flex-wrap:wrap;min-width:0}",
-	".dsh-rtr-distleg{font-size:12px;color:var(--dsw-alias-label-secondary,#666);display:inline-flex;align-items:center;gap:4px;max-width:160px;overflow:hidden;white-space:nowrap}",
+	".dsh-rtr-distleg{font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-secondary,#666);display:inline-flex;align-items:center;gap:4px;max-width:160px;overflow:hidden;white-space:nowrap}",
 	".dsh-rtr-distleg i{width:7px;height:7px;border-radius:2px;flex:none}",
 	".dsh-rtr-segbar{display:flex;height:14px;border-radius:6px;overflow:hidden;gap:0px;background:color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 4%,var(--dsw-alias-bg-base,#fff))}",
 	".dsh-rtr-segbar span{display:block;min-width:3px;transition:width .5s ease}",
-	".dsh-rtr-distdetails summary{font-size:12px;color:var(--dsw-alias-label-tertiary,#8a8a8f);cursor:pointer;user-select:none;width:max-content}",
+	".dsh-rtr-distdetails summary{font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-tertiary,#8a8a8f);cursor:pointer;user-select:none;width:max-content}",
 	".dsh-rtr-distdetails[open] summary{margin-bottom:4px;color:var(--dsw-alias-state-business-primary,#4c6ef5)}",
-	".dsh-rtr-disttitle{font-size:12px;letter-spacing:.05em;color:var(--dsw-alias-label-tertiary,#8a8a8f)}",
+	".dsh-rtr-disttitle{font-size:var(--dsh-content-font-size-secondary,0.93em);letter-spacing:.05em;color:var(--dsw-alias-label-tertiary,#8a8a8f)}",
 	".dsh-rtr-dist{display:flex;flex-direction:column;gap:4px;max-height:138px;overflow-y:auto;min-width:0}",
 	".dsh-rtr-distrow{display:grid;grid-template-columns:minmax(60px,110px) 1fr 26px;align-items:center;gap:8px;min-width:0}",
-	".dsh-rtr-distlbl{font-size:12px;color:var(--dsw-alias-label-secondary,#666);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+	".dsh-rtr-distlbl{font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-secondary,#666);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
 	".dsh-rtr-disttrack{height:8px;border-radius:4px;background:rgba(120,150,190,.16);overflow:hidden}",
 	".dsh-rtr-disttrack span{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,var(--dsw-alias-state-business-primary,#4c6ef5),color-mix(in srgb,var(--dsw-alias-state-business-primary,#4c6ef5) 55%,#9db8ff));transition:width .4s ease}",
 	".dsh-rtr-distrow.is-click{cursor:pointer}",
 	".dsh-rtr-distrow.is-click .dsh-rtr-disttrack span{background:linear-gradient(90deg,#7a5cf5,#b48cff)}",
 	".dsh-rtr-distrow.is-click:hover .dsh-rtr-distlbl{color:var(--dsw-alias-state-business-primary,#4c6ef5)}",
-	".dsh-rtr-distval{font-size:12px;font-family:monospace;color:var(--dsw-alias-label-primary,#333);text-align:right}",
+	".dsh-rtr-distval{font-size:var(--dsh-content-font-size-secondary,0.93em);font-family:monospace;color:var(--dsw-alias-label-primary,#333);text-align:right}",
 	".dsh-scr-panel h4{margin:0 0 14px;font-size:15px;font-weight:600;letter-spacing:.04em;color:#fff;padding-bottom:10px;border-bottom:1px solid rgba(58,157,255,.2)}",
 	".dsh-scr-panel h4::before{content:\"\"}",
 	".dsh-scr-center{display:flex;flex-direction:column;gap:14px}",
 	".dsh-scr-nums{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}",
 	".dsh-scr-num{border:1px solid rgba(58,157,255,.45);border-radius:10px;padding:16px 12px 12px;text-align:center;background:rgba(10,30,60,.45);backdrop-filter:blur(10px);box-shadow:0 0 15px rgba(58,157,255,.12)}",
 	".dsh-scr-num b{display:block;font-size:36px;font-weight:700;color:#fff;font-family:monospace;line-height:1.1}",
-	".dsh-scr-num span{font-size:13px;letter-spacing:.1em;color:#8fb4d9}",
+	".dsh-scr-num span{font-size:var(--dsh-content-font-size,1em);letter-spacing:.1em;color:#8fb4d9}",
 	".dsh-scr-num.is-good b{color:var(--rt-ok-bright,#36f1b0);text-shadow:0 0 10px rgba(54,241,176,.5)}",
-	".dsh-scr-num.is-warn b{color:var(--rt-sev-medium-bright,#ffd43b);text-shadow:0 0 10px rgba(255,212,59,.5)}",
+	".dsh-scr-num.is-warn b{color:var(--rt-sev-medium-bright,#ffb454);text-shadow:0 0 10px rgba(255,180,84,.45)}",
 	".dsh-scr-num.is-bad b{color:var(--rt-sev-high-bright,#ff6b8a);text-shadow:0 0 10px rgba(255,107,138,.5)}",
-	".dsh-scr-bar{display:flex;align-items:center;gap:10px;margin:7px 0;font-size:12px}",
+	".dsh-scr-bar{display:flex;align-items:center;gap:10px;margin:7px 0;font-size:var(--dsh-content-font-size-secondary,0.93em)}",
 	".dsh-scr-bar .lbl{width:80px;color:#8fb4d9;flex:none;text-align:right}",
 	".dsh-scr-bar .track{flex:1;height:8px;border-radius:4px;background:rgba(58,157,255,.15);overflow:hidden}",
 	".dsh-scr-bar .fill{height:100%;border-radius:4px;background:#3a9dff;box-shadow:0 0 6px rgba(58,157,255,.6)}",
 	".dsh-scr-bar .fill.is-alt{background:#3a9dff;box-shadow:0 0 6px rgba(58,157,255,.6)}",
 	".dsh-scr-bar .val{width:34px;color:#fff;font-family:monospace;flex:none}",
-	".dsh-scr-donut{width:132px;height:132px;border-radius:50%;margin:14px auto 24px;position:relative;isolation:isolate;transform:scaleY(.62);background:conic-gradient(#ff4d6d 0 25%,#ffaa00 25% 50%,#ffdd33 50% 75%,#3a9dff 75% 100%);box-shadow:0 0 18px rgba(58,157,255,.2)}",
+	".dsh-scr-donut{width:132px;height:132px;border-radius:50%;margin:14px auto 24px;position:relative;isolation:isolate;transform:scaleY(.62);background:conic-gradient(#ff4d6d 0 25%,#ff8a3d 25% 50%,#ffb454 50% 75%,#3a9dff 75% 100%);box-shadow:0 0 18px rgba(58,157,255,.2)}",
 	".dsh-scr-donut::before{content:\"\";position:absolute;left:2px;right:2px;top:0;bottom:-26px;border-radius:50%;background:linear-gradient(180deg,#0e2a52,#0a1c3a);z-index:-1;box-shadow:0 18px 28px rgba(2,8,20,.65)}",
 	".dsh-scr-donut::after{content:attr(data-total);position:absolute;inset:27px;border-radius:50%;background:#050f1f;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;color:#fff;font-family:monospace;transform:scaleY(1.62)}",
-	".dsh-scr-b3d{position:relative;height:clamp(150px,20vh,210px);font-size:10px;perspective:56em;perspective-origin:50% calc(50% - 11em)}",
+	".dsh-scr-b3d{position:relative;height:clamp(150px,20vh,210px);font-size:var(--dsh-content-font-size-secondary,0.93em);perspective:56em;perspective-origin:50% calc(50% - 11em)}",
 	".dsh-scr-b3stage{position:absolute;top:72%;left:50%;transform-style:preserve-3d;transform:rotateY(-38deg)}",
 	".dsh-scr-b3floor{position:absolute;left:-14em;top:-7em;width:28em;height:14em;transform:translateY(6.5em) rotateX(90deg);background:radial-gradient(rgba(5,15,31,0) 40%,#050f1f 78%),linear-gradient(rgba(58,157,255,.16) 1px,transparent 1px),linear-gradient(90deg,rgba(58,157,255,.16) 1px,transparent 1px);background-size:100%,2em 2em,2em 2em}",
 	".dsh-scr-b3slot{position:absolute;left:0;top:0;transform-style:preserve-3d;margin-left:var(--x)}",
@@ -918,56 +920,56 @@ var CSS_SCREEN = [
 	".dsh-scr-b3bar>i:nth-child(3){transform:rotate3d(0,1,0,0deg) translateZ(1.3em);filter:brightness(.8)}",
 	".dsh-scr-b3bar>i:nth-child(4){transform:rotate3d(0,1,0,90deg) translateZ(1.3em);filter:brightness(.4)}",
 	".dsh-scr-b3num{position:absolute;left:-1.3em;width:2.6em;text-align:center;font-size:1.35em;font-weight:700;color:#fff;font-family:monospace;text-shadow:0 1px 5px rgba(0,0,0,.85);transform:rotateY(38deg) translateZ(1.6em) translateY(calc(max(1em,5em - 13em*var(--v,.04))))}",
-	".dsh-scr-legend{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;font-size:12px;color:#8fb4d9}",
+	".dsh-scr-legend{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;font-size:var(--dsh-content-font-size-secondary,0.93em);color:#8fb4d9}",
 	".dsh-scr-legend i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:-1px}",
-	".dsh-scr-table{width:100%;border-collapse:collapse;font-size:13px}",
-	".dsh-scr-table th{position:sticky;top:0;z-index:1;color:#3a9dff;font-weight:500;text-align:left;padding:10px 8px;border-bottom:1px solid rgba(58,157,255,.2);letter-spacing:.04em;font-size:12px;background:rgba(10,40,80,.85)}",
+	".dsh-scr-table{width:100%;border-collapse:collapse;font-size:var(--dsh-content-font-size,1em)}",
+	".dsh-scr-table th{position:sticky;top:0;z-index:1;color:#3a9dff;font-weight:500;text-align:left;padding:10px 8px;border-bottom:1px solid rgba(58,157,255,.2);letter-spacing:.04em;font-size:var(--dsh-content-font-size,1em);background:rgba(10,40,80,.85)}",
 	".dsh-scr-table td{padding:10px 8px;border-bottom:1px solid rgba(58,157,255,.08);color:#e6f2ff}",
 	".dsh-scr-table tr:hover td{background:rgba(58,157,255,.1)}",
-	".dsh-scr-sev{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:600}",
+	".dsh-scr-sev{display:inline-block;padding:2px 9px;border-radius:999px;font-size:var(--dsh-content-font-size-secondary,0.93em);font-weight:600}",
 	".dsh-scr-sev-critical{color:var(--rt-sev-critical-bright,#ff8fa0);background:rgba(194,24,47,.30);border:1px solid rgba(255,90,110,.45)}",
 	".dsh-scr-sev-high{color:var(--rt-sev-high-bright,#ffb0b0);background:rgba(255,77,77,.20);border:1px solid rgba(255,90,90,.45)}",
 	".dsh-scr-sev-medium{color:var(--rt-sev-medium-bright,#ffe98a);background:rgba(255,221,51,.12);border:1px solid rgba(255,221,51,.45)}",
 	".dsh-scr-sev-low{color:var(--rt-sev-low-bright,#7cc0ff);background:rgba(58,157,255,.16);border:1px solid rgba(58,157,255,.45)}",
-	".dsh-scr-mode{display:flex;align-items:center;gap:10px;margin:6px 0;font-size:13px;color:#e6f2ff}",
+	".dsh-scr-mode{display:flex;align-items:center;gap:10px;margin:6px 0;font-size:var(--dsh-content-font-size,1em);color:#e6f2ff}",
 	".dsh-scr-mode .tag{width:104px;flex:none;color:#8fb4d9}",
 	".dsh-scr-mode .n{margin-left:auto;font-family:monospace;color:#fff}",
 	".dsh-scr-empty{padding:60px 20px;text-align:center;color:#8fb4d9;letter-spacing:.12em;font-size:15px}"
 ].join("\n");
 
 var CSS = [
-	".dsh-rtr-root{height:100%;display:flex;min-height:0;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#1a1a1a);font-size:13px}",
+	".dsh-rtr-root{height:100%;display:flex;min-height:0;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#1a1a1a);font-size:var(--dsh-content-font-size,1em)}",
 	".dsh-rtr-side{width:168px;flex:none;border-right:1px solid var(--dsw-alias-border-l1,#e9e9ec);padding:16px 12px;display:flex;flex-direction:column;gap:4px;background:linear-gradient(180deg,color-mix(in srgb,var(--rt-accent,#4c6ef5) 3%,var(--dsw-alias-bg-base,#fff)),color-mix(in srgb,var(--rt-accent,#4c6ef5) 6%,var(--dsw-alias-bg-base,#fff)));backdrop-filter:blur(12px) saturate(1.1)}",
-	".dsh-rtr-side-title{font-size:12px;letter-spacing:.12em;color:var(--dsw-alias-label-tertiary,#8a8a8f);padding:0 8px 12px;font-weight:600}",
-	".dsh-rtr-side-item{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 10px;border:none;background:none;border-radius:6px;cursor:pointer;color:var(--dsw-alias-label-secondary,#5b5b60);font-size:13px;text-align:left;transition:background .18s,color .18s,box-shadow .18s}",
+	".dsh-rtr-side-title{font-size:var(--dsh-content-font-size-secondary,0.93em);letter-spacing:.12em;color:var(--dsw-alias-label-tertiary,#8a8a8f);padding:0 8px 12px;font-weight:600}",
+	".dsh-rtr-side-item{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 10px;border:none;background:none;border-radius:6px;cursor:pointer;color:var(--dsw-alias-label-secondary,#5b5b60);font-size:var(--dsh-content-font-size,1em);text-align:left;transition:background .18s,color .18s,box-shadow .18s}",
 	".dsh-rtr-side-item:hover{background:var(--dsw-alias-interactive-bg-hover,color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 6%,transparent));color:var(--dsw-alias-label-primary,#1a1a1a)}",
 	".dsh-rtr-side-item.is-active{background:color-mix(in srgb,var(--rt-accent,#4c6ef5) 10%,transparent);color:var(--rt-accent,#4c6ef5);font-weight:600;box-shadow:inset 3px 0 0 0 var(--rt-accent,#4c6ef5),inset 0 0 0 1px color-mix(in srgb,var(--rt-accent,#4c6ef5) 10%,transparent)}",
-	".dsh-rtr-count{font-size:12px;min-width:22px;text-align:center;border-radius:999px;padding:0px 8px;background:color-mix(in srgb,var(--rt-accent,#4c6ef5) 10%,transparent);border:1px solid color-mix(in srgb,var(--rt-accent,#4c6ef5) 28%,transparent);color:var(--rt-accent,#4c6ef5);font-variant-numeric:tabular-nums}",
+	".dsh-rtr-count{font-size:var(--dsh-content-font-size-secondary,0.93em);min-width:22px;text-align:center;border-radius:999px;padding:0px 8px;background:color-mix(in srgb,var(--rt-accent,#4c6ef5) 10%,transparent);border:1px solid color-mix(in srgb,var(--rt-accent,#4c6ef5) 28%,transparent);color:var(--rt-accent,#4c6ef5);font-variant-numeric:tabular-nums}",
 	".dsh-rtr-main{flex:1;min-width:0;display:flex;flex-direction:column;overflow:auto;padding:16px 16px 16px;gap:12px}",
-	".dsh-rtr-meta{display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--dsw-alias-label-secondary,#5b5b60);border:1px solid var(--dsw-alias-border-l1,#e9e9ec);border-radius:9px;padding:8px 12px;background:color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 4%,var(--dsw-alias-bg-base,#fff))}",
+	".dsh-rtr-meta{display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-secondary,#5b5b60);border:1px solid var(--dsw-alias-border-l1,#e9e9ec);border-radius:9px;padding:8px 12px;background:color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 4%,var(--dsw-alias-bg-base,#fff))}",
 	".dsh-rtr-meta b{color:var(--dsw-alias-label-primary,#1a1a1a);font-weight:600;margin-left:4px}",
 	".dsh-rtr-meta.is-ghost{border-style:dashed;background:transparent;color:var(--dsw-alias-label-tertiary,#8a8a8f);padding:4px 12px}",
-	".dsh-rtr-metalink{font:inherit;font-size:12px;color:var(--dsw-alias-state-business-primary,#4c6ef5);background:none;border:none;cursor:pointer;padding:0}",
+	".dsh-rtr-metalink{font:inherit;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-state-business-primary,#4c6ef5);background:none;border:none;cursor:pointer;padding:0}",
 	".dsh-rtr-metalink:hover{text-decoration:underline}",
-	".dsh-rtr-meta input{font:inherit;font-size:12px;padding:3px 8px;border:1px solid var(--dsw-alias-border-l2,#d4d4d8);border-radius:6px;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#1a1a1a)}",
+	".dsh-rtr-meta input{font:inherit;font-size:var(--dsh-content-font-size,1em);padding:3px 8px;border:1px solid var(--dsw-alias-border-l2,#d4d4d8);border-radius:6px;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#1a1a1a)}",
 	".dsh-rtr-stats{display:flex;flex-direction:column;gap:12px}",
 	".dsh-rtr-cardsrow{display:flex;gap:12px;flex-wrap:wrap}",
 	".dsh-rtr-statcard{flex:1;min-width:110px;border:1px solid var(--dsw-alias-border-l1,#e9e9ec);border-radius:10px;padding:8px 12px;background:var(--dsw-alias-bg-base,#fff);cursor:pointer}",
 	".dsh-rtr-statcard:hover{border-color:var(--dsw-alias-border-l2,#d4d4d8)}",
 	".dsh-rtr-statcard.is-dim{opacity:.55}",
 	".dsh-rtr-statnum{font-size:21px;font-weight:700;line-height:1.2;margin-top:4px}",
-	".dsh-rtr-statlabel{font-size:12px;color:var(--dsw-alias-label-tertiary,#8a8a8f);letter-spacing:.05em}",
+	".dsh-rtr-statlabel{font-size:var(--dsh-content-font-size,1em);color:var(--dsw-alias-label-tertiary,#8a8a8f);letter-spacing:.05em}",
 	".dsh-rtr-statextra{display:flex;flex-direction:row;flex-wrap:wrap;gap:8px 16px;width:100%;align-items:flex-start}",
 	".dsh-rtr-bar{display:flex;height:10px;border-radius:5px;overflow:hidden;background:color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 4%,var(--dsw-alias-bg-base,#fff));flex:1 1 100%}",
 	".dsh-rtr-chiprow{display:flex;gap:8px;flex-wrap:wrap;flex:1 1 100%}",
 	".dsh-rtr-types{display:flex;gap:8px;flex-wrap:wrap}",
-	".dsh-rtr-typechip{font-size:12px;padding:2px 8px;border-radius:6px;background:color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 4%,var(--dsw-alias-bg-base,#fff));color:var(--dsw-alias-label-secondary,#5b5b60);border:1px solid var(--dsw-alias-border-l1,#e9e9ec);cursor:pointer}",
+	".dsh-rtr-typechip{font-size:var(--dsh-content-font-size-secondary,0.93em);padding:2px 8px;border-radius:6px;background:color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 4%,var(--dsw-alias-bg-base,#fff));color:var(--dsw-alias-label-secondary,#5b5b60);border:1px solid var(--dsw-alias-border-l1,#e9e9ec);cursor:pointer}",
 	".dsh-rtr-typechip.is-static{cursor:default;opacity:.78}",
 	".dsh-rtr-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}",
 	".dsh-rtr-toolbar .dsh-rtr-spacer{flex:1}",
-	".dsh-rtr-select,.dsh-rtr-search{font:inherit;font-size:12px;padding:4px 8px;border:1px solid var(--dsw-alias-border-l2,#d4d4d8);border-radius:6px;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#1a1a1a)}",
+	".dsh-rtr-select,.dsh-rtr-search{font:inherit;font-size:var(--dsh-content-font-size,1em);padding:4px 8px;border:1px solid var(--dsw-alias-border-l2,#d4d4d8);border-radius:6px;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#1a1a1a)}",
 	".dsh-rtr-search{width:170px}",
-	".dsh-rtr-btn{font:inherit;font-size:12px;padding:5px 11px;border-radius:6px;border:1px solid var(--dsw-alias-border-l2,#d4d4d8);background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#1a1a1a);cursor:pointer;white-space:nowrap}",
+	".dsh-rtr-btn{font:inherit;font-size:var(--dsh-content-font-size,1em);padding:5px 11px;border-radius:6px;border:1px solid var(--dsw-alias-border-l2,#d4d4d8);background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#1a1a1a);cursor:pointer;white-space:nowrap}",
 	".dsh-rtr-btn:hover{background:var(--dsw-alias-interactive-bg-hover,color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 7%,transparent))}",
 	".dsh-rtr-btn.is-primary{border-color:transparent;background:var(--dsw-alias-state-business-primary,#4c6ef5);color:#fff}",
 	".dsh-rtr-btn.is-primary:hover{filter:brightness(1.05)}",
@@ -975,61 +977,61 @@ var CSS = [
 	".dsh-rtr-btn:active{background:color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 13%,transparent)}",
 	".dsh-rtr-btn:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4c6ef5);outline-offset:1px}",
 	".dsh-rtr-btn:disabled{opacity:.5;cursor:default}",
-	".dsh-rtr-grouphead{display:flex;align-items:center;gap:12px;padding:12px 12px 4px;font-weight:600;font-size:13px;color:var(--dsw-alias-label-secondary,#5b5b60)}",
+	".dsh-rtr-grouphead{display:flex;align-items:center;gap:12px;padding:12px 12px 4px;font-weight:600;font-size:var(--dsh-content-font-size,1em);color:var(--dsw-alias-label-secondary,#5b5b60)}",
 	".dsh-rtr-grouphead .dsh-rtr-count{font-weight:400}",
 	".dsh-rtr-row{border:1px solid var(--dsw-alias-border-l1,#e9e9ec);border-radius:10px;overflow:hidden;background:var(--dsw-alias-bg-base,#fff)}",
 	".dsh-rtr-row + .dsh-rtr-row{margin-top:8px}",
 	".dsh-rtr-rowhead{display:flex;align-items:center;gap:12px;padding:8px 12px;cursor:pointer}",
 	".dsh-rtr-rowhead:hover{background:var(--dsw-alias-interactive-bg-hover,color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 5%,transparent))}",
-	".dsh-rtr-seq{font-size:12px;color:var(--dsw-alias-label-tertiary,#8a8a8f);width:28px;flex:none;text-align:right}",
+	".dsh-rtr-seq{font-size:var(--dsh-content-font-size,1em);color:var(--dsw-alias-label-tertiary,#8a8a8f);width:28px;flex:none;text-align:right}",
 	".dsh-rtr-title{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
-	".dsh-rtr-summ{flex:1;min-width:0;color:var(--dsw-alias-label-tertiary,#8a8a8f);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
-	".dsh-rtr-time{font-size:12px;color:var(--dsw-alias-label-tertiary,#8a8a8f);flex:none}",
-	".dsh-rtr-sev{flex:none;font-size:12px;font-weight:600;padding:4px 8px;border-radius:9px;border:1px solid}",
+	".dsh-rtr-summ{flex:1;min-width:0;color:var(--dsw-alias-label-tertiary,#8a8a8f);font-size:var(--dsh-content-font-size,1em);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+	".dsh-rtr-time{font-size:var(--dsh-content-font-size,1em);color:var(--dsw-alias-label-tertiary,#8a8a8f);flex:none}",
+	".dsh-rtr-sev{flex:none;font-size:var(--dsh-content-font-size,1em);font-weight:600;padding:4px 8px;border-radius:9px;border:1px solid}",
 	".dsh-rtr-sev-critical{color:#c2182f;border-color:rgba(194,24,47,.35);background:rgba(194,24,47,.08)}",
 	".dsh-rtr-sev-high{color:#ff4d4d;border-color:rgba(255,77,77,.35);background:rgba(255,77,77,.08)}",
-	".dsh-rtr-sev-medium{color:#b58a00;border-color:rgba(181,138,0,.35);background:rgba(181,138,0,.08)}",
+	".dsh-rtr-sev-medium{color:#c2650a;border-color:rgba(194,101,10,.35);background:rgba(194,101,10,.08)}",
 	".dsh-rtr-sev-low{color:#3b7dd8;border-color:rgba(59,125,216,.35);background:rgba(59,125,216,.08)}",
-	".dsh-rtr-st{flex:none;font-size:12px;padding:4px 8px;border-radius:9px;border:1px solid var(--dsw-alias-border-l2,#d4d4d8);color:var(--dsw-alias-label-secondary,#5b5b60)}",
+	".dsh-rtr-st{flex:none;font-size:var(--dsh-content-font-size,1em);padding:4px 8px;border-radius:9px;border:1px solid var(--dsw-alias-border-l2,#d4d4d8);color:var(--dsw-alias-label-secondary,#5b5b60)}",
 	".dsh-rtr-st-retesting{border-color:var(--dsw-alias-state-business-primary,#4c6ef5);color:var(--dsw-alias-state-business-primary,#4c6ef5);background:var(--dsw-alias-state-business-primary-alpha,rgba(76,110,245,.08))}",
 	".dsh-rtr-st-verified{color:#2f9e63;border-color:rgba(47,158,99,.35);background:rgba(47,158,99,.08)}",
 		".dsh-rtr-st-code-reviewed{color:#0b7285;border-color:rgba(11,114,133,.35);background:rgba(11,114,133,.08)}",
 	".dsh-rtr-st-false-positive{color:#8a8a8f;text-decoration:line-through}",
-	".dsh-rtr-am{flex:none;font-size:12px;padding:4px 8px;border-radius:9px;border:1px solid}",
+	".dsh-rtr-am{flex:none;font-size:var(--dsh-content-font-size,1em);padding:4px 8px;border-radius:9px;border:1px solid}",
 	".dsh-rtr-am-static{color:var(--dsw-alias-label-secondary,#5b5b60);border-color:rgba(91,91,96,.35);background:rgba(91,91,96,.07)}",
 	".dsh-rtr-am-dynamic{color:#2f9e63;border-color:rgba(47,158,99,.35);background:rgba(47,158,99,.1);font-weight:600}",
 	// 详情是覆盖面板（v6 第 5.3 节）：宽 min(640px, 内容区宽度)，覆盖而不挤压列表；窄屏改成贴边整宽。
 	".dsh-rtr-detail{position:fixed;right:24px;bottom:24px;z-index:60;box-sizing:border-box;width:min(640px,calc(100vw - 48px));max-height:min(70vh,640px);overflow:auto;border:1px solid var(--dsw-alias-border-l1,#e9e9ec);border-radius:12px;padding:12px 16px;display:flex;flex-direction:column;gap:12px;background:var(--dsw-alias-bg-base,#fff);box-shadow:0 12px 36px rgba(0,0,0,.2)}",
 	"@media(max-width:720px){.dsh-rtr-detail{left:12px;right:12px;bottom:12px;width:auto}}",
 	".dsh-rtr-detail-head{position:sticky;top:0;z-index:1;display:flex;justify-content:flex-end;margin:-8px 0 4px;background:var(--dsw-alias-bg-base,#fff)}",
-	".dsh-rtr-fields{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--dsw-alias-label-secondary,#5b5b60)}",
+	".dsh-rtr-fields{display:flex;gap:16px;flex-wrap:wrap;font-size:var(--dsh-content-font-size,1em);color:var(--dsw-alias-label-secondary,#5b5b60)}",
 	".dsh-rtr-fields b{color:var(--dsw-alias-label-primary,#1a1a1a);font-weight:600;margin-left:4px}",
-	".dsh-rtr-block h4{margin:0 0 4px;font-size:12px;color:var(--dsw-alias-label-tertiary,#8a8a8f);letter-spacing:.04em}",
-	".dsh-rtr-block pre{margin:0;padding:12px 12px;border-radius:8px;background:var(--dsw-alias-bg-base,#fff);border:1px solid var(--dsw-alias-border-l1,#e9e9ec);white-space:pre-wrap;word-break:break-word;font-size:12px;max-height:280px;overflow:auto}",
+	".dsh-rtr-block h4{margin:0 0 4px;font-size:var(--dsh-content-font-size,1em);color:var(--dsw-alias-label-tertiary,#8a8a8f);letter-spacing:.04em}",
+	".dsh-rtr-block pre{margin:0;padding:12px 12px;border-radius:8px;background:var(--dsw-alias-bg-base,#fff);border:1px solid var(--dsw-alias-border-l1,#e9e9ec);white-space:pre-wrap;word-break:break-word;font-size:var(--dsh-content-font-size,1em);max-height:280px;overflow:auto}",
 	".dsh-rtr-duo{display:flex;gap:12px;flex-wrap:wrap}",
 	".dsh-rtr-duo>div{flex:1;min-width:280px}",
-	".dsh-rtr-duo pre{margin:0;padding:12px 12px;border-radius:8px;background:var(--dsw-alias-bg-base,#fff);border:1px solid var(--dsw-alias-border-l1,#e9e9ec);white-space:pre-wrap;word-break:break-word;font-size:12px;max-height:280px;overflow:auto}",
+	".dsh-rtr-duo pre{margin:0;padding:12px 12px;border-radius:8px;background:var(--dsw-alias-bg-base,#fff);border:1px solid var(--dsw-alias-border-l1,#e9e9ec);white-space:pre-wrap;word-break:break-word;font-size:var(--dsh-content-font-size-secondary,0.93em);max-height:280px;overflow:auto}",
 	// 原文双栏在窄屏改成上下栏（v6 第 5.3 节）；默认遮蔽秘密，展开按钮只在本地改显示。
 	"@media(max-width:720px){.dsh-rtr-packets{display:block}.dsh-rtr-packets>div+div{margin-top:12px}}",
 	".dsh-rtr-packet-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:8px}",
 	".dsh-rtr-packet-actions small{color:var(--dsw-alias-label-secondary,#5b5b60)}",
-	".dsh-rtr-verdict{font-size:12px;padding:8px 12px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2,#d4d4d8);background:var(--dsw-alias-bg-base,#fff)}",
+	".dsh-rtr-verdict{font-size:var(--dsh-content-font-size-secondary,0.93em);padding:8px 12px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2,#d4d4d8);background:var(--dsw-alias-bg-base,#fff)}",
 	".dsh-rtr-rowactions{display:flex;gap:8px;flex:none}",
 	".dsh-rtr-check{accent-color:var(--dsw-alias-state-business-primary,#4c6ef5)}",
-	".dsh-rtr-pager{display:flex;align-items:center;justify-content:center;gap:12px;padding:4px 0;font-size:12px;color:var(--dsw-alias-label-secondary,#5b5b60)}",
-	".dsh-rtr-empty{border:1px dashed var(--dsw-alias-border-l2,#d4d4d8);border-radius:10px;padding:24px 24px;text-align:center;color:var(--dsw-alias-label-tertiary,#8a8a8f);font-size:12px;line-height:1.5}",
+	".dsh-rtr-pager{display:flex;align-items:center;justify-content:center;gap:12px;padding:4px 0;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-secondary,#5b5b60)}",
+	".dsh-rtr-empty{border:1px dashed var(--dsw-alias-border-l2,#d4d4d8);border-radius:10px;padding:24px 24px;text-align:center;color:var(--dsw-alias-label-tertiary,#8a8a8f);font-size:var(--dsh-content-font-size-secondary,0.93em);line-height:1.5}",
 	".dsh-rtr-empty-actions{margin-top:16px}",
 	".dsh-rtr-empty-actions button{font:inherit;cursor:pointer;border:1px solid var(--dsw-alias-border-l1,#d9d9de);border-radius:6px;padding:6px 14px;background:var(--dsw-alias-bg-base,transparent);color:var(--dsw-alias-label-primary,inherit)}",
-	".dsh-rtr-notice{position:sticky;top:0;z-index:2;font-size:12px;padding:8px 12px;border-radius:8px;background:rgba(76,110,245,.08);border:1px solid rgba(76,110,245,.25);color:var(--dsw-alias-label-primary,#1a1a1a)}",
+	".dsh-rtr-notice{position:sticky;top:0;z-index:2;font-size:var(--dsh-content-font-size-secondary,0.93em);padding:8px 12px;border-radius:8px;background:rgba(76,110,245,.08);border:1px solid rgba(76,110,245,.25);color:var(--dsw-alias-label-primary,#1a1a1a)}",
 	// 报告预览：定高、正文独立滚动，长报告不把页面撑爆，底部按钮始终可见。
 	".dsh-rtr-report-preview{margin:12px 0;border:1px solid var(--dsw-alias-border-l1,#d9d9de);border-radius:10px;background:var(--dsw-alias-bg-base,#fff);overflow:hidden}",
 	".dsh-rtr-preview-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--dsw-alias-border-l1,#e5e5ea)}",
-	".dsh-rtr-preview-name{font-size:12px;color:var(--dsw-alias-label-secondary,#6e6e73);overflow-wrap:anywhere}",
+	".dsh-rtr-preview-name{font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-secondary,#6e6e73);overflow-wrap:anywhere}",
 	// 正文底色必须**跟随主题**：宿主没定义 --dsw-alias-bg-l1，写死浅色回退会让深色下变成白底白字。
 	// 用半透明灰（和工具行 chip 同一手法）在浅色/深色都成立。
-	".dsh-rtr-preview-body{max-height:min(420px,60vh);overflow:auto;margin:0;padding:12px;font-size:12px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--dsw-alias-bg-l1,rgba(128,128,128,.08))}",
+	".dsh-rtr-preview-body{max-height:min(420px,60vh);overflow:auto;margin:0;padding:12px;font-size:var(--dsh-content-font-size-secondary,0.93em);line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--dsw-alias-bg-l1,rgba(128,128,128,.08))}",
 	".dsh-rtr-preview-head{border-bottom-color:var(--dsw-alias-border-l1,rgba(128,128,128,.25))}",
-	".dsh-rtr-skel{color:var(--dsw-alias-label-tertiary,#8a8a8f);padding:24px;text-align:center;font-size:12px}",
+	".dsh-rtr-skel{color:var(--dsw-alias-label-tertiary,#8a8a8f);padding:24px;text-align:center;font-size:var(--dsh-content-font-size-secondary,0.93em)}",
 	".dsh-rtr-tl{display:flex;flex-direction:column}",
 	".dsh-rtr-tl-item{display:flex;gap:12px;align-items:stretch;min-width:0}",
 	".dsh-rtr-tl-rail{display:flex;flex-direction:column;align-items:center;width:18px;flex:none}",
@@ -1037,9 +1039,9 @@ var CSS = [
 	".dsh-rtr-tl-line{flex:1;width:2px;background:var(--dsw-alias-border-l2,#d4d4d8);margin-top:4px}",
 	".dsh-rtr-tl-item:last-child .dsh-rtr-tl-line{display:none}",
 	".dsh-rtr-tl-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;padding-bottom:12px}",
-	".dsh-rtr-tl-time{font-family:monospace;font-size:12px;color:var(--dsw-alias-label-secondary,#5b5b60);letter-spacing:.04em}",
+	".dsh-rtr-tl-time{font-family:monospace;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-secondary,#5b5b60);letter-spacing:.04em}",
 	".dsh-rtr-tl-card{border:1px solid var(--dsw-alias-border-l1,#e9e9ec);border-radius:10px;background:var(--dsw-alias-bg-base,#fff);overflow:hidden}",
-	".dsh-rtr-tl-meta{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--dsw-alias-label-secondary,#5b5b60);padding:0 12px 8px;cursor:pointer}",
+	".dsh-rtr-tl-meta{display:flex;gap:16px;flex-wrap:wrap;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-secondary,#5b5b60);padding:0 12px 8px;cursor:pointer}",
 	".dsh-rtr-tl-meta b{color:var(--dsw-alias-label-primary,#1a1a1a);font-weight:600;margin-left:4px}",
 	".dsh-rtr-tl-concl{flex:1;min-width:0;color:var(--dsw-alias-label-tertiary,#8a8a8f);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
 	"@media (max-width:720px){.dsh-rtr-tl-item{gap:8px}.dsh-rtr-tl-meta{gap:8px}}",
@@ -1047,17 +1049,17 @@ var CSS = [
 	".dsh-rtr-cp-item{display:flex;flex-direction:column;gap:0;min-width:0}",
 	".dsh-rtr-cp-card{border:1px solid var(--dsw-alias-border-l1,#e9e9ec);border-radius:10px;background:var(--dsw-alias-bg-base,#fff);overflow:hidden}",
 	".dsh-rtr-cp-chain{display:flex;gap:0;flex-wrap:wrap;align-items:stretch;padding:8px 12px;cursor:pointer;row-gap:8px}",
-	".dsh-rtr-cp-hop{display:flex;align-items:baseline;gap:8px;font-size:12px;max-width:100%}",
+	".dsh-rtr-cp-hop{display:flex;align-items:baseline;gap:8px;font-size:var(--dsh-content-font-size-secondary,0.93em);max-width:100%}",
 	".dsh-rtr-cp-hop:not(:last-child):after{content:'→';color:var(--dsw-alias-label-tertiary,#8a8a8f);margin:0 8px}",
 	".dsh-rtr-cp-hop i{font-style:normal;color:var(--dsw-alias-label-tertiary,#8a8a8f);white-space:nowrap}",
 	".dsh-rtr-cp-hop b{font-weight:600;color:var(--dsw-alias-label-primary,#1a1a1a);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px}",
-	".dsh-rtr-cp-hoplabel{font-size:12px;color:var(--dsw-alias-label-tertiary,#8a8a8f);white-space:nowrap}",
-	".dsh-rtr-cp-hopval{color:var(--dsw-alias-label-primary,#1a1a1a);font-size:12px}",
+	".dsh-rtr-cp-hoplabel{font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-tertiary,#8a8a8f);white-space:nowrap}",
+	".dsh-rtr-cp-hopval{color:var(--dsw-alias-label-primary,#1a1a1a);font-size:var(--dsh-content-font-size-secondary,0.93em)}",
 	".dsh-rtr-cp-impact{flex:1 1 100%;border-top:1px dashed var(--dsw-alias-border-l1,#e9e9ec);padding-top:8px}",
 	"@media (max-width:720px){.dsh-rtr-cp-hop{flex-basis:100%}.dsh-rtr-cp-hop:not(:last-child):after{display:none}}",
 	"@media (max-width:720px){.dsh-rtr-root{flex-direction:column}.dsh-rtr-side{width:auto;flex-direction:row;overflow-x:auto;padding:8px}.dsh-rtr-side-title{display:none}.dsh-rtr-side-item{white-space:nowrap}}",
 	".dsh-rtr-exportpop{position:fixed;z-index:300;visibility:hidden;background:var(--rt-surface-card,#fff);border:1px solid var(--rt-border,#e9e9ec);border-radius:12px;box-shadow:0 10px 34px rgba(9,20,40,.18);padding:8px;min-width:180px;display:flex;flex-direction:column}",
-	".dsh-rtr-exportitem{border:none;background:none;text-align:left;padding:8px 12px;font-size:13px;border-radius:6px;cursor:pointer;color:var(--dsw-alias-label-primary,#1a1a1a)}",
+	".dsh-rtr-exportitem{border:none;background:none;text-align:left;padding:8px 12px;font-size:var(--dsh-content-font-size,1em);border-radius:6px;cursor:pointer;color:var(--dsw-alias-label-primary,#1a1a1a)}",
 	".dsh-rtr-exportitem:hover{background:var(--rt-surface-tint,#f7f7f8)}"
 ].join("\n");
 
@@ -1067,7 +1069,7 @@ function installStyles() {
 	if (!document.getElementById("dsh-rt-tokens")) {
 		var tok = document.createElement("style");
 		tok.id = "dsh-rt-tokens";
-		tok.textContent = ".dsh-task-workspace,.dsh-rtr-screen{--rt-sev-critical:#c2182f;--rt-sev-high:#ff4d4d;--rt-sev-medium:#d9b00c;--rt-sev-low:#3b7dd8;--rt-sev-critical-bright:#ff8fa0;--rt-sev-high-bright:#ff6b8a;--rt-sev-medium-bright:#ffd43b;--rt-sev-low-bright:#4dabf7;--rt-ok:#2f9e44;--rt-dead:#c92a2a;--rt-ok-bright:#36f1b0;--rt-dead-bright:#ff8787;--rt-accent:var(--dsw-alias-state-business-primary,#4c6ef5);--rt-surface-card:var(--dsw-alias-bg-base,#fff);--rt-surface-tint:color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 4%,var(--dsw-alias-bg-base,#fff));--rt-border:var(--dsw-alias-border-l1,#e9e9ec);--rt-mono:ui-monospace,\"SF Mono\",SFMono-Regular,Menlo,Consolas,monospace;--rt-navy-bg:rgba(8,24,46,.96);--rt-navy-bg-soft:rgba(12,32,62,.6);--rt-navy-line:rgba(58,157,255,.45);--rt-navy-line-soft:rgba(58,157,255,.28);--rt-navy-text:#e8f3ff;--rt-navy-text-2:#cfe6ff;--rt-navy-body:#b9d2ee;--rt-navy-dim:#7d97b8;--rt-navy-dim-2:#8fb4d9;--rt-navy-accent:#38d4ff;--rt-navy-accent-2:#3a9dff}";
+		tok.textContent = ".dsh-task-workspace,.dsh-rtr-screen{--rt-sev-critical:#c2182f;--rt-sev-high:#ff4d4d;--rt-sev-medium:#c2650a;--rt-sev-low:#3b7dd8;--rt-sev-critical-bright:#ff8fa0;--rt-sev-high-bright:#ff6b8a;--rt-sev-medium-bright:#ffb454;--rt-sev-low-bright:#4dabf7;--rt-ok:#2f9e44;--rt-dead:#c92a2a;--rt-ok-bright:#36f1b0;--rt-dead-bright:#ff8787;--rt-accent:var(--dsw-alias-state-business-primary,#4c6ef5);--rt-surface-card:var(--dsw-alias-bg-base,#fff);--rt-surface-tint:color-mix(in srgb,var(--dsw-alias-label-primary,#1a1a1a) 4%,var(--dsw-alias-bg-base,#fff));--rt-border:var(--dsw-alias-border-l1,#e9e9ec);--rt-mono:ui-monospace,\"SF Mono\",SFMono-Regular,Menlo,Consolas,monospace;--rt-navy-bg:rgba(8,24,46,.96);--rt-navy-bg-soft:rgba(12,32,62,.6);--rt-navy-line:rgba(58,157,255,.45);--rt-navy-line-soft:rgba(58,157,255,.28);--rt-navy-text:#e8f3ff;--rt-navy-text-2:#cfe6ff;--rt-navy-body:#b9d2ee;--rt-navy-dim:#7d97b8;--rt-navy-dim-2:#8fb4d9;--rt-navy-accent:#38d4ff;--rt-navy-accent-2:#3a9dff}";
 		document.head.appendChild(tok);
 	}
 	var el = document.createElement("style");
@@ -1196,7 +1198,7 @@ function distSection(title, items) {
 			DistBars({ items: items })));
 }
 
-var SEV_COLORS = { critical: "#c2182f", high: "#ff4d4d", medium: "#d9b00c", low: "#3b7dd8" };
+var SEV_COLORS = { critical: "#c2182f", high: "#ff4d4d", medium: "#c2650a", low: "#3b7dd8" };
 
 function StatsPanel(props) {
 	var stats = props.stats, total = stats.total || 0;
@@ -1205,7 +1207,7 @@ function StatsPanel(props) {
 		var stLabel = props.mode === "ctf-solver" ? CTF_STATUS_LABEL : LEDGER_STATUS_LABEL;
 		var lk = props.mode === "ctf-solver" ? ["pending", "stuck", "verified"] : ["pending", "verified", "fixed", "false-positive"];
 		var cards = [{ key: "", label: "任务总数", color: null }].concat(lk.map(function (s) {
-			return { key: s, label: stLabel[s], color: s === "verified" ? "#2f9e63" : s === "stuck" ? "#c2182f" : s === "fixed" ? "#3b7dd8" : s === "false-positive" ? "#8a8a8f" : "#b58a00" };
+			return { key: s, label: stLabel[s], color: s === "verified" ? "#2f9e63" : s === "stuck" ? "#c2182f" : s === "fixed" ? "#3b7dd8" : s === "false-positive" ? "#8a8a8f" : "#c2650a" };
 		}));
 		return React.createElement("div", { className: "dsh-rtr-stats" },
 			React.createElement("div", { className: "dsh-rtr-cardsrow" }, cards.map(function (c) {
@@ -1224,7 +1226,7 @@ function StatsPanel(props) {
 		var stSet = props.mode === "binary-analysis" ? BIN_STATUS_LABEL : props.mode === "av-evasion" ? AV_STATUS_LABEL : ASSET_STATUS_LABEL;
 		var stKeys = props.mode === "binary-analysis" ? ["pending", "suspect", "verified"] : props.mode === "av-evasion" ? ["pending", "verified", "detected"] : ["pending", "verified", "false-positive", "fixed"];
 		var cards = [{ key: "", label: "总数", color: null }].concat(stKeys.map(function (s) {
-			return { key: s, label: stSet[s], color: s === "verified" ? "#2f9e63" : s === "suspect" ? "#b58a00" : s === "false-positive" ? "#8a8a8f" : s === "fixed" ? "#3b7dd8" : "#b58a00" };
+			return { key: s, label: stSet[s], color: s === "verified" ? "#2f9e63" : s === "suspect" ? "#c2650a" : s === "false-positive" ? "#8a8a8f" : s === "fixed" ? "#3b7dd8" : "#c2650a" };
 		}));
 		return React.createElement("div", { className: "dsh-rtr-stats" },
 			React.createElement("div", { className: "dsh-rtr-cardsrow" }, cards.map(function (c) {
@@ -1244,7 +1246,7 @@ function StatsPanel(props) {
 		// 状态卡按模式词表出（IR 默认五态全出——code-reviewed=复核通过有语义，补全五卡不缺过滤面）
 		var stKeys = ["pending", "code-reviewed", "verified", "false-positive", "fixed"];
 		var cards = [{ key: "", label: "节点总数", color: null }].concat(stKeys.map(function (s) {
-			return { key: s, label: TIMELINE_STATUS_LABEL[s], color: s === "verified" ? "#2f9e63" : s === "false-positive" ? "#8a8a8f" : s === "fixed" ? "#3b7dd8" : "#b58a00" };
+			return { key: s, label: TIMELINE_STATUS_LABEL[s], color: s === "verified" ? "#2f9e63" : s === "false-positive" ? "#8a8a8f" : s === "fixed" ? "#3b7dd8" : "#c2650a" };
 		}));
 		return React.createElement("div", { className: "dsh-rtr-stats" },
 			React.createElement("div", { className: "dsh-rtr-cardsrow" }, cards.map(function (c) {
@@ -1261,7 +1263,7 @@ function StatsPanel(props) {
 	if (props.archetype === "cloudpath") {
 		var stKeys = ["pending", "verified", "false-positive", "fixed"];
 		var cards = [{ key: "", label: "路径总数", color: null }].concat(stKeys.map(function (s) {
-			return { key: s, label: CLOUDPATH_STATUS_LABEL[s], color: s === "verified" ? "#2f9e63" : s === "false-positive" ? "#8a8a8f" : s === "fixed" ? "#3b7dd8" : "#b58a00" };
+			return { key: s, label: CLOUDPATH_STATUS_LABEL[s], color: s === "verified" ? "#2f9e63" : s === "false-positive" ? "#8a8a8f" : s === "fixed" ? "#3b7dd8" : "#c2650a" };
 		}));
 		return React.createElement("div", { className: "dsh-rtr-stats" },
 			React.createElement("div", { className: "dsh-rtr-cardsrow" }, cards.map(function (c) {
@@ -1340,6 +1342,10 @@ function Detail(props) {
 	var revealPackets = useState(false);
 	var f = props.f, mode = props.mode;
 	var meta = props.meta || MODE_META.pentest;
+	var curationText = [f.title, f.summary, f.description, f.poc, f.evidence, f.chain, f.impact]
+		.filter(function (value) { return typeof value === 'string' && value.trim(); }).join('\n\n').slice(0, 16384);
+	var curationButton = React.createElement(CurationAction, { sessionId: props.sessionId,
+		selectedText: curationText, sourceRef: 'finding:' + String(f.id || ''), disabled: !curationText.trim() });
 	var audit = mode === "code-audit";
 	var binary = mode === "binary-analysis";
 	if (meta.archetype === "ledger") {
@@ -1361,6 +1367,7 @@ function Detail(props) {
 		f.verifyNote ? Block({ title: "复核记录" }, f.verifyNote) : null,
 			React.createElement("div", { className: "dsh-rtr-rowactions" },
 				React.createElement(Btn, { onClick: function () { props.onVerify(f); } }, "独立复核（可选）"),
+				curationButton,
 				React.createElement(Btn, { onClick: function () { props.onExportOne(f); } }, "导出任务卡（MD）")));
 	}
 	if (meta.archetype === "assets") {
@@ -1380,8 +1387,8 @@ function Detail(props) {
 			f.chain ? Block({ title: meta.chainLabel }, f.chain) : null,
 			f.poc ? Block({ title: meta.pocTitle }, f.poc) : null,
 			mode === "attack-defense" && (f.baseline || f.diffEvidence) ? React.createElement("div", { className: "dsh-rtr-duo" },
-				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize: 12, color: "#8a8a8f" } }, "对照三件套 · 基线"), React.createElement("pre", null, f.baseline || "（未填）")),
-				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize: 12, color: "#8a8a8f" } }, "差分（翻转）"), React.createElement("pre", null, f.diffEvidence || "（未填）"))) : null,
+				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize:'var(--dsh-content-font-size-secondary,0.93em)', color: "#8a8a8f" } }, "对照三件套 · 基线"), React.createElement("pre", null, f.baseline || "（未填）")),
+				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize:'var(--dsh-content-font-size-secondary,0.93em)', color: "#8a8a8f" } }, "差分（翻转）"), React.createElement("pre", null, f.diffEvidence || "（未填）"))) : null,
 			mode === "attack-defense" && f.markerEcho ? Block({ title: "marker 逐字回显" }, f.markerEcho) : null,
 			mode === "attack-defense" && f.requestPkt ? Block({ title: "完整请求包" }, f.requestPkt) : null,
 			mode === "attack-defense" && f.responsePkt ? Block({ title: "关键响应" }, f.responsePkt) : null,
@@ -1392,6 +1399,7 @@ function Detail(props) {
 			f.verifyNote ? Block({ title: "验证记录" }, f.verifyNote) : null,
 			React.createElement("div", { className: "dsh-rtr-rowactions" },
 				React.createElement(Btn, { onClick: function () { props.onVerify(f); } }, "独立复核（可选）"),
+				curationButton,
 				React.createElement(Btn, { onClick: function () { props.onExportOne(f); } }, "导出资产卡片（MD）")));
 	}
 	if (meta.archetype === "timeline") {
@@ -1414,6 +1422,7 @@ function Detail(props) {
 			f.verifyNote ? Block({ title: "复核注记" }, f.verifyNote) : null,
 			React.createElement("div", { className: "dsh-rtr-rowactions" },
 				React.createElement(Btn, { onClick: function () { props.onVerify(f); } }, "发送到会话复核"),
+				curationButton,
 				React.createElement(Btn, { onClick: function () { props.onExportOne(f); } }, "导出节点卡（MD）")));
 	}
 	if (meta.archetype === "cloudpath") {
@@ -1450,6 +1459,7 @@ function Detail(props) {
 			f.verifyNote ? Block({ title: "复核注记" }, f.verifyNote) : null,
 			React.createElement("div", { className: "dsh-rtr-rowactions" },
 				React.createElement(Btn, { onClick: function () { props.onVerify(f); } }, "发送到会话验证"),
+				curationButton,
 				React.createElement(Btn, { onClick: function () { props.onExportOne(f); } }, "导出路径卡（MD）")));
 	}
 	return React.createElement("div", { className: "dsh-rtr-detail" },
@@ -1464,8 +1474,9 @@ function Detail(props) {
 		// 「复测中」给出对应运行链接（v6 第 5.3 节）：不另起重复会话，直接指到本任务的执行记录。
 		f.verifying ? React.createElement("div", { className: "dsh-rtr-block" },
 			React.createElement("h4", null, "复测中"),
-			React.createElement("p", null, "复核/复测请求已发送到原会话，等结论；本次运行记录见「执行记录」。"),
-			props.onOpenExecution ? React.createElement(Btn, { onClick: function () { props.onOpenExecution(); } }, "查看运行记录") : null) : null,
+			React.createElement("p", null, "复测请求已发送到原会话，等待结论；本次执行记录见「执行记录」。"),
+			props.onOpenExecution ? React.createElement(Btn, { onClick: function () { props.onOpenExecution(); } }, "查看执行记录") : null) : null,
+		props.workerReview ? Block({ title: "独立复核" }, props.workerReview.text) : null,
 		React.createElement("div", { className: "dsh-rtr-fields" },
 			React.createElement("span", null, audit ? "主线类型" : binary ? "结论类型" : "类型", React.createElement("b", null, f.type || "未分类")),
 			binary && f.family ? React.createElement("span", null, "家族", React.createElement("b", null, f.family)) : null,
@@ -1482,21 +1493,21 @@ function Detail(props) {
 		mode !== "pentest" && f.description ? Block({ title: binary ? "定性依据（结论摘要）" : "描述" }, f.description) : null,
 		mode !== "pentest" && !audit && f.impact ? Block({ title: binary ? "能力与危害" : "影响证明" }, f.impact) : null,
 		mode === "pentest" && (f.baseline || f.diffEvidence || f.markerEcho) ? React.createElement("div", { className: "dsh-rtr-duo" },
-			React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize: 12, color: "#8a8a8f" } }, "对照三件套 · 基线"), React.createElement("pre", null, f.baseline || "（未填）")),
-			React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize: 12, color: "#8a8a8f" } }, "差分（翻转）"), React.createElement("pre", null, f.diffEvidence || "（未填）"))) : null,
+			React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize:'var(--dsh-content-font-size-secondary,0.93em)', color: "#8a8a8f" } }, "对照三件套 · 基线"), React.createElement("pre", null, f.baseline || "（未填）")),
+			React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize:'var(--dsh-content-font-size-secondary,0.93em)', color: "#8a8a8f" } }, "差分（翻转）"), React.createElement("pre", null, f.diffEvidence || "（未填）"))) : null,
 		mode === "pentest" && f.markerEcho ? Block({ title: "marker 逐字回显" }, f.markerEcho) : null,
 		audit && (f.chain || f.chainTracer) ? React.createElement("div", { className: "dsh-rtr-block" },
 			React.createElement("h4", null, "双链对照（entry → sink）"),
 			React.createElement("div", { className: "dsh-rtr-duo" },
-				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize: 12, color: "#8a8a8f" } }, "审计工人链"), React.createElement("pre", null, f.chain || "（未填）")),
-				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize: 12, color: "#8a8a8f" } }, "追踪员链（独立重追）"), React.createElement("pre", null, f.chainTracer || "（未填）"))),
+				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize:'var(--dsh-content-font-size-secondary,0.93em)', color: "#8a8a8f" } }, "审计工人链"), React.createElement("pre", null, f.chain || "（未填）")),
+				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize:'var(--dsh-content-font-size-secondary,0.93em)', color: "#8a8a8f" } }, "追踪员链（独立重追）"), React.createElement("pre", null, f.chainTracer || "（未填）"))),
 			f.chainVerdict ? React.createElement("div", { className: "dsh-rtr-verdict", style: { marginTop: 8 } }, "一致性结论：" + f.chainVerdict) : null) : null,
 		!audit && f.chain ? Block({ title: binary ? "执行链 / 还原链路" : "调用链（entry → sink）" }, f.chain) : null,
 		audit && (f.snippetEntry || f.snippetSink) ? React.createElement("div", { className: "dsh-rtr-block" },
 			React.createElement("h4", null, "关键代码"),
 			React.createElement("div", { className: "dsh-rtr-duo" },
-				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize: 12, color: "#8a8a8f" } }, "入口 entry"), React.createElement("pre", null, f.snippetEntry || "（未填）")),
-				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize: 12, color: "#8a8a8f" } }, "危险点 sink"), React.createElement("pre", null, f.snippetSink || "（未填）")))) : null,
+				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize:'var(--dsh-content-font-size-secondary,0.93em)', color: "#8a8a8f" } }, "入口 entry"), React.createElement("pre", null, f.snippetEntry || "（未填）")),
+				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize:'var(--dsh-content-font-size-secondary,0.93em)', color: "#8a8a8f" } }, "危险点 sink"), React.createElement("pre", null, f.snippetSink || "（未填）")))) : null,
 		f.poc ? Block({ title: meta.pocTitle }, f.poc) : null,
 		binary && f.iocs ? Block({ title: "IOC 清单" }, f.iocs) : null,
 		deliveryError[0] ? Block({ title: '导出失败' }, deliveryError[0]) : null,
@@ -1506,9 +1517,9 @@ function Detail(props) {
 		mode === "pentest" && (f.requestPkt || f.responsePkt) ? React.createElement("div", { className: "dsh-rtr-block" },
 			React.createElement("h4", null, "原始依据（请求 / 响应）"),
 			React.createElement("div", { className: "dsh-rtr-duo dsh-rtr-packets" },
-				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize: 12, color: "#8a8a8f" } }, "请求原文"),
+				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize:'var(--dsh-content-font-size-secondary,0.93em)', color: "#8a8a8f" } }, "请求原文"),
 					React.createElement("pre", null, revealPackets[0] ? (f.requestPkt || "（未保存）") : maskSecrets(f.requestPkt || "（未保存）"))),
-				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize: 12, color: "#8a8a8f" } }, "响应原文"),
+				React.createElement("div", null, React.createElement("h4", { style: { margin: "0 0 4px", fontSize:'var(--dsh-content-font-size-secondary,0.93em)', color: "#8a8a8f" } }, "响应原文"),
 					React.createElement("pre", null, revealPackets[0] ? (f.responsePkt || "（未保存）") : maskSecrets(f.responsePkt || "（未保存）")))),
 			React.createElement("div", { className: "dsh-rtr-packet-actions" },
 				React.createElement("small", null, revealPackets[0]
@@ -1533,7 +1544,11 @@ function Detail(props) {
 			mode === "code-audit" ? React.createElement(Btn, { primary: true, onClick: function () { props.onLiveVerify ? props.onLiveVerify(f) : null; } }, "实测") : null,
 			// 底部操作按 v6 第 5.3 节的叫法：复核/复测、导出这条发现（功能不变）。
 			props.onVerify ? React.createElement(Btn, { onClick: function () { props.onVerify(f); } }, "复核/复测") : null,
+			mode === "pentest" && props.onWorkerReview
+				? React.createElement(Btn, { disabled: props.workerReviewBusy, onClick: function () { props.onWorkerReview(f); } },
+		props.workerReviewBusy ? "独立复核中…" : "请求独立复核") : null,
 			props.onExportOne ? React.createElement(Btn, { onClick: function () { props.onExportOne(f); } }, "导出这条发现") : null,
+			curationButton,
 			mode === 'pentest' && f.delivery && f.delivery.ready ? React.createElement(Btn, { onClick: function () {
 				api('finding.delivery', { sessionId: f.sessionId || props.sessionId, id: f.id }).then(function (result) {
 					if (result.ok) { if (props.onPreview) props.onPreview(result.filename, result.text); else download(result.filename, result.text); }
@@ -1590,18 +1605,41 @@ var CHAT_COOPERATION = {auto:'自行推进','confirm-data-change':'改动网站�
 var CHAT_COOPERATION_HINT = {auto:'在已确认的范围和操作权限内继续；缺账号或关键信息时集中询问。','confirm-data-change':'读取和分析继续；提交、修改或删除业务数据前先确认当前操作及预计影响。','confirm-step':'先说明本步骤要检查什么，确认后执行该步骤内必要调用；不为每条请求重复弹窗。'};
 var CHAT_REPORTING = {end:'任务结束时',notable:'发现问题或需要帮助时',step:'每完成一个检查步骤时'};
 function ChatIcon(props) {
-  var paths={direction:'M4 6h12M4 12h8M4 18h4',users:'M14 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M8 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 20v-2a4 4 0 0 0-3-3.87M16 2.13a4 4 0 0 1 0 7.75',chat:'M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9H13a8.48 8.48 0 0 1 8 8v.5',prompt:'M4 4h16v16H4zM8 8h8M8 12h8M8 16h4',settings:'M4 6h16M4 12h16M4 18h16M8 4v4M16 10v4M10 16v4'};
+  var paths={direction:'M4 6h12M4 12h8M4 18h4',module:'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',users:'M14 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M8 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 20v-2a4 4 0 0 0-3-3.87M16 2.13a4 4 0 0 1 0 7.75',chat:'M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9H13a8.48 8.48 0 0 1 8 8v.5',prompt:'M4 4h16v16H4zM8 8h8M8 12h8M8 16h4',settings:'M4 6h16M4 12h16M4 18h16M8 4v4M16 10v4M10 16v4',more:'M5 12h.01M12 12h.01M19 12h.01',flow:'M4 5h6v4H4zM14 5h6v4h-6zM9 15h6v4H9zM7 9v3h10V9M12 12v3',globe:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3',code:'M9 18l-6-6 6-6M15 6l6 6-6 6',flag:'M5 21V4M5 5h11l-1.5 4L16 13H5'};
   return React.createElement('svg',{width:14,height:14,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.7,strokeLinecap:'round',strokeLinejoin:'round','aria-hidden':true},React.createElement('path',{d:paths[props.name]||paths.settings}));
+}
+
+// 工作台导航语义图标。品牌图形只用于 Saker 标识，功能项不再全部复用猎隼。
+function SakerNavIcon(props) {
+  var name = props && props.name || 'dashboard';
+  var size = (props && props.size) || 16;
+  var paths = {
+    dashboard: 'M4 4h7v7H4zM13 4h7v4h-7zM13 10h7v10h-7zM4 13h7v7H4z',
+    tasks: 'M4 5h16M4 12h10M4 19h7M16 15l2 2 4-4',
+    findings: 'M12 3 2 21h20L12 3zM12 9v5M12 17h.01',
+    traffic: 'M3 12h4l3-7 4 14 3-7h4',
+    assets: 'M4 7 12 3l8 4v10l-8 4-8-4zM4 7l8 4 8-4M12 11v10',
+    modules: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
+    roles: 'M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8M4 21v-1a7 7 0 0 1 14 0v1',
+    capabilities: 'M4 7h16v10H4zM8 21h8M12 17v4M7 11h3M14 11h3',
+    attention: 'M12 3a7 7 0 0 0-7 7v4l-2 4h18l-2-4V10a7 7 0 0 0-7-7M9 21h6',
+    logs: 'M5 4h14v16H5zM8 8h8M8 12h8M8 16h5',
+    knowledge: 'M4 5a3 3 0 0 1 3-2h5v18H7a3 3 0 0 1-3-3zM20 5a3 3 0 0 0-3-2h-5v18h5a3 3 0 0 0 3-3z',
+    conversation: 'M4 5h16v11H9l-5 4z',
+    collapse: 'M15 6l-6 6 6 6',
+    expand: 'M9 6l6 6-6 6',
+  };
+  return React.createElement('svg',{'data-saker-nav-icon':name,width:size,height:size,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.7,strokeLinecap:'round',strokeLinejoin:'round','aria-hidden':true},React.createElement('path',{d:paths[name]||paths.dashboard}));
 }
 function InteractionControl(props) {
   return React.createElement('div',{style:{marginTop:12}},
     React.createElement('label',{className:'dsh-task-field'},React.createElement('span',null,'什么时候问我'),React.createElement('select',{'aria-label':'什么时候问我',value:cooperationValue(props.interaction),disabled:props.disabled,onChange:function(e){return props.onChange(e.target.value);}},
       ['auto','confirm-data-change','confirm-step'].map(function(value){return React.createElement('option',{key:value,value:value},CHAT_COOPERATION[value]);}))),
-    React.createElement('p',{style:{fontSize:12}},CHAT_COOPERATION_HINT[cooperationValue(props.interaction)]));
+    React.createElement('p',{style:{fontSize:'var(--dsh-content-font-size-secondary,0.93em)'}},CHAT_COOPERATION_HINT[cooperationValue(props.interaction)]));
 }
 function FlowControls(props) {
   return React.createElement('div',null,
-    React.createElement('label',{className:'dsh-task-field'},React.createElement('span',null,'子代理上限'),React.createElement('input',{type:'number',min:0,max:16,step:1,'aria-label':'子代理上限',value:props.workers??2,disabled:props.disabled,onChange:function(e){var n=Number(e.target.value);if(e.target.value!==''&&Number.isInteger(n)&&n>=0&&n<=16)props.onChange({workers:n});}})),
+    React.createElement('label',{className:'dsh-task-field'},React.createElement('span',null,'并行任务上限'),React.createElement('input',{type:'number',min:0,max:16,step:1,'aria-label':'并行任务上限',value:props.workers??2,disabled:props.disabled,onChange:function(e){var n=Number(e.target.value);if(e.target.value!==''&&Number.isInteger(n)&&n>=0&&n<=16)props.onChange({workers:n});}})),
     React.createElement(InteractionControl,{interaction:props.interaction,disabled:props.disabled,onChange:function(value){return props.onChange({interaction:value});}}));
 }
 // 统一错误文案（v6 第 9.3 节）：接口错误含 code / 具体 message / 可恢复操作，
@@ -1612,8 +1650,7 @@ function chatError(value) {
   var message = value.error || value.message || '操作失败，请重试';
   return value.hint ? message + '（' + value.hint + '）' : message;
 }
-// 提示词模板编辑器（v6 第 3 节）：右侧覆盖抽屉；内置 36 篇只读；会话独立草稿；必填 0–2 项；
-// 全文始终可见；插入不发送、不创建任务、不调用模型。
+// 用户主动选用的任务文字。示例、个人模板与会话草稿分别保存，插入不发送。
 var PROMPT_FAVORITES_KEY='saker.prompt.favorites';
 function promptSubstitute(tpl, values, fields) {
   return String(tpl.text).replace(/\{\{([a-zA-Z0-9_]+)\}\}/g, function (_m, key) {
@@ -1628,19 +1665,29 @@ function promptMissing(tpl, values, fields) {
 }
 function loadPromptFavorites() { try { return JSON.parse(window.localStorage.getItem(PROMPT_FAVORITES_KEY)) || []; } catch (error) { return []; } }
 function savePromptFavorites(list) { try { window.localStorage.setItem(PROMPT_FAVORITES_KEY, JSON.stringify(list)); } catch (error) { /* localStorage 不可用则仅本次会话有效 */ } }
+function promptVisibleRows(rows, scope, query, favorites) {
+  var q=String(query||'').trim().toLowerCase(), favoriteIds=favorites||[];
+  return rows.filter(function(row){
+    if(scope==='mine'&&row.builtin)return false;
+    if(q)return [row.id,row.title,row.group].concat(row.keywords||[]).join(' ').toLowerCase().indexOf(q)>=0;
+    if(scope==='common')return row.common===true||favoriteIds.indexOf(row.id)>=0;
+    return true;
+  }).slice().sort(function(a,b){return (favoriteIds.indexOf(a.id)>=0?0:1)-(favoriteIds.indexOf(b.id)>=0?0:1);});
+}
 function ChatPromptEditor(props) {
-  var lib=useState(null), query=useState(''), scope=useState('common'), selectedId=useState('');
+  var lib=useState(null), query=useState(''), queryDraft=useState(''), scope=useState('common'), selectedId=useState('');
   var values=useState({}), text=useState(''), editMode=useState('fields');
   var saveState=useState(''), notice=useState(''), busy=useState(false), optional=useState(false);
   var importNotice=useState(''), importRef=useRef(null);
   var drafts=useState({}), favorites=useState(loadPromptFavorites()), conflict=useState(null), saveAsName=useState('');
-  var draftRev=useRef(0), alive=useRef(true), pending=useRef(Promise.resolve()), openBtn=useRef(null), focusDone=useRef(false);
+  var draftRev=useRef(0), alive=useRef(true), pending=useRef(Promise.resolve()), openBtn=useRef(null), focusDone=useRef(false), composing=useRef(false);
   // 当前选中的模板：persist 的回调是异步的，闭包里的 selectedId[0] 是**发起那次渲染**的值，
   // 用它判断"存的还是不是当前模板"会误判（真机复现：切模板后新模板的保存被旧 revision 顶掉）。
   var selectedRef=useRef('');
   var dirty=useRef(false), debounce=useRef(0);
   var fields=lib[0]?lib[0].fields:{};
   var all=lib[0]?lib[0].builtin.concat(lib[0].user.templates):[];
+  if(selectedId[0]==='__new_prompt__')all=all.concat([{id:'__new_prompt__',title:'空白模板',group:'自定义',text:'',required:[],optional:[],draftOnly:true}]);
   var selected=all.find(function(row){return row.id===selectedId[0];})||null;
   function persist(id, body) {
     if(!id)return pending.current;
@@ -1654,7 +1701,7 @@ function ChatPromptEditor(props) {
       // 「编辑 → 切模板 → 切回来」会恢复成保存前的旧值（2026-10-18 真机复现：
       // S01 的 检查重点 明明已落库，切回来却是空的）。
       drafts[1](function(previous){var next=Object.assign({},previous);next[id]=result.draft;return next;});
-      if(alive.current){if(id===selectedRef.current)draftRev.current=result.draft.revision;saveState[1]('已保存');}
+      if(alive.current){if(id===selectedRef.current)draftRev.current=result.draft.revision;saveState[1]('草稿已保存');}
     }).catch(function(error){if(alive.current)saveState[1]('草稿保存失败：'+error.message);});
   }
   // 500ms 防抖保存 + 关闭时提交最后一版（v6 第 3.3 节第 7 条）：编辑停下就落一次，
@@ -1689,7 +1736,7 @@ function ChatPromptEditor(props) {
         if(at&&bt&&at!==bt)return bt<at?-1:1;
         return b.revision-a.revision;
       })[0];
-      if(recent){selectedId[1](recent.templateId);selectedRef.current=recent.templateId;values[1](recent.fields||{});editMode[1](recent.editMode||'fields');text[1](recent.text||'');draftRev.current=recent.revision;saveState[1]('已恢复本会话草稿');}
+      if(recent){selectedId[1](recent.templateId);selectedRef.current=recent.templateId;values[1](recent.fields||{});editMode[1](recent.editMode||'fields');text[1](recent.text||'');draftRev.current=recent.revision;saveState[1]('已恢复上次编辑');}
     }).catch(function(error){if(active)notice[1](error.message);});
   }
   useEffect(function(){var p=load();return function(){alive.current=false;};},[props.sessionId]);
@@ -1721,8 +1768,14 @@ function ChatPromptEditor(props) {
     else{values[1]({});text[1]('');draftRev.current=0;}
   }
   function setField(key,value){var next=Object.assign({},values[0]);next[key]=value;values[1](next);if(editMode[0]==='fields'&&selected)text[1](generated(selected,next));markDirty();}
-  function beginManual(){editMode[1]('manual');notice[1]('已切换为直接编辑；之后切换模板不会自动改写这份稿。');markDirty();}
+  function beginManual(){editMode[1]('manual');notice[1]('正文可以直接修改；改完可复制、插入或保存。');markDirty();}
   function useGenerated(){editMode[1]('fields');if(selected)text[1](generated(selected,values[0]));markDirty();}
+  function newTemplate(){
+    flushDraft();selectedId[1]('__new_prompt__');selectedRef.current='__new_prompt__';
+    var saved=drafts[0].__new_prompt__;
+    values[1]({});editMode[1]('manual');text[1](saved&&saved.text||'');draftRev.current=saved&&saved.revision||0;
+    saveAsName[1]('');query[1]('');queryDraft[1]('');scope[1]('mine');saveState[1](saved?'已恢复未保存为模板的草稿':'未保存为模板');notice[1]('写下任务要求，填一个名称即可保存。');
+  }
   function toggleFavorite(){if(!selected)return;var list=favorites[0].indexOf(selected.id)>=0?favorites[0].filter(function(x){return x!==selected.id;}):favorites[0].concat([selected.id]);favorites[1](list);savePromptFavorites(list);}
   // 导入/导出（v6 第 3.3 节第 11 条）：导入逐条报告结果，重 ID 由服务端导入为新副本；
   // 导出只含用户模板、标签与字段声明，不含账号凭据。
@@ -1757,7 +1810,7 @@ function ChatPromptEditor(props) {
       lib[1](Object.assign({},lib[0],{user:Object.assign({},user,{templates:lib[0].user.templates.concat(user.templates||[])})}));
     }).catch(function(error){notice[1]('加载更多模板失败：'+error.message);});
   }
-  function copy(){var missing=selected?promptMissing(selected,values[0],fields):[];var out=text[0];if(missing.length)out=promptSubstitute(selected,values[0],fields);return Promise.resolve().then(function(){return navigator.clipboard.writeText(out);}).then(function(){notice[1](missing.length?('已复制，还剩 '+missing.length+' 项未填：'+missing.join('、')):'已复制全文');}).catch(function(){notice[1]('复制失败，请在下方编辑框全选后手工复制。');});}
+  function copy(){return Promise.resolve().then(function(){return navigator.clipboard.writeText(text[0]);}).then(function(){notice[1]('已复制全文');}).catch(function(){notice[1]('复制失败，请在正文中全选后复制。');});}
   function insert(){try{
     if(!props.inputActions||typeof props.inputActions.insertText!=='function')throw Error('输入框暂不可用，请复制后粘贴');
     // v6 第 3.3 节第 8 条：落点在**打开抽屉前**就捕获好（宿主 caretSpan 在编辑器失焦后返回文档末尾，
@@ -1771,6 +1824,7 @@ function ChatPromptEditor(props) {
         if(selected)persist(selected.id,{expectedRevision:draftRev.current,editMode:editMode[0],fields:values[0],text:text[0]});
         props.onClose();
         notice[1]('输入框已有新内容，已追加到末尾');
+        if(props.onInserted)props.onInserted('输入框已有新内容，模板已追加到末尾');
         return;
       }
       throw Error('输入框正在变化，请稍后重试；编辑内容仍保留');
@@ -1778,79 +1832,94 @@ function ChatPromptEditor(props) {
     if(selected)persist(selected.id,{expectedRevision:draftRev.current,editMode:editMode[0],fields:values[0],text:text[0]});
     props.onClose();
     notice[1]('已插入聊天输入框，请检查后自行发送');
+    if(props.onInserted)props.onInserted('已插入聊天输入框，请检查后自行发送');
   }catch(error){notice[1](error.message);}}
   /** 打开抽屉时捕获到的落点若为非空区间，说明输入框里选着一段文字（v6 第 3.3 节第 8 条）。 */
   function replacesSelection(){var s=props.insertion&&props.insertion.current;
     return !!(s&&typeof s.start==='number'&&typeof s.end==='number'&&s.end>s.start);}
-  function saveAs(){if(!selected||!saveAsName[0].trim())return;busy[1](true);var nextId='mine-'+Date.now().toString(36);
-    // 填信息模式保存可复用的模板（保留 {{占位}}）；直接编辑模式保存冻结的纯文本，
-    // 只保留仍在正文中的字段声明，避免声明了正文没有的字段。
+  function templateToSave(id,title){
     var body=editMode[0]==='fields'?selected.text:text[0];
     var present=Array.from(new Set((String(body).match(/\{\{([a-zA-Z0-9_]+)\}\}/g)||[]).map(function(s){return s.slice(2,-2);})));
     var req=(selected.required||[]).filter(function(k){return present.indexOf(k)>=0;});
     var opt=(selected.optional||[]).filter(function(k){return present.indexOf(k)>=0;});
-    return api('prompt.library',{sessionId:props.sessionId,action:'save-as',newId:nextId,template:{id:nextId,title:saveAsName[0].trim(),group:'自定义',text:body,required:req,optional:opt,keywords:[]}}).then(function(result){
-      if(!result.ok)throw Error(chatError(result));saveAsName[1]('');return load().then(function(){switchTo(nextId);});notice[1]('已另存为我的模板');
+    return {id:id,title:title,group:'自定义',text:body,required:req,optional:opt,scene:selected.scene||['all'],keywords:selected.keywords||[]};
+  }
+  function acceptSavedTemplate(row){
+    var existed=lib[0].user.templates.some(function(t){return t.id===row.id;});
+    lib[1](Object.assign({},lib[0],{user:Object.assign({},lib[0].user,{total:lib[0].user.total+(existed?0:1),templates:[row].concat(lib[0].user.templates.filter(function(t){return t.id!==row.id;}))})}));
+    selectedId[1](row.id);selectedRef.current=row.id;draftRev.current=drafts[0][row.id]&&drafts[0][row.id].revision||0;
+    query[1]('');queryDraft[1]('');scope[1]('mine');saveAsName[1]('');saveState[1]('模板已保存');markDirty();
+  }
+  function saveAs(){if(!selected||!saveAsName[0].trim()||!text[0].trim())return;busy[1](true);var nextId='mine-'+Date.now().toString(36);
+    return api('prompt.library',{sessionId:props.sessionId,action:'save-as',newId:nextId,template:templateToSave(nextId,saveAsName[0].trim())}).then(function(result){
+      if(!result.ok)throw Error(chatError(result));acceptSavedTemplate(result.template);notice[1]('已保存到“我的”');
+    }).catch(function(error){notice[1](error.message);}).finally(function(){busy[1](false);});}
+  function saveUser(){if(!selected||selected.builtin||selected.draftOnly||!text[0].trim())return;busy[1](true);
+    var record=templateToSave(selected.id,saveAsName[0].trim()||selected.title);record.expectedRevision=selected.revision;
+    return api('prompt.library',{sessionId:props.sessionId,action:'upsert',template:record}).then(function(result){
+      if(!result.ok)throw Error(chatError(result));acceptSavedTemplate(result.template);notice[1]('修改已保存');
     }).catch(function(error){notice[1](error.message);}).finally(function(){busy[1](false);});}
   function resolveConflict(mode){var c=conflict[0];if(!c)return;
     if(mode==='server'){values[1](c.server.fields||{});editMode[1](c.server.editMode||'fields');text[1](c.server.text||'');draftRev.current=c.server.revision;saveState[1]('已载入另一窗口版本');}
     else{draftRev.current=c.server.revision;persist(c.local.templateId||selected.id,{expectedRevision:c.server.revision,editMode:c.local.editMode||'fields',fields:c.local.fields||{},text:c.local.text||''});saveState[1]('已用本地版本另存');}
     conflict[1](null);}
-  var shown=all.filter(function(row){if(scope[0]==='mine'&&row.builtin)return false;return true;});
-  if(query[0].trim()){var q=query[0].trim().toLowerCase();shown=shown.filter(function(row){return [row.id,row.title,row.group].concat(row.keywords||[]).join(' ').toLowerCase().indexOf(q)>=0;});}
-  shown=shown.slice().sort(function(a,b){var af=favorites[0].indexOf(a.id)>=0?0:1,bf=favorites[0].indexOf(b.id)>=0?0:1;return af-bf;});
-  var missing=selected?promptMissing(selected,values[0],fields):[];
+  var shown=promptVisibleRows(all,scope[0],query[0],favorites[0]);
+  var missing=selected&&editMode[0]==='fields'?promptMissing(selected,values[0],fields):[];
   var canInsert=!!selected&&text[0].trim()&&missing.length===0;
   // 还有没加载出来的用户模板时给「加载更多」；每页 30 条只是加载数量，没有总数上限。
   var userMore=(lib[0]&&lib[0].user&&Number.isInteger(lib[0].user.more))?lib[0].user.more:0;
   if(!props.open)return null;
-  return React.createElement('div',{className:'dsh-prompt-drawer',role:'dialog','aria-modal':'false','aria-label':'提示词模板',onKeyDown:function(event){if(event.key==='Escape'){event.stopPropagation();props.onClose();}}},
-    React.createElement('div',{className:'dsh-prompt-head'},React.createElement('strong',null,'提示词模板'),React.createElement('button',{type:'button',onClick:props.onClose,'aria-label':'关闭提示词模板'},'关闭')),
-    // 面板顶部与工具行悬停用同一句解释（v6 第 5.1 节），不另写一套术语。
-    React.createElement('p',{className:'dsh-prompt-hint'},'选一段需求文字，改目标和重点后发送。只编辑或复制；插入后仍由用户发送。'),
+ return React.createElement('div',{className:'dsh-prompt-overlay',onMouseDown:function(event){if(event.target===event.currentTarget)props.onClose();}},React.createElement('div',{className:'dsh-prompt-drawer',role:'dialog','aria-modal':'true','aria-label':'指令模板',onKeyDown:function(event){if(event.isComposing||event.keyCode===229)return;if(event.key==='Escape'){event.stopPropagation();props.onClose();}else if(event.key==='Tab'&&event.currentTarget.querySelectorAll){var items=Array.from(event.currentTarget.querySelectorAll('button:not(:disabled),input:not(:disabled),textarea:not(:disabled),[tabindex="0"]')).filter(function(el){return el.getClientRects().length;});var first=items[0],last=items[items.length-1];if(items.length&&((event.shiftKey&&document.activeElement===first)||(!event.shiftKey&&document.activeElement===last))){event.preventDefault();(event.shiftKey?last:first).focus();}}}},
+     React.createElement('div',{className:'dsh-prompt-head'},React.createElement('strong',null,'指令模板'),React.createElement('button',{type:'button',onClick:props.onClose,'aria-label':'关闭指令模板'},'关闭')),
+     React.createElement('p',{className:'dsh-prompt-hint'},'选一条指令 → 补上空白 → 插入输入框。发送仍由你点。'),
     React.createElement('div',{className:'dsh-prompt-body'},
       React.createElement('div',{className:'dsh-prompt-list'},
-        React.createElement('input',{type:'search','aria-label':'模板搜索',placeholder:'搜索：越权 / 接口 / Nday…',value:query[0],onChange:function(e){query[1](e.target.value);}}),
+        React.createElement('input',{type:'search','aria-label':'模板搜索',placeholder:'搜索：隐藏资产 / FOFA / 越权…',value:queryDraft[0],
+          onCompositionStart:function(){composing.current=true;},
+          onCompositionEnd:function(e){composing.current=false;queryDraft[1](e.target.value);query[1](e.target.value);},
+          onChange:function(e){queryDraft[1](e.target.value);if(!composing.current)query[1](e.target.value);}}),
         React.createElement('div',{className:'dsh-prompt-scopes',role:'tablist'},[['common','常用'],['mine','我的'],['all','全部']].map(function(row){return React.createElement('button',{key:row[0],type:'button',role:'tab','aria-selected':scope[0]===row[0],className:scope[0]===row[0]?'is-active':'',onClick:function(){scope[1](row[0]);}},row[1]);})),
         React.createElement('div',{className:'dsh-prompt-io'},
+          React.createElement('button',{type:'button',onClick:newTemplate},'新建'),
           React.createElement('button',{type:'button',onClick:function(){if(importRef.current)importRef.current.click();}},'导入'),
           React.createElement('input',{ref:importRef,type:'file',accept:'application/json,.json',style:{display:'none'},'aria-label':'导入模板文件',onChange:function(e){var file=e.target.files&&e.target.files[0];e.target.value='';importFile(file);}}),
           React.createElement('button',{type:'button',onClick:exportTemplates},'导出')),
         React.createElement('ul',{className:'dsh-prompt-items'},shown.map(function(row){return React.createElement('li',{key:row.id},React.createElement('button',{type:'button',className:row.id===selectedId[0]?'is-active':'',onClick:function(){switchTo(row.id);}},
-          React.createElement('span',{className:'dsh-prompt-item-title'},row.title),React.createElement('span',{className:'dsh-prompt-item-hint'},(row.group||'')+(row.builtin?'':' · 我的'+(row.updatedAt?(' · '+String(row.updatedAt).slice(0,16).replace('T',' ')):'')))));})),
-        userMore>0?React.createElement('button',{type:'button',className:'dsh-prompt-more',onClick:loadMoreUser},'加载更多（还有 '+userMore+' 条）'):null,
+          React.createElement('span',{className:'dsh-prompt-item-title'},row.title),React.createElement('span',{className:'dsh-prompt-item-hint'},(row.group||'')+(row.builtin?'':row.draftOnly?' · 草稿':' · 我的'+(row.updatedAt?(' · '+String(row.updatedAt).slice(0,16).replace('T',' ')):'')))));})),
+        userMore>0&&(scope[0]!=='common'||query[0].trim())?React.createElement('button',{type:'button',className:'dsh-prompt-more',onClick:loadMoreUser},'加载更多（还有 '+userMore+' 条）'):null,
         showEmptySmall(shown.length,query[0])),
       React.createElement('div',{className:'dsh-prompt-main'},
         selected?React.createElement('div',{className:'dsh-prompt-titlebar'},React.createElement('strong',null,selected.title),React.createElement('button',{type:'button',className:favorites[0].indexOf(selected.id)>=0?'is-active':'',onClick:toggleFavorite},favorites[0].indexOf(selected.id)>=0?'已收藏':'收藏'),
-          React.createElement('div',{className:'dsh-prompt-modes',role:'tablist'},React.createElement('button',{type:'button',role:'tab','aria-selected':editMode[0]==='fields',className:editMode[0]==='fields'?'is-active':'',onClick:useGenerated},'填关键信息'),React.createElement('button',{type:'button',role:'tab','aria-selected':editMode[0]==='manual',className:editMode[0]==='manual'?'is-active':'',onClick:beginManual},'直接编辑'))):null,
-        selected?React.createElement('div',{className:'dsh-prompt-fields'},
+          !selected.draftOnly?React.createElement('div',{className:'dsh-prompt-modes',role:'tablist'},React.createElement('button',{type:'button',role:'tab','aria-selected':editMode[0]==='fields',className:editMode[0]==='fields'?'is-active':'',title:editMode[0]==='manual'?'按示例和已填信息重新生成，替换当前正文':'填写空白后生成正文',onClick:useGenerated},editMode[0]==='manual'?'按示例重新生成':'填写空白'),React.createElement('button',{type:'button',role:'tab','aria-selected':editMode[0]==='manual',className:editMode[0]==='manual'?'is-active':'',onClick:beginManual},'直接编辑')):null):null,
+        selected&&editMode[0]==='fields'?React.createElement('div',{className:'dsh-prompt-fields'},
           (selected.required||[]).map(function(key){return fieldControl(key,values[0][key],setField,fields,missing);}),
           (selected.optional||[]).length?React.createElement('details',{open:optional[0],onToggle:function(e){optional[1](e.target.open);}},React.createElement('summary',null,'更多信息（'+(selected.optional||[]).length+'）'),
-            (selected.optional||[]).map(function(key){return fieldControl(key,values[0][key],setField,fields,missing);})):null):React.createElement('div',{className:'dsh-prompt-blank'},
-              React.createElement('strong',null,'先选一个模板'),
-              React.createElement('p',null,'从左侧挑一个符合这次需求的模板，填 0–2 项关键信息，再把完整文字插入输入框。'),
+            (selected.optional||[]).map(function(key){return fieldControl(key,values[0][key],setField,fields,missing);})):null):!selected?React.createElement('div',{className:'dsh-prompt-blank'},
+              React.createElement('strong',null,'先选一条模板'),
+              React.createElement('p',null,'从左侧挑一条常用的，或点“新建”自己写。'),
               React.createElement('ol',null,
-                React.createElement('li',null,'没有合适的？切到“直接编辑”自己写，或另存成我的模板。'),
-                React.createElement('li',null,'首次打开保持空白，不会自动替你选模板，也不会创建任务。'))),
-        selected?React.createElement('label',{className:'dsh-prompt-full'},'最终文字（发送前可修改）',React.createElement('textarea',{'aria-label':'提示词全文',value:text[0],readOnly:editMode[0]==='fields',maxLength:16000,onChange:function(e){text[1](e.target.value);editMode[1]('manual');markDirty();}})):null,
+                React.createElement('li',null,'把目标填进去，正文可以继续改。'),
+                React.createElement('li',null,'点“插入输入框”只会填入文字，不会自动发送。'))):null,
+        selected?React.createElement('label',{className:'dsh-prompt-full'},'指令正文（可直接修改）',React.createElement('textarea',{'aria-label':'指令正文',value:text[0],placeholder:'写清楚要做什么、已有证据或附件，以及哪些不能碰。',maxLength:16000,onChange:function(e){text[1](e.target.value);editMode[1]('manual');markDirty();}})):null,
         conflict[0]&&conflict[0].local&&conflict[0].local.templateId===selectedId[0]?React.createElement('div',{className:'dsh-prompt-conflict',role:'alert'},React.createElement('p',null,'其他窗口已修改这份草稿，两份都保留：'),React.createElement('button',{type:'button',onClick:function(){resolveConflict('server');}},'载入另一窗口版本'),React.createElement('button',{type:'button',onClick:function(){resolveConflict('local');}},'用本地版本另存')):null,
         importNotice[0]?React.createElement('p',{role:'status'},importNotice[0]):null,
         notice[0]?React.createElement('p',{role:'status'},notice[0]):null),
     ),
     React.createElement('div',{className:'dsh-prompt-foot'},
       React.createElement('span',{role:'status'},saveState[0]||(selected?'':'未选择模板')),
-      React.createElement('label',{className:'dsh-prompt-saveas'},'另存为',React.createElement('input',{'aria-label':'另存为名称',value:saveAsName[0],placeholder:'名称',onChange:function(e){saveAsName[1](e.target.value);}}),React.createElement('button',{type:'button',disabled:busy[0]||!selected||!saveAsName[0].trim(),onClick:saveAs},'另存')),
+      React.createElement('label',{className:'dsh-prompt-saveas'},'名称',React.createElement('input',{'aria-label':'另存为名称',value:saveAsName[0],placeholder:selected&&!selected.builtin&&!selected.draftOnly?selected.title:'起个名称，存到“我的”',maxLength:60,onChange:function(e){saveAsName[1](e.target.value);}}),React.createElement('button',{type:'button',disabled:busy[0]||!selected||!saveAsName[0].trim()||!text[0].trim(),onClick:saveAs},'存为我的模板')),
+      selected&&!selected.builtin&&!selected.draftOnly?React.createElement('button',{type:'button',disabled:busy[0]||!text[0].trim(),onClick:saveUser},'保存修改'):null,
       React.createElement('button',{type:'button',disabled:!selected||!text[0].trim(),onClick:copy},'复制'),
-      React.createElement('button',{type:'button',className:'is-primary',disabled:!canInsert,title:missing.length?'先填写：'+missing.join('、'):'',onClick:insert},replacesSelection()?'替换选中文字':'插入输入框')));
+      React.createElement('button',{type:'button',className:'is-primary',disabled:!canInsert,title:missing.length?'先填写：'+missing.join('、'):'',onClick:insert},replacesSelection()?'替换选中文字':'插入输入框'))));
 }
 function showEmptySmall(count,query){return count?null:React.createElement('p',{className:'dsh-prompt-empty'},query?('没有匹配“'+query+'”的模板'):'这里还没有模板');}
 function fieldControl(key,value,setField,fields,missing){var f=fields[key]||{label:key};var needs=missing.indexOf(f.label)>=0;var common={'aria-label':f.label,value:value||'',placeholder:f.placeholder||'',onChange:function(e){setField(key,e.target.value);}};
   // 用独立子节点，不要用 `+` 拼：f.help 为空时 `'标签' + null` 会渲染出字面量 “null”。
   return React.createElement('label',{key:key,className:'dsh-prompt-field'+(needs?' is-missing':'')},
-    f.label,
+    React.createElement('span',{className:'dsh-prompt-label'},f.label,needs?React.createElement('em',null,'必填'):null),
     f.help?React.createElement('small',null,f.help):null,
     f.type==='textarea'?React.createElement('textarea',common):React.createElement('input',common),
-    needs?React.createElement('small',{className:'dsh-prompt-need'},'填写'+f.label):null);}
+    needs?React.createElement('small',{className:'dsh-prompt-need'},'填写后才能插入') : null);}
 // 用量行（v6 第 5.1 节）：本任务网站请求、模型用量与时间；明细展开查看缓存与主子会话。
 // 未知用量不显示为零；这里只读计数，不额外调用模型。
 function usageDuration(seconds) {
@@ -1918,13 +1987,20 @@ function MaterialsEntry(props) {
   var fallbackOpen = useState(false), text = useState(''), name = useState('');
   var busy = useState(false), notice = useState(''), error = useState('');
   var summary = useState(null);
+  var lastMaterial = useState(null), viewing = useState(false), materialDetail = useState(null);
+  var materialDetailError = useState(''), materialBusy = useState(false);
+  var queued = useState([]);
   var preparation = useState([]);
   var panelPosition = useState(null);
   var fileRef = useRef(null), dirRef = useRef(null), root = useRef(null), trigger = useRef(null);
   // 面板由 ChatSetup 统一管（四入口互斥）；单独挂载时退回本地状态。
   var open = [props.open === undefined ? fallbackOpen[0] : props.open,
     function (next) { if (props.onOpenChange) props.onOpenChange(next); else fallbackOpen[1](next); }];
-  function closeEntry() { open[1](false); if (trigger.current && trigger.current.focus) trigger.current.focus(); }
+  function closeEntry() {
+    viewing[1](false); materialDetail[1](null); materialDetailError[1]('');
+    open[1](false);
+    if (trigger.current && trigger.current.focus) trigger.current.focus();
+  }
   useEffect(function () {
     if (!open[0] || typeof window === 'undefined') return;
     function place() {
@@ -1950,7 +2026,7 @@ function MaterialsEntry(props) {
     if (!open[0]) return;
     if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') return;
     function onDown(event) { var el = root.current; if (el && el.contains && el.contains(event.target)) return; closeEntry(); }
-    function onKey(event) { if (event.key === 'Escape') { event.stopPropagation(); closeEntry(); } }
+    function onKey(event) { if (event.isComposing || event.keyCode === 229) return; if (event.key === 'Escape') { event.stopPropagation(); closeEntry(); } }
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
     return function () { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
@@ -1975,7 +2051,7 @@ function MaterialsEntry(props) {
     }
     return { requests: requests, files: files, failed: failed, skipped: skipped, identities: identities, entries: entries, broken: broken, errors: errors };
   }
-  function save() {
+  function saveLegacy() {
     if (!text[0].trim()) { error[1]('请先粘贴请求、响应或代码，或选择一个文件'); return Promise.resolve(); }
     busy[1](true); error[1](''); notice[1](''); summary[1](null);
     if (projectMode) {
@@ -1985,6 +2061,7 @@ function MaterialsEntry(props) {
           summary[1]({ requests: 0, files: 1, failed: 0, skipped: 0, identities: 0, entries: result.sections, broken: 0, errors: [] });
           preparation[1](result.preview ? [result.preview] : []);
           notice[1]('已导入项目文档：' + result.sections + ' 个段落' + (result.unread ? '，' + result.unread + ' 个区域不可读' : ''));
+          lastMaterial[1]({ kind: 'project', name: name[0] || '粘贴的测试要求', sections: result.sections });
           text[1](''); name[1]('');
           if (props.onImported) props.onImported();
         })
@@ -1998,6 +2075,7 @@ function MaterialsEntry(props) {
         summary[1](summarize([{ ok: true, format: m.format, name: m.name || '粘贴内容', identities: m.identities,
           entries: m.summary && m.summary.entries, broken: m.summary && m.summary.broken }]));
         notice[1]((m.reused ? '相同内容已存在，已合并来源' : '已保存') + '：' + m.format + '，' + m.bytes + ' 字节');
+        lastMaterial[1]({ id: m.id, name: m.name || '粘贴内容', format: m.format, bytes: m.bytes, reused: m.reused === true });
         text[1](''); name[1]('');
         if (props.onImported) props.onImported();
       })
@@ -2025,7 +2103,37 @@ function MaterialsEntry(props) {
     for (var i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
     return btoa(binary);
   }
-  function pickFiles(event) {
+  function openMaterial(material) {
+    var id = material && material.id;
+    if (!id) { materialDetailError[1]('这条记录没有可读取的文件 ID'); viewing[1](true); return; }
+    viewing[1](true); materialBusy[1](true); materialDetailError[1](''); materialDetail[1](null);
+    return api('materials.detail', { sessionId: props.sessionId, kind: 'file', id: id, offset: 0, limit: 16384 })
+      .then(function (result) {
+        if (!result.ok) throw Error(result.error || '读取文件失败');
+        if (!result.detail) throw Error('文件不存在或已移除');
+        materialDetail[1](result.detail);
+      })
+      .catch(function (failure) { materialDetailError[1](failure.message); })
+      .finally(function () { materialBusy[1](false); });
+  }
+  function readMoreMaterial() {
+    var current = materialDetail[0];
+    if (!current || current.nextOffset == null) return Promise.resolve();
+    materialBusy[1](true); materialDetailError[1]('');
+    return api('materials.detail', { sessionId: props.sessionId, kind: 'file', id: current.id,
+      offset: current.nextOffset, limit: current.limit || 16384 })
+      .then(function (result) {
+        if (!result.ok) throw Error(result.error || '继续读取失败');
+        if (!result.detail) throw Error('文件不存在或已移除');
+        materialDetail[1](Object.assign({}, result.detail, {
+          offset: current.offset,
+          preview: String(current.preview || '') + String(result.detail.preview || ''),
+        }));
+      })
+      .catch(function (failure) { materialDetailError[1](failure.message); })
+      .finally(function () { materialBusy[1](false); });
+  }
+  function pickFilesLegacy(event) {
     var files = [...(event.target.files || [])].slice(0, 30);
     event.target.value = '';
     if (!files.length) return;
@@ -2051,6 +2159,8 @@ function MaterialsEntry(props) {
                 if (projectMode) results.push({ name: row.name, ok: true, format: result.source && result.source.kind,
                   entries: result.sections, broken: result.unread, preview: result.preview });
                 else results.push({ name: row.name, ok: true, format: result.material && result.material.format,
+                  id: result.material && result.material.id, materialName: result.material && result.material.name,
+                  bytes: result.material && result.material.bytes, reused: result.material && result.material.reused,
                   identities: result.material && result.material.identities,
                   entries: result.material && result.material.summary && result.material.summary.entries,
                   broken: result.material && result.material.summary && result.material.summary.broken });
@@ -2062,11 +2172,114 @@ function MaterialsEntry(props) {
           summary[1](s);
           if (projectMode) preparation[1](results.filter(function (row) { return row.ok && row.preview; }).map(function (row) { return row.preview; }));
           notice[1]((projectMode ? '已导入 ' : '已保存 ') + (s.requests + s.files) + '/' + rows.length + ' 个文件' + (s.skipped ? '（跳过 ' + s.skipped + ' 个空文件）' : ''));
+          var saved = results.filter(function (row) { return row.ok && row.id; }).slice(-1)[0];
+          if (saved) lastMaterial[1]({ id: saved.id, name: saved.materialName || saved.name, format: saved.format, bytes: saved.bytes, reused: saved.reused === true });
           if (props.onImported) props.onImported();
         });
       })
       .catch(function (failure) { error[1](failure.message); })
       .finally(function () { busy[1](false); });
+  }
+  function importQueued(entry, results, imported) {
+    var file = entry.file;
+    var read = projectMode
+      ? readBinary(file).then(function (body) { return { name: file.name, body: toBase64(body) }; })
+      : readFile(file).then(function (body) { return { name: file.name, body: body }; });
+    return read.then(function (row) {
+      if (!projectMode && !row.body.trim()) {
+        results.push({ ok: false, skipped: true, name: row.name, error: '空文件已跳过' });
+        return;
+      }
+      var endpoint = projectMode ? 'project.import' : 'materials.import';
+      var payload = projectMode
+        ? { sessionId: props.sessionId, name: row.name, base64: row.body }
+        : { sessionId: props.sessionId, name: row.name, text: row.body };
+      return api(endpoint, payload).then(function (result) {
+        if (!result.ok) throw Error(result.error || '保存失败');
+        if (projectMode) {
+          results.push({ ok: true, name: row.name, format: result.source && result.source.kind, entries: result.sections, broken: result.unread });
+          preparation[1](current => current.concat(result.preview ? [result.preview] : []));
+        } else {
+          results.push({ ok: true, name: row.name, format: result.material && result.material.format,
+            id: result.material && result.material.id, materialName: result.material && result.material.name,
+            bytes: result.material && result.material.bytes, reused: result.material && result.material.reused,
+            identities: result.material && result.material.identities,
+            entries: result.material && result.material.summary && result.material.summary.entries,
+            broken: result.material && result.material.summary && result.material.summary.broken });
+        }
+        imported.add(entry.id);
+      }).catch(function (failure) {
+        results.push({ ok: false, name: row.name, error: failure.message });
+      });
+    });
+  }
+  function importPasted(results) {
+    if (!text[0].trim()) return Promise.resolve();
+    if (projectMode) {
+      return api('project.import', { sessionId: props.sessionId, name: name[0] || '粘贴的测试要求', text: text[0] })
+        .then(function (result) {
+          if (!result.ok) throw Error(result.error || '保存项目文档失败');
+          results.push({ ok: true, fromPaste: true, name: name[0] || '粘贴的测试要求', format: 'project', entries: result.sections, broken: 0 });
+          preparation[1](result.preview ? [result.preview] : []);
+          text[1](''); name[1]('');
+        })
+        .catch(function (failure) {
+          results.push({ ok: false, fromPaste: true, name: name[0] || '粘贴内容', error: failure.message });
+        });
+    }
+    return api('materials.import', { sessionId: props.sessionId, name: name[0], text: text[0] })
+      .then(function (result) {
+        if (!result.ok) throw Error(result.error || '保存测试资料失败');
+        var m = result.material;
+        results.push({ ok: true, fromPaste: true, format: m.format, name: m.name || '粘贴内容', identities: m.identities,
+          id: m.id, materialName: m.name, bytes: m.bytes, reused: m.reused,
+          entries: m.summary && m.summary.entries, broken: m.summary && m.summary.broken });
+        text[1](''); name[1]('');
+      })
+      .catch(function (failure) {
+        results.push({ ok: false, fromPaste: true, name: name[0] || '粘贴内容', error: failure.message });
+      });
+  }
+  function save() {
+    var entries = queued[0].slice();
+    if (!entries.length && !text[0].trim()) {
+      error[1]('请先粘贴请求、响应或代码，或先选择文件');
+      return Promise.resolve();
+    }
+    busy[1](true); error[1](''); notice[1](''); summary[1](null);
+    var results = [], imported = new Set();
+    var chain = Promise.resolve();
+    entries.forEach(function (entry) {
+      chain = chain.then(function () { return importQueued(entry, results, imported); });
+    });
+    chain = chain.then(function () { return importPasted(results); });
+    return chain.then(function () {
+      var s = summarize(results);
+      summary[1](s);
+      if (s.failed || s.skipped) error[1]('有 ' + (s.failed + s.skipped) + ' 项未导入；成功项已保留，失败项可重试或移除。');
+      notice[1]((projectMode ? '已导入 ' : '已保存 ') + (s.requests + s.files) + '/' + results.length + ' 项内容');
+      var saved = results.filter(function (row) { return row.ok && row.id; }).slice(-1)[0];
+      if (saved) lastMaterial[1]({ id: saved.id, name: saved.materialName || saved.name, format: saved.format, bytes: saved.bytes, reused: saved.reused === true });
+      if (imported.size) queued[1](current => current.filter(entry => !imported.has(entry.id)));
+      if (props.onImported) props.onImported();
+    }).catch(function (failure) {
+      error[1](failure.message);
+    }).finally(function () { busy[1](false); });
+  }
+  function pickFiles(event) {
+    var selected = [...(event.target.files || [])].slice(0, 30);
+    event.target.value = '';
+    if (!selected.length) return;
+    error[1](''); notice[1](''); summary[1](null);
+    var seen = new Set(queued[0].map(function (entry) { return entry.file.name + ':' + entry.file.size + ':' + entry.file.lastModified; }));
+    var next = [];
+    selected.forEach(function (file) {
+      var key = file.name + ':' + file.size + ':' + file.lastModified;
+      if (seen.has(key)) return;
+      seen.add(key);
+      next.push({ id: 'queued-' + Date.now() + '-' + Math.random().toString(36).slice(2), file: file });
+    });
+    queued[1](current => current.concat(next));
   }
   function prepareSource(preview, sourceRole, regions) {
     busy[1](true); error[1]('');
@@ -2095,62 +2308,100 @@ function MaterialsEntry(props) {
   }
   return React.createElement('div', { className: 'dsh-materials-entry', ref: root },
     React.createElement('button', { ref: trigger, type: 'button', className: 'dsh-chat-toolbar-button', 'aria-expanded': open[0],
-      title: projectMode ? '导入本次项目的测试文档。程序只做本地解析，不立刻调用模型。' : '把本次网站的请求、代码或文件交给 AI 分析。保存原文并添加引用；不立刻发送或访问网站。',
-      onClick: function () { open[1](!open[0]); } }, projectMode ? '添加测试文档' : '添加文件'),
+      title: projectMode ? '导入这次测试的要求文件。只在本机解析，不会立刻读取。' : '把请求、代码或文件交给 Saker 检查。只保存在本机，添加后才会读取。',
+      onClick: function () { open[1](!open[0]); } }, projectMode ? '测试文档' : '附件'),
     open[0] ? React.createElement('div', { className: 'dsh-materials-import', style: panelPosition[0] },
-      React.createElement('div', { className: 'dsh-chat-panel-head' }, React.createElement('strong', null, projectMode ? '添加测试文档' : '添加文件'),
+      React.createElement('div', { className: 'dsh-chat-panel-head saker-panel-head' },
+        React.createElement('div', { className: 'saker-panel-headtext' },
+          React.createElement('strong', null, viewing[0] ? '附件内容' : (projectMode ? '导入测试文档' : '添加附件')),
+          React.createElement('p', { className: 'saker-panel-subtitle' }, viewing[0]
+            ? (lastMaterial[0] && lastMaterial[0].name ? lastMaterial[0].name : '本机保存的原文；读取不会发送给模型。')
+            : (projectMode ? '选择这次测试的要求文件。只在本机解析。' : '文档、截图、请求都可以。只保存在本机。'))),
         React.createElement('button', { type: 'button', 'aria-label': projectMode ? '关闭添加测试文档' : '关闭添加文件', onClick: closeEntry }, '关闭')),
-      React.createElement('p', null, projectMode
-        ? '导入本次测试要求：Word、Excel 或文本。程序只在本地解析，不立刻调用模型，也不访问网站。'
-        : '原始 HTTP、HAR、curl 文本、JS、源码或扫描导出都可以。保存原文并建立引用；不立刻发送，也不访问网站。'),
-      React.createElement('div', { className: 'dsh-materials-import-actions' },
-        React.createElement('button', { type: 'button', disabled: busy[0], onClick: function () { if (fileRef.current) fileRef.current.click(); } }, '选择文件'),
-        projectMode ? null : React.createElement('button', { type: 'button', disabled: busy[0], onClick: function () { if (dirRef.current) dirRef.current.click(); } }, '选择代码文件夹'),
-        React.createElement('input', { ref: fileRef, type: 'file', multiple: true, accept: projectMode ? '.docx,.xlsx,.txt,.md,.json' : undefined, style: { display: 'none' }, onChange: pickFiles }),
-        React.createElement('input', { ref: dirRef, type: 'file', webkitdirectory: '', multiple: true, style: { display: 'none' }, onChange: pickFiles })),
-      React.createElement('label', { className: 'dsh-materials-import-paste' }, projectMode ? '粘贴环境说明或测试要求' : '粘贴请求、响应或代码',
-        React.createElement('textarea', { 'aria-label': projectMode ? '粘贴测试文档' : '粘贴测试资料', rows: 5, maxLength: 200000, value: text[0],
-          placeholder: projectMode ? '填写项目地址、测试账号说明，以及需要检查的功能与要求。' : '例如：GET /api/orders HTTP/1.1 或 HAR JSON 片段', onChange: function (event) { text[1](event.target.value); } })),
-      React.createElement('label', { className: 'dsh-materials-import-name' }, '名称（可选）',
-        React.createElement('input', { 'aria-label': '测试资料名称', value: name[0], onChange: function (event) { name[1](event.target.value); } })),
-      React.createElement('button', { type: 'button', className: 'is-primary', disabled: busy[0], onClick: save }, busy[0] ? '正在保存…' : projectMode ? '导入到本次测试' : '保存到本任务资料'),
-      // 导入进度与结果（v6 第 7.1 节）：识别→解析→去重→保存；完成显示计数，失败可展开看具体原因。
-      React.createElement('div', { className: 'dsh-materials-progress' },
-        React.createElement('span', { className: 'dsh-materials-steps' }, IMPORT_STEPS.join(' → ') + (busy[0] ? '（进行中…）' : summary[0] ? '（已完成）' : '')),
-        summary[0] ? React.createElement('small', null, '导入完成：请求 ' + summary[0].requests + '、文件 ' + summary[0].files
-          + (summary[0].identities ? '、身份 ' + summary[0].identities + '（待关联）' : '')
-          + (summary[0].entries ? '、条目 ' + summary[0].entries + (summary[0].broken ? '（其中 ' + summary[0].broken + ' 条坏记录）' : '') : '')
-          + (summary[0].skipped ? '、跳过空文件 ' + summary[0].skipped : '') + '；失败 ' + summary[0].failed) : null,
-        summary[0] && summary[0].errors.length ? React.createElement('details', { className: 'dsh-materials-errors' },
-          React.createElement('summary', null, '查看错误 ' + summary[0].errors.length + ' 条'),
-          React.createElement('ul', null, summary[0].errors.map(function (text, index) { return React.createElement('li', { key: index }, text); }))) : null),
-      projectMode && preparation[0].length ? React.createElement('details', { className: 'dsh-materials-preparation', open: true },
-        React.createElement('summary', null, '导入预览与范围（' + preparation[0].length + '）'),
-        preparation[0].map(function (preview) {
-          return React.createElement('div', { key: preview.sourceId + '@' + preview.sourceRevision, style: { padding: '8px 0', borderTop: '1px solid color-mix(in srgb,currentColor 10%,transparent)' } },
-            React.createElement('strong', null, preview.displayName || preview.sourceId),
-            React.createElement('label', { className: 'dsh-materials-import-name' }, '用途 ',
-              React.createElement('select', { 'aria-label': '来源用途', value: preview.sourceRole, disabled: busy[0], onChange: function (event) { return setSourceRole(preview, event.target.value); } },
-                React.createElement('option', { value: 'requirements' }, '测试要求'),
-                React.createElement('option', { value: 'environment' }, '环境说明'))),
-            (preview.sheets || []).map(function (sheet) {
-              return React.createElement('div', { key: preview.sourceId + ':' + sheet.sheet, style: { marginTop: 8, padding: 8, border: '1px solid color-mix(in srgb,currentColor 12%,transparent)', borderRadius: 6 } },
-                React.createElement('div', null, sheet.sheet + ' · ' + sheet.rows + ' 行 · 隐藏行 ' + sheet.hiddenRows + (sheet.hiddenColumns.length ? ' · 隐藏列 ' + sheet.hiddenColumns.join(',') : '')),
-                sheet.headerAmbiguous ? React.createElement('small', { role: 'status' }, '首行是否为表头不确定；默认保留为数据，需人工选择。') : null,
-                React.createElement('label', null, '表头 ',
-                  React.createElement('select', { 'aria-label': sheet.sheet + '表头', value: (preview.regions || []).find(function (region) { return region.sheet === sheet.sheet; })?.headerMode || 'auto', disabled: busy[0], onChange: function (event) { return setRegion(preview, sheet, { headerMode: event.target.value, headerRow: event.target.value === 'header' ? sheet.firstNonEmptyRow : null }); } },
-                    React.createElement('option', { value: 'auto' }, '自动识别'),
-                    React.createElement('option', { value: 'header' }, '首行是表头'),
-                    React.createElement('option', { value: 'none' }, '无表头，全部保留'))),
-                React.createElement('label', null, React.createElement('input', { type: 'checkbox',
-                  checked: (preview.regions || []).find(function (region) { return region.sheet === sheet.sheet; })?.includeHidden === true,
-                  disabled: busy[0], onChange: function (event) { return setRegion(preview, sheet, { includeHidden: event.target.checked }); } }), '纳入隐藏行和隐藏列')),
-                React.createElement('small', null, '首行：' + (sheet.firstValues || []).join(' / '));
-            }),
-            React.createElement('small', null, preview.note || ''));
-        })) : null,
-      notice[0] ? React.createElement('small', { role: 'status' }, notice[0]) : null,
-      error[0] ? React.createElement('p', { role: 'alert' }, error[0]) : null) : null);
+      viewing[0] ? React.createElement(React.Fragment, null,
+        React.createElement('div', { className: 'dsh-materials-import-body dsh-materials-viewer' },
+          materialBusy[0] && !materialDetail[0] ? React.createElement('p', { className: 'saker-panel-hint' }, '正在读取本机原文…') : null,
+          materialDetailError[0] ? React.createElement('p', { role: 'alert' }, materialDetailError[0]) : null,
+          materialDetail[0] ? React.createElement('div', null,
+            React.createElement('div', { className: 'dsh-materials-viewer-meta' },
+			React.createElement('strong', null, materialDetail[0].name || '文件'),
+              React.createElement('small', null,
+                (materialDetail[0].importSummary && materialDetail[0].importSummary.format ? materialDetail[0].importSummary.format + ' · ' : '')
+                + (materialDetail[0].totalBytes != null ? materialDetail[0].totalBytes + ' 字节' : '大小未知')
+                + (materialDetail[0].truncated ? ' · 已显示 ' + (materialDetail[0].offset || 0) + '–' + (materialDetail[0].nextOffset || 0) : ' · 已显示全部'))),
+            materialDetail[0].missing
+              ? React.createElement('p', { role: 'alert' }, '原始文件已不在本机，且没有保存正文；这里只保留索引信息。')
+              : React.createElement('pre', { className: 'dsh-materials-viewer-text' }, materialDetail[0].preview || '（空文件）'),
+            materialDetail[0].truncated ? React.createElement('button', { type: 'button', disabled: materialBusy[0], onClick: readMoreMaterial },
+              materialBusy[0] ? '正在读取…' : '继续读取') : null,
+            materialDetail[0].note ? React.createElement('small', null, materialDetail[0].note) : null) : null),
+        React.createElement('div', { className: 'dsh-materials-import-foot dsh-materials-viewer-foot' },
+          React.createElement('button', { type: 'button', onClick: function () { viewing[1](false); materialDetail[1](null); materialDetailError[1](''); } }, '返回添加'),
+          React.createElement('button', { type: 'button', onClick: closeEntry }, '关闭')))
+      : React.createElement(React.Fragment, null,
+        React.createElement('div', { className: 'dsh-materials-import-body' },
+          projectMode ? React.createElement('p', { className: 'saker-panel-hint' }, '支持 Word、Excel、文本或 Markdown。') : null,
+          React.createElement('div', { className: 'dsh-materials-import-actions' },
+            React.createElement('button', { type: 'button', disabled: busy[0], onClick: function () { if (fileRef.current) fileRef.current.click(); } }, '选择文件'),
+            projectMode ? null : React.createElement('button', { type: 'button', disabled: busy[0], onClick: function () { if (dirRef.current) dirRef.current.click(); } }, '选择文件夹'),
+            React.createElement('input', { ref: fileRef, type: 'file', multiple: true, accept: projectMode ? '.docx,.xlsx,.txt,.md,.json' : undefined, style: { display: 'none' }, onChange: pickFiles }),
+            React.createElement('input', { ref: dirRef, type: 'file', webkitdirectory: '', multiple: true, style: { display: 'none' }, onChange: pickFiles })),
+          queued[0].length ? React.createElement('div', { className: 'dsh-materials-queue', 'aria-label': '待导入文件' },
+            React.createElement('small', null, '已选择 ' + queued[0].length + ' 个文件；确认后点击下面的导入按钮。'),
+            queued[0].map(function (entry) {
+              return React.createElement('div', { key: entry.id, className: 'dsh-materials-queue-row' },
+                React.createElement('span', null, entry.file.name + ' · ' + entry.file.size + ' 字节'),
+                React.createElement('button', { type: 'button', 'aria-label': '移除 ' + entry.file.name,
+                  onClick: function () { queued[1](current => current.filter(item => item.id !== entry.id)); } }, '移除'));
+            })) : null,
+          React.createElement('details', { className: 'saker-panel-section' }, React.createElement('summary', null, projectMode ? '或者直接粘贴测试要求' : '或者直接粘贴请求 / 代码'),
+            React.createElement('label', { className: 'dsh-materials-import-paste' }, projectMode ? '环境说明或测试要求' : '请求、响应或代码',
+              React.createElement('textarea', { 'aria-label': projectMode ? '粘贴测试文档' : '粘贴测试资料', rows: 5, maxLength: 200000, value: text[0],
+                placeholder: projectMode ? '填写项目地址、测试账号说明，以及需要检查的功能与要求。' : '例如：GET /api/orders HTTP/1.1 或 HAR JSON 片段', onChange: function (event) { text[1](event.target.value); } })),
+            React.createElement('label', { className: 'dsh-materials-import-name' }, '名称（可选）',
+              React.createElement('input', { 'aria-label': '测试资料名称', value: name[0], onChange: function (event) { name[1](event.target.value); } }))),
+          projectMode && preparation[0].length ? React.createElement('details', { className: 'dsh-materials-preparation', open: true },
+            React.createElement('summary', null, '导入预览与范围（' + preparation[0].length + '）'),
+            preparation[0].map(function (preview) {
+              return React.createElement('div', { key: preview.sourceId + '@' + preview.sourceRevision, style: { padding: '8px 0', borderTop: '1px solid color-mix(in srgb,currentColor 10%,transparent)' } },
+                React.createElement('strong', null, preview.displayName || preview.sourceId),
+                React.createElement('label', { className: 'dsh-materials-import-name' }, '用途 ',
+                  React.createElement('select', { 'aria-label': '来源用途', value: preview.sourceRole, disabled: busy[0], onChange: function (event) { return setSourceRole(preview, event.target.value); } },
+                    React.createElement('option', { value: 'requirements' }, '测试要求'),
+                    React.createElement('option', { value: 'environment' }, '环境说明'))),
+                (preview.sheets || []).map(function (sheet) {
+                  return React.createElement('div', { key: preview.sourceId + ':' + sheet.sheet, style: { marginTop: 8, padding: 8, border: '1px solid color-mix(in srgb,currentColor 12%,transparent)', borderRadius: 6 } },
+                    React.createElement('div', null, sheet.sheet + ' · ' + sheet.rows + ' 行 · 隐藏行 ' + sheet.hiddenRows + (sheet.hiddenColumns.length ? ' · 隐藏列 ' + sheet.hiddenColumns.join(',') : '')),
+                    sheet.headerAmbiguous ? React.createElement('small', { role: 'status' }, '首行是否为表头不确定；默认保留为数据，需人工选择。') : null,
+                    React.createElement('label', null, '表头 ',
+                      React.createElement('select', { 'aria-label': sheet.sheet + '表头', value: (preview.regions || []).find(function (region) { return region.sheet === sheet.sheet; })?.headerMode || 'auto', disabled: busy[0], onChange: function (event) { return setRegion(preview, sheet, { headerMode: event.target.value, headerRow: event.target.value === 'header' ? sheet.firstNonEmptyRow : null }); } },
+                        React.createElement('option', { value: 'auto' }, '自动识别'),
+                        React.createElement('option', { value: 'header' }, '首行是表头'),
+                        React.createElement('option', { value: 'none' }, '无表头，全部保留'))),
+                    React.createElement('label', null, React.createElement('input', { type: 'checkbox',
+                      checked: (preview.regions || []).find(function (region) { return region.sheet === sheet.sheet; })?.includeHidden === true,
+                      disabled: busy[0], onChange: function (event) { return setRegion(preview, sheet, { includeHidden: event.target.checked }); } }), '纳入隐藏行和隐藏列')),
+                    React.createElement('small', null, '首行：' + (sheet.firstValues || []).join(' / '));
+                }),
+                React.createElement('small', null, preview.note || ''));
+            })) : null),
+        React.createElement('div', { className: 'dsh-materials-import-foot' },
+          React.createElement('button', { type: 'button', className: 'is-primary', disabled: busy[0] || (!queued[0].length && !text[0].trim()), onClick: save },
+            busy[0] ? '正在导入…' : queued[0].length ? (text[0].trim() ? '添加文件与粘贴内容' : '添加所选文件') : text[0].trim() ? '添加到当前任务' : '先选择文件或粘贴内容'),
+          // 成功条固定在滚动区外：失败仍保留输入，成功可直接查看同一份材料。
+          notice[0] ? React.createElement('div', { className: 'dsh-materials-success', role: 'status' },
+            React.createElement('span', null, notice[0]),
+            lastMaterial[0] && lastMaterial[0].id ? React.createElement('button', { type: 'button', onClick: function () { return openMaterial(lastMaterial[0]); } }, '查看') : null) : null,
+          React.createElement('div', { className: 'dsh-materials-progress' },
+            busy[0] ? React.createElement('small', null, '正在识别并保存…') : null,
+            summary[0] ? React.createElement('small', null, '已导入：请求 ' + summary[0].requests + '、文件 ' + summary[0].files
+              + (summary[0].identities ? '、身份 ' + summary[0].identities + '（待关联）' : '')
+              + (summary[0].entries ? '、条目 ' + summary[0].entries + (summary[0].broken ? '（其中 ' + summary[0].broken + ' 条坏记录）' : '') : '')
+              + (summary[0].skipped ? '、跳过空文件 ' + summary[0].skipped : '') + '；失败 ' + summary[0].failed) : null,
+            summary[0] && summary[0].errors.length ? React.createElement('details', { className: 'dsh-materials-errors' },
+              React.createElement('summary', null, '查看错误 ' + summary[0].errors.length + ' 条'),
+              React.createElement('ul', null, summary[0].errors.map(function (text, index) { return React.createElement('li', { key: index }, text); }))) : null),
+          error[0] ? React.createElement('p', { role: 'alert' }, error[0]) : null))) : null);
 }
 // 停止状态（v6 第 5.2 节）：点击停止后先显示“正在停止…”，收到代理退出依据后才显示“已停止”。
 // 给助手选择模型（v6 第 5.5 节）：可选模型来自宿主自己的授权偏好；未配置时给出配置入口，不悄悄换模型。
@@ -2165,16 +2416,13 @@ function WorkerModelSection(props) {
   }, [props.sessionId]);
   var current = data[0];
   if (error[0]) return React.createElement('details', { className: 'dsh-worker-model' },
-    React.createElement('summary', null, '给助手选择模型'), React.createElement('p', { role: 'alert' }, error[0]));
+    React.createElement('summary', null, '并行任务用哪个模型（可选）'), React.createElement('p', { role: 'alert' }, error[0]));
   if (!current) return React.createElement('details', { className: 'dsh-worker-model' },
-    React.createElement('summary', null, '给助手选择模型'), React.createElement('p', null, '正在读取可选模型…'));
+    React.createElement('summary', null, '并行任务用哪个模型（可选）'), React.createElement('p', null, '正在读取可选模型…'));
   var models = current.models || [], enabled = current.enabled === true && models.length > 0;
   var values = props.values || {};
   var labels = { workerModel: '协作模型', reviewModel: '独立复核', reportModel: '写报告时使用' };
-  var summary = Object.keys(labels).map(function (key) {
-    var value = values[key] || null;
-    return labels[key] + '：' + (value ? value.provider + ' / ' + value.model : '继承');
-  }).join(' · ');
+  var customized = Object.keys(labels).some(function (key) { return !!values[key]; });
   function selectFor(key) {
     var value = values[key] || null;
     var currentKey = value ? value.provider + '::' + value.model : '';
@@ -2189,20 +2437,20 @@ function WorkerModelSection(props) {
         return props.onChange(key, { provider: next.slice(0, at), model: next.slice(at + 2) });
       }
     },
-      React.createElement('option', { value: '' }, enabled ? '沿用当前会话模型' : '当前会话模型（未配置可选模型）'),
+      React.createElement('option', { value: '' }, enabled ? '和当前会话一样' : '当前会话模型（未配置可选模型）'),
       models.map(function (row) {
         return React.createElement('option', { key: row.provider + '::' + row.model, value: row.provider + '::' + row.model }, row.provider + ' / ' + row.model);
       })));
   }
   return React.createElement('details', { className: 'dsh-worker-model' },
-    React.createElement('summary', null, '给助手选择模型 · ' + summary),
-    React.createElement('p', null, '默认三用途都继承当前会话模型；只有用户显式选择时才覆盖，不常驻创建助手。'),
+    React.createElement('summary', null, '并行任务用哪个模型（可选）'),
+    React.createElement('p', null, customized ? '已自定义：只有你明确选择时才更换。' : '默认和当前会话一样；不用改也能用。'),
     selectFor('workerModel'),
     selectFor('reviewModel'),
     selectFor('reportModel'),
     React.createElement('small', null, enabled
-      ? '协作模型用于具体、独立的辅助工作；独立复核只在争议或高风险需要新上下文时创建；写报告模型只在用户明确要求成稿时使用。模型调用计入本任务共享额度。'
-      : '未配置可选模型：三用途都会沿用当前会话模型。可在宿主「插件」页的“子代理模型选择设置”里开启并勾选允许的模型；这里不会替你换模型。'));
+      ? '并行任务用“协作模型”；复核和写报告各有自己的触发条件。用量都算在本任务里。'
+      : '未配置可选模型：三项都会沿用当前会话模型。可在宿主「插件」页的“子代理模型选择设置”里开启允许的模型。'));
 }
 // 登录账号（v6 第 5.5 节）：列表只显示名称与状态；秘密单独保存，不回显、不进测试资料。
 var ACCOUNT_STATUS_LABEL = { valid: '有效', unconfirmed: '待确认', expired: '已失效' };
@@ -2276,9 +2524,10 @@ function taskScopeDisplay(scope, fallback) {
 // 任务工作区（发现页/资料页）要能打开输入框上方的「添加测试资料」面板，但两者是宿主的不同 slot，
 // 拿不到彼此的 props。模块级桥接只暴露一个「打开资料面板」动作，不引入新的全局状态。
 var materialsPanelBridge = { open: null };
+var curationSessionBridge = { sessionId: '' };
 // 保存设置后的变更摘要用词（v6 第 4.2 节）：与后端 settingsDiff 的字段一一对应，不另造术语。
-var SETTING_CHANGE_LABELS = { reporting: '什么时候汇报', explain: '解释原理', workers: '助手上限', workerModel: '助手模型',
-  allowTargetNetwork: '允许访问网站', readOnly: '仅发送 GET/HEAD', excludedPaths: '排除路径',
+var SETTING_CHANGE_LABELS = { reporting: '什么时候汇报', explain: '解释原理', workers: '并行任务上限', workerModel: '并行任务模型',
+  allowTargetNetwork: '允许访问网站', readOnly: '只读模式', excludedPaths: '排除路径',
   requestRatePerMinute: '扫描速率', requestConcurrency: '并发上限', direction: '测试方向', workflow: '测试安排',
   mode: '方向', interaction: '什么时候问我' };
 function fileBase64(file) {
@@ -2298,7 +2547,7 @@ function CompetitionEntry(props) {
   function saveAnswer(status){if(!answer[0])return;return act('competition.answer-add',{challengeId:selected[0],value:answer[0],source:'用户从当前界面提交'}).then(function(value){if(!value||!value.answer)return;if(status==='accepted')return act('competition.answer-update',{challengeId:selected[0],answerId:value.answer.answerId,status:'accepted',confirmedBy:'user',confirmationNote:'用户在当前 Desktop 界面确认'}).then(function(updated){if(updated){answer[1]('');return detail(selected[0])}});answer[1]('');return detail(selected[0])})}
   function toggleKnowledge(){var scene=data[0]&&data[0].scene;return act('knowledge.toggle',{enabled:!(scene&&scene.knowledgeEnabled),expectedRevision:scene&&scene.sceneRevision})}
   function importKnowledge(files){if(!files.length)return;busy[1](true);var chain=Promise.resolve();Array.from(files).forEach(function(file){chain=chain.then(function(){return fileBase64(file)}).then(function(base64){return api('knowledge.import-base64',{sessionId:props.sessionId,name:file.name,base64:base64})}).then(function(value){if(!value.ok)throw Error(value.error||('导入失败：'+file.name))})});return chain.then(load).catch(function(failure){error[1](failure.message)}).finally(function(){busy[1](false)})}
-  function searchKnowledge(){if(!knowledgeQuery[0].trim())return;return act('knowledge.search',{query:knowledgeQuery[0],limit:5}).then(function(value){if(value&&value.rows){knowledgeRead[1](value.rows.map(function(row){return row.title+' · '+row.location+'\n'+row.excerpt}).join('\n\n'))}})}
+  function searchKnowledge(){if(!knowledgeQuery[0].trim())return;return act('knowledge.search',{query:knowledgeQuery[0],limit:5}).then(function(value){if(value&&value.rows){knowledgeRead[1](value.rows.map(function(row){return row.title+' · '+(row.section||row.sourceLabel||'')+'\n'+row.excerpt}).join('\n\n'))}})}
   function readKnowledgeSource(source){var lines=[];function next(cursor){return api('knowledge.read',{sessionId:props.sessionId,sourceId:source.sourceId,revision:source.revision,cursor:cursor||undefined,maxBytes:8192}).then(function(value){if(!value.ok)throw Error(value.error||'读取资料失败');if(!lines.length)lines.push('# '+value.title);lines.push(value.text);if(value.nextCursor)return next(value.nextCursor);knowledgeRead[1](lines.join('\n'));});}return next().catch(function(failure){error[1](failure.message)})}
   function pageKnowledge(offset){return api('knowledge.list',{sessionId:props.sessionId,offset:offset,limit:20}).then(function(value){if(!value.ok)throw Error(value.error||'读取资料列表失败');knowledgePage[1](value)}).catch(function(failure){error[1](failure.message)})}
   var status=data[0], rows=status&&status.challenges&&status.challenges.rows||[], current=details[0]&&details[0].challenge||rows.find(function(row){return row.challengeId===selected[0]}), knowledgeListing=knowledgePage[0]||status&&status.knowledge||{}, sources=knowledgeListing.rows||[];
@@ -2339,7 +2588,7 @@ function CompetitionEntry(props) {
       React.createElement('label',{className:'dsh-chat-field'},React.createElement('span',null,'候选答案或 stdin'),React.createElement('textarea',{rows:2,value:answer[0],onChange:function(event){answer[1](event.target.value)},placeholder:'保留原始大小写和字符'})),
       React.createElement('div',{className:'dsh-chat-actions'},React.createElement('button',{type:'button',disabled:!answer[0]||busy[0],onClick:function(){saveAnswer('pending')}},'保存候选'),React.createElement('button',{type:'button',disabled:!answer[0]||busy[0],onClick:function(){saveAnswer('accepted')}},'人工确认通过'),React.createElement('button',{type:'button',disabled:!executionId[0]||!answer[0],onClick:writeInput},'写入 stdin')),
       details[0]&&(details[0].answers||[]).length?React.createElement('div',null,React.createElement('h3',null,'候选答案'),details[0].answers.map(function(item){return React.createElement('p',{key:item.answerId},React.createElement('code',null,item.value),' · '+item.status+' ',item.status==='pending'?React.createElement('button',{type:'button',onClick:function(){return act('competition.answer-update',{challengeId:current.challengeId,answerId:item.answerId,status:'accepted',confirmedBy:'user',confirmationNote:'用户在平台核对后确认'}).then(function(){return detail(current.challengeId)})}},'人工确认通过'):null)})):null,
-      details[0]&&(details[0].executions||[]).length?React.createElement('details',null,React.createElement('summary',null,'执行记录'),details[0].executions.map(function(item){return React.createElement('p',{key:item.executionId},item.executionId+' · '+item.state+' · '+item.environment+' ',React.createElement('button',{type:'button',onClick:function(){stdoutOffset[1](0);stderrOffset[1](0);return readOutput(item.executionId,true)}},'继续此执行'))})):null);
+    details[0]&&(details[0].executions||[]).length?React.createElement('details',null,React.createElement('summary',null,'执行记录'),details[0].executions.map(function(item){return React.createElement('p',{key:item.executionId},item.executionId+' · '+item.state+' · '+item.environment+' ',React.createElement('button',{type:'button',onClick:function(){stdoutOffset[1](0);stderrOffset[1](0);return readOutput(item.executionId,true)}},'继续此执行'))})):null);
   } else {
     inner=React.createElement('div',null,
       React.createElement('div',{className:'dsh-chat-panel-head'},React.createElement('strong',null,'题目'),React.createElement('span',null,status&&status.summary?status.summary.challenges+' 道题 · 已通过 '+status.summary.acceptedAnswers:'')),
@@ -2350,27 +2599,525 @@ function CompetitionEntry(props) {
       error[0]?React.createElement('p',{role:'alert'},error[0]):null,React.createElement('div',{className:'dsh-competition-body'},inner));
   return props.embedded?body:React.createElement(React.Fragment,null,React.createElement('span',{className:'dsh-chat-entry-group'},triggers),body);
 }
+function chatOverlayLayout(rect, viewportHeight, viewportWidth) {
+  // Keep the close button below Desktop's draggable title bar. If the composer
+  // is near the top, use the available viewport instead of forcing a tall panel above it.
+  var safeTop=48, margin=12, gap=6;
+  var spaceAbove=Math.floor(rect.top-safeTop-gap);
+  var bottom=spaceAbove>=240?Math.max(margin,Math.floor(viewportHeight-rect.top+gap)):margin;
+  return {maxHeight:Math.max(0,Math.min(720,viewportHeight-safeTop-bottom)),bottom:bottom,
+    right:Math.max(margin,Math.floor(viewportWidth-rect.right)),
+    width:Math.max(0,Math.min(560,Math.floor(rect.width),viewportWidth-margin*2))};
+}
+function messageTextBlocks(value, depth) {
+  if(depth>4||value==null)return '';
+  if(typeof value==='string')return value.slice(0,16384);
+  if(Array.isArray(value))return value.map(function(item){return messageTextBlocks(item,depth+1);}).filter(Boolean).join('');
+  if(typeof value!=='object')return '';
+  if(Array.isArray(value.content))return messageTextBlocks(value.content,depth+1);
+  if(value.message)return messageTextBlocks(value.message,depth+1);
+  if(value.data)return messageTextBlocks(value.data,depth+1);
+  if(value.type==='text'&&typeof value.text==='string')return value.text.slice(0,16384);
+  return '';
+}
+function CurationAction(props) {
+  var open=useState(false), curation=useState(null), draft=useState({title:'',body:'',conditions:'',sources:'',product:'',version:'',applicability:'unknown'});
+  var selected=useState(''), sourceRef=useState(''), confirmed=useState(false), busy=useState(false), error=useState(''), notice=useState('');
+  var availability=useState(null), availabilityError=useState(''), visibility=useState('project');
+  var poll=useRef(0), draftTimer=useRef(0), requestRef=useRef('');
+  var sessionId=String(props.sessionId||props.session?.id||props.session?.header?.id||curationSessionBridge.sessionId||'');
+  useEffect(function(){
+    if(!sessionId){availability[1](null);return;}
+    var active=true;
+    api('curation.available',{sessionId:sessionId}).then(function(value){
+      if(!active)return;
+      if(value&&value.ok){availability[1](value);availabilityError[1]('');}
+      else availabilityError[1](chatError(value||{}));
+    }).catch(function(failure){if(active)availabilityError[1](failure.message);});
+    return function(){active=false;};
+  },[sessionId]);
+  function receive(value){
+    curation[1](value);
+    if(value&&value.draft)draft[1](Object.assign({},value.draft));
+  }
+  useEffect(function(){
+    var state=curation[0]&&curation[0].state, requestId=curation[0]&&curation[0].requestId;
+    if(!open[0]||!requestId||(state!=='queued'&&state!=='generating'))return;
+    var timer=setInterval(function(){
+      api('curation.get',{sessionId:sessionId,requestId:requestId}).then(function(value){
+        if(!value.ok)throw Error(chatError(value));
+        if(curation[0]&&curation[0].requestId===requestId)receive(value.curation);
+      }).catch(function(failure){error[1](failure.message);});
+    },1000);
+    return function(){clearInterval(timer);};
+  },[open[0],curation[0]&&curation[0].requestId,curation[0]&&curation[0].state]);
+  function selectedTextForMessage(){
+    if(typeof props.selectedText==='string'&&props.selectedText.trim())return props.selectedText.slice(0,16384);
+    var fromProps=messageTextBlocks(props.message||props.node||props.item||props.assistantMessage||props.content,0);
+    return fromProps||'';
+  }
+  function sourceText(){
+    var text=selectedTextForMessage();
+    if(text){var ref=String(props.sourceRef||('assistant-ui:'+String(props.message?.id||props.node?.id||props.id||Date.now())));selected[1](text);sourceRef[1](ref);return Promise.resolve({text:text,sourceRef:ref});}
+    var messageId=String(props.messageId||props.message?.id||props.node?.messageId||'');
+    if(messageId)return api('curation.message',{sessionId:sessionId,messageId:messageId}).then(function(value){
+      if(!value.ok)throw Error(chatError(value));selected[1](value.text);sourceRef[1](value.sourceRef||('assistant:'+messageId));
+      return {text:value.text,sourceRef:value.sourceRef||('assistant:'+messageId)};
+    });
+    return api('curation.latest',{sessionId:sessionId}).then(function(value){
+      if(!value.ok)throw Error(chatError(value));selected[1](value.text);sourceRef[1](value.sourceRef||('assistant-ui:'+Date.now()));
+      return {text:value.text,sourceRef:value.sourceRef||('assistant-ui:'+Date.now())};
+    });
+  }
+  function begin(forceManual){
+    if(!sessionId){error[1]('会话尚未就绪，请稍后再试。');return Promise.resolve();}
+    open[1](true);busy[1](true);error[1]('');notice[1]('');
+    requestRef.current='curation-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,9);
+    return sourceText().then(function(latest){
+      return (forceManual?Promise.resolve({ok:true,available:false,reason:'手动编辑'}):(availability[0]?Promise.resolve(availability[0]):api('curation.available',{sessionId:sessionId}))).then(function(value){
+        if(!value.ok)throw Error(chatError(value));
+        availability[1](value);availabilityError[1]('');
+        if(!value.available){notice[1]=(value.reason||'独立整理当前离线')+'；已改为手动编辑。';
+          return api('curation.manual',{sessionId:sessionId,requestId:requestRef.current,selectedText:latest.text,sourceRef:latest.sourceRef});}
+        return api('curation.start',{sessionId:sessionId,requestId:requestRef.current,selectedText:latest.text,
+          sourceRef:latest.sourceRef,model:value.model,route:value.route});
+      });
+    }).then(function(result){
+      if(!result.ok)throw Error(chatError(result));
+      receive(result.curation);
+    }).catch(function(failure){error[1](failure.message);}).finally(function(){busy[1](false);});
+  }
+  function setDraftField(key,value){
+    var next=Object.assign({},draft[0],{[key]:value});draft[1](next);notice[1]('');
+    if(!curation[0]||curation[0].state!=='editing')return;
+    clearTimeout(draftTimer.current);
+    draftTimer.current=setTimeout(function(){
+      api('curation.update',{sessionId:sessionId,requestId:curation[0].requestId,
+        expectedEditRevision:curation[0].editRevision,draft:next}).then(function(result){
+        if(!result.ok)throw Error(chatError(result));
+        curation[1](result.curation);
+      }).catch(function(failure){error[1]('草稿保存失败：'+failure.message);});
+    },500);
+  }
+  function cancel(){if(!curation[0])return Promise.resolve();busy[1](true);return api('curation.cancel',{sessionId:sessionId,requestId:curation[0].requestId}).then(function(value){if(!value.ok)throw Error(chatError(value));receive(value.curation);}).catch(function(failure){error[1](failure.message);}).finally(function(){busy[1](false);});}
+  function discard(){if(!curation[0])return Promise.resolve();busy[1](true);return api('curation.discard',{sessionId:sessionId,requestId:curation[0].requestId}).then(function(value){if(!value.ok)throw Error(chatError(value));receive(value.curation);notice[1]('已放弃本次整理；必要的费用与状态元数据保留用于核对。');}).catch(function(failure){error[1](failure.message);}).finally(function(){busy[1](false);});}
+  function save(asNew){
+    if(!curation[0]||curation[0].state!=='editing')return Promise.resolve();
+    if(!confirmed[0]){error[1]('保存前请确认已经检查正文和来源。');return Promise.resolve();}
+    busy[1](true);error[1]('');notice[1]('');
+    return api('curation.save',{sessionId:sessionId,requestId:curation[0].requestId,userConfirmed:true,asNew:asNew===true,
+      expectedEditRevision:curation[0].editRevision,visibility:visibility[0],
+      title:draft[0].title,body:draft[0].body,conditions:draft[0].conditions,sources:draft[0].sources,
+      product:draft[0].product,version:draft[0].version,applicability:draft[0].applicability}).then(function(value){
+      if(!value.ok)throw Error(chatError(value));receive(value.curation);
+      if(value.curation&&value.curation.requiresChoice){notice[1]=value.curation.message||'已有相近条目，请选择。';return;}
+      notice[1]=value.curation&&value.curation.duplicate==='exact'?'内容已存在，已打开原条目。':'已保存为知识；索引状态会在知识库中显示。';
+    }).catch(function(failure){error[1](failure.message);}).finally(function(){busy[1](false);});
+  }
+  var state=curation[0]&&curation[0].state;
+  var label=!curation[0]?'整理为知识':state==='queued'?'排队中':state==='generating'?'生成中':state==='editing'?'检查整理稿':state==='saved'?'已保存':state==='failed'?'整理失败':'继续整理';
+  return React.createElement(React.Fragment,null,
+    React.createElement('span',{style:{display:'inline-flex',alignItems:'center',gap:'8px',flexWrap:'wrap'}},
+      React.createElement('button',{type:'button',className:'dsh-curation-trigger',disabled:props.disabled===true,title:props.disabled===true?'没有可整理的回答或发现正文': '点击一次发起独立整理；只发送这条回答（选中文本时只发送选区）及必要证据，不超过 16KiB。',onClick:function(){return begin(false);}},label),
+      !props.disabled&&availability[0]&&availability[0].model?React.createElement('small',{style:{fontSize: '12px',opacity:.72}},'模型：'+availability[0].model.provider+' / '+availability[0].model.model+' · '+(availability[0].routeLabel||'去向未知')):null,
+      !props.disabled&&availabilityError[0]?React.createElement('small',{style:{fontSize: '12px',opacity:.72}},'模型信息读取失败'):null),
+    open[0]?React.createElement('div',{className:'dsh-curation-overlay',onMouseDown:function(event){if(event.target===event.currentTarget)open[1](false);},onKeyDown:function(event){if(event.key==='Escape'){event.stopPropagation();open[1](false);}}},
+      React.createElement('div',{className:'dsh-curation-dialog',role:'dialog','aria-modal':'true','aria-label':'整理为知识'},
+        React.createElement('div',{className:'dsh-curation-head'},React.createElement('strong',null,'整理为知识'),React.createElement('button',{type:'button',onClick:function(){open[1](false);}},'关闭')),
+        React.createElement('div',{className:'dsh-curation-body'},
+    React.createElement('p',{className:'dsh-chat-setting-hint'},'一次独立生成：无工具、无并行任务、无自动续接。按下主按钮后立即发送这条回答及必要证据，完成后检查再保存。'),
+          busy[0]&&!curation[0]?React.createElement('p',{role:'status'},'正在读取来源与模型信息，随后立即发起一次整理…'):null,
+          curation[0]?React.createElement('div',{className:'dsh-curation-meta'},React.createElement('span',null,'模型：'+(curation[0].model&&curation[0].model.provider?curation[0].model.provider+' / '+curation[0].model.model:'手动编辑')),React.createElement('span',null,'状态：'+(state||'')),React.createElement('span',null,'wire：'+(curation[0].wireAttempts||0)),React.createElement('span',null,'费用：'+(curation[0].usage&&curation[0].usage.unknown?'未知':(curation[0].usage&&curation[0].usage.totalTokens!=null?curation[0].usage.totalTokens+' token':'—')))):null,
+          selected[0]?React.createElement('details',null,React.createElement('summary',null,'查看将发送的正文（'+new TextEncoder().encode(selected[0]).length+' 字节）'),React.createElement('pre',{className:'dsh-curation-source'},selected[0])):null,
+          (state==='queued'||state==='generating')?React.createElement('div',{className:'dsh-curation-progress',role:'status'},React.createElement('span',null,state==='queued'?'等待服务准入，尚未发出。':'已发出，等待独立整理结果…'),React.createElement('button',{type:'button',disabled:busy[0],onClick:cancel},'取消整理')):null,
+          (state==='editing'||state==='failed'||state==='cancelled'||state==='saved')?React.createElement('div',{className:'dsh-curation-form'},
+            React.createElement('label',null,'标题',React.createElement('input',{value:draft[0].title,disabled:state==='saved'||busy[0],onChange:function(event){setDraftField('title',event.target.value);}})),
+            React.createElement('label',null,'可复用做法或结论',React.createElement('textarea',{rows:5,value:draft[0].body,disabled:state==='saved'||busy[0],onChange:function(event){setDraftField('body',event.target.value);}})),
+            React.createElement('label',null,'适用条件与前提',React.createElement('textarea',{rows:2,value:draft[0].conditions,disabled:state==='saved'||busy[0],onChange:function(event){setDraftField('conditions',event.target.value);}})),
+            React.createElement('label',null,'来源引用',React.createElement('textarea',{rows:2,value:draft[0].sources,disabled:state==='saved'||busy[0],onChange:function(event){setDraftField('sources',event.target.value);}})),
+            React.createElement('div',{className:'dsh-curation-grid'},
+              React.createElement('label',null,'产品（未知可空）',React.createElement('input',{value:draft[0].product,disabled:state==='saved'||busy[0],onChange:function(event){setDraftField('product',event.target.value);}})),
+              React.createElement('label',null,'版本（未知可空）',React.createElement('input',{value:draft[0].version,disabled:state==='saved'||busy[0],onChange:function(event){setDraftField('version',event.target.value);}})),
+              React.createElement('label',null,'适用性',React.createElement('select',{value:draft[0].applicability,disabled:state==='saved'||busy[0],onChange:function(event){setDraftField('applicability',event.target.value);}},React.createElement('option',{value:'exact'},'已确认适用'),React.createElement('option',{value:'partial'},'部分适用'),React.createElement('option',{value:'unknown'},'待验证经验')))),
+            state!=='saved'?React.createElement('label',{className:'dsh-curation-confirm'},React.createElement('input',{type:'checkbox',checked:confirmed[0],onChange:function(event){confirmed[1](event.target.checked);}}),'我已检查内容、来源和适用条件'):null,
+            state!=='saved'?React.createElement('label',{className:'dsh-curation-confirm'},React.createElement('input',{type:'checkbox',checked:visibility[0]==='global',onChange:function(event){visibility[1](event.target.checked?'global':'project');}}),'保存为所有会话可用（个人全局）'):null,
+            React.createElement('div',{className:'dsh-curation-actions'},state!=='saved'?React.createElement('button',{type:'button',className:'is-primary',disabled:busy[0]||state!=='editing',onClick:function(){return save(false);}},'保存为知识'):null,
+              curation[0]&&curation[0].requiresChoice?React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){return save(true);}},'作为新条目保存'):null,
+              state==='failed'||state==='cancelled'?React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){return begin(true);}},'手动编辑'):null,
+              state!=='saved'?React.createElement('button',{type:'button',disabled:busy[0],onClick:discard},'放弃'):null,
+              React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){open[1](false);}},'稍后继续'))):null,
+          notice[0]?React.createElement('p',{role:'status'},notice[0]):null,
+          error[0]?React.createElement('p',{role:'alert'},error[0]):null),
+        React.createElement('div',{className:'dsh-curation-foot'},React.createElement('small',null,'独立整理不消耗主任务工具/模型额度，但会计入费用核对；超限正文请缩小选择。')))):null);
+}
+function ChatKnowledgeLibrary(props) {
+  var listing=useState(null), query=useState(''), results=useState(null), reading=useState(null);
+  var busy=useState(false), error=useState(''), notice=useState(''), status=useState(null);
+  function load(offset){
+    busy[1](true);error[1]('');
+    return api('knowledge.list',{sessionId:props.sessionId,offset:offset||0,limit:30,query:query[0]}).then(function(value){
+      if(!value.ok)throw Error(chatError(value));listing[1](value);
+      return api('knowledge.status',{sessionId:props.sessionId});
+    }).then(function(value){if(value&&value.ok)status[1](value);})
+      .catch(function(failure){error[1](failure.message);}).finally(function(){busy[1](false);});
+  }
+  useEffect(function(){load(0);},[props.sessionId]);
+  function search(){
+    if(!query[0].trim()){notice[1]('输入关键词后再搜索。');return Promise.resolve();}
+    busy[1](true);error[1]('');notice[1]('正在本地检索；仅用户主动搜索，不会发送给模型。');
+    return api('knowledge.search',{sessionId:props.sessionId,query:query[0],limit:5}).then(function(value){
+      if(!value.ok)throw Error(chatError(value));results[1](value);notice[1](value.rows&&value.rows.length?'找到 '+value.rows.length+' 个相关章节。':'没有匹配资料。');
+    }).catch(function(failure){error[1](failure.message);}).finally(function(){busy[1](false);});
+  }
+  function read(row,cursor){
+    busy[1](true);error[1]('');
+    return api('knowledge.read',{sessionId:props.sessionId,ref:row.ref||undefined,sourceId:row.sourceId||undefined,cursor:cursor||undefined,maxBytes:8192}).then(function(value){
+      if(!value.ok)throw Error(chatError(value));
+      var nextRow=value.ref?Object.assign({},row,{ref:value.ref}):row;
+      var key=nextRow.ref||nextRow.sourceId||nextRow.title;
+      reading[1](function(previous){return {row:nextRow,text:previous&&previous.key===key?previous.text+value.text:value.text,key:key,nextCursor:value.nextCursor,complete:value.complete};});
+    }).catch(function(failure){error[1](failure.message);}).finally(function(){busy[1](false);});
+  }
+  function importFile(file){
+    if(!file)return Promise.resolve();busy[1](true);error[1]('');notice[1]('正在保存并建立本地索引：'+file.name);
+    return fileBase64(file).then(function(base64){return api('knowledge.import-base64',{sessionId:props.sessionId,name:file.name,title:file.name,base64:base64});}).then(function(value){
+      if(!value.ok)throw Error(chatError(value));
+      notice[1]('已保存：'+(value.source&&value.source.title||file.name)+'（'+String(value.source&&value.source.indexState||'pending-index')+'）');
+      return load(0);
+    }).catch(function(failure){error[1](failure.message);}).finally(function(){busy[1](false);});
+  }
+  function remove(sourceId){
+    if(!sourceId)return Promise.resolve();busy[1](true);error[1]('');
+    return api('knowledge.delete',{sessionId:props.sessionId,sourceId:sourceId}).then(function(value){
+      if(!value.ok)throw Error(chatError(value));notice[1]('已停止后续检索；已有历史引用仍按原修订保留。');return load(0);
+    }).catch(function(failure){error[1](failure.message);}).finally(function(){busy[1](false);});
+  }
+  if(!props.open)return null;
+  var rows=listing[0]&&listing[0].rows||[];
+  return React.createElement('div',{className:'dsh-chat-more dsh-knowledge-library',role:'dialog','aria-modal':'false','aria-label':'知识库'},
+    React.createElement('div',{className:'dsh-chat-panel-head saker-panel-head'},
+      React.createElement('div',{className:'saker-panel-headtext'},React.createElement('strong',null,'知识库'),React.createElement('p',{className:'saker-panel-subtitle'},'管理本任务导入的文档；搜索和查看只在本机进行。')),
+      React.createElement('button',{type:'button',onClick:props.onClose},'关闭')),
+    React.createElement('div',{className:'dsh-chat-settings-body'},
+      React.createElement('div',{className:'dsh-knowledge-layout'},
+        React.createElement('div',{className:'dsh-knowledge-list'},
+          React.createElement('div',{className:'dsh-chat-fields'},React.createElement('input',{'aria-label':'搜索知识库',value:query[0],placeholder:'搜索标题、章节或正文',onChange:function(event){query[1](event.target.value);},onKeyDown:function(event){if(event.key==='Enter')return search();}}),React.createElement('button',{type:'button',disabled:busy[0],onClick:search},'搜索')),
+          React.createElement('div',{className:'dsh-chat-actions'},React.createElement('label',{className:'saker-ui-btn'},'导入文档',React.createElement('input',{type:'file',multiple:true,disabled:busy[0],style:{display:'none'},onChange:function(event){var files=Array.from(event.target.files||[]);event.target.value='';var chain=Promise.resolve();files.forEach(function(file){chain=chain.then(function(){return importFile(file);});});return chain;}}))),
+          status[0]?React.createElement('small',{className:'saker-panel-hint'},(status[0].legacy&&status[0].legacy.available?'内置知识 '+status[0].legacy.documents+' 篇（只读） · ':'')+'已导入 '+status[0].documents+' 份文档'):null,
+          results[0]?React.createElement('div',{className:'dsh-knowledge-results'},React.createElement('h4',null,'搜索结果'),
+            results[0].rows.length?results[0].rows.map(function(row){return React.createElement('button',{type:'button',key:row.ref,onClick:function(){return read(row);}},React.createElement('strong',null,row.title),React.createElement('span',null,(row.section||'')+' · '+row.sourceLabel),React.createElement('small',null,row.excerpt));}):React.createElement('p',null,'没有找到匹配的文档。')):null,
+          React.createElement('h4',null,'已导入文档'),
+          rows.length?rows.map(function(row){return React.createElement('div',{className:'dsh-knowledge-row',key:row.sourceId},
+            React.createElement('div',null,React.createElement('strong',null,row.title),React.createElement('small',null,(row.sourceLabel||'')+' · 修订 '+row.revision)),
+            React.createElement('div',{className:'dsh-knowledge-row-actions'},React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){return read({ref:null,sourceId:row.sourceId,title:row.title});}},'查看'),React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){return remove(row.sourceId);}},'移出查询')));}):React.createElement('div',{className:'saker-panel-empty'},React.createElement('strong',null,'还没有文档'),React.createElement('span',null,'导入文档后，Saker 才能在本会话中按需查询。')),
+          status[0]&&status[0].legacy&&status[0].legacy.available?React.createElement('p',{className:'saker-panel-hint'},'内置知识随 Saker 提供，搜索时自动参与；不会写入你的导入列表，也不会改动原库。'):null,
+          React.createElement('div',{className:'dsh-chat-actions'},React.createElement('button',{type:'button',disabled:busy[0]||!listing[0]||listing[0].offset<=0,onClick:function(){return load(Math.max(0,(listing[0].offset||0)-30));}},'上一页'),React.createElement('button',{type:'button',disabled:busy[0]||!listing[0]||listing[0].nextOffset==null,onClick:function(){return load(listing[0].nextOffset);}},'下一页'))),
+        React.createElement('div',{className:'dsh-knowledge-reader'},reading[0]?React.createElement('div',{className:'dsh-knowledge-read'},React.createElement('h4',null,reading[0].row.title||'文档正文'),React.createElement('pre',{className:'dsh-chat-result'},reading[0].text),reading[0].nextCursor?React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){return read(reading[0].row,reading[0].nextCursor);}},'继续读取'):React.createElement('small',null,'已读完当前章节。')):React.createElement('div',{className:'saker-panel-empty'},React.createElement('strong',null,'选择一份文档'),React.createElement('span',null,'正文会在这里打开，不需要离开当前任务。')))) ,
+      notice[0]?React.createElement('p',{role:'status'},notice[0]):null,
+      error[0]?React.createElement('p',{role:'alert'},error[0]):null));
+}
+var WORKFLOW_NEW_NODES=[
+  {id:'scope',title:'明确目标和范围',instruction:'用一句话写清要检查的对象、允许做的事情和已知材料。',tools:[],output:'本轮目标和范围。',completion:'artifact',evidencePolicy:'none',identityRef:''},
+  {id:'execute',title:'执行并记录',instruction:'按目标做一次可验证的动作，保留请求、回执或文件依据。',tools:[],output:'可复查的执行结果和证据。',completion:'artifact',evidencePolicy:'none',identityRef:''}
+];
+function workflowClone(value){return JSON.parse(JSON.stringify(value||{}));}
+function workflowNewId(prefix){return 'step-'+prefix+'-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,6);}
+function ChatWorkflowStudio(props){
+  var catalog=useState([]), selected=useState(null), detail=useState(null), query=useState('');
+  var editor=useState(false), draft=useState(null), activeNode=useState(0), history=useState([]), future=useState([]);
+  var replaceFrom=useState(''), replaceTo=useState('');
+  var busy=useState(false), notice=useState(''), error=useState('');
+  function load(preferred){
+    busy[1](true);error[1]('');
+    return api('workflow.catalog',{sessionId:props.sessionId}).then(function(result){
+      if(!result.ok)throw Error(chatError(result));
+      var list=Array.isArray(result.workflows)?result.workflows:[];
+      catalog[1](list);selected[1](result.selected||null);
+      var id=preferred||(result.selected&&result.selected.id)||(list[0]&&list[0].id);
+      if(!id)return null;
+      return api('workflow.detail',{sessionId:props.sessionId,id:id}).then(function(value){
+        if(!value.ok)throw Error(chatError(value));
+        detail[1](value.workflow||null);selected[1](value.selected||result.selected||null);
+        return value.workflow||null;
+      });
+    }).catch(function(failure){error[1](failure.message);return null;}).finally(function(){busy[1](false);});
+  }
+  useEffect(function(){if(props.open)load();},[props.open,props.sessionId]);
+  function choose(id){
+    if(!id)return;
+    busy[1](true);error[1]('');
+    api('workflow.detail',{sessionId:props.sessionId,id:id}).then(function(result){
+      if(!result.ok)throw Error(chatError(result));
+      detail[1](result.workflow||null);selected[1](result.selected||null);
+    }).catch(function(failure){error[1](failure.message);}).finally(function(){busy[1](false);});
+  }
+  function useSelected(){
+    if(!detail[0])return;
+    busy[1](true);error[1]('');notice[1]('');
+    api('workflow.select',{sessionId:props.sessionId,id:detail[0].id}).then(function(result){
+      if(!result.ok)throw Error(chatError(result));
+      selected[1](result.selected||detail[0]);notice[1]('已选择，下一次发送会使用这个测试流程。');
+      return load((result.selected&&result.selected.id)||detail[0].id);
+    }).catch(function(failure){error[1](failure.message);}).finally(function(){busy[1](false);});
+  }
+  function beginEdit(source,scope){
+    var base=source?workflowClone(source):{
+      id:'',version:'1',title:'我的测试流程',description:'按你的工作顺序安排的测试步骤。',mode:'pentest',
+      nodes:workflowClone(WORKFLOW_NEW_NODES)
+    };
+    if(!Array.isArray(base.nodes)||base.nodes.length<2){base.nodes=workflowClone(WORKFLOW_NEW_NODES);}
+    base.nodes=base.nodes.map(function(item){item=workflowClone(item);delete item.next;return item;});
+    if(!base.nodes[0].id)base.nodes[0].id='scope';
+    if(!base.nodes[1].id)base.nodes[1].id='execute';
+    draft[1](base);activeNode[1](0);history[1]([]);future[1]([]);editor[1](true);notice[1]('');
+    notice[1]((scope==='personal'?'另存为我的流程':'只改这一轮；不会改动内置流程')+'。');
+  }
+  function commit(next){
+    if(!draft[0])return;
+    history[1](function(previous){return previous.concat([workflowClone(draft[0])]).slice(-40);});
+    future[1]([]);draft[1](next);
+  }
+  function undo(){
+    if(!history[0].length)return;
+    var previous=history[0][history[0].length-1];
+    future[1](function(items){return [workflowClone(draft[0])].concat(items).slice(0,40);});
+    history[1](history[0].slice(0,-1));draft[1](previous);activeNode[1](Math.min(activeNode[0],Math.max(0,previous.nodes.length-1)));
+  }
+  function redo(){
+    if(!future[0].length)return;
+    var next=future[0][0];
+    history[1](history[0].concat([workflowClone(draft[0])]).slice(-40));
+    future[1](future[0].slice(1));draft[1](next);activeNode[1](Math.min(activeNode[0],Math.max(0,next.nodes.length-1)));
+  }
+  function patchDraft(patch){
+    var next=workflowClone(draft[0]||{});Object.assign(next,patch);commit(next);
+  }
+  function patchNode(index,patch){
+    var next=workflowClone(draft[0]||{});next.nodes=Array.isArray(next.nodes)?next.nodes.map(function(node,nodeIndex){
+      return nodeIndex===index?Object.assign({},node,patch):node;
+    }):[];commit(next);
+  }
+  function addNode(){
+    var next=workflowClone(draft[0]||{});var nodes=Array.isArray(next.nodes)?next.nodes.slice():[];
+    if(nodes.length>=12){error[1]('最多 12 个步骤。');return;}
+    var item={id:workflowNewId('node'),title:'新步骤',instruction:'写清这一步要做什么、需要什么依据、怎样算完成。',tools:[],output:''};
+    var at=Math.max(0,Math.min(nodes.length,Number(activeNode[0])+1));nodes.splice(at,0,item);next.nodes=nodes;commit(next);activeNode[1](at);
+  }
+  function removeNode(index){
+    if(!draft[0]||draft[0].nodes.length<=2){error[1]('至少保留两个步骤。');return;}
+    var next=workflowClone(draft[0]);next.nodes=draft[0].nodes.filter(function(_,nodeIndex){return nodeIndex!==index;});
+    commit(next);activeNode[1](Math.max(0,Math.min(index,next.nodes.length-1)));
+  }
+  function moveNode(index,delta){
+    var next=workflowClone(draft[0]);var target=index+delta;
+    if(!next.nodes||target<0||target>=next.nodes.length)return;
+    var moved=next.nodes[index];next.nodes[index]=next.nodes[target];next.nodes[target]=moved;
+    commit(next);activeNode[1](target);
+  }
+  function replaceTools(){
+    var from=String(replaceFrom[0]||'').trim(),to=String(replaceTo[0]||'').trim();
+    if(!from||!to){error[1]('批量换工具需要填写原工具和新工具。');return;}
+    var next=workflowClone(draft[0]||{}),changed=0;
+    next.nodes=(next.nodes||[]).map(function(item){
+      var tools=Array.isArray(item.tools)?item.tools.slice():[];
+      tools=tools.map(function(name){if(name===from){changed++;return to;}return name;});
+      return Object.assign({},item,{tools:tools});
+    });
+    if(!changed){error[1]('当前测试流程里没有 '+from+'；没有改动。');return;}
+    commit(next);error[1]('');notice[1]('已将 '+changed+' 处 '+from+' 换成 '+to+'；下一轮按实际可用工具核对。');
+  }
+  function save(scope){
+    if(!draft[0])return;
+    if(!String(draft[0].title||'').trim()){error[1]('先给测试流程起个名字。');return;}
+    busy[1](true);error[1]('');notice[1]('');
+    var payload=workflowClone(draft[0]);
+    api('workflow.save',{sessionId:props.sessionId,scope:scope,id:scope==='personal'?'':(payload.id||''),workflow:payload,select:true})
+      .then(function(result){
+        if(!result.ok)throw Error(chatError(result));
+        selected[1](result.selected||null);notice[1](scope==='personal'?'已保存到我的流程，并用于这一轮。':'已用于这一轮，不会改动内置流程。');
+        editor[1](false);return load(result.workflow&&result.workflow.id);
+      }).catch(function(failure){error[1](failure.message);}).finally(function(){busy[1](false);});
+  }
+  var rows=(catalog[0]||[]).filter(function(item){
+    var term=String(query[0]||'').trim().toLowerCase();
+    return !term||[item.title,item.description,item.id].join(' ').toLowerCase().indexOf(term)>=0;
+  });
+  var shown=editor[0]?draft[0]:detail[0];
+  var stageNodes=shown&&Array.isArray(shown.nodes)?shown.nodes:[];
+  var node=stageNodes[activeNode[0]]||stageNodes[0]||null;
+  function nodeField(label,value,onChange,multiline){
+    return React.createElement('label',{className:'saker-field'},React.createElement('span',null,label),
+      multiline?React.createElement('textarea',{rows:3,value:value||'',onChange:onChange}):React.createElement('input',{value:value||'',onChange:onChange}));
+  }
+  return React.createElement('div',{className:'dsh-chat-more saker-workflow-panel',role:'dialog','aria-modal':'false','aria-label':'测试流程选择与编辑'},
+    React.createElement('div',{className:'dsh-chat-panel-head saker-panel-head'},
+      React.createElement('div',{className:'saker-panel-headtext'},React.createElement('strong',null,'测试流程'),
+        React.createElement('p',{className:'saker-panel-subtitle'},editor[0]?'调整步骤、顺序和工具；保存只影响这一轮，也可以另存为个人流程。':'选择一套测试步骤。不会自动发送，也不会扩大授权范围。')),
+      React.createElement('button',{type:'button','aria-label':'关闭测试流程面板',onClick:props.onClose},'关闭')),
+    React.createElement('div',{className:'saker-workflow-layout'},
+      React.createElement('aside',{className:'saker-workflow-list'},
+        React.createElement('input',{type:'search','aria-label':'搜索测试流程',placeholder:'搜索测试流程',value:query[0],onChange:function(event){query[1](event.target.value);}}),
+        React.createElement('div',{className:'saker-workflow-list-head'},React.createElement('strong',null,'可用流程'),React.createElement('button',{type:'button',onClick:function(){beginEdit(null,'session');}},'新建')),
+        rows.length?rows.map(function(item){return React.createElement('button',{type:'button',key:item.id,className:'saker-workflow-item'+(detail[0]&&detail[0].id===item.id?' is-active':''),onClick:function(){choose(item.id);}},
+          React.createElement('span',null,React.createElement('strong',null,item.title),React.createElement('small',null,item.nodes+' 步 · '+(item.source==='builtin'?'内置':'我的流程'))),
+          selected[0]&&selected[0].id===item.id?React.createElement('em',null,'使用中'):null);}):React.createElement('div',{className:'saker-panel-empty'},React.createElement('strong',null,'没有匹配的流程'),React.createElement('span',null,'可以新建一个。'))),
+      React.createElement('section',{className:'saker-workflow-main'},
+        editor[0]?React.createElement('div',{className:'saker-workflow-editor-head'},
+          React.createElement('div',null,React.createElement('strong',null,draft[0]&&draft[0].title||'我的测试流程'),React.createElement('small',null,'编辑只影响这一轮；另存后才会进入我的流程。')),
+          React.createElement('div',{className:'saker-workflow-actions'},
+            React.createElement('button',{type:'button',disabled:!history[0].length,onClick:undo},'撤销'),
+            React.createElement('button',{type:'button',disabled:!future[0].length,onClick:redo},'重做'),
+            React.createElement('button',{type:'button',onClick:addNode},'添加步骤')))
+          :null,
+        shown?React.createElement('div',{className:'saker-workflow-stage-wrap'},
+          React.createElement('div',{className:'saker-workflow-stage-head'},
+            React.createElement('div',null,React.createElement('strong',null,shown.title),React.createElement('p',null,shown.description||'按顺序完成，每一步都留下依据。'))),
+          React.createElement('div',{className:'saker-stage-rail','aria-label':'步骤图'},
+            stageNodes.map(function(item,index){return React.createElement('button',{type:'button',key:item.id||index,className:'saker-stage'+(index===activeNode[0]?' is-active':'')+(index<(editor[0]?0:1)?' is-done':''),onClick:function(){activeNode[1](index);}},
+              React.createElement('span',null,String(index+1)),React.createElement('strong',null,item.title||'未命名步骤'),React.createElement('small',null,(item.completion==='receipt'?(item.evidencePolicy==='reuse'?'可复用历史回执 · ':'需本次真实回执 · '):'需结构化证据 · ')+((item.tools||[]).length?item.tools.join(' · '):'不限定工具')));})),
+          editor[0]?React.createElement('div',{className:'saker-workflow-editor-grid'},
+            React.createElement('div',{className:'saker-workflow-fields'},
+              nodeField('流程名称',draft[0].title,function(event){patchDraft({title:event.target.value});}),
+              nodeField('一句话说明',draft[0].description,function(event){patchDraft({description:event.target.value});},true),
+              node?React.createElement('div',{className:'saker-workflow-node-edit'},
+                React.createElement('div',{className:'saker-workflow-node-actions'},React.createElement('strong',null,'步骤 '+(activeNode[0]+1)),React.createElement('span',null,
+                  React.createElement('button',{type:'button',disabled:activeNode[0]<=0,onClick:function(){moveNode(activeNode[0],-1);}},'上移'),
+                  React.createElement('button',{type:'button',disabled:activeNode[0]>=stageNodes.length-1,onClick:function(){moveNode(activeNode[0],1);}},'下移'),
+                  React.createElement('button',{type:'button',disabled:stageNodes.length<=2,onClick:function(){removeNode(activeNode[0]);}},'删除'))),
+                nodeField('步骤名称',node.title,function(event){patchNode(activeNode[0],{title:event.target.value});}),
+                nodeField('这一步做什么',node.instruction,function(event){patchNode(activeNode[0],{instruction:event.target.value});},true),
+                nodeField('用什么工具（逗号分隔，可留空）',(node.tools||[]).join(', '),function(event){patchNode(activeNode[0],{tools:event.target.value.split(',').map(function(value){return value.trim();}).filter(Boolean)});}),
+                nodeField('完成后会留下什么',node.output,function(event){patchNode(activeNode[0],{output:event.target.value});},true),
+                React.createElement('label',{className:'saker-field'},React.createElement('span',null,'推进时必须有什么'),
+                  React.createElement('select',{value:node.completion||'artifact',onChange:function(event){var value=event.target.value;patchNode(activeNode[0],{completion:value,evidencePolicy:value==='receipt'?(node.evidencePolicy==='reuse'?'reuse':'fresh'):'none',identityRef:value==='receipt'?(node.identityRef||''):''});}},
+                    React.createElement('option',{value:'artifact'},'结构化证据'),
+                    React.createElement('option',{value:'receipt'},'真实执行回执'))),
+                (node.completion==='receipt')?React.createElement('label',{className:'saker-field'},React.createElement('span',null,'回执来源'),
+                  React.createElement('select',{value:node.evidencePolicy==='reuse'?'reuse':'fresh',onChange:function(event){patchNode(activeNode[0],{evidencePolicy:event.target.value});}},
+                    React.createElement('option',{value:'fresh'},'必须本次新执行'),
+                    React.createElement('option',{value:'reuse'},'允许复用历史证据'))):null,
+                (node.completion==='receipt')?nodeField('必须是哪个账号（可留空）',node.identityRef||'',function(event){patchNode(activeNode[0],{identityRef:event.target.value});}):null):null),
+            React.createElement('details',{className:'saker-workflow-step'},
+              React.createElement('summary',null,'批量换工具'),
+              React.createElement('p',null,'只替换测试流程中完全同名的工具；是否可用由下一轮实际 Host 工具表判断。'),
+              React.createElement('div',{className:'saker-workflow-actions'},
+                React.createElement('input',{'aria-label':'原工具',placeholder:'例如 redteam_execution',value:replaceFrom[0],onChange:function(event){replaceFrom[1](event.target.value);}}),
+                React.createElement('input',{'aria-label':'替换为',placeholder:'例如 mcp_call',value:replaceTo[0],onChange:function(event){replaceTo[1](event.target.value);}}),
+                React.createElement('button',{type:'button',onClick:replaceTools},'替换同类工具'))),
+            React.createElement('div',{className:'saker-workflow-note'},React.createElement('strong',null,'会怎样生效'),React.createElement('p',null,'下一次发送时，模型会看到当前测试流程，先用 saker_workflow 取得当前步骤；保存不会发送消息。')))
+            :React.createElement('div',{className:'saker-workflow-preview'},
+              React.createElement('div',{className:'saker-workflow-preview-head'},React.createElement('div',null,React.createElement('strong',null,'这套流程会做哪些事'),React.createElement('p',null,'每一步都可以在执行时根据证据调整。')),React.createElement('button',{type:'button',className:'is-primary',onClick:useSelected},selected[0]&&selected[0].id===detail[0].id?'正在使用':'使用此流程')),
+              stageNodes.map(function(item,index){return React.createElement('details',{key:item.id||index,className:'saker-workflow-step'},React.createElement('summary',null,String(index+1)+'. '+(item.title||'未命名步骤')),React.createElement('p',null,item.instruction),React.createElement('small',null,'完成条件：'+(item.output||'未填写')+' · '+(item.completion==='receipt'?(item.evidencePolicy==='reuse'?'可复用完整性有效的历史回执':'必须是本次运行后采集的真实回执'):'必须提交结构化证据')));}),
+              React.createElement('div',{className:'saker-workflow-actions'},React.createElement('button',{type:'button',onClick:function(){beginEdit(detail[0],'session');}},'编辑本次'),React.createElement('button',{type:'button',onClick:function(){beginEdit(detail[0],'personal');}},'另存为我的流程'),React.createElement('button',{type:'button',onClick:function(){beginEdit(null,'session');}},'新建流程'))))
+          :React.createElement('div',{className:'saker-panel-empty'},React.createElement('strong',null,busy[0]?'正在读取测试流程…':'还没有选择测试流程'),React.createElement('span',null,'可以从左侧选择，也可以新建一个。')),
+        error[0]?React.createElement('p',{role:'alert'},error[0]):null,
+        notice[0]?React.createElement('p',{role:'status'},notice[0]):null,
+        editor[0]?React.createElement('div',{className:'saker-workflow-save'},React.createElement('button',{type:'button',className:'is-primary',onClick:function(){save('session');}},'只用这一轮'),React.createElement('button',{type:'button',onClick:function(){save('personal');}},'另存为我的流程'),React.createElement('button',{type:'button',onClick:function(){editor[1](false);error[1]('');}},'取消编辑')):null)));
+}
+function ChatComponentSummary(props) {
+  var info = props.info || {};
+  var facts = info.facts || [];
+  var advisories = info.advisories || [];
+  var evaluations = info.evaluations || [];
+  var upstreams = info.upstreams || [];
+  if (!facts.length && !advisories.length && !evaluations.length && !upstreams.length)
+    return props.error ? React.createElement('p', { role: 'alert' }, '组件记录读取失败：' + props.error) : null;
+  return React.createElement('div', { className: 'dsh-chat-component-summary' },
+    React.createElement('p', { className: 'dsh-chat-task-detail-stats' },
+      '组件 ' + facts.length + ' · 公告/更新 ' + advisories.length + ' · 评估 ' + evaluations.length + (upstreams.length ? ' · 上游 ' + upstreams.length : '')),
+    React.createElement('details', { className: 'dsh-chat-component-details' },
+      React.createElement('summary', null, '查看组件事实与最近评估'),
+      React.createElement('div', { className: 'dsh-chat-component-list' },
+        facts.slice(0, 5).map(function (item) {
+          return React.createElement('p', { key: item.id },
+            '事实：' + item.product + ' ' + (item.version || '版本未知') + (item.assetId ? ' · ' + item.assetId : ' · 未映射目标'));
+        }),
+        advisories.slice(0, 5).map(function (item) {
+          return React.createElement('p', { key: item.id },
+            (item.kind === 'security-change' ? '安全更新：' : '公告：') + item.id
+              + (item.fixedVersion ? ' · 修复 ' + item.fixedVersion : ''));
+        }),
+        evaluations.slice(0, 5).map(function (item) {
+          return React.createElement('p', { key: item.id },
+            '评估：' + item.status + ' · ' + String(item.reason || '').slice(0, 140));
+        }),
+        upstreams.slice(0, 5).map(function (item) {
+          return React.createElement('p', { key: item.id },
+            '上游：' + (item.selected && item.selected.repositoryUrl || '待选择') + ' · ' + item.status);
+        }))));
+}
+function ChatRoleSummary(props) {
+  var info=props.info||{}, work=info.workItems||[], instances=info.instances||[], messages=info.messages||[];
+  if(!work.length&&!instances.length)return props.error?React.createElement('p',{role:'alert'},'工作与角色读取失败：'+props.error):null;
+  var labels={proposed:'待确认',queued:'排队',starting:'启动中',active:'进行中',waiting:'等待交接',blocked:'受阻',completed:'已完成',stopped:'已停止',released:'已释放','cleanup-failed':'释放未确认'};
+  var releaseLabels={unreleased:'未释放',stopping:'停止处理中',released:'已释放','cleanup-failed':'释放未确认',unknown:'释放未知'};
+  return React.createElement('div',{className:'dsh-chat-role-summary'},
+    React.createElement('p',{className:'dsh-chat-task-detail-stats'},'具体工作 '+work.length+' · 角色实例 '+instances.length+' · 消息 '+messages.length),
+    React.createElement('details',{className:'dsh-chat-component-details'},
+      React.createElement('summary',null,'查看具体问题、分工与交接'),
+      React.createElement('div',{className:'dsh-chat-component-list'},
+        work.slice(0,6).map(function(item){return React.createElement('p',{key:item.workId},'问题：'+(item.title||item.question)+' · '+(labels[item.state]||item.state||'待确认')+(item.executionState&&item.executionState!==item.state?' · 执行'+item.executionState:'')+(item.releaseState&&item.releaseState!=='released'?' · '+(releaseLabels[item.releaseState]||item.releaseState):'')+(item.settlement?' · '+item.settlement.label:''));}),
+        instances.slice(0,6).map(function(item){return React.createElement('p',{key:item.childId},'角色：'+(item.roleTitle||item.roleId)+' · '+(labels[item.state]||item.state||'')+(item.releaseState&&item.releaseState!=='released'?' · '+(releaseLabels[item.releaseState]||item.releaseState):'')+(item.releaseAttempt>1?' · 第'+item.releaseAttempt+'次释放':'')+(item.releaseError?' · '+String(item.releaseError).slice(0,80):'')+(item.settlement?' · '+item.settlement.label:'')+(item.logicalParent?' · 交接自 '+item.logicalParent:''));}),
+        messages.slice(0,4).map(function(item){return React.createElement('p',{key:item.messageId},'交接：'+(item.kind||'message')+' · '+(item.state||'')+' · '+String(item.text||'').slice(0,100));}))));
+}
+
+// 只有真实任务或仍在收尾的代理才需要持续刷新。没有 task policy 时，
+// 服务端用 phase='preparing' 表示“尚未开始”；它不能被当成活动轮询的信号，
+// 否则空会话会每 3 秒发一次 chat.settings。
+function chatNeedsPolling(live) {
+  if (!live) return false;
+  if (live.agentRunning === true || Number(live.active || 0) > 0) return true;
+  return !!live.policy && ['preparing', 'running', 'pausing'].includes(live.phase);
+}
+
 function ChatSetup(props) {
   var state=useState(null), busy=useState(false), notice=useState(''), error=useState(''), panel=useState(null);
   // 「继续其他检查」只关掉本会话这一条提示，不改变任何任务状态（v6 第 5.2 节）。
   var attentionDismissed=useState(false);
   var readError=useState('');
-  var request=useRef(0), mounted=useRef(true), saving=useRef(false), openButton=useRef(null), moreButton=useRef(null), overlayRoot=useRef(null);
+  var request=useRef(0), mounted=useRef(true), saving=useRef(false), openButton=useRef(null), moreButton=useRef(null), moduleButton=useRef(null), collabButton=useRef(null), workflowButton=useRef(null), overlayRoot=useRef(null), retryTimer=useRef(0);
   // v6 第 3.3 节第 8 条：提示词抽屉的插入落点必须在**打开抽屉之前**捕获，否则宿主 caretSpan 已经
   // 因为编辑器失焦而退化成文档末尾，原来的光标/选区就丢了。
   var promptInsertion=useRef(null);
+  var sendBurst=useRef([]);
   // 三个入口共用一份「当前打开哪个面板」：始终最多一个（v6 第 10.5 节 UI09/UI12）。
   function setPanelOnly(name, next){ panel[1](function(previous){ if(next) return name; return previous===name?null:previous; }); }
+  function starterDraftText(){
+    try{
+      if(typeof document==='undefined')return '';
+      var editor=document.querySelector('[data-composer-input="true"]');
+      return editor?String(editor.innerText||'').replace(/\r\n/g,'\n'):'';
+    }catch(_error){return '';}
+  }
   var open=[panel[0]==='prompt', function(next){ setPanelOnly('prompt',next); }];
   var more=[panel[0]==='settings', function(next){ setPanelOnly('settings',next); }];
+  var collab=[panel[0]==='collab', function(next){ setPanelOnly('collab',next); }];
+  var knowledgeOpen=[panel[0]==='knowledge', function(next){ setPanelOnly('knowledge',next); }];
+  var workflowOpen=[panel[0]==='workflow', function(next){ setPanelOnly('workflow',next); }];
+  var moduleOpen=[panel[0]==='modules', function(next){ setPanelOnly('modules',next); }];
+	var moduleList=useState(null), moduleError=useState(''), moduleText=useState(''), moduleCategory=useState(''), moduleStatus=useState(''), moduleSelected=useState(null), moduleBusy=useState(false);
+	var moduleReq=useRef(0), moduleTimer=useRef(null), moduleComposing=useRef(false);
+  var taskDetailsOpen=[panel[0]==='details', function(next){ setPanelOnly('details',next); }];
+  var menuOpen=[panel[0]==='menu', function(next){ setPanelOnly('menu',next); }];
+  var componentInfo=useState(null), componentError=useState(''), componentReq=useRef(0);
+  var roleInfo=useState(null), roleError=useState(''), roleReq=useRef(0);
+  var settingsSection=useState('scope');
+  var settingsQuery=useState('');
+  var collabDraft=useState(null);
   var workerDraft=useState('0'), customWorkers=useState('3'), draft=useState(null), workScenario=useState('free');
+  // 宿主场景 chip 与 Saker 的场景上下文是两个插件；chip 选中后广播，
+  // 让“测试文档/开始检查”立即按新场景渲染，不用等任务刷新。
+  var hostScene=useState(typeof window!=='undefined'&&window.__sakerSelectedScene?String(window.__sakerSelectedScene):'');
+  function draftStorageKey(kind){return 'saker.chat.draft.'+kind+'.'+props.sessionId;}
+  function readDraftStorage(kind){try{var value=window.localStorage.getItem(draftStorageKey(kind));var parsed=value?JSON.parse(value):null;return parsed&&typeof parsed==='object'?parsed:null;}catch(_error){return null;}}
+  function writeDraftStorage(kind,value){try{if(value&&Object.keys(value).length)window.localStorage.setItem(draftStorageKey(kind),JSON.stringify(value));else window.localStorage.removeItem(draftStorageKey(kind));}catch(_error){/* localStorage unavailable: keep the in-memory draft */}}
   var startQuestion=useState('');
   // 本轮预算（开始测试时用）：放在抽屉的「限制请求和用量」折叠里，任务页单独使用时由 TaskPanel 自己管。
   var budget=useState({calls:'',modelCalls:'',tokens:'',minutes:'',unmetered:''});
   var inlineAssetView=useState(false);
   function setBudget(patch){budget[1](function(previous){return Object.assign({},previous||{},patch);});}
   var decisionNote=useState('');
-  function load(){var revision=++request.current;return api('chat.settings',{sessionId:props.sessionId}).then(function(result){
+  function load(attempt){var revision=++request.current;return api('chat.settings',{sessionId:props.sessionId}).then(function(result){
     if(!result.ok)throw Error(chatError(result));
     if(!mounted.current||request.current!==revision||saving.current)return result;
     // Reading or polling must not turn displayed defaults into a user choice.
@@ -2378,14 +3125,23 @@ function ChatSetup(props) {
     return result;
   }).then(function(result){
     if(!result.ok)throw Error(chatError(result));if(mounted.current&&request.current===revision&&!saving.current){state[1](result);readError[1]('');}
-  }).catch(function(failure){if(mounted.current&&request.current===revision)readError[1](failure.message);});}
-  useEffect(function(){mounted.current=true;load();var timer=setInterval(load,3000);return function(){mounted.current=false;request.current++;clearInterval(timer);};},[props.sessionId]);
-  // 下限降到 96px：短视口时让弹层缩短并内部滚动，而不是把顶部顶出屏幕。
-  useEffect(function(){if(!open[0]&&!more[0])return;var root=overlayRoot.current;if(typeof window==='undefined'||!root||typeof root.getBoundingClientRect!=='function')return;function fit(){var rect=root.getBoundingClientRect(),viewport=window.innerHeight||document.documentElement.clientHeight||820;var spaceAbove=Math.max(240,Math.floor(rect.top-18));var available=Math.min(520,spaceAbove,Math.max(240,viewport-48));root.style.setProperty('--dsh-chat-overlay-max-height',available+'px');root.style.setProperty('--dsh-chat-overlay-bottom',Math.max(16,Math.floor(viewport-rect.top+6))+'px');root.style.setProperty('--dsh-chat-overlay-right',Math.max(12,Math.floor((window.innerWidth||document.documentElement.clientWidth||1280)-rect.right))+'px');root.style.setProperty('--dsh-chat-overlay-width',Math.max(280,Math.min(560,Math.floor(rect.width)))+'px');}fit();window.addEventListener('resize',fit);return function(){window.removeEventListener('resize',fit);if(root){root.style.removeProperty('--dsh-chat-overlay-max-height');root.style.removeProperty('--dsh-chat-overlay-bottom');root.style.removeProperty('--dsh-chat-overlay-right');root.style.removeProperty('--dsh-chat-overlay-width');}};},[open[0],more[0]]);
+  }).catch(function(failure){if(!mounted.current||request.current!==revision)return;
+    // 新打开的旧会话可能在宿主完成会话装载前到达这里。先快速重试，避免
+    // 输入区短暂闪出一条吓人的 HTTP 400；连续失败才如实显示。
+    var rawMessage=String(failure&&failure.message||'');
+    var retrying=(Number(attempt)||0)<4&&/请选择当前可用的 ?Saker 会话/.test(rawMessage);
+    if(retrying){clearTimeout(retryTimer.current);retryTimer.current=setTimeout(function(){if(mounted.current)load((Number(attempt)||0)+1);},400);return;}
+    // 宿主要在会话装载完成后才认这个 id；不要把内部 HTTP 400 原样甩给新用户。
+    readError[1](/请选择当前可用的 ?Saker 会话/.test(rawMessage)?'这个会话还没有开始安全任务。直接在输入框发送目标和授权范围即可开始；已有任务的设置可在任务开始后调整。':rawMessage);});}
+  useEffect(function(){mounted.current=true;load(0);return function(){mounted.current=false;request.current++;clearTimeout(retryTimer.current);};},[props.sessionId, props.session]);
+  // Only while work is actually running. Finished sessions refresh on a new
+  // host session event, opening task details, or a manual action.
+  useEffect(function(){var live=state[0],active=chatNeedsPolling(live);if(!active)return;var timer=setInterval(function(){load(0);},3000);return function(){clearInterval(timer);};},[props.sessionId,state[0]&&state[0].phase,state[0]&&state[0].agentRunning,state[0]&&state[0].active]);
+  useEffect(function(){if(!open[0]&&!more[0]&&!collab[0]&&!knowledgeOpen[0]&&!workflowOpen[0]&&!taskDetailsOpen[0]&&!menuOpen[0])return;var root=overlayRoot.current;if(typeof window==='undefined'||!root||typeof root.getBoundingClientRect!=='function')return;function fit(){var rect=root.getBoundingClientRect(),viewport=window.innerHeight||document.documentElement.clientHeight||820,viewportWidth=window.innerWidth||document.documentElement.clientWidth||1280;var layout=chatOverlayLayout(rect,viewport,viewportWidth);if(workflowOpen[0]){layout.width=Math.min(1040,viewportWidth-32);layout.bottom=12;layout.right=12;layout.maxHeight=Math.max(0,Math.min(760,viewport-60));}else if(more[0]){layout.width=Math.min(980,viewportWidth-32);layout.bottom=12;layout.right=12;layout.maxHeight=Math.max(0,Math.min(720,viewport-48-12));}else if(taskDetailsOpen[0]){layout.width=Math.min(680,viewportWidth-32);layout.bottom=12;layout.maxHeight=Math.max(0,Math.min(680,viewport-60));}else if(menuOpen[0]){layout.width=Math.min(260,viewportWidth-24);layout.bottom=12;layout.maxHeight=Math.max(0,Math.min(360,viewport-60));}else if(knowledgeOpen[0])layout.width=Math.min(900,viewportWidth-32);else if(collab[0]){layout.width=Math.min(620,viewportWidth-24);layout.bottom=12;layout.maxHeight=Math.max(0,Math.min(560,viewport-60));}root.style.setProperty('--dsh-chat-overlay-max-height',layout.maxHeight+'px');root.style.setProperty('--dsh-chat-overlay-bottom',layout.bottom+'px');root.style.setProperty('--dsh-chat-overlay-right',layout.right+'px');root.style.setProperty('--dsh-chat-overlay-width',layout.width+'px');}fit();window.addEventListener('resize',fit);return function(){window.removeEventListener('resize',fit);if(root){root.style.removeProperty('--dsh-chat-overlay-max-height');root.style.removeProperty('--dsh-chat-overlay-bottom');root.style.removeProperty('--dsh-chat-overlay-right');root.style.removeProperty('--dsh-chat-overlay-width');}};},[open[0],more[0],collab[0],knowledgeOpen[0],workflowOpen[0],taskDetailsOpen[0],menuOpen[0]]);
   // Opening any overlay must not leave the inline task assets underneath it.
   useEffect(function(){if(more[0]&&inlineAssetView[0])inlineAssetView[1](false);},[more[0],inlineAssetView[0]]);
   // 设置草稿按会话保留；关闭只隐藏，明确“放弃”才清空。
-  useEffect(function(){draft[1](null);budget[1]({calls:'',modelCalls:'',tokens:'',minutes:'',unmetered:''});},[props.sessionId]);
+  useEffect(function(){draft[1](readDraftStorage('settings'));collabDraft[1](readDraftStorage('collaboration'));budget[1]({calls:'',modelCalls:'',tokens:'',minutes:'',unmetered:''});},[props.sessionId]);
   function run(endpoint,payload,opts){saving.current=true;request.current++;busy[1](true);error[1]('');notice[1]('');
     return api(endpoint,Object.assign({sessionId:props.sessionId},payload||{})).then(function(result){if(!result.ok)throw Error(chatError(result));
       if(endpoint==='task.continue')decisionNote[1]('');
@@ -2394,18 +3150,68 @@ function ChatSetup(props) {
       .catch(function(failure){error[1](failure.message);if(opts&&opts.propagate)throw failure;})
       .finally(function(){saving.current=false;busy[1](false);return load();});
   }
+  function isComposerSendTarget(target){
+    var cursor=target;
+    while(cursor&&cursor!==document){
+      if(cursor.getAttribute&&cursor.getAttribute('aria-label')==='发送消息')return true;
+      cursor=cursor.parentElement;
+    }
+    return false;
+  }
+  function scheduleSendRefresh(){
+    sendBurst.current.forEach(function(timer){clearTimeout(timer);});
+    sendBurst.current=[0,600,1400,2800,5200,10000].map(function(delay){
+      return setTimeout(function(){if(mounted.current)load(0);},delay);
+    });
+  }
+  useEffect(function(){
+    if(typeof document==='undefined'||typeof document.addEventListener!=='function')return;
+    function onClick(event){if(isComposerSendTarget(event.target))scheduleSendRefresh();}
+    function onKey(event){if(event.key==='Enter'&&!event.shiftKey&&event.target&&event.target.closest&&event.target.closest('[data-composer-input]'))scheduleSendRefresh();}
+    document.addEventListener('click',onClick,true);
+    document.addEventListener('keydown',onKey,true);
+    return function(){
+      document.removeEventListener('click',onClick,true);
+      document.removeEventListener('keydown',onKey,true);
+      sendBurst.current.forEach(function(timer){clearTimeout(timer);});
+      sendBurst.current=[];
+    };
+  },[props.sessionId]);
   // A blank composer still has a real session: keep its scene and editable
   // preferences, while withholding execution state from a reused host draft.
   var current=state[0];
-  if(props.blank&&current)current={options:current.options,choice:current.choice,scene:current.scene,hostWorkerLimit:current.hostWorkerLimit,defaults:current.defaults};
+  if(props.blank&&current)current={options:current.options,choice:current.choice,scene:current.scene,hostWorkerLimit:current.hostWorkerLimit,defaults:current.defaults,settingsView:current.settingsView};
   var policy=current&&current.policy, options=current&&current.options||{}, overview=current&&current.overview, mode=policy?policy.mode:current&&current.choice||'regular';
+  var settingsSnapshot=current&&current.settingsView, settingsEffective=settingsSnapshot&&settingsSnapshot.effective||{};
   var scene=current&&current.scene;
-  var activeScenario=scene?.sceneId||scene?.scene?.id||workScenario[0];
+  var activeScenario=scene?.sceneId||scene?.scene?.id||hostScene[0]||workScenario[0];
   if(activeScenario==='pentest')activeScenario='free';
   if(activeScenario==='project')activeScenario='cases';
+  useEffect(function(){
+    if(typeof window==='undefined'||typeof window.addEventListener!=='function')return;
+    function onScene(event){var next=event&&event.detail&&event.detail.scene;if(next)hostScene[1](String(next));}
+    window.addEventListener('saker-scene-selected',onScene);
+    return function(){window.removeEventListener('saker-scene-selected',onScene);};
+  },[]);
   var competitionMode=activeScenario==='competition', projectMode=activeScenario==='cases';
-  var interaction=policy?policy.interaction:options.interaction||'auto', workers=policy?policy.workerLimit:options.workers??0, reporting=chatReporting(policy||options), cooperation=cooperationValue(interaction);
-  var explainValue=policy?(policy.explain===true):(options.explain===true);
+  // 宿主输入框仍使用通用「构建内容」文案。Saker 会话里换成任务语言，
+  // 让第一次打开的人知道可以直接贴目标、请求、题目或附件；不替换宿主组件。
+  useEffect(function(){
+    if(typeof document==='undefined'||typeof MutationObserver!=='function')return;
+    var text=competitionMode?'粘贴题目、附件或实例地址':projectMode?'描述测试要求，或添加案例文件':'直接说目标，或粘贴请求、代码和附件';
+    var host=['描述你想要构建的内容, / 调用指令, @ 文件或对话','发消息或创建任务, / 调用指令, @ 文件或对话','Describe what you want to build, / commands, @ files or sessions','Message or run a task, / commands, @ files or sessions'];
+    function apply(){var inputs=document.querySelectorAll('[data-composer-card] [data-composer-input]');Array.prototype.forEach.call(inputs,function(input){
+      var current=input.getAttribute('data-placeholder')||'';if(host.indexOf(current)<0)return;
+      input.setAttribute('data-placeholder',text);if(host.indexOf(input.getAttribute('aria-label')||'')>=0)input.setAttribute('aria-label',text);
+    });var holders=document.querySelectorAll('[data-composer-card] [data-composer-placeholder]');Array.prototype.forEach.call(holders,function(holder){
+      if(host.indexOf(String(holder.textContent||'').trim())>=0)holder.textContent=text;
+    });}
+    apply();
+    var observer=new MutationObserver(apply);observer.observe(document.body,{subtree:true,childList:true,characterData:true});
+    return function(){observer.disconnect();};
+  },[competitionMode,projectMode]);
+  var interaction=settingsEffective.interaction||(policy?policy.interaction:options.interaction)||'auto', workers=Number.isInteger(settingsEffective.workers)?settingsEffective.workers:(policy?policy.workerLimit:options.workers??2), reporting=chatReporting(settingsEffective.interaction?settingsEffective:(policy||options)), cooperation=cooperationValue(interaction);
+  var explainValue=settingsEffective.explain===true||(policy?policy.explain===true:options.explain===true);
   var takeoverTerminal=!policy||policy.cancelled||policy.planComplete||['cancelled','plan_complete','queue_complete','first_verified_rce','first_verified_high','time_budget_exhausted','tool_budget_exhausted'].indexOf(current&&current.reason)>=0||String(current&&current.reason||'').startsWith('model_budget:')||(current&&current.stopped&&['turn_ended','paused:needs-user'].indexOf(current.reason)<0);
   var hostWorkerLimit=current&&Number.isInteger(current.hostWorkerLimit)?current.hostWorkerLimit:16;
   if(workers>hostWorkerLimit)workers=hostWorkerLimit;
@@ -2422,13 +3228,18 @@ function ChatSetup(props) {
   // 关闭提示词模板/设置并把焦点还给对应的入口按钮（v6 第 10.5 节 UI09/UI12）。
   function closePanels(){
     if(panel[0]==='prompt'){ panel[1](null); if(openButton.current&&openButton.current.focus)openButton.current.focus(); }
+    else if(panel[0]==='workflow'){ panel[1](null); if(workflowButton.current&&workflowButton.current.focus)workflowButton.current.focus(); }
+    else if(panel[0]==='modules'){ panel[1](null); if(moduleButton.current&&moduleButton.current.focus)moduleButton.current.focus(); }
+    else if(panel[0]==='knowledge'){ panel[1](null); if(moreButton.current&&moreButton.current.focus)moreButton.current.focus(); }
+    else if(panel[0]==='collab'){ panel[1](null); if(collabButton.current&&collabButton.current.focus)collabButton.current.focus(); }
+    else if(panel[0]==='details'||panel[0]==='menu'){ panel[1](null); if(moreButton.current&&moreButton.current.focus)moreButton.current.focus(); }
     else if(panel[0]==='settings'){ panel[1](null); if(moreButton.current&&moreButton.current.focus)moreButton.current.focus(); }
   }
   useEffect(function(){
-    if(panel[0]!=='prompt'&&panel[0]!=='settings')return;
+    if(panel[0]!=='prompt'&&panel[0]!=='settings'&&panel[0]!=='collab'&&panel[0]!=='knowledge'&&panel[0]!=='workflow'&&panel[0]!=='details'&&panel[0]!=='menu'&&panel[0]!=='modules')return;
     if(typeof document==='undefined'||typeof document.addEventListener!=='function')return;
     function onDown(event){ var root=overlayRoot.current; if(root&&root.contains&&root.contains(event.target))return; closePanels(); }
-    function onKey(event){ if(event.key==='Escape'){ event.stopPropagation(); closePanels(); } }
+    function onKey(event){ if(event.isComposing||event.keyCode===229)return; if(event.key==='Escape'){ event.stopPropagation(); closePanels(); } }
     document.addEventListener('mousedown',onDown);
     document.addEventListener('keydown',onKey);
     return function(){ document.removeEventListener('mousedown',onDown); document.removeEventListener('keydown',onKey); };
@@ -2436,6 +3247,7 @@ function ChatSetup(props) {
   // 任务工作区里的「添加测试资料」通过桥接打开同一个面板；卸载时清掉，避免指向已销毁组件。
   useEffect(function(){
     materialsPanelBridge.open=function(){ setPanelOnly('materials',true); };
+    curationSessionBridge.sessionId=props.sessionId;
     return function(){ materialsPanelBridge.open=null; };
   },[props.sessionId]);
   useEffect(function(){ attentionDismissed[1](false); },[props.sessionId]);
@@ -2447,40 +3259,43 @@ function ChatSetup(props) {
   var draftExplain=draftValues.explain===undefined?explainValue:draftValues.explain;
   var draftWorkflow=draftValues.workflow===undefined?liveWorkflow:draftValues.workflow;
   var draftWorkersRaw=draftValues.workers===undefined?workerDraft[0]:String(draftValues.workers);
-  var liveWorkerModel=policy?(policy.workerModel??null):(options.workerModel??null);
-  var liveReviewModel=policy?(policy.reviewModel??null):(options.reviewModel??null);
-  var liveReportModel=policy?(policy.reportModel??null):(options.reportModel??null);
+  var liveWorkerModel=settingsEffective.workerModel??(policy?(policy.workerModel??null):(options.workerModel??null));
+  var liveReviewModel=settingsEffective.reviewModel??(policy?(policy.reviewModel??null):(options.reviewModel??null));
+  var liveReportModel=settingsEffective.reportModel??(policy?(policy.reportModel??null):(options.reportModel??null));
   var draftWorkerModel=draftValues.workerModel===undefined?liveWorkerModel:draftValues.workerModel;
   var draftReviewModel=draftValues.reviewModel===undefined?liveReviewModel:draftValues.reviewModel;
   var draftReportModel=draftValues.reportModel===undefined?liveReportModel:draftValues.reportModel;
   // 动作限制（v6 第 4.3/5.5 节）：允许访问网站 / 不改动网站数据。未开始时读选择，已开始读策略。
-  var liveAllowTargetNetwork=policy?(policy.allowTargetNetwork!==false):(options.allowTargetNetwork!==false);
-  var liveReadOnly=policy?(policy.readOnly===true):(options.readOnly===true);
-  var liveExcludedPaths=policy?(Array.isArray(policy.excludedPaths)?policy.excludedPaths:[]):(Array.isArray(options.excludedPaths)?options.excludedPaths:[]);
+  var liveAllowTargetNetwork=settingsEffective.allowTargetNetwork===undefined?(policy?(policy.allowTargetNetwork!==false):(options.allowTargetNetwork!==false)):settingsEffective.allowTargetNetwork!==false;
+  var liveReadOnly=settingsEffective.readOnly===undefined?(policy?(policy.readOnly===true):(options.readOnly===true)):settingsEffective.readOnly===true;
+  var liveExcludedPaths=Array.isArray(settingsEffective.excludedPaths)?settingsEffective.excludedPaths:(policy?(Array.isArray(policy.excludedPaths)?policy.excludedPaths:[]):(Array.isArray(options.excludedPaths)?options.excludedPaths:[]));
   function limitText(value){return value===undefined||value===null?'':String(value);}
-  var liveRequestRate=limitText(policy?policy.requestRatePerMinute:options.requestRatePerMinute);
-  var liveRequestConcurrency=limitText(policy?policy.requestConcurrency:options.requestConcurrency);
+  var liveRequestRate=limitText(settingsEffective.requestRatePerMinute!==undefined?settingsEffective.requestRatePerMinute:(policy?policy.requestRatePerMinute:options.requestRatePerMinute));
+  var liveRequestConcurrency=limitText(settingsEffective.requestConcurrency!==undefined?settingsEffective.requestConcurrency:(policy?policy.requestConcurrency:options.requestConcurrency));
   var draftAllowTargetNetwork=draftValues.allowTargetNetwork===undefined?liveAllowTargetNetwork:draftValues.allowTargetNetwork;
   var draftReadOnly=draftValues.readOnly===undefined?liveReadOnly:draftValues.readOnly;
   var draftExcludedPaths=draftValues.excludedPaths===undefined?liveExcludedPaths.join('\n'):draftValues.excludedPaths;
-  var liveAllowedOrigins=(policy?policy.allowedOrigins:options.allowedOrigins)||[];
+  var liveAllowedOrigins=settingsEffective.allowedOrigins||(policy?policy.allowedOrigins:options.allowedOrigins)||[];
   var draftAllowedOrigins=draftValues.allowedOrigins===undefined?liveAllowedOrigins.join('\n'):draftValues.allowedOrigins;
   var draftRequestRate=draftValues.requestRatePerMinute===undefined?liveRequestRate:draftValues.requestRatePerMinute;
   var draftRequestConcurrency=draftValues.requestConcurrency===undefined?liveRequestConcurrency:draftValues.requestConcurrency;
-  var liveBudget=policy?.budget||options.budget||{};
+  var liveBudget=settingsEffective.budget||policy?.budget||options.budget||{};
   function budgetValue(key){return liveBudget[key]===undefined||liveBudget[key]===null?'':String(liveBudget[key]);}
   var draftToolCalls=draftValues.toolCalls===undefined?budgetValue('toolCalls'):draftValues.toolCalls;
   var draftModelCalls=draftValues.modelCalls===undefined?budgetValue('modelCalls'):draftValues.modelCalls;
   var draftTokens=draftValues.tokens===undefined?budgetValue('tokens'):draftValues.tokens;
   var draftMinutes=draftValues.minutes===undefined?budgetValue('minutes'):draftValues.minutes;
   var draftUnmetered=draftValues.unmeteredToolCalls===undefined?budgetValue('unmeteredToolCalls'):draftValues.unmeteredToolCalls;
-  var liveModelConcurrency=options.modelConcurrency===undefined||options.modelConcurrency===null?'':String(options.modelConcurrency);
+  var liveModelConcurrency=settingsEffective.modelConcurrency===undefined||settingsEffective.modelConcurrency===null?'':String(settingsEffective.modelConcurrency);
   var draftModelConcurrency=draftValues.modelConcurrency===undefined?liveModelConcurrency:draftValues.modelConcurrency;
-  var liveTarget=policy?(policy.target||''):(options?.target||'');
+  var liveTarget=settingsEffective.target||(policy?(policy.target||''):(options?.target||''));
   var draftTarget=draftValues.target===undefined?liveTarget:draftValues.target;
+  var liveKnowledge=settingsEffective.knowledge||{enabled:false,strategy:'web-first'};
+  var draftKnowledgeEnabled=draftValues.knowledgeEnabled===undefined?liveKnowledge.enabled===true:draftValues.knowledgeEnabled;
+  var draftKnowledgeStrategy=draftValues.knowledgeStrategy===undefined?(liveKnowledge.strategy||'web-first'):draftValues.knowledgeStrategy;
   var effectiveAllowTargetNetwork=draftAllowTargetNetwork;
   // 函数式更新：同一次渲染里连续改两项（例如先关网站访问再勾只读）不会互相覆盖。
-  function patchDraft(patch){error[1]('');draft[1](function(previous){return Object.assign({},previous||{},patch);});}
+  function patchDraft(patch){error[1]('');draft[1](function(previous){var next=Object.assign({},previous||{},patch);writeDraftStorage('settings',next);return next;});}
   function draftChanges(){var d=draft[0]||{},out={};
     if(d.direction!==undefined&&d.direction!==mode)out.direction=d.direction;
     if(d.interaction!==undefined&&d.interaction!==interaction)out.interaction=d.interaction;
@@ -2502,199 +3317,416 @@ function ChatSetup(props) {
     if(d.modelCalls!==undefined&&String(d.modelCalls).trim()!==budgetValue('modelCalls'))out.modelCalls=d.modelCalls;
     if(d.tokens!==undefined&&String(d.tokens).trim()!==budgetValue('tokens'))out.tokens=d.tokens;
     if(d.unmeteredToolCalls!==undefined&&String(d.unmeteredToolCalls).trim()!==budgetValue('unmeteredToolCalls'))out.unmeteredToolCalls=d.unmeteredToolCalls;
+    if(d.knowledgeEnabled!==undefined&&d.knowledgeEnabled!==(liveKnowledge.enabled===true))out.knowledgeEnabled=d.knowledgeEnabled;
+    if(d.knowledgeStrategy!==undefined&&d.knowledgeStrategy!==(liveKnowledge.strategy||'web-first'))out.knowledgeStrategy=d.knowledgeStrategy;
     if(d.workflow!==undefined&&d.workflow!==liveWorkflow)out.workflow=d.workflow;
     if(d.target!==undefined&&String(d.target).trim()!==String(liveTarget).trim())out.target=String(d.target).trim();
     return out;}
-  function cancelDraft(){draft[1](null);error[1]('');more[1](false);}
+  function cancelDraft(){draft[1](null);writeDraftStorage('settings',null);error[1]('');more[1](false);}
+  function settingsRequestId(prefix){return prefix+'-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10);}
+  function settingsExpected(){var view=settingsSnapshot||current&&current.settingsView;if(!view)return null;
+    return {settingsRevision:view.settingsRevision,sceneRevision:view.sceneRevision,roundId:view.roundId};}
+  function settingsPatchFromChanges(changes){
+    var patch={};
+    // 比赛题场景只接受通用设置；设置草稿是跨场景保留的，切到比赛题后
+    // 旧草稿里的 target/allowTargetNetwork 等字段必须丢掉，否则保存会 400。
+    var siteOnly=['target','direction','allowTargetNetwork','readOnly','requestRatePerMinute','requestConcurrency','allowedOrigins','excludedPaths'];
+    var allowSite=activeScenario!=='competition';
+    ['interaction','reporting','explain','workers','workerModel','reviewModel','reportModel','target','direction','allowTargetNetwork','readOnly','requestRatePerMinute','requestConcurrency','modelConcurrency'].forEach(function(key){
+      if(changes[key]===undefined)return;
+      if(!allowSite&&siteOnly.indexOf(key)>=0)return;
+      patch[key]=changes[key];
+    });
+    if(allowSite&&changes.allowedOrigins!==undefined)patch.allowedOrigins=String(changes.allowedOrigins).split(/[\r\n,]+/).map(function(value){return value.trim();}).filter(Boolean);
+    if(allowSite&&changes.excludedPaths!==undefined)patch.excludedPaths=String(changes.excludedPaths).split(/[\r\n,]+/).map(function(value){return value.trim();}).filter(Boolean);
+    var budget={};
+    ['minutes','toolCalls','modelCalls','tokens','unmeteredToolCalls'].forEach(function(key){if(changes[key]!==undefined)budget[key]=String(changes[key]).trim()===''?null:changes[key];});
+    if(Object.keys(budget).length)patch.budget=budget;
+    if(changes.knowledgeEnabled!==undefined||changes.knowledgeStrategy!==undefined){patch.knowledge={};if(changes.knowledgeEnabled!==undefined)patch.knowledge.enabled=changes.knowledgeEnabled;if(changes.knowledgeStrategy!==undefined)patch.knowledge.strategy=changes.knowledgeStrategy;}
+    return patch;
+  }
+  function submitSettings(prefix,patch,onSuccess){
+    var expected=settingsExpected();
+    if(!expected){error[1]('设置快照尚未载入，请刷新后重试。');return Promise.resolve();}
+    if(!patch||!Object.keys(patch).length){notice[1]('没有需要保存的改动');return Promise.resolve();}
+    busy[1](true);saving.current=true;error[1]('');notice[1]('');
+    return api('task.settings',{sessionId:props.sessionId,requestId:settingsRequestId(prefix),expected:expected,patch:patch}).then(function(result){
+      if(!result.ok)throw Error(chatError(result));
+      if(typeof onSuccess==='function')onSuccess(result);
+      notice[1](result.summary||(result.noChange?'没有需要保存的改动':'设置已保存'));
+      saving.current=false;busy[1](false);
+      return load();
+    }).catch(function(failure){error[1](failure.message);notice[1]('未保存：请修正后重试，当前草稿仍在。');})
+      .finally(function(){saving.current=false;busy[1](false);});
+  }
   function saveDraft(){
     var changes=draftChanges();
-    if(!Object.keys(changes).length){notice[1]('没有需要保存的改动');draft[1](null);more[1](false);return Promise.resolve();}
-    if(changes.workers!==undefined){var raw=String(changes.workers).trim(),parsed=Number(raw);
-      if(!raw||!Number.isInteger(parsed)||parsed<0||parsed>hostWorkerLimit){error[1]('请输入0–'+hostWorkerLimit+'的整数');return Promise.resolve();}
-      changes.workers=parsed;}
-    var chain=Promise.resolve();
-    if(policy){
-      chain=chain.then(function(){return run('task.settings',Object.assign({
-        expectedRevision: policy.policyRev,
-      },changes),{propagate:true});});
-    }else{
-      var next=Object.assign({mode:mode,workflow:'single',workers:workers,interaction:interaction,reporting:reporting,explain:explainValue,startMode:'direct-test',
-        workerModel:liveWorkerModel,reviewModel:liveReviewModel,reportModel:liveReportModel,
-        allowTargetNetwork:effectiveAllowTargetNetwork,readOnly:draftReadOnly,excludedPaths:draftExcludedPaths,requestRatePerMinute:draftRequestRate,requestConcurrency:draftRequestConcurrency},changes);
-      if(next.direction!==undefined){next.mode=next.direction;delete next.direction;}
-      next.workflow='single';
-      chain=chain.then(function(){return run('task.choose',next,{propagate:true});});
+    var patch=settingsPatchFromChanges(changes);
+    // 空目标不应把“保存”变成 HTTP 400：没有地址时只能离线分析。
+    // 先按离线保存，用户之后填了地址再勾选“允许访问这些地址”。
+    // 比赛题场景没有网站目标字段，不能把离线默认值 target/allowTargetNetwork
+    // 补进 patch：服务端按 competition 字段白名单校验会直接 400。
+    if(activeScenario!=='competition'&&!String((patch.target !== undefined ? patch.target : liveTarget) || '').trim()
+      && patch.allowTargetNetwork !== false){
+      patch.target='';
+      patch.allowTargetNetwork=false;
     }
-    if(changes.allowedOrigins!==undefined)chain=chain.then(function(){return run('task.limits',{allowedOrigins:changes.allowedOrigins},{propagate:true});});
-    return chain.then(function(){draft[1](null);budget[1]({calls:'',modelCalls:'',tokens:'',minutes:'',unmetered:''});more[1](false);
-      // 保存后把实际改了哪些设置说清楚（v6 第 4.2 节）：不只说「已保存」。
-      var labels=Object.keys(changes).map(function(key){return SETTING_CHANGE_LABELS[key]||key;});
-      notice[1](labels.length?'设置已保存：'+labels.join('、'):'设置已保存');})
-      .catch(function(failure){error[1](failure.message);notice[1]('未保存：请修正后重试，当前草稿仍在。');});
+    if(!Object.keys(patch).length){notice[1]('没有需要保存的改动');draft[1](null);writeDraftStorage('settings',null);more[1](false);return Promise.resolve();}
+    return submitSettings('settings',patch,function(result){
+      draft[1](null);writeDraftStorage('settings',null);
+      if(!result.noChange)budget[1]({calls:'',modelCalls:'',tokens:'',minutes:'',unmetered:''});
+      if(!String((patch.target !== undefined ? patch.target : liveTarget) || '').trim())notice[1]('未填地址，已按离线分析保存。');
+      more[1](false);
+    });
+  }
+  function openCollaboration(){
+    var next=!collab[0];collab[1](next);
+    if(next){
+      setCollabDraft({workers:String(workers),workerModel:liveWorkerModel,reviewModel:liveReviewModel});
+      more[1](false);open[1](false);inlineAssetView[1](false);
+    }
+  }
+  function openSettings(){
+    var next=!more[0];more[1](next);
+    if(next){
+      try{var saved=window.localStorage.getItem('saker.settings.section.'+props.sessionId);if(saved==='scope'||saved==='knowledge'||saved==='limits')settingsSection[1](saved);}catch(_error){}
+      open[1](false);collab[1](false);inlineAssetView[1](false);
+    }
+  }
+  function openWorkflow(){
+    var next=!workflowOpen[0];workflowOpen[1](next);
+    if(next){more[1](false);open[1](false);collab[1](false);inlineAssetView[1](false);}
+  }
+  function chooseSettingsSection(name){settingsSection[1](name);try{window.localStorage.setItem('saker.settings.section.'+props.sessionId,name);}catch(_error){}}
+  var settingsSearchIndex=[
+    ['范围','scope'],['范围与授权','scope'],['允许访问网站','scope'],['只看不改','scope'],['只读模式','scope'],['排除路径','scope'],['请求速率','scope'],['请求并发','scope'],['账号','scope'],['测试方向','scope'],
+    ['知识库','knowledge'],['知识库查询','knowledge'],['知识查询策略','knowledge'],['导入文档','knowledge'],
+    ['节奏','limits'],['用量与汇报','limits'],['时间上限','limits'],['工具调用','limits'],['模型调用','limits'],['模型 token','limits'],['本地模型并发','limits'],['未计量通道','limits'],['什么时候问我','limits'],['什么时候汇报','limits'],['解释原理','limits']
+  ];
+  function setCollabDraft(value){collabDraft[1](value);writeDraftStorage('collaboration',value);}
+  function collabValues(){var d=collabDraft[0]||{};return {workers:d.workers===undefined?String(workers):String(d.workers),
+    workerModel:d.workerModel===undefined?liveWorkerModel:d.workerModel,
+    reviewModel:d.reviewModel===undefined?liveReviewModel:d.reviewModel};}
+  function saveCollaboration(){
+    var values=collabValues(),patch={};
+    if(String(values.workers)!==String(workers))patch.workers=values.workers;
+    if(JSON.stringify(values.workerModel)!==JSON.stringify(liveWorkerModel))patch.workerModel=values.workerModel;
+    if(JSON.stringify(values.reviewModel)!==JSON.stringify(liveReviewModel))patch.reviewModel=values.reviewModel;
+    return submitSettings('collaboration',patch,function(){setCollabDraft(null);collab[1](false);});
+  }
+  function stopWorker(childId){
+    busy[1](true);error[1]('');notice[1]('正在停止并行任务…');
+    return api('task.cleanup',{sessionId:props.sessionId,childId:childId}).then(function(result){
+      if(!result.ok)throw Error(chatError(result));
+      notice[1]('并行任务已停止；主任务未受影响。');return load();
+    }).catch(function(failure){error[1](failure.message);})
+      .finally(function(){busy[1](false);});
+  }
+  function trapModalTab(event){
+    if(event.key!=='Tab'||!event.currentTarget.querySelectorAll)return;
+    var items=Array.from(event.currentTarget.querySelectorAll('button:not(:disabled),input:not(:disabled),textarea:not(:disabled),select:not(:disabled),[tabindex="0"]')).filter(function(el){return el.getClientRects().length;});
+    if(!items.length)return;var first=items[0],last=items[items.length-1];
+    if((event.shiftKey&&document.activeElement===first)||(!event.shiftKey&&document.activeElement===last)){event.preventDefault();(event.shiftKey?last:first).focus();}
+  }
+  var compactWorkflow=current&&current.workflowStatus;
+  var compactRun=compactWorkflow&&compactWorkflow.run;
+  var compactSelected=compactWorkflow&&compactWorkflow.selected;
+  var compactMethodText=compactRun
+    ? '测试流程 · '+String((compactSelected&&compactSelected.title)||'当前流程')+(compactRun.state==='running'?' · '+Math.min(compactRun.total,compactRun.currentIndex+1)+'/'+compactRun.total:compactRun.state==='blocked'?' · 受阻':' · 已结束')
+    : '测试流程';
+  var compactStatusText=props.blank?'未开始':(policy?taskStatusLabel(current,policy):(current&&current.agentRunning?'运行中':'直接处理'));
+  // 已取消/暂停接续/超过截止时间的轮次不会再发模型请求；直接继续输入只会得到
+  // TASK_MODEL_BUDGET。把下一步写进常驻状态本身，避免用户以为“发给模型没反应”。
+  var compactBlocked=!!(policy&&!props.blank&&(policy.cancelled===true||policy.continuationPaused===true
+    ||(policy.budget&&policy.budget.deadline!==undefined&&policy.budget.deadline!==null&&Date.now()>=policy.budget.deadline)));
+  if(compactBlocked)compactStatusText+=' · 新建测试';
+  var compactRequestCount=overview&&overview.counts?Number(overview.counts.receipts||0):0;
+  var compactActive=!!current&&!current.stopped&&!current.idle&&(current.agentRunning===true||Number(current.active||0)>0||['running','pausing'].includes(current.phase));
+  function loadComponents(){
+    var revision=++componentReq.current;
+    api('component.status',{sessionId:props.sessionId}).then(function(value){
+      if(revision!==componentReq.current)return;
+      if(!value||value.ok===false)throw Error((value&&value.error)||'读取组件记录失败');
+      componentInfo[1](value);componentError[1]('');
+    }).catch(function(failure){if(revision===componentReq.current){componentInfo[1](null);componentError[1](failure.message||String(failure));}});
+  }
+  function loadRoles(){
+    var revision=++roleReq.current;
+    api('role.status',{sessionId:props.sessionId}).then(function(value){
+      if(revision!==roleReq.current)return;
+      if(!value||value.ok===false)throw Error((value&&value.error)||'读取工作与角色失败');
+      roleInfo[1](value);roleError[1]('');
+    }).catch(function(failure){if(revision===roleReq.current){roleInfo[1](null);roleError[1](failure.message||String(failure));}});
+  }
+  function loadModules(text,categoryValue,statusValue){
+    var revision=++moduleReq.current;
+    moduleError[1]('');
+    scopeContextFor(props.sessionId).then(function(scope){
+      return api('workbench.query',{kind:'modules.list',context:Object.assign({sessionId:props.sessionId},scope),filter:{text:String(text||''),categoryId:String(categoryValue||''),status:String(statusValue||'')},page:{limit:20}});
+    })
+      .then(function(response){
+        if(revision!==moduleReq.current)return;
+        if(!response||response.ok===false)throw Error(chatError(response));
+        moduleList[1](response.data||{items:[],page:{}});
+      })
+      .catch(function(failure){if(revision===moduleReq.current)moduleError[1](failure.message||String(failure));});
+  }
+  function openModules(){
+    var next=!moduleOpen[0];
+    moduleOpen[1](next);
+    if(next){more[1](false);open[1](false);collab[1](false);workflowOpen[1](false);if(!moduleList[0])loadModules(moduleText[0],moduleCategory[0],moduleStatus[0]);}
+    else{
+      if(moduleTimer.current)clearTimeout(moduleTimer.current);
+      moduleTimer.current=null;
+      if(moduleButton.current&&moduleButton.current.focus)moduleButton.current.focus();
+    }
+  }
+  function chooseModule(item){
+    if(moduleBusy[0])return;
+    moduleBusy[1](true);moduleError[1]('');
+    wbCommand(null,'module.prefer',{sessionId:props.sessionId},{
+      moduleSnapshotRef:item.moduleRef||{id:item.id,version:item.version,digest:item.digest,ownerKey:item.ownerKey},
+      operation:'auto',sessionRef:props.sessionId,
+    }).then(function(result){moduleSelected[1](item);notice[1]('已选“'+item.title+'”，下一次工作会带上；发送仍由你决定。');moduleOpen[1](false);})
+      .catch(function(failure){moduleError[1](failure.message||String(failure));})
+      .finally(function(){moduleBusy[1](false);});
+  }
+  function openTaskDetails(){var next=!taskDetailsOpen[0];taskDetailsOpen[1](next);if(next){more[1](false);open[1](false);collab[1](false);load(0);loadComponents();loadRoles();}}
+  function openCompactMenu(){menuOpen[1](!menuOpen[0]);if(!menuOpen[0]){more[1](false);open[1](false);collab[1](false);}}
+  function openPromptPanel(){var next=!open[0];if(next){promptInsertion.current=props.inputActions&&typeof props.inputActions.captureInsertion==='function'?props.inputActions.captureInsertion():null;open[1](true);more[1](false);inlineAssetView[1](false);menuOpen[1](false);}else open[1](false);}
+  function startNewRound(){return run('task.new-round',{preferences:{mode:policy&&policy.scenario==='project'?'regular':policy&&policy.mode||mode,scenario:policy&&policy.scenario||activeScenario,workflow:'single',interaction:interaction,reporting:reporting,workers:workers,allowTargetNetwork:liveAllowTargetNetwork!==false,readOnly:liveReadOnly===true}});}
+  // 案例/按清单检查只能通过 project.start 生成项目运行和检查项；
+  // 普通 send 会走 web-default，导致 project_checks 永远为空。
+  function startProjectCase(){
+    if(busy[0])return Promise.resolve();
+    var question=starterDraftText().trim()||'按导入的测试要求逐项核对';
+    var target=String(settingsEffective&&settingsEffective.target||liveTarget||'').trim();
+    // 只按文档/代码核对时没有网址：显式关闭网站访问，避免服务端要求范围而 400。
+    var allowNetwork=target?liveAllowTargetNetwork!==false:false;
+    busy[1](true);error[1]('');
+    var policy={workflow:'single',interaction:interaction,question:question,budget:{workers:workers},
+      allowTargetNetwork:allowNetwork,readOnly:liveReadOnly===true};
+    if(target)policy.target=target;
+    return api('project.start',{sessionId:props.sessionId,policy:policy})
+      .then(function(value){if(!value.ok)throw Error(value.error||'开始按清单检查失败');notice[1]('已开始按清单检查');return load();})
+      .catch(function(failure){error[1](failure.message||String(failure));})
+      .finally(function(){busy[1](false);});
   }
   return React.createElement('section',{ref:overlayRoot,'aria-label':'聊天任务设置',className:'dsh-chat-setup'},
-    React.createElement('div',{className:'dsh-chat-settings-row'},
-      React.createElement('span',{className:'dsh-chat-chip',title:'使用输入框上方唯一的 Saker 场景选择器切换'},React.createElement(ChatIcon,{name:'direction'}),'当前：'+(competitionMode?'比赛模式':projectMode?'案例测试':'自由测试')),
-      React.createElement('span',{className:'dsh-chat-toolbar-spacer'}),
-      React.createElement('div',{className:'dsh-chat-entry-group'},
-      React.createElement('button',{type:'button',className:more[0]?'dsh-chat-toolbar-button saker-ui-btn is-active':'dsh-chat-toolbar-button saker-ui-btn','aria-expanded':more[0],title:workers>0?'按需协作已启用；子任务完成时会自动交回结果。':'默认由主模型完成；需要时再明确启用协作。',onClick:function(){var next=!more[0];workerDraft[1](String(workers));customWorkers[1](workers>=3?String(workers):'3');more[1](next);if(next){open[1](false);inlineAssetView[1](false);}}},React.createElement(ChatIcon,{name:'users'}),'协作'+(workers>0?' '+workers:' 关')),
-      competitionMode?React.createElement(CompetitionEntry,{key:props.sessionId+'-competition-entry',sessionId:props.sessionId,open:panel[0]==='competition',onOpenChange:function(next){setPanelOnly('competition',next);}})
-        :React.createElement(MaterialsEntry,{key:props.sessionId+'-materials-entry',sessionId:props.sessionId,scenario:activeScenario,open:panel[0]==='materials',onOpenChange:function(next){setPanelOnly('materials',next);}}),
-      React.createElement('button',{ref:openButton,type:'button',className:open[0]?'dsh-chat-toolbar-button saker-ui-btn is-active':'dsh-chat-toolbar-button saker-ui-btn','aria-expanded':open[0],title:'写提示词：编辑、复制或插入当前输入框，不自动发送。',onClick:function(){var next=!open[0];if(next){promptInsertion.current=props.inputActions&&typeof props.inputActions.captureInsertion==='function'?props.inputActions.captureInsertion():null;}open[1](next);if(next){more[1](false);inlineAssetView[1](false);}}},React.createElement(ChatIcon,{name:'prompt'}),'写提示词'),
-      React.createElement('button',{ref:moreButton,type:'button',className:more[0]?'dsh-chat-toolbar-button is-active':'dsh-chat-toolbar-button','aria-expanded':more[0],title:'测试范围、询问和汇报、助手与预算设置。',onClick:function(){if(more[0]&&error[0]){more[1](true);return;}var next=!more[0];workerDraft[1](String(workers));customWorkers[1](workers>=3?String(workers):'3');more[1](next);if(next){open[1](false);inlineAssetView[1](false);}}},React.createElement(ChatIcon,{name:'settings'}),'设置'))),
-    more[0]?React.createElement('div',{className:'dsh-chat-more','aria-label':'聊天协作设置'},
-      React.createElement('div',{className:'dsh-chat-panel-head'},React.createElement('strong',null,'本次测试设置'),React.createElement('button',{type:'button','aria-label':'关闭测试设置',onClick:closePanels},'关闭')),
+    React.createElement('div',{className:'dsh-chat-compact-bar',role:'toolbar','aria-label':'Saker 快捷操作'},
+      React.createElement('button',{ref:workflowButton,type:'button',className:'dsh-chat-method-chip'+(workflowOpen[0]?' is-active':''),'aria-expanded':workflowOpen[0],title:(compactWorkflow&&compactSelected&&compactSelected.title||'测试流程')+'：查看或编辑当前测试流程',onClick:openWorkflow},
+        React.createElement(ChatIcon,{name:'flow'}),React.createElement('span',null,compactMethodText),React.createElement('small',null,'▾')),
+      React.createElement('button',{ref:moduleButton,type:'button',className:'dsh-chat-toolbar-button saker-ui-btn'+(moduleOpen[0]?' is-active':''),'aria-expanded':moduleOpen[0],title:'选择下一次工作使用的测试模块；只保存偏好，不会自动发送。',onClick:openModules},
+        React.createElement(ChatIcon,{name:'module'}),React.createElement('span',null,moduleSelected[0]?moduleSelected[0].title:'测试模块')),
+      projectMode?React.createElement('button',{type:'button',className:'dsh-chat-toolbar-button saker-ui-btn',disabled:busy[0],title:'读取已导入的测试文档，逐条生成检查项并开始第一项；不会重新扫描无关内容。',onClick:startProjectCase},
+        React.createElement(ChatIcon,{name:'flag'}),React.createElement('span',null,'开始检查')):null,
+      React.createElement('button',{type:'button',className:'dsh-chat-status-chip'+(taskDetailsOpen[0]?' is-active':''),title:compactBlocked?'本轮已停止，后续消息不会发出。点这里打开详情，再点“新建测试”。':(current&&current.currentAction?current.currentAction:'打开任务详情'),onClick:openTaskDetails},
+        React.createElement('span',{className:'dsh-chat-status-dot'}),React.createElement('span',{className:'dsh-chat-status-text'},compactStatusText),compactRequestCount?React.createElement('small',{title:'仅统计宿主落库的结构化 HTTP 回执；shell/CLI 内部请求可能未计入'},'回执 '+compactRequestCount):null),
+      compactActive?React.createElement('button',{type:'button',className:'dsh-chat-stop-button',disabled:busy[0],onClick:function(){return run('task.cancel');}},'停止'):null,
+      React.createElement('button',{ref:openButton,type:'button',className:open[0]?'dsh-chat-toolbar-button saker-ui-btn is-active':'dsh-chat-toolbar-button saker-ui-btn','aria-expanded':open[0],title:'从指令模板里选一条，补上信息后插入输入框；不会自动发送。',onClick:openPromptPanel},React.createElement(ChatIcon,{name:'prompt'}),'指令模板'),
+      React.createElement('span',{className:'dsh-chat-compact-optional'},competitionMode?React.createElement(CompetitionEntry,{key:props.sessionId+'-competition-entry',sessionId:props.sessionId,open:panel[0]==='competition',onOpenChange:function(next){setPanelOnly('competition',next);}})
+        :React.createElement(MaterialsEntry,{key:props.sessionId+'-materials-entry',sessionId:props.sessionId,scenario:activeScenario,open:panel[0]==='materials',onOpenChange:function(next){setPanelOnly('materials',next);}})),
+      React.createElement('button',{ref:moreButton,type:'button',className:'dsh-chat-toolbar-button dsh-chat-more-button'+(menuOpen[0]?' is-active':''),'aria-expanded':menuOpen[0],title:'更多：任务详情、协作和设置。',onClick:openCompactMenu},React.createElement(ChatIcon,{name:'more'}),'更多')),
+    menuOpen[0]?React.createElement('div',{className:'dsh-chat-more dsh-chat-compact-menu',role:'dialog','aria-modal':'false','aria-label':'更多操作',onKeyDown:trapModalTab},
+      React.createElement('div',{className:'dsh-chat-panel-head saker-panel-head'},React.createElement('strong',null,'快速操作'),React.createElement('button',{type:'button','aria-label':'关闭快速操作',onClick:closePanels},'关闭')),
+      React.createElement('div',{className:'dsh-chat-compact-menu-body'},
+        React.createElement('button',{type:'button',onClick:openTaskDetails},'任务详情'),
+        React.createElement('button',{type:'button',onClick:function(){menuOpen[1](false);openCollaboration();}},workers>0?'并行任务 · '+workers+' 个':'并行任务'),
+        React.createElement('button',{type:'button',onClick:function(){menuOpen[1](false);openSettings();}},'设置'),
+        React.createElement('button',{type:'button',onClick:function(){menuOpen[1](false);openWorkflow();}},'测试流程'),
+        React.createElement('button',{type:'button',onClick:function(){menuOpen[1](false);openPromptPanel();}},'指令模板'),
+        policy&&(current.stopped||current.idle)&&!policy.blocker&&!policy.awaitingConfirmation&&!policy.parentSession?React.createElement('button',{type:'button',onClick:startNewRound},'新建测试'):null))
+    :taskDetailsOpen[0]?React.createElement('div',{className:'dsh-chat-more dsh-chat-task-detail',role:'dialog','aria-modal':'false','aria-label':'任务详情',onKeyDown:trapModalTab},
+      React.createElement('div',{className:'dsh-chat-panel-head saker-panel-head'},React.createElement('div',{className:'saker-panel-headtext'},React.createElement('strong',null,'任务详情'),React.createElement('p',{className:'saker-panel-subtitle'},compactMethodText+' · '+compactStatusText)),React.createElement('button',{type:'button','aria-label':'关闭任务详情',onClick:closePanels},'关闭')),
+      React.createElement('div',{className:'dsh-chat-task-detail-body'},
+        policy?React.createElement(React.Fragment,null,
+          overview?React.createElement('p',{className:'dsh-chat-task-detail-scope'},'范围：'+taskScopeDisplay(overview.scope,policy.target)):null,
+          overview?React.createElement('p',{className:'dsh-chat-task-detail-stats'},'资产 '+(overview.counts&&overview.counts.assets||0)+' · 请求/回执 '+(overview.counts&&overview.counts.receipts||0)+' · 并行任务 '+(overview.counts&&overview.counts.runningWorkers||0)):null,
+          React.createElement(ChatComponentSummary,{info:componentInfo[0],error:componentError[0]}),
+          React.createElement(ChatRoleSummary,{info:roleInfo[0],error:roleError[0]}),
+          React.createElement('div',{className:'dsh-chat-actions'},React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){inlineAssetView[1](false);chooseSettingsSection('scope');setPanelOnly('settings',true);}}, '编辑范围'),React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){inlineAssetView[1](!inlineAssetView[0]);}},'查看资产'),
+            policy.manualTakeover&&policy.manualTakeover.active?React.createElement('button',{type:'button',disabled:busy[0]||current.agentRunning,onClick:function(){return run('task.takeover-resume',{expectedPolicyRev:policy.policyRev});}},'继续测试'):null,
+            !(policy.manualTakeover&&policy.manualTakeover.active)&&current.browserTakeover&&current.browserTakeover.open&&!takeoverTerminal?React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){return run('task.takeover',{expectedPolicyRev:policy.policyRev});}},'我来操作'):null,
+            current.reason==='turn_ended'&&current.stopped?React.createElement('button',{type:'button',disabled:busy[0]||current.agentRunning||(current.active||0)>0,onClick:function(){return run('task.continue-current');}},'继续当前任务'):null),
+          inlineAssetView[0]?React.createElement(TaskAssetView,{sessionId:props.sessionId}):null,
+          overview&&overview.pendingChange?React.createElement('div',{className:'dsh-chat-task-overview-pending'},React.createElement('span',null,'待确认的任务变更：'+(overview.pendingChange.summary||overview.pendingChange.fields.join('、'))),React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){return run('task.pending-apply');}},'确认变更'),React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){return run('task.pending-cancel');}},'取消')):null,
+          React.createElement(UsageRow,{key:props.sessionId+'-usage',sessionId:props.sessionId}),
+          React.createElement('div',{className:'dsh-chat-actions'},React.createElement('button',{type:'button',disabled:busy[0]||current.agentRunning||(current.active||0)>0,onClick:startNewRound},'新建测试'))):
+          React.createElement('p',null,'还没有开始任务。直接发送要求，或先选择题目的处理方式。'),
+        error[0]?React.createElement('p',{role:'alert'},error[0]):null))
+    :moduleOpen[0]?React.createElement('div',{className:'dsh-chat-more dsh-chat-compact-menu saker-module-picker',role:'dialog','aria-modal':'false','aria-label':'选择测试模块',onKeyDown:trapModalTab},
+      React.createElement('div',{className:'dsh-chat-panel-head saker-panel-head'},React.createElement('div',{className:'saker-panel-headtext'},React.createElement('strong',null,'测试模块'),React.createElement('p',{className:'saker-panel-subtitle'},'选一个下一次测试要用的模块；也可以不选，直接执行。')),React.createElement('button',{type:'button','aria-label':'关闭模块选择',onClick:function(){moduleOpen[1](false);if(moduleButton.current&&moduleButton.current.focus)moduleButton.current.focus();}},'关闭')),
+      React.createElement('div',{className:'saker-module-search-row'},
+			React.createElement('input',{className:'saker-module-search',type:'search',placeholder:'搜索名称、别名、工具或用途','aria-label':'搜索测试模块',value:moduleText[0],onChange:function(event){
+				var value=event.target.value;moduleText[1](value);
+				if(moduleComposing.current)return;
+				if(moduleTimer.current)clearTimeout(moduleTimer.current);
+				moduleTimer.current=setTimeout(function(){loadModules(value,moduleCategory[0],moduleStatus[0]);},180);
+			},onCompositionStart:function(){moduleComposing.current=true;},onCompositionEnd:function(event){
+				moduleComposing.current=false;
+				if(moduleTimer.current)clearTimeout(moduleTimer.current);
+				moduleTimer.current=setTimeout(function(){loadModules(event.target.value,moduleCategory[0],moduleStatus[0]);},180);
+			}}),
+        React.createElement('select',{'aria-label':'按分类筛选模块',value:moduleCategory[0],onChange:function(event){moduleCategory[1](event.target.value);loadModules(moduleText[0],event.target.value,moduleStatus[0]);}},
+          React.createElement('option',{value:''},'全部分类'),((moduleList[0]&&moduleList[0].taxonomy&&moduleList[0].taxonomy.primaryCategories)||[]).map(function(category){return React.createElement('option',{key:category.id,value:category.id},category.title);})),
+        React.createElement('select',{'aria-label':'按可用状态筛选模块',value:moduleStatus[0],onChange:function(event){moduleStatus[1](event.target.value);loadModules(moduleText[0],moduleCategory[0],event.target.value);}},
+          React.createElement('option',{value:''},'全部状态'),React.createElement('option',{value:'available'},'可用'),React.createElement('option',{value:'partial'},'部分可用'),React.createElement('option',{value:'blocked'},'缺少依赖'))),
+      React.createElement('div',{className:'saker-module-rows'},
+        moduleError[0]?React.createElement('p',{role:'alert'},moduleError[0]):null,
+        moduleBusy[0]?React.createElement('p',{className:'saker-panel-hint'},'正在保存选择…'):null,
+        !moduleList[0]&&!moduleError[0]?React.createElement('p',{className:'saker-panel-hint'},'正在读取模块…'):null,
+        moduleList[0]&&moduleList[0].items&&moduleList[0].items.length?moduleList[0].items.map(function(item){
+          return React.createElement('button',{key:item.id+'@'+item.version,type:'button',className:'saker-module-row',onClick:function(){chooseModule(item);}},
+            React.createElement('span',{className:'saker-wb-row'},React.createElement('strong',{style:{flex:1}},item.title),React.createElement('span',{className:'saker-wb-chip '+(item.runtimeStatus==='available'?'ok':item.runtimeStatus==='blocked'?'bad':'warn')},item.statusLabel||'未评估')),
+            React.createElement('small',null,item.userSummary||item.outputSummary||''),
+            React.createElement('small',null,(item.familyLabel||item.family||'自定义')+' · v'+item.version+(item.tools&&item.tools.length?' · '+item.tools.slice(0,3).join(' / '):'')));
+        }):null,
+        moduleList[0]&&moduleList[0].items&&!moduleList[0].items.length?React.createElement('p',{className:'saker-panel-hint'},'没有匹配的模块。'):null),
+      React.createElement('p',{className:'saker-panel-hint'},moduleSelected[0]?'当前已选：'+moduleSelected[0].title+'。下一次测试准入时会带上。':'选择只影响下一次测试；不会自动发送，也不会新增费用。'))
+    :workflowOpen[0]?React.createElement(ChatWorkflowStudio,{sessionId:props.sessionId,open:true,onClose:function(){workflowOpen[1](false);if(workflowButton.current&&workflowButton.current.focus)workflowButton.current.focus();}})
+    :knowledgeOpen[0]?React.createElement(ChatKnowledgeLibrary,{sessionId:props.sessionId,open:true,onClose:function(){knowledgeOpen[1](false);if(moreButton.current&&moreButton.current.focus)moreButton.current.focus();}})
+    :collab[0]?React.createElement('div',{className:'dsh-chat-more dsh-chat-collab',role:'dialog','aria-modal':'false','aria-label':'协作设置',onKeyDown:trapModalTab},
+      React.createElement('div',{className:'dsh-chat-panel-head saker-panel-head'},
+        React.createElement('div',{className:'saker-panel-headtext'},React.createElement('strong',null,'并行执行'),React.createElement('p',{className:'saker-panel-subtitle'},'需要同时处理多个独立检查时再开启；默认按顺序执行。')),
+        React.createElement('button',{type:'button','aria-label':'关闭协作设置',onClick:closePanels},'关闭')),
       React.createElement('div',{className:'dsh-chat-settings-body'},
-      React.createElement('p',{className:'dsh-chat-setting-hint'},'只影响当前任务，保存后生效。'),
-      React.createElement('p',{className:'dsh-chat-setting-hint'},competitionMode?'管理本题执行环境与本地资料；看题和读取附件不会自动调用模型。':projectMode?'设置目标、访问限制、账号和本轮预算；不改别的会话。':'选择什么时候问你、怎么汇报，以及助手数量；不改别的会话。'),
-      competitionMode?null:React.createElement('h4',null,'测试范围与访问限制'),
-      competitionMode?null:React.createElement('label',{className:'dsh-chat-target'},React.createElement('span',null,'测试哪些网站（选填）'),
-        React.createElement('textarea',{'aria-label':'测试范围（网址、域名、IP/CIDR，选填）',rows:3,value:draftTarget,disabled:busy[0]||!!(policy&&policy.parentSession),placeholder:projectMode?'每行一个入口；也可写域名、IP/CIDR 或 *.example.com':competitionMode?'题目实例、目标地址或连接说明（可留空）':'完整 URL、域名、IP/CIDR 或资产清单；多项每行一条，只测试已获授权范围',onChange:function(event){patchDraft({target:event.target.value});}})),
-      competitionMode?null:React.createElement(AccountsSection,{key:props.sessionId+'-accounts',sessionId:props.sessionId}),
-      // 执行入口与观测范围（v6 第 8.1 节）：如实列出已接通的能力，以及不在 Saker 观测内的通道，
-      // 不拿"工具已装"冒充全部计量。
-      competitionMode?null:React.createElement('details',{className:'dsh-execution-scope'},
-        React.createElement('summary',null,'哪些请求会留下记录'),
-        React.createElement('ul',null,
-          React.createElement('li',null,'Saker 发送的 HTTP 请求：可查看目标、时间、状态和响应回执。范围、排除路径、速率和取消设置在发送前检查。'),
-          React.createElement('li',null,'浏览器、命令和 MCP：可查看工具调用；工具内部发了多少请求，可能无法统计，界面会标为未知。'))),
-      competitionMode?React.createElement('details',{className:'dsh-action-limits'},
-        React.createElement('summary',null,'比赛预算与本地模型并发'),
-        React.createElement('div',{className:'dsh-limit-row'},
-          React.createElement('label',null,'最多运行多久（分钟）',
-            React.createElement('input',{'aria-label':'最多运行多久（分钟）',type:'number',min:1,value:draftMinutes,placeholder:'未设置',disabled:busy[0]||!current,onChange:function(event){setBudget({minutes:event.target.value});patchDraft({minutes:event.target.value});}})),
-          React.createElement('label',null,'工具调用上限（次）',
-            React.createElement('input',{'aria-label':'工具调用上限（次）',type:'number',min:1,value:draftToolCalls,placeholder:'未设置',disabled:busy[0]||!current,onChange:function(event){setBudget({calls:event.target.value});patchDraft({toolCalls:event.target.value});}}))),
-        React.createElement('div',{className:'dsh-limit-row'},
-          React.createElement('label',null,'模型调用上限（次）',
-            React.createElement('input',{'aria-label':'模型调用上限（次）',type:'number',min:1,value:draftModelCalls,placeholder:'未设置',disabled:busy[0]||!current,onChange:function(event){setBudget({modelCalls:event.target.value});patchDraft({modelCalls:event.target.value});}})),
-          React.createElement('label',null,'模型用量上限（token）',
-            React.createElement('input',{'aria-label':'模型用量上限（token）',type:'number',min:1,value:draftTokens,placeholder:'未设置',disabled:busy[0]||!current,onChange:function(event){setBudget({tokens:event.target.value});patchDraft({tokens:event.target.value});}}))),
-        React.createElement('div',{className:'dsh-limit-row'},
-          React.createElement('label',null,'本地模型并发（默认 1）',
-            React.createElement('input',{'aria-label':'本地模型并发',type:'number',min:1,max:16,value:draftModelConcurrency,placeholder:'1',disabled:busy[0]||!current,onChange:function(event){patchDraft({modelConcurrency:event.target.value});}}))),
-        React.createElement('small',null,'同一本地/内网模型服务默认串行；明确设置为 2–16 才会提高并发。留空使用默认值 1。'),
-        React.createElement('small',null,'模型和工具额度留空表示不增加本插件门槛；设置后主任务、助手与可归属辅助流共用准入。'))
-      :React.createElement('details',{className:'dsh-action-limits'},
-        React.createElement('summary',null,'限制请求和用量'),
-        React.createElement('label',{className:'dsh-chat-explain'},
-          React.createElement('input',{type:'checkbox','aria-label':'允许访问网站',checked:effectiveAllowTargetNetwork,disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){return patchDraft({allowTargetNetwork:event.target.checked});}}),
-          '允许访问网站'),
-        React.createElement('small',null,'关闭后只分析已添加的内容；程序会拒绝新的目标网络操作（MCP、扫描器、shell、浏览器、已存请求与基线复查）。'),
-        projectMode?React.createElement('label',{className:'dsh-chat-exclude'},React.createElement('span',null,'其他允许访问的网站（选填）'),
-          React.createElement('textarea',{'aria-label':'其他允许访问的网站',rows:2,value:draftAllowedOrigins,placeholder:'每行一个完整网址，例如 https://api.example.test',disabled:busy[0]||!current,onChange:function(event){return patchDraft({allowedOrigins:event.target.value});}}),
-          React.createElement('small',null,'主目标之外的 API、登录或静态资源站点。模型发现新站点后不会自动放行，请在这里添加。')):null,
-        React.createElement('label',{className:'dsh-chat-explain'},
-          React.createElement('input',{type:'checkbox','aria-label':'仅发送 GET/HEAD',checked:draftReadOnly,disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){return patchDraft({readOnly:event.target.checked});}}),
-          '仅发送 GET/HEAD'),
-        React.createElement('small',null,'只允许 GET/HEAD 这类读取请求；提交、修改或删除业务数据会被程序拒绝。'),
-        React.createElement('label',{className:'dsh-chat-exclude'},React.createElement('span',null,'排除的地址或路径（选填）'),
-          React.createElement('textarea',{'aria-label':'排除的地址或路径',rows:2,value:draftExcludedPaths,placeholder:'例如 /payment、/delete',disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){return patchDraft({excludedPaths:event.target.value});}})),
-        React.createElement('small',null,'每行一条，按路径前缀排除（/payment 会排除 /payment 及其子路径）；命中的请求会被程序拒绝，不会发出。'),
-        React.createElement('div',{className:'dsh-limit-row'},
-          React.createElement('label',null,'扫描速率（每分钟请求数）',
-            React.createElement('input',{'aria-label':'扫描速率（每分钟请求数）',type:'number',min:1,max:600,value:draftRequestRate,placeholder:'未设置',disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){return patchDraft({requestRatePerMinute:event.target.value});}})),
-          React.createElement('label',null,'并发上限（同时进行）',
-            React.createElement('input',{'aria-label':'并发上限（同时进行）',type:'number',min:1,max:16,value:draftRequestConcurrency,placeholder:'未设置',disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){return patchDraft({requestConcurrency:event.target.value});}}))),
-        React.createElement('small',null,'留空表示未设置，实际沿用宿主当前限制；只约束本插件派发的目标请求，排队超时会拒绝而不是硬发。'),
-        policy?React.createElement('small',null,'本轮预算已生效：操作 '+(policy.budget?.toolCalls??'未设')+' 次'
-          +(policy.budget?.modelCalls!==undefined?' · 模型调用 '+policy.budget.modelCalls+' 次':'')
-          +(policy.budget?.tokens!==undefined?' · 模型 token '+policy.budget.tokens:'')
-          +(Number.isInteger(policy.budget?.unmeteredToolCalls)?' · 未计量通道上限 '+policy.budget.unmeteredToolCalls+' 次':' · 未计量通道不设额外上限')
-          +'。用户可在任务状态中增加时间和剩余额度，已用量不会清零。')
-          :React.createElement('div',null,
-            React.createElement('div',{className:'dsh-limit-row'},
-              React.createElement('label',null,'最多运行多久（分钟）',
-                React.createElement('input',{'aria-label':'最多运行多久（分钟）',type:'number',min:1,value:draftMinutes,placeholder:'未设置',disabled:busy[0]||!current,onChange:function(event){setBudget({minutes:event.target.value});patchDraft({minutes:event.target.value});}})),
-              React.createElement('label',null,'网站请求上限（次）',
-                React.createElement('input',{'aria-label':'网站请求上限（次）',type:'number',min:1,value:draftToolCalls,placeholder:'未设置',disabled:busy[0]||!current,onChange:function(event){setBudget({calls:event.target.value});patchDraft({toolCalls:event.target.value});}}))),
-            React.createElement('div',{className:'dsh-limit-row'},
-              React.createElement('label',null,'模型调用上限（次）',
-                React.createElement('input',{'aria-label':'模型调用上限（次）',type:'number',min:1,value:draftModelCalls,placeholder:'未设置',disabled:busy[0]||!current,onChange:function(event){setBudget({modelCalls:event.target.value});patchDraft({modelCalls:event.target.value});}})),
-              React.createElement('label',null,'模型用量上限（token）',
-                React.createElement('input',{'aria-label':'模型用量上限（token）',type:'number',min:1,value:draftTokens,placeholder:'未设置',disabled:busy[0]||!current,onChange:function(event){setBudget({tokens:event.target.value});patchDraft({tokens:event.target.value});}}))),
-            React.createElement('div',{className:'dsh-limit-row'},
-                React.createElement('label',null,'未计量通道上限（可选）',
-                React.createElement('input',{'aria-label':'未计量扫描额度（次工具调用）',type:'number',min:0,value:draftUnmetered,placeholder:'未设置',disabled:busy[0]||!current,onChange:function(event){setBudget({unmetered:event.target.value});patchDraft({unmeteredToolCalls:event.target.value});}}))),
-            React.createElement('small',null,'这些是可选的真实限制；留空沿用宿主限制，不额外制造 30 次/15 分钟等默认门槛。')),
-        !effectiveAllowTargetNetwork?React.createElement('p',{role:'status'},'访问网站已关闭：只分析已添加的内容，需要访问时请明确打开上面的“允许访问网站”。'):null),
-      React.createElement('h4',null,'询问、汇报和助手'),
-      projectMode||competitionMode?null:React.createElement('label',{className:'dsh-task-field'},React.createElement('span',null,'测试方向'),
-        React.createElement('select',{'aria-label':'测试方向',value:draftDirection,disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){return patchDraft({direction:event.target.value});}},['regular','nday','0day'].map(function(value){return React.createElement('option',{key:value,value:value},labels[value]);}))),
-      projectMode?null:React.createElement('label',{className:'dsh-task-field'},React.createElement('span',null,'什么时候问我'),
-        React.createElement('select',{'aria-label':'聊天协作方式',value:draftInteraction,disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){return patchDraft({interaction:event.target.value});}},['auto','confirm-data-change','confirm-step'].map(function(value){return React.createElement('option',{key:value,value:value},CHAT_COOPERATION[value]);}))),
-      projectMode?null:React.createElement(WorkerModelSection,{key:props.sessionId+'-worker-model',sessionId:props.sessionId,
-        values:{workerModel:draftWorkerModel,reviewModel:draftReviewModel,reportModel:draftReportModel},
-        disabled:busy[0]||!current||!!policy,onChange:function(key,value){var patch={};patch[key]=value;patchDraft(patch);}}),
-      React.createElement('p',{className:'dsh-chat-setting-hint'},CHAT_COOPERATION_HINT[draftInteraction]),
-      React.createElement('fieldset',{className:'dsh-chat-reporting'},React.createElement('legend',null,'什么时候汇报'),['end','notable','step'].map(function(value){return React.createElement('label',{key:value},React.createElement('input',{type:'radio',name:'chat-reporting-'+props.sessionId,'aria-label':CHAT_REPORTING[value],value:value,checked:draftReporting===value,disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(){return patchDraft({reporting:value});},onClick:function(){return patchDraft({reporting:value});}}),CHAT_REPORTING[value]);}),React.createElement('small',null,'进度、错误和必须提问一直可见；汇报偏好不额外调用模型总结。')),
-      React.createElement('label',{className:'dsh-chat-explain'},React.createElement('input',{type:'checkbox','aria-label':'解释测试原理',checked:draftExplain,disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){return patchDraft({explain:event.target.checked});}}),'解释测试原理',React.createElement('small',null,'在结果后解释关键判断，适合学习；不改变结论标准。')),
-      React.createElement('label',{className:'dsh-task-field'},React.createElement('span',null,'协作人数'),
-        React.createElement('select',{'aria-label':'聊天子代理上限',value:workerDraft[0]==='custom'?'custom':!workerOptions.map(String).includes(String(draftWorkersRaw))?'custom':String(draftWorkersRaw),disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){workerDraft[1](event.target.value);if(event.target.value==='custom'){var fallback=workers>=3&&workers<=hostWorkerLimit?String(workers):'3';customWorkers[1](fallback);patchDraft({workers:fallback});}else patchDraft({workers:event.target.value});}},workerOptions.concat([Number(draftWorkersRaw)]).filter(function(value,index,list){return Number.isInteger(value)&&list.indexOf(value)===index;}).sort(function(a,b){return a-b;}).map(function(value){return React.createElement('option',{key:value,value:String(value)},value===0?'只用当前 AI':value===2?'自动，最多 2 个':'最多 '+value+' 个');}).concat(React.createElement('option',{key:'custom',value:'custom'},'自定义人数…')))),
-      workerDraft[0]==='custom'||!workerOptions.map(String).includes(String(draftWorkersRaw))?React.createElement('label',{className:'dsh-task-field'},React.createElement('span',null,'自定义人数（3–'+hostWorkerLimit+'）'),
-        React.createElement('input',{'aria-label':'自定义子代理上限',type:'number',min:3,max:hostWorkerLimit,step:1,value:customWorkers[0],disabled:busy[0]||!current||!!(policy&&policy.parentSession),onChange:function(event){customWorkers[1](event.target.value);patchDraft({workers:event.target.value});}})):null,
-      React.createElement('small',null,'原设置的0保持关闭；明确启用后先按1个附加任务工作，只有存在独立问题时再增加。'),
-      projectMode?null:React.createElement('small',null,'宿主当前支持0–'+hostWorkerLimit+'个。按需分派，共用预算；人数不代表一定创建这么多代理，增加人数可能增加用量。'),
-      projectMode?null:React.createElement('button',{type:'button',disabled:busy[0]||!current||!!(policy&&policy.parentSession),onClick:function(){return run('chat.defaults',{interaction:interaction,reporting:reporting,workers:workers,explain:explainValue,workerModel:draftWorkerModel,reviewModel:draftReviewModel,reportModel:draftReportModel});}},'存为默认偏好'),
-      projectMode?null:React.createElement('small',null,'只保存询问、汇报、解释原理、助手和模型偏好；目标、账号、排除路径和已用量不会复制到新任务。'),
-      React.createElement('h4',null,'预算与高级诊断'),
-      current&&!policy?.parentSession?React.createElement('details',null,React.createElement('summary',null,policy?'本轮任务与预算':'开始任务与预算'),
-        React.createElement('small',null,'可在首次模型调用前设定本轮问题和额度；点击开始后立即执行。'),
-        competitionMode?React.createElement('p',{role:'status'},'比赛模式按题目记录执行；开始解题直接使用聊天输入，不要求额外预算向导。'):React.createElement(TaskPanel,{key:props.sessionId+'-budget-'+String(!!props.blank),sessionId:props.sessionId,blank:props.blank,scenario:activeScenario,targetState:[draftTarget,function(value){patchDraft({target:value});}],budgetDraft:{value:budget[0],set:setBudget},questionDraft:{value:startQuestion[0],set:startQuestion[1]}})):null),
+        React.createElement('div',{className:'dsh-collab-switch-row'},
+          React.createElement('label',{className:'dsh-chat-explain saker-check'},React.createElement('input',{type:'checkbox','aria-label':'启用按需协作',checked:Number(collabValues().workers)>0,disabled:busy[0]||!current,onChange:function(event){setCollabDraft(Object.assign({},collabValues(),{workers:event.target.checked?(Number(collabValues().workers)||1):0}));}}),'允许同时处理独立任务'),
+          React.createElement('label',{className:'dsh-collab-limit'},'并行任务数',React.createElement('input',{'aria-label':'最多同时运行的并行任务',type:'number',min:0,max:hostWorkerLimit,step:1,value:collabValues().workers,disabled:busy[0]||!current||Number(collabValues().workers)===0,onChange:function(event){setCollabDraft(Object.assign({},collabValues(),{workers:event.target.value}));}}),React.createElement('span',null,'个'))),
+        React.createElement('p',{className:'saker-panel-hint'},Number(collabValues().workers)>0?'最多 '+hostWorkerLimit+' 个。只有任务确实能并行时才会拆分。':'当前按顺序执行；大多数测试任务保持这样即可。'),
+        Number(collabValues().workers)>0?React.createElement(WorkerModelSection,{key:props.sessionId+'-collab-model',sessionId:props.sessionId,values:collabValues(),disabled:busy[0]||!current,onChange:function(key,value){var next=collabValues();next[key]=value;setCollabDraft(next);}}):null,
+        React.createElement('div',{className:'dsh-chat-collab-workers'},
+          React.createElement('div',{className:'dsh-collab-workers-head'},React.createElement('strong',null,'并行任务'),React.createElement('span',null,String(current&&current.active||0)+' 个')),
+          (current&&Array.isArray(current.workerRows)&&current.workerRows.length)?current.workerRows.map(function(row){return React.createElement('div',{className:'dsh-chat-collab-worker',key:row.childId},
+            React.createElement('span',null,String(row.site||row.question||row.childId).slice(0,160)),
+            React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){return stopWorker(row.childId);}},'停止'));}):React.createElement('p',{className:'dsh-collab-empty'},'现在没有并行任务。')),
+        error[0]?React.createElement('p',{role:'alert'},error[0]):null),
+      React.createElement('div',{className:'dsh-chat-settings-actions'},React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){setCollabDraft(null);collab[1](false);}},'取消'),
+        React.createElement('button',{type:'button',disabled:busy[0]||!current,onClick:saveCollaboration},'保存')))
+    :more[0]?React.createElement('div',{className:'dsh-chat-more dsh-task-settings',role:'dialog','aria-modal':'false','aria-label':'测试设置',onKeyDown:trapModalTab},
+      React.createElement('div',{className:'dsh-chat-panel-head saker-panel-head'},
+        React.createElement('div',{className:'saker-panel-headtext'},React.createElement('strong',null,'设置'),React.createElement('p',{className:'saker-panel-subtitle'},current?'都可以先跳过。只影响这个会话的下一轮。':'任务开始后，这里可以调整范围、资料和运行节奏。')),
+        React.createElement('button',{type:'button','aria-label':'关闭测试设置',onClick:closePanels},'关闭')),
+      !current?React.createElement('p',{className:'saker-panel-hint'},'还没开始安全任务。先在输入框写清目标和授权范围并发送；任务开始后，这里的设置会启用。'):null,
+      React.createElement('div',{className:'dsh-settings-layout'},
+        React.createElement('div',{className:'dsh-settings-side'},
+          React.createElement('div',{className:'dsh-settings-nav',role:'tablist','aria-label':'设置分类'},
+            [['scope','测试范围','网址、账号与授权边界'],['knowledge','知识库','是否查询已导入文档'],['limits','运行限制','时间、用量和汇报']].map(function(tab){return React.createElement('button',{key:tab[0],type:'button',role:'tab','aria-selected':settingsSection[0]===tab[0],className:settingsSection[0]===tab[0]?'is-active':'',onClick:function(){chooseSettingsSection(tab[0]);}},React.createElement('strong',null,tab[1]),React.createElement('small',null,tab[2]));})),
+          React.createElement('div',{className:'dsh-settings-search'},
+            React.createElement('input',{type:'search','aria-label':'搜索设置项',placeholder:'查找设置项',value:settingsQuery[0],onChange:function(event){settingsQuery[1](event.target.value);}}),
+            settingsQuery[0].trim()?React.createElement('div',{className:'dsh-settings-search-popover',role:'listbox','aria-label':'设置搜索结果'},settingsSearchIndex.filter(function(row){return row[0].toLowerCase().indexOf(settingsQuery[0].trim().toLowerCase())>=0;}).slice(0,8).map(function(row){return React.createElement('button',{key:row[0],type:'button',onClick:function(){chooseSettingsSection(row[1]);settingsQuery[1]('');}},row[0],React.createElement('span',null,row[1]==='scope'?'测试范围':row[1]==='knowledge'?'知识库':'运行限制'));})):null)),
+        React.createElement('div',{className:'dsh-settings-content dsh-chat-settings-body dsh-settings-body'},
+        settingsSection[0]==='scope'?React.createElement('div',{className:'dsh-settings-section saker-panel-section'},
+          React.createElement('h4',null,'测试范围'),
+          React.createElement('p',{className:'saker-panel-section-desc'},competitionMode?'这是比赛题的环境设置；看题和读取附件不会自动调用模型。':'只填已授权的网址或域名。不知道怎么写可以留空，Saker 会先询问。'),
+          competitionMode?React.createElement('div',null,
+            React.createElement('p',null,'比赛题目的附件、实例地址和解题环境都在单独面板中。'),
+            React.createElement('button',{type:'button',className:'saker-ui-btn',onClick:function(){setPanelOnly('competition',true);}},'打开题目与环境')):
+          React.createElement(React.Fragment,null,
+            React.createElement('label',{className:'dsh-chat-target'},React.createElement('span',null,'网址或域名'),
+              React.createElement('textarea',{'aria-label':'测试范围（网址、域名、IP/CIDR，选填）',rows:3,value:draftTarget,disabled:busy[0]||!!(policy&&policy.parentSession),placeholder:projectMode?'每行一个入口，例如 app.example.com/login':'例如 https://example.com 或 app.example.com。每行一个。',onChange:function(event){patchDraft({target:event.target.value});}})),
+            React.createElement(AccountsSection,{key:props.sessionId+'-accounts',sessionId:props.sessionId}),
+            React.createElement('label',{className:'dsh-chat-explain saker-check'},React.createElement('input',{type:'checkbox','aria-label':'允许访问网站',checked:effectiveAllowTargetNetwork,disabled:busy[0]||!!(policy&&policy.parentSession),onChange:function(event){patchDraft({allowTargetNetwork:event.target.checked});}}),'允许测试访问这些地址'),
+            !String(draftTarget||'').trim()?React.createElement('small',{className:'saker-panel-hint'},effectiveAllowTargetNetwork?'还没填地址。要访问网站请先填地址；只做离线分析请取消勾选。':'未填地址，本轮只做离线分析。'):null,
+            React.createElement('label',{className:'dsh-chat-explain saker-check'},React.createElement('input',{type:'checkbox','aria-label':'仅发送 GET/HEAD',checked:draftReadOnly,disabled:busy[0]||!!(policy&&policy.parentSession),onChange:function(event){patchDraft({readOnly:event.target.checked});}}),'只看，不改数据（仅 GET/HEAD）'),
+            React.createElement('small',{className:'saker-panel-hint'},'不会提交、修改或删除网站数据。'),
+            React.createElement('details',{className:'dsh-settings-advanced'},React.createElement('summary',null,'更多选项：登录、限速、排除路径'),
+              React.createElement('label',{className:'dsh-chat-exclude'},React.createElement('span',null,'排除的地址或路径（选填）'),React.createElement('textarea',{'aria-label':'排除的地址或路径',rows:2,value:draftExcludedPaths,disabled:busy[0]||!!(policy&&policy.parentSession),onChange:function(event){patchDraft({excludedPaths:event.target.value});}})),
+              projectMode?React.createElement('label',{className:'dsh-chat-exclude'},React.createElement('span',null,'其他允许访问的网站（选填）'),React.createElement('textarea',{'aria-label':'其他允许访问的网站',rows:2,value:draftAllowedOrigins,disabled:busy[0]||!!(policy&&policy.parentSession),onChange:function(event){patchDraft({allowedOrigins:event.target.value});}})):null,
+              React.createElement('div',{className:'dsh-limit-row'},
+                React.createElement('label',null,'请求速率（每分钟）',React.createElement('input',{'aria-label':'扫描速率（每分钟请求数）',type:'number',min:1,max:600,value:draftRequestRate,placeholder:'未设置',disabled:busy[0]||!!(policy&&policy.parentSession),onChange:function(event){patchDraft({requestRatePerMinute:event.target.value});}})),
+                React.createElement('label',null,'请求并发',React.createElement('input',{'aria-label':'并发上限（同时进行）',type:'number',min:1,max:16,value:draftRequestConcurrency,placeholder:'未设置',disabled:busy[0]||!!(policy&&policy.parentSession),onChange:function(event){patchDraft({requestConcurrency:event.target.value});}}))),
+              !projectMode?React.createElement('label',{className:'dsh-task-field'},React.createElement('span',null,'测试重点'),React.createElement('select',{'aria-label':'测试方向',value:draftDirection,disabled:busy[0]||!!(policy&&policy.parentSession),onChange:function(event){patchDraft({direction:event.target.value});}},['regular','nday','0day'].map(function(value){return React.createElement('option',{key:value,value:value},labels[value]);}))):null,
+              React.createElement('small',{className:'saker-panel-hint'},'这些选项可以留空；保存不会扩大到已有授权之外的地址。')),
+            React.createElement('p',{className:'dsh-settings-note'},'只会记录本轮真实发起的请求。'))):
+        settingsSection[0]==='knowledge'?React.createElement('div',{className:'dsh-settings-section saker-panel-section'},
+          React.createElement('h4',null,'知识库'),
+          React.createElement('p',{className:'saker-panel-section-desc'},'允许本轮查询已导入的文档；关闭时只读取本次附件。'),
+          React.createElement('label',{className:'dsh-chat-explain saker-check'},React.createElement('input',{type:'checkbox','aria-label':'启用知识查询',checked:draftKnowledgeEnabled,disabled:busy[0]||!current,onChange:function(event){patchDraft({knowledgeEnabled:event.target.checked});}}),'可以查询我导入的文档'),
+          React.createElement('p',{className:'dsh-chat-setting-hint'},(liveKnowledge.enabled?'当前已开启。':'当前已关闭；关闭时只读取本次上传的附件。')),
+          React.createElement('label',{className:'dsh-task-field'},React.createElement('span',null,'先查资料还是先联网'),
+            React.createElement('select',{'aria-label':'知识查询策略',value:draftKnowledgeStrategy,disabled:busy[0]||!current||!draftKnowledgeEnabled,onChange:function(event){patchDraft({knowledgeStrategy:event.target.value});}},
+              React.createElement('option',{value:'web-first'},'先联网，再查资料'),
+              React.createElement('option',{value:'knowledge-first'},'先查资料，再联网'),
+              React.createElement('option',{value:'knowledge-only'},'只查资料'))),
+          React.createElement('div',{className:'saker-panel-actions'},React.createElement('button',{type:'button',className:'saker-ui-btn',onClick:function(){setPanelOnly('knowledge',true);}},'管理知识库')),
+          React.createElement('small',{className:'saker-panel-hint'},'管理页只在本机浏览、搜索和导入，不会自动查询资料。')):null,
+        settingsSection[0]==='limits'?React.createElement('div',{className:'dsh-settings-section saker-panel-section'},
+          React.createElement('h4',null,'运行限制'),
+          React.createElement('p',{className:'saker-panel-section-desc'},'不想管就留空。达到限制会自动停下。'),
+          React.createElement('div',{className:'saker-grid2'},
+            React.createElement('label',{className:'saker-field'},React.createElement('span',null,'最多运行（分钟）'),React.createElement('input',{'aria-label':'最多运行多久（分钟）',type:'number',min:1,max:10080,value:draftMinutes,placeholder:'不限制',disabled:busy[0]||!current,onChange:function(event){setBudget({minutes:event.target.value});patchDraft({minutes:event.target.value});}}),React.createElement('small',null,'已用 '+(liveBudget.used&&liveBudget.used.minutes||0)+' 分钟')),
+            React.createElement('label',{className:'saker-field'},React.createElement('span',null,'最多调用工具（次）'),React.createElement('input',{'aria-label':'工具调用上限（次）',type:'number',min:1,max:10000,value:draftToolCalls,placeholder:'不限制',disabled:busy[0]||!current,onChange:function(event){setBudget({calls:event.target.value});patchDraft({toolCalls:event.target.value});}}),React.createElement('small',null,'已用 '+(liveBudget.used&&liveBudget.used.toolCalls||0)+' 次')),
+            React.createElement('label',{className:'saker-field'},React.createElement('span',null,'最多请求模型（次）'),React.createElement('input',{'aria-label':'模型调用上限（次）',type:'number',min:1,max:10000,value:draftModelCalls,placeholder:'不限制',disabled:busy[0]||!current,onChange:function(event){setBudget({modelCalls:event.target.value});patchDraft({modelCalls:event.target.value});}}),React.createElement('small',null,'已用 '+(liveBudget.used&&liveBudget.used.modelCalls||0)+' 次')),
+            React.createElement('label',{className:'saker-field'},React.createElement('span',null,'最多使用 token'),React.createElement('input',{'aria-label':'模型用量上限（token）',type:'number',min:1,max:1000000000000,value:draftTokens,placeholder:'不限制',disabled:busy[0]||!current,onChange:function(event){setBudget({tokens:event.target.value});patchDraft({tokens:event.target.value});}}),React.createElement('small',null,'已用 '+(liveBudget.usageUnknown?'未知':String(liveBudget.used&&liveBudget.used.tokens||0))))),
+          React.createElement('small',{className:'saker-panel-hint'},'时间从本轮第一次执行开始算；清空不会重新计时。'),
+          React.createElement('details',{className:'dsh-settings-advanced'},React.createElement('summary',null,'高级选项'),
+            React.createElement('label',{className:'dsh-task-field'},React.createElement('span',null,'本地模型并发'),React.createElement('input',{'aria-label':'本地模型并发',type:'number',min:1,max:16,value:draftModelConcurrency,placeholder:'默认 1',disabled:busy[0]||!current,onChange:function(event){patchDraft({modelConcurrency:event.target.value});}})),
+            competitionMode?null:React.createElement('label',{className:'dsh-task-field'},React.createElement('span',null,'未计量通道上限'),React.createElement('input',{'aria-label':'未计量扫描额度（次工具调用）',type:'number',min:0,max:1000,value:draftUnmetered,placeholder:'不增加限制',disabled:busy[0]||!current,onChange:function(event){setBudget({unmetered:event.target.value});patchDraft({unmeteredToolCalls:event.target.value});}})),
+            current&&current.modelBudget?React.createElement('small',null,'模型请求：已计费 '+current.modelBudget.chargedCalls+' 次 · 已知 token '+current.modelBudget.knownTokens+' · 处理中预留 '+current.modelBudget.heldTokens):null,
+            React.createElement('small',null,'工具调用和模型调用分开统计；未知用量不会显示为零。'))):null,
+        settingsSection[0]==='limits'?React.createElement('details',{className:'dsh-settings-advanced'},React.createElement('summary',null,'什么时候问我、什么时候汇报'),
+          React.createElement('label',{className:'dsh-task-field'},React.createElement('span',null,'什么时候问我'),React.createElement('select',{'aria-label':'聊天协作方式',value:draftInteraction,disabled:busy[0]||!!(policy&&policy.parentSession),onChange:function(event){patchDraft({interaction:event.target.value});}},['auto','confirm-data-change','confirm-step'].map(function(value){return React.createElement('option',{key:value,value:value},CHAT_COOPERATION[value]);}))),
+          React.createElement('fieldset',{className:'dsh-chat-reporting'},React.createElement('legend',null,'什么时候汇报'),['end','notable','step'].map(function(value){return React.createElement('label',{key:value},React.createElement('input',{type:'radio',name:'settings-reporting-'+props.sessionId,'aria-label':CHAT_REPORTING[value],value:value,checked:draftReporting===value,disabled:busy[0]||!!(policy&&policy.parentSession),onChange:function(){return patchDraft({reporting:value});}}),CHAT_REPORTING[value]);})),
+          React.createElement('label',{className:'dsh-chat-explain'},React.createElement('input',{type:'checkbox','aria-label':'解释测试原理',checked:draftExplain,disabled:busy[0]||!!(policy&&policy.parentSession),onChange:function(event){return patchDraft({explain:event.target.checked});}}),'解释为什么这样测')):null,
+        projectMode?null:React.createElement('div',{className:'saker-panel-actions'},React.createElement('button',{type:'button',className:'saker-ui-btn',disabled:busy[0]||!current||!!(policy&&policy.parentSession),onClick:function(){return run('chat.defaults',{interaction:interaction,reporting:reporting,workers:workers,explain:explainValue,workerModel:draftWorkerModel,reviewModel:draftReviewModel,reportModel:draftReportModel});}},'保存为以后新会话的默认值'),React.createElement('small',{className:'saker-panel-hint'},'不含目标、账号和已用量。')),
+        error[0]?React.createElement('p',{role:'alert'},error[0]):null)),
       React.createElement('div',{className:'dsh-chat-settings-actions'},
         React.createElement('button',{type:'button',disabled:busy[0],onClick:cancelDraft},'取消'),
-        React.createElement('button',{type:'button',disabled:busy[0]||!current,onClick:saveDraft},'保存'),
+        React.createElement('button',{type:'button',disabled:busy[0]||!current,onClick:saveDraft,title:'保存当前会话的设置'},'保存设置'),
         Object.keys(draftChanges()).length?React.createElement('small',{role:'status'},'尚未保存'):null)):null,
     policy&&policy.awaitingConfirmation?React.createElement('div',{className:'dsh-chat-checkpoint','aria-label':'聊天阶段确认'},React.createElement('strong',null,cooperation==='confirm-step'?'需要你确认这一步':'需要你确认下一步'),React.createElement('p',null,policy.awaitingConfirmation.note),
             current.reason!=='interaction_confirmation_required'?React.createElement('p',null,({'time_budget_exhausted':'原时间上限已到，不能继续本轮。','tool_budget_exhausted':'原操作额度已用完，不能继续本轮。','turn_ended':'本轮已结束；直接发送新的要求即可继续同一任务。'}[current.reason])||'本轮还有未处理的停止原因，请在任务详情查看。'):null,
       cooperation==='confirm-step'?React.createElement('label',{className:'dsh-chat-full-prompt'},'补充你的思路（可选）',React.createElement('textarea',{'aria-label':'补充你的思路',rows:2,maxLength:2000,value:decisionNote[0],placeholder:'补充观察事实、业务疑问或下一步方向',onChange:function(event){decisionNote[1](event.target.value);}})):null,
       React.createElement('button',{type:'button',disabled:busy[0]||current.agentRunning||current.reason!=='interaction_confirmation_required',onClick:function(){return run('task.continue',{note:decisionNote[0]});}},current.agentRunning?'正在收尾，请稍候':cooperation==='confirm-step'?'按当前思路继续':'确认并继续'),
       React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){return run('task.cancel');}},'停止本轮'),React.createElement('small',null,'改变协作或汇报设置不会解除当前等待；原截止时间仍有效。')):null,
-    !props.blank&&current&&((current.configured&&current.policy&&current.policy.scenario==='project')||activeScenario==='cases')?React.createElement(ProjectChatStatus,{sessionId:props.sessionId,status:current}):null,
-    policy&&(current.stopped||current.idle)&&!policy.blocker&&!policy.awaitingConfirmation&&!policy.parentSession?React.createElement('button',{type:'button',disabled:busy[0]||current.agentRunning||(current.active||0)>0,onClick:function(){return run('task.new-round',{preferences:{mode:policy.scenario==='project'?'regular':policy.mode,scenario:policy.scenario,workflow:'single',interaction:policy.interaction,reporting:reporting,workers:policy.workerLimit,allowTargetNetwork:policy.allowTargetNetwork!==false,readOnly:policy.readOnly===true}});}},'新建测试'):null,
-    policy&&policy.scenario!=='project'&&!policy.awaitingConfirmation?React.createElement('div',{className:'dsh-chat-task-status',role:'status'},React.createElement('span',null,policy.manualTakeover&&policy.manualTakeover.active?'人工操作中（模型已暂停）':taskStatusLabel(current,policy)),(current.active||0)>0?React.createElement('span',null,'子代理 '+current.active+'/'+workers):null,
-      React.createElement('button',{type:'button',disabled:busy[0]||!!policy.parentSession,onClick:function(){more[1](true);open[1](false);}},'范围'),
-      // 当前动作来自真实执行回执（v6 第 5.1 节）：只在运行中显示，没运行时不给状态栏堆零指标。
-      policy&&!current.stopped&&current.currentAction?React.createElement('span',{className:'dsh-chat-action'},current.currentAction):null,
-      // 停止按钮在运行状态始终可见（v6 第 5.2 节）：不等用户先点开设置或确认区。
-      !current.stopped&&!current.idle?React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){return run('task.cancel');}},'停止本轮'):null,
-      policy.scenario!=='project'&&policy.manualTakeover&&policy.manualTakeover.active?React.createElement('button',{type:'button',disabled:busy[0]||current.agentRunning,onClick:function(){return run('task.takeover-resume',{expectedPolicyRev:policy.policyRev});}},'继续测试'):null,
-      policy.scenario!=='project'&&!(policy.manualTakeover&&policy.manualTakeover.active)&&current.browserTakeover&&current.browserTakeover.open&&!takeoverTerminal?React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){return run('task.takeover',{expectedPolicyRev:policy.policyRev});}},'我来操作'):null,
-      current.reason==='turn_ended'&&current.stopped?React.createElement('button',{type:'button',disabled:busy[0]||current.agentRunning||(current.active||0)>0,onClick:function(){return run('task.continue-current');}},'继续当前任务'):null):null,
-    policy&&policy.scenario!=='project'&&!policy.awaitingConfirmation&&overview?React.createElement('section',{className:'dsh-chat-task-overview','aria-label':'当前任务摘要'},
-      React.createElement('p',null,'范围：'+taskScopeDisplay(overview.scope,policy.target)
-        +' · 资产 '+(overview.counts?.assets||0)+' · 已发请求/回执 '+(overview.counts?.receipts||0)
-        +' · 运行助手 '+(overview.counts?.runningWorkers||0)+' · 待确认 '+(overview.counts?.needsUser||0)),
-      React.createElement('div',{className:'dsh-chat-task-overview-actions'},
-        React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){inlineAssetView[1](false);return more[1](true);}},'编辑范围'),
-        React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){more[1](false);open[1](false);inlineAssetView[1](!inlineAssetView[0]);}},'查看资产')),
-      overview.pendingChange?React.createElement('div',{className:'dsh-chat-task-overview-pending'},
-        React.createElement('span',null,'待确认的任务变更：'+(overview.pendingChange.summary||overview.pendingChange.fields.join('、'))),
-        React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){return run('task.pending-apply');}},'确认变更'),
-        React.createElement('button',{type:'button',disabled:busy[0],onClick:function(){return run('task.pending-cancel');}},'取消')):null,
-      inlineAssetView[0]?React.createElement(TaskAssetView,{sessionId:props.sessionId}):null):null,
+    !props.blank&&current&&activeScenario==='cases'&&taskDetailsOpen[0]?React.createElement(ProjectChatStatus,{sessionId:props.sessionId,status:current}):null,
     // 需要用户处理时只显示单条具体事项（v6 第 5.2 节）：说清哪一项受影响，并给出重新绑定/继续两条路。
     current&&Array.isArray(current.attention)&&current.attention.length&&!attentionDismissed[0]?React.createElement('div',{className:'dsh-chat-attention',role:'alert'},
       React.createElement('span',null,current.attention[0].message),
       React.createElement('button',{type:'button',onClick:function(){more[1](true);}},'重新绑定账号'),
       React.createElement('button',{type:'button',onClick:function(){attentionDismissed[1](true);}},'继续其他检查')):null,
-    props.preset==='pentest'?React.createElement(UsageRow,{key:props.sessionId+'-usage',sessionId:props.sessionId}):null,
-    current?React.createElement(ChatPromptEditor,{key:props.sessionId+'-'+mode,sessionId:props.sessionId,mode:mode,scene:activeScenario,open:open[0],onClose:close,inputActions:props.inputActions,insertion:promptInsertion}):null,
-    error[0]||readError[0]?React.createElement('p',{role:'alert'},error[0]||readError[0]):notice[0]?React.createElement('span',{role:'status'},notice[0]):null);
+    current?React.createElement(ChatPromptEditor,{key:props.sessionId+'-'+mode,sessionId:props.sessionId,mode:mode,scene:activeScenario,open:open[0],onClose:close,onInserted:function(message){notice[1](message);},inputActions:props.inputActions,insertion:promptInsertion}):null,
+    error[0]||readError[0]?React.createElement('div',{role:'alert',className:'dsh-chat-error'},React.createElement('span',null,error[0]||readError[0]),
+      readError[0]?React.createElement('button',{type:'button',onClick:function(){readError[1]('');load(0);}},'重试'):null):notice[0]?React.createElement('span',{role:'status'},notice[0]):null);
 }
 function ChatSetupEntry(props) {
   var live=props.session;
   var blank=props.blank===true||live?.blank===true;
   var sessionId=String(props.sessionId||live?.id||'');
   var preset=props.useProjection('agentPreset')||live?.agentPreset||live?.projectionValues?.agentPreset;
-  return preset==='pentest'||preset==='ctf-solver'?React.createElement(ChatSetup,{key:sessionId+'-'+String(!!blank),sessionId:sessionId,blank:blank,inputActions:props.inputActions,preset:preset}):null;
+  return preset==='pentest'||preset==='ctf-solver'?React.createElement(ChatSetup,{key:sessionId+'-'+String(!!blank),sessionId:sessionId,session:live,blank:blank,inputActions:props.inputActions,preset:preset}):null;
+}
+function installCurationStyles() {
+  var style=document.createElement('style');style.id='saker-curation-style';
+  style.textContent=[
+    '.dsh-curation-trigger{font:inherit;font-size:var(--dsh-content-font-size-secondary,0.93em);border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;padding:4px 8px;background:transparent;color:inherit;cursor:pointer}',
+    '.dsh-curation-overlay{position:fixed;inset:48px 0 0;z-index:700;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;background:rgba(20,28,44,.28);-webkit-app-region:no-drag}',
+    '.dsh-curation-dialog{display:flex;flex-direction:column;width:min(900px,calc(100vw - 32px));max-height:min(760px,calc(100vh - 64px));background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,inherit);border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:12px;box-shadow:0 20px 70px rgba(0,0,0,.24);overflow:hidden;font-size:var(--dsh-content-font-size,1em);line-height:1.5}',
+    '.dsh-curation-head{display:flex;align-items:center;justify-content:space-between;flex:0 0 52px;padding:0 16px;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16))}',
+    '.dsh-curation-head button,.dsh-curation-actions button{font:inherit;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;padding:5px 11px;background:transparent;color:inherit;cursor:pointer}',
+    '.dsh-curation-body{flex:1;min-height:0;overflow:auto;padding:16px;overscroll-behavior:contain}',
+    '.dsh-curation-meta{display:flex;flex-wrap:wrap;gap:4px 16px;margin:8px 0;color:var(--dsw-alias-label-secondary,inherit);font-size:var(--dsh-content-font-size-secondary,0.93em)}',
+    '.dsh-curation-source{max-height:220px;overflow:auto;padding:8px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));border-radius:6px;background:var(--dsw-alias-bg-l1,rgba(128,128,128,.04));white-space:pre-wrap;overflow-wrap:anywhere}',
+    '.dsh-curation-progress{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px;border:1px solid var(--dsw-alias-state-business-primary,#4b74d9);border-radius:8px;background:var(--dsw-alias-state-business-primary-alpha,rgba(75,116,217,.08))}',
+    '.dsh-curation-form{display:grid;gap:8px;margin-top:12px}.dsh-curation-form label{display:grid;gap:4px;color:var(--dsw-alias-label-secondary,inherit);font-size:var(--dsh-content-font-size-secondary,0.93em)}',
+    '.dsh-curation-form input,.dsh-curation-form textarea,.dsh-curation-form select{width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;background:var(--dsw-alias-bg-base,transparent);color:inherit;font:inherit}',
+    '.dsh-curation-form textarea{resize:vertical;line-height:1.5}.dsh-curation-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}',
+    '.dsh-curation-confirm{display:flex!important;grid-template-columns:none!important;align-items:center;gap:8px!important}.dsh-curation-confirm input{width:auto}',
+    '.dsh-curation-actions{position:sticky;bottom:-16px;z-index:3;display:flex;flex-wrap:wrap;gap:8px;margin:4px -16px -16px;padding:12px 16px;background:var(--dsw-alias-bg-base,#fff);border-top:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16))}.dsh-curation-actions .is-primary{background:var(--dsw-alias-state-business-primary,#4b74d9);border-color:transparent;color:#fff}',
+    '.dsh-curation-foot{flex:0 0 auto;padding:8px 16px;border-top:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));color:var(--dsw-alias-label-secondary,inherit)}',
+    '@media(max-width:760px){.dsh-curation-overlay{padding:8px}.dsh-curation-dialog{width:calc(100vw - 16px)}.dsh-curation-grid{grid-template-columns:1fr}.dsh-curation-body{padding:12px}.dsh-curation-head,.dsh-curation-foot{padding-inline:12px}}'
+  ].join('');
+  var previous=document.getElementById(style.id);if(previous)previous.remove();
+  (document.head||document.documentElement).appendChild(style);
+  return function(){style.remove();};
 }
 function installChatSetupStyles() {
   var style=document.createElement('style');style.id='saker-chat-setup-style';
-  style.textContent=".dsh-chat-setup{box-sizing:border-box;width:min(var(--dsh-composer-card-max-width,100%),calc(100% - 2 * var(--dsh-composer-side-clearance,16px)));margin-inline:auto;container-type:inline-size;min-width:0;text-align:left;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-primary,inherit)}.dsh-chat-settings-row,.dsh-chat-actions,.dsh-chat-panel-head{display:flex;align-items:center;flex-wrap:wrap;gap:8px}.dsh-chat-settings-row{padding:0;gap:8px;min-height:32px}.dsh-chat-chip{box-sizing:border-box;display:inline-flex;align-items:center;gap:4px;height:32px;padding:0 9px;border-radius:6px;background:var(--dsw-alias-bg-l1,rgba(128,128,128,.055));color:var(--dsw-alias-label-secondary,inherit);border:1px solid transparent}.dsh-chat-chip:hover{background:var(--dsw-alias-bg-hover,rgba(128,128,128,.10))}.dsh-chat-toolbar-spacer{flex:1;min-width:4px}.dsh-chat-setup button,.dsh-chat-setup select,.dsh-chat-setup input,.dsh-chat-setup textarea{font:inherit;color:inherit;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));background:var(--dsw-alias-bg-base,transparent);border-radius:8px;padding:6px 9px;max-width:100%;box-sizing:border-box}.dsh-chat-setup .dsh-chat-chip select{border:0;padding:3px 0;background:transparent;max-width:150px;cursor:pointer}.dsh-chat-chip svg{flex-shrink:0;opacity:.7}.dsh-chat-setup button{cursor:pointer}.dsh-chat-setup .dsh-chat-toolbar-button{height:32px;display:inline-flex;align-items:center;gap:4px;border-color:transparent;background:transparent;padding:6px 8px}.dsh-chat-setup button:hover{background:var(--dsw-alias-bg-hover,rgba(128,128,128,.08))}.dsh-chat-setup .is-active{color:var(--dsw-alias-state-business-primary,#4b74d9);background:var(--dsw-alias-state-business-primary-alpha,rgba(75,116,217,.08))}.dsh-chat-setup button:disabled,.dsh-chat-setup select:disabled,.dsh-chat-setup input:disabled{opacity:.5;cursor:default}.dsh-chat-setup :focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4b74d9);outline-offset:2px}.dsh-chat-setup p{margin:8px 0}.dsh-chat-setting-hint,.dsh-chat-setup small{color:var(--dsw-alias-label-secondary,inherit);font-size:12px;opacity:.8}.dsh-chat-setup small{display:block;margin:4px 0}.dsh-chat-more,.dsh-chat-checkpoint,.dsh-chat-prompt{padding:16px 16px;margin:4px 0 8px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));border-radius:12px;background:var(--dsw-alias-bg-base,transparent)}.dsh-chat-prompt,.dsh-chat-more{max-height:min(390px,44vh);overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}.dsh-chat-prompt[hidden]{display:none}.dsh-chat-panel-head{justify-content:space-between;margin-bottom:8px}.dsh-chat-panel-head strong{font-size:13px;font-weight:600}.dsh-chat-panel-head button{border-color:transparent;padding:3px 7px;color:var(--dsw-alias-label-secondary,inherit)}.dsh-chat-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr));gap:8px;margin:12px 0}.dsh-chat-fields input{display:block;width:100%;margin-top:4px}.dsh-chat-full-prompt{display:block;margin:12px 0}.dsh-chat-full-prompt textarea{display:block;width:100%;resize:vertical;min-height:105px;max-height:230px;margin-top:4px;line-height:1.5}.dsh-chat-actions{margin-top:8px}.dsh-chat-actions button:first-child{background:var(--dsw-alias-state-business-primary,#4b74d9);color:#fff;border-color:transparent}.dsh-chat-checkpoint{border-left:3px solid var(--dsw-alias-state-business-primary,#4b74d9)}.dsh-chat-checkpoint button{margin-right:8px}.dsh-chat-reporting{border:0;padding:0;margin:12px 0}.dsh-chat-reporting legend{font-weight:500;margin-bottom:4px}.dsh-chat-reporting label{display:inline-flex;align-items:center;gap:4px;margin-right:16px}.dsh-chat-reporting input{padding:0;accent-color:var(--dsw-alias-state-business-primary,#4b74d9)}.dsh-chat-worker-custom{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:12px 0}.dsh-chat-worker-custom input{width:66px}.dsh-chat-setup [role=alert]{color:var(--dsw-alias-state-error-primary,#c84040)}.dsh-chat-setup *{animation:none!important;transition:none!important}@media(max-width:760px){.dsh-chat-toolbar-spacer{display:none}.dsh-chat-settings-row{gap:4px}.dsh-chat-more,.dsh-chat-prompt{padding:12px}.dsh-chat-fields{grid-template-columns:1fr 1fr}}@media(max-width:500px){.dsh-chat-fields{grid-template-columns:1fr}}.dsh-chat-task-status{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:8px;font-size:12px;color:var(--dsw-alias-label-secondary,inherit)}.dsh-chat-task-status button{padding:2px 7px}.dsh-task-workspace{width:100%;max-width:var(--dsh-composer-card-max-width,1120px);margin-inline:auto;padding:16px 24px 24px;box-sizing:border-box;font-size:13px}.dsh-task-nav{display:flex;align-items:center;flex-wrap:wrap;gap:4px;border-bottom:1px solid var(--dsw-alias-border-l1,#ddd);padding-bottom:12px;margin-bottom:16px}.dsh-task-nav button{font:inherit;cursor:pointer;background:transparent;color:var(--dsw-alias-label-secondary,inherit);border:0;border-radius:6px;padding:7px 16px}.dsh-task-nav button[aria-current=page]{background:var(--dsw-alias-bg-hover,rgba(75,116,217,.08));color:var(--dsw-alias-state-business-primary,#4b74d9);font-weight:600}.dsh-task-workspace :focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4b74d9);outline-offset:2px}.dsh-task-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}.dsh-task-panel h3{margin:0;font-size:16px}.dsh-task-panel p{margin:12px 0;line-height:1.5}.dsh-task-panel small{color:var(--dsw-alias-label-secondary,inherit)}.dsh-task-panel details,.dsh-task-fold{margin:12px 0;padding:12px 12px;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:8px}.dsh-task-workspace summary{cursor:pointer;line-height:1.5}.dsh-task-scope{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px}.dsh-task-scope select,.dsh-task-panel input,.dsh-task-panel select{font:inherit;color:inherit;background:var(--dsw-alias-bg-base,transparent);border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;padding:6px 8px;box-sizing:border-box;max-width:100%}@container(max-width:540px){.dsh-chat-toolbar-spacer{display:none}.dsh-chat-settings-row{gap:4px}.dsh-chat-chip{padding-inline:6px}}@media(max-width:760px){.dsh-task-workspace{padding:12px}}";
+  style.textContent=".dsh-chat-setup{box-sizing:border-box;width:min(var(--dsh-composer-card-max-width,100%),calc(100% - 2 * var(--dsh-composer-side-clearance,16px)));margin-inline:auto;container-type:inline-size;min-width:0;text-align:left;font-size:var(--dsh-content-font-size,1em);line-height:1.5;color:var(--dsw-alias-label-primary,inherit)}.dsh-chat-settings-row,.dsh-chat-actions,.dsh-chat-panel-head{display:flex;align-items:center;flex-wrap:wrap;gap:8px}.dsh-chat-settings-row{padding:0;gap:8px;min-height:32px}.dsh-chat-chip{box-sizing:border-box;display:inline-flex;align-items:center;gap:4px;height:32px;padding:0 9px;border-radius:6px;background:var(--dsw-alias-bg-l1,rgba(128,128,128,.055));color:var(--dsw-alias-label-secondary,inherit);border:1px solid transparent}.dsh-chat-chip:hover{background:var(--dsw-alias-bg-hover,rgba(128,128,128,.10))}.dsh-chat-toolbar-spacer{flex:1;min-width:4px}.dsh-chat-setup button,.dsh-chat-setup select,.dsh-chat-setup input,.dsh-chat-setup textarea{font:inherit;color:inherit;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));background:var(--dsw-alias-bg-base,transparent);border-radius:8px;padding:6px 9px;max-width:100%;box-sizing:border-box}.dsh-chat-setup .dsh-chat-chip select{border:0;padding:3px 0;background:transparent;max-width:150px;cursor:pointer}.dsh-chat-chip svg{flex-shrink:0;opacity:.7}.dsh-chat-setup button{cursor:pointer}.dsh-chat-setup .dsh-chat-toolbar-button{height:32px;display:inline-flex;align-items:center;gap:4px;border-color:transparent;background:transparent;padding:6px 8px}.dsh-chat-setup button:hover{background:var(--dsw-alias-bg-hover,rgba(128,128,128,.08))}.dsh-chat-setup .is-active{color:var(--dsw-alias-state-business-primary,#4b74d9);background:var(--dsw-alias-state-business-primary-alpha,rgba(75,116,217,.08))}.dsh-chat-setup button:disabled,.dsh-chat-setup select:disabled,.dsh-chat-setup input:disabled{opacity:.5;cursor:default}.dsh-chat-setup :focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4b74d9);outline-offset:2px}.dsh-chat-setup p{margin:8px 0}.dsh-chat-setting-hint,.dsh-chat-setup small{color:var(--dsw-alias-label-secondary,inherit);font-size:var(--dsh-content-font-size,1em);opacity:.8}.dsh-chat-setup small{display:block;margin:4px 0}.dsh-chat-more,.dsh-chat-checkpoint,.dsh-chat-prompt{padding:16px 16px;margin:4px 0 8px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));border-radius:12px;background:var(--dsw-alias-bg-base,transparent)}.dsh-chat-prompt,.dsh-chat-more{max-height:min(390px,44vh);overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}.dsh-chat-prompt[hidden]{display:none}.dsh-chat-panel-head{justify-content:space-between;margin-bottom:8px}.dsh-chat-panel-head strong{font-size:var(--dsh-content-font-size,1em);font-weight:600}.dsh-chat-panel-head button{border-color:transparent;padding:3px 7px;color:var(--dsw-alias-label-secondary,inherit)}.dsh-chat-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr));gap:8px;margin:12px 0}.dsh-chat-fields input{display:block;width:100%;margin-top:4px}.dsh-chat-full-prompt{display:block;margin:12px 0}.dsh-chat-full-prompt textarea{display:block;width:100%;resize:vertical;min-height:105px;max-height:230px;margin-top:4px;line-height:1.5}.dsh-chat-actions{margin-top:8px}.dsh-chat-actions button:first-child{background:var(--dsw-alias-state-business-primary,#4b74d9);color:#fff;border-color:transparent}.dsh-chat-checkpoint{border-left:3px solid var(--dsw-alias-state-business-primary,#4b74d9)}.dsh-chat-checkpoint button{margin-right:8px}.dsh-chat-reporting{border:0;padding:0;margin:12px 0}.dsh-chat-reporting legend{font-weight:500;margin-bottom:4px}.dsh-chat-reporting label{display:inline-flex;align-items:center;gap:4px;margin-right:16px}.dsh-chat-reporting input{padding:0;accent-color:var(--dsw-alias-state-business-primary,#4b74d9)}.dsh-chat-worker-custom{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:12px 0}.dsh-chat-worker-custom input{width:66px}.dsh-chat-setup [role=alert]{color:var(--dsw-alias-state-error-primary,#c84040)}.dsh-chat-setup *{animation:none!important;transition:none!important}@media(max-width:760px){.dsh-chat-toolbar-spacer{display:none}.dsh-chat-settings-row{gap:4px}.dsh-chat-more,.dsh-chat-prompt{padding:12px}.dsh-chat-fields{grid-template-columns:1fr 1fr}}@media(max-width:500px){.dsh-chat-fields{grid-template-columns:1fr}}.dsh-chat-task-status{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:8px;font-size:var(--dsh-content-font-size,1em);color:var(--dsw-alias-label-secondary,inherit)}.dsh-chat-task-status button{padding:2px 7px}.dsh-task-workspace{width:100%;max-width:var(--dsh-composer-card-max-width,1120px);margin-inline:auto;padding:16px 24px 24px;box-sizing:border-box;font-size:var(--dsh-content-font-size,1em)}.dsh-task-nav{display:flex;align-items:center;flex-wrap:wrap;gap:4px;border-bottom:1px solid var(--dsw-alias-border-l1,#ddd);padding-bottom:12px;margin-bottom:16px}.dsh-task-nav button{font:inherit;cursor:pointer;background:transparent;color:var(--dsw-alias-label-secondary,inherit);border:0;border-radius:6px;padding:7px 16px}.dsh-task-nav button[aria-current=page]{background:var(--dsw-alias-bg-hover,rgba(75,116,217,.08));color:var(--dsw-alias-state-business-primary,#4b74d9);font-weight:600}.dsh-task-workspace :focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4b74d9);outline-offset:2px}.dsh-task-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}.dsh-task-panel h3{margin:0;font-size:16px}.dsh-task-panel p{margin:12px 0;line-height:1.5}.dsh-task-panel small{color:var(--dsw-alias-label-secondary,inherit)}.dsh-task-panel details,.dsh-task-fold{margin:12px 0;padding:12px 12px;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:8px}.dsh-task-workspace summary{cursor:pointer;line-height:1.5}.dsh-task-scope{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px}.dsh-task-scope select,.dsh-task-panel input,.dsh-task-panel select{font:inherit;color:inherit;background:var(--dsw-alias-bg-base,transparent);border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;padding:6px 8px;box-sizing:border-box;max-width:100%}@container(max-width:540px){.dsh-chat-toolbar-spacer{display:none}.dsh-chat-settings-row{gap:4px}.dsh-chat-chip{padding-inline:6px}}@media(max-width:760px){.dsh-task-workspace{padding:12px}}";
   style.textContent += '.dsh-chat-setup .dsh-rtr-btn.is-primary{background:var(--dsw-alias-state-business-primary,#4b74d9);color:#fff;border-color:transparent}.dsh-chat-setup .dsh-rtr-btn.is-primary:hover{filter:brightness(.95)}';
   style.textContent += '.dsh-chat-entry-group{display:flex;align-items:center;gap:4px;max-width:100%;margin-left:auto;flex-wrap:wrap}.dsh-chat-entry-group>button{white-space:nowrap}@media(max-width:720px){.dsh-chat-entry-group{margin-left:0;flex-basis:100%}}';
-  style.textContent += '.dsh-chat-result{margin:8px 0;padding:9px 11px;max-height:240px;overflow:auto;background:var(--dsw-alias-bg-layer-2,#f4f5f7);border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.6 Consolas,"Microsoft YaHei",monospace}.dsh-chat-session-row{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;margin:4px 0;text-align:left}.dsh-chat-session-row strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dsh-chat-session-row span{color:var(--dsw-alias-label-secondary,inherit);font-size:12px}';
+  style.textContent += '.dsh-chat-result{margin:8px 0;padding:9px 11px;max-height:240px;overflow:auto;background:var(--dsw-alias-bg-layer-2,#f4f5f7);border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.6 Consolas,"Microsoft YaHei",monospace}.dsh-chat-session-row{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;margin:4px 0;text-align:left}.dsh-chat-session-row strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dsh-chat-session-row span{color:var(--dsw-alias-label-secondary,inherit);font-size:var(--dsh-content-font-size-secondary,0.93em)}';
   // v6 第 5.7 节令牌层：小控件 6px、抽屉 12px。上面旧组件样式里小控件散成 8px，
   // 这里按方案与设计稿统一覆盖；选择器特异性更高，不靠声明顺序碰运气。
   style.textContent += '.dsh-chat-setup .dsh-chat-chip,.dsh-chat-setup button,.dsh-chat-setup select,.dsh-chat-setup input,.dsh-chat-setup textarea{border-radius:6px}'
@@ -2704,42 +3736,103 @@ function installChatSetupStyles() {
   style.textContent += '.dsh-chat-setup .dsh-chat-more,.dsh-chat-setup .dsh-chat-prompt,.dsh-chat-setup .dsh-prompt-drawer{animation:dsh-overlay-in 120ms ease-out!important}'
     + '@keyframes dsh-overlay-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}'
     + '@media(prefers-reduced-motion:reduce){.dsh-chat-setup .dsh-chat-more,.dsh-chat-setup .dsh-chat-prompt,.dsh-chat-setup .dsh-prompt-drawer{animation:none!important}}';
-  style.textContent += '.dsh-chat-setup{position:relative}.dsh-chat-more,.dsh-chat-prompt{z-index:650;box-sizing:border-box;margin:0;max-height:var(--dsh-chat-overlay-max-height,min(70vh,520px));overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;background:var(--dsw-alias-bg-base,#fff);box-shadow:0 10px 32px rgba(0,0,0,.18)}.dsh-chat-more{position:fixed;right:var(--dsh-chat-overlay-right,16px);bottom:var(--dsh-chat-overlay-bottom,100px);width:min(520px,var(--dsh-chat-overlay-width,100%),calc(100vw - 24px))}.dsh-chat-prompt{position:absolute;bottom:calc(100% + 6px);left:0;right:0}';
+  style.textContent += '.dsh-chat-setup{position:relative}.dsh-chat-more,.dsh-chat-prompt{z-index:650;box-sizing:border-box;margin:0;max-height:var(--dsh-chat-overlay-max-height,min(70vh,520px));overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;background:var(--dsw-alias-bg-base,#fff);box-shadow:0 10px 32px rgba(0,0,0,.18)}.dsh-chat-more{position:fixed;right:var(--dsh-chat-overlay-right,16px);bottom:var(--dsh-chat-overlay-bottom,100px);width:min(520px,var(--dsh-chat-overlay-width,100%),calc(100vw - 24px))}.dsh-chat-prompt{position:absolute;bottom:calc(100% + 6px);left:0;right:0}'
+    + '.saker-module-picker{display:flex;flex-direction:column;overflow:hidden}'
+    + '.saker-module-picker>.dsh-chat-panel-head,.saker-module-picker>.saker-module-search-row,.saker-module-picker>.saker-panel-hint{flex:0 0 auto}'
+    + '.saker-module-picker>.saker-module-rows{flex:1 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}'
+    + '.saker-module-search-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}'
+    + '.saker-module-search-row .saker-module-search{flex:1 1 100%;min-width:0}'
+    + '.saker-module-search-row select{flex:1 1 110px;min-width:0;max-width:none}';
   // 设计稿（saker-ui-v6.html）：设置类抽屉 .drawer.narrow 宽 440px、右对齐；窄窗用 min(440px,100%) 防止溢出遮挡输入框。
   style.textContent += '.dsh-chat-more{max-width:calc(100vw - 24px)}';
   // 弹层高度同时受"可用高度"和"视口高度"限制：短视口/高缩放下不会把标题和关闭按钮顶出屏幕。
   style.textContent += '.dsh-chat-more{display:flex;flex-direction:column;overflow:hidden}.dsh-chat-more>.dsh-chat-panel-head{z-index:3;margin:-16px -16px 8px;padding:12px 16px;background:var(--dsw-alias-bg-base,#fff);border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16))}.dsh-chat-settings-body{flex:1 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}.dsh-chat-settings-actions{display:flex;align-items:center;gap:8px;margin:12px -16px -16px;position:relative;z-index:2;background:var(--dsw-alias-bg-base,#fff);padding:12px 16px;border-top:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16))}.dsh-chat-settings-actions button:last-of-type{background:var(--dsw-alias-state-business-primary,#4b74d9);color:#fff;border-color:transparent}.dsh-chat-settings-actions small{color:var(--dsw-alias-label-secondary,inherit)}';
+  style.textContent += '.dsh-chat-more:has(.dsh-settings-nav){width:min(980px,var(--dsh-chat-overlay-width,100%),calc(100vw - 32px));max-width:calc(100vw - 32px)}'
+    + '.dsh-chat-collab{width:min(640px,var(--dsh-chat-overlay-width,100%),calc(100vw - 24px));max-height:min(560px,calc(100vh - 60px))}'
+    + '.dsh-chat-collab .dsh-chat-settings-body{display:flex;flex-direction:column;gap:8px;padding-bottom:4px}'
+    + '.dsh-chat-collab .dsh-chat-settings-body>p{margin:0}.dsh-chat-collab .dsh-worker-model{margin:4px 0}'
+    + '.dsh-knowledge-library{width:min(900px,var(--dsh-chat-overlay-width,100%),calc(100vw - 32px))}'
+    + '.dsh-settings-nav{display:flex;flex:0 0 auto;gap:8px;padding:0 0 8px;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));margin-bottom:8px}'
+    + '.dsh-settings-nav button{flex:1 1 0;min-width:0;border:1px solid transparent;background:transparent;color:var(--dsw-alias-label-secondary,inherit);padding:7px 10px;font:inherit;cursor:pointer;border-radius:6px;white-space:nowrap}'
+    + '.dsh-settings-nav button.is-active{background:var(--dsw-alias-bg-hover,rgba(75,116,217,.10));color:var(--dsw-alias-state-business-primary,#4b74d9);border-color:var(--dsw-alias-border-l1,rgba(128,128,128,.16))}'
+    + '.dsh-settings-search{position:relative;flex:0 0 auto;margin-bottom:8px}.dsh-settings-search>input{width:100%;box-sizing:border-box;padding:4px 8px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;background:transparent;color:inherit;font:inherit}'
+    + '.dsh-settings-search-popover{position:absolute;top:100%;left:0;right:0;z-index:2;display:grid;gap:4px;margin-top:4px;padding:8px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;background:var(--dsw-alias-bg-base,#fff);box-shadow:0 8px 24px rgba(0,0,0,.16)}'
+    + '.dsh-settings-search-popover button{display:flex;justify-content:space-between;gap:12px;border:0;border-radius:6px;padding:4px 8px;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}.dsh-settings-search-popover button:hover{background:var(--dsw-alias-bg-hover,rgba(128,128,128,.08))}.dsh-settings-search-popover span{color:var(--dsw-alias-label-secondary,inherit);font-size:var(--dsh-content-font-size-secondary,0.93em)}'
+    + '.dsh-settings-section{display:flex;flex-direction:column;gap:4px;min-height:0}'
+    + '.dsh-settings-section h4{margin:4px 0 8px;font-size:var(--dsh-content-font-size,1em)}'
+    + '.dsh-settings-advanced{margin:8px 0;padding:8px 12px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));border-radius:8px}'
+    + '.dsh-settings-advanced summary{cursor:pointer;line-height:1.5}'
+    + '.dsh-settings-legacy{display:none!important}'
+    + '.dsh-chat-collab-workers{display:grid;gap:8px;margin:12px 0;padding:8px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));border-radius:8px}'
+    + '.dsh-chat-collab-worker{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:8px;border-top:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.12))}.dsh-chat-collab-worker span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+    + '.dsh-collab-switch-row{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:2px 0 4px}.dsh-collab-switch-row .saker-check{flex:1 1 250px}'
+    + '.dsh-collab-limit{display:inline-flex;align-items:center;gap:8px;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-secondary,inherit);white-space:nowrap}.dsh-collab-limit input{width:64px;height:32px;padding:0 8px}'
+    + '.dsh-chat-collab .dsh-worker-model{margin:12px 0 4px;padding:8px 12px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.14));border-radius:8px;background:var(--dsw-alias-bg-l1,rgba(128,128,128,.03))}'
+    + '.dsh-chat-collab .dsh-worker-model summary{font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-secondary,inherit)}'
+    + '.dsh-chat-collab-workers{margin:4px 0 0;padding:8px 12px;max-height:168px;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}.dsh-collab-workers-head{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:var(--dsh-content-font-size-secondary,0.93em)}.dsh-collab-workers-head span{color:var(--dsw-alias-label-secondary,inherit)}.dsh-collab-empty{margin:4px 0 0!important;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-secondary,inherit)}'
+    + '.dsh-knowledge-results,.dsh-knowledge-read{display:grid;gap:8px;margin:8px 0;padding:8px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));border-radius:8px}.dsh-knowledge-results>button{display:grid;gap:4px;text-align:left;border:0;background:transparent;color:inherit;padding:8px;border-radius:6px;cursor:pointer}.dsh-knowledge-results>button:hover{background:var(--dsw-alias-bg-hover,rgba(128,128,128,.08))}.dsh-knowledge-results small,.dsh-knowledge-row small{display:block;color:var(--dsw-alias-label-secondary,inherit)}'
+    + '.dsh-knowledge-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.12))}.dsh-knowledge-row>div{min-width:0;overflow-wrap:anywhere}'
+    + '@media(max-width:760px){.dsh-settings-nav{overflow-x:auto;justify-content:flex-start}.dsh-settings-nav button{flex:0 0 auto}.dsh-chat-more:has(.dsh-settings-nav){width:calc(100vw - 24px)}}';
   style.textContent += '.dsh-chat-task-overview{margin-top:8px;padding:8px 0;border-top:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));color:var(--dsw-alias-label-secondary,inherit)}.dsh-chat-task-overview p{margin:0 0 8px;overflow-wrap:anywhere}.dsh-chat-task-overview-actions,.dsh-chat-task-overview-pending{display:flex;align-items:center;flex-wrap:wrap;gap:8px}.dsh-chat-task-overview-pending{margin-top:8px;color:var(--dsw-alias-label-primary,inherit)}';
-  style.textContent += '.dsh-chat-target{display:block;margin:12px 0}.dsh-chat-target span{display:block;font-size:12px;color:var(--dsw-alias-label-secondary,inherit);margin-bottom:4px}.dsh-chat-target input,.dsh-chat-target textarea{display:block;width:100%;min-width:0}.dsh-chat-target textarea{min-height:78px;resize:vertical;line-height:1.5}';
-  style.textContent += '.dsh-chat-setup .dsh-chat-field,.dsh-task-workspace .dsh-chat-field{display:flex;flex-direction:column;align-items:stretch;gap:4px;min-width:0;margin:12px 0}.dsh-chat-setup .dsh-chat-field>span,.dsh-task-workspace .dsh-chat-field>span{display:block;margin:0;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-secondary,inherit)}.dsh-chat-setup .dsh-chat-field>input,.dsh-chat-setup .dsh-chat-field>textarea,.dsh-chat-setup .dsh-chat-field>select,.dsh-task-workspace .dsh-chat-field>input,.dsh-task-workspace .dsh-chat-field>textarea,.dsh-task-workspace .dsh-chat-field>select{display:block;width:100%;min-width:0;margin:0;box-sizing:border-box}.dsh-chat-setup .dsh-chat-field>textarea,.dsh-task-workspace .dsh-chat-field>textarea{min-height:76px;resize:vertical;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}.dsh-chat-more>.dsh-competition-body{flex:1 1 auto;min-height:0;min-width:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}.dsh-task-workspace>.dsh-competition-body{min-width:0}';
+  style.textContent += '.dsh-chat-target{display:block;margin:12px 0}.dsh-chat-target span{display:block;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-secondary,inherit);margin-bottom:4px}.dsh-chat-target input,.dsh-chat-target textarea{display:block;width:100%;min-width:0}.dsh-chat-target textarea{min-height:78px;resize:vertical;line-height:1.5}';
+  style.textContent += '.dsh-chat-setup .dsh-chat-field,.dsh-task-workspace .dsh-chat-field{display:flex;flex-direction:column;align-items:stretch;gap:4px;min-width:0;margin:12px 0}.dsh-chat-setup .dsh-chat-field>span,.dsh-task-workspace .dsh-chat-field>span{display:block;margin:0;font-size:var(--dsh-content-font-size-secondary,0.93em);line-height:1.5;color:var(--dsw-alias-label-secondary,inherit)}.dsh-chat-setup .dsh-chat-field>input,.dsh-chat-setup .dsh-chat-field>textarea,.dsh-chat-setup .dsh-chat-field>select,.dsh-task-workspace .dsh-chat-field>input,.dsh-task-workspace .dsh-chat-field>textarea,.dsh-task-workspace .dsh-chat-field>select{display:block;width:100%;min-width:0;margin:0;box-sizing:border-box}.dsh-chat-setup .dsh-chat-field>textarea,.dsh-task-workspace .dsh-chat-field>textarea{min-height:76px;resize:vertical;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}.dsh-chat-more>.dsh-competition-body{flex:1 1 auto;min-height:0;min-width:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}.dsh-task-workspace>.dsh-competition-body{min-width:0}';
   style.textContent += '.dsh-worker-model{display:block;margin:12px 0}.dsh-worker-model summary{cursor:pointer;line-height:1.5}.dsh-worker-model label{display:inline-flex;align-items:center;gap:8px;margin:8px 0}.dsh-worker-model p{margin:8px 0}';
   style.textContent += '.dsh-action-limits{display:block;margin:12px 0}.dsh-action-limits summary{cursor:pointer;line-height:1.5}.dsh-action-limits label{display:inline-flex;align-items:center;gap:8px;margin:8px 0}.dsh-action-limits p{margin:8px 0}';
-  style.textContent += '.dsh-chat-exclude{display:block;margin:12px 0}.dsh-chat-exclude span{display:block;font-size:12px;color:var(--dsw-alias-label-secondary,inherit);margin-bottom:4px}.dsh-chat-exclude textarea{display:block;width:100%;min-height:56px;resize:vertical;font:inherit;line-height:1.5}';
-  style.textContent += '.dsh-limit-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}.dsh-limit-row label{display:grid;gap:4px;font-size:12px;color:var(--dsw-alias-label-secondary,inherit)}.dsh-limit-row input{font:inherit;color:inherit;width:100%;box-sizing:border-box}@media(max-width:520px){.dsh-limit-row{grid-template-columns:1fr}}';
+  style.textContent += '.dsh-chat-exclude{display:block;margin:12px 0}.dsh-chat-exclude span{display:block;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-secondary,inherit);margin-bottom:4px}.dsh-chat-exclude textarea{display:block;width:100%;min-height:56px;resize:vertical;font:inherit;line-height:1.5}';
+  style.textContent += '.dsh-limit-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}.dsh-limit-row label{display:grid;gap:4px;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-secondary,inherit)}.dsh-limit-row input{font:inherit;color:inherit;width:100%;box-sizing:border-box}@media(max-width:520px){.dsh-limit-row{grid-template-columns:1fr}}';
+  style.textContent += '.dsh-chat-compact-bar{display:flex;align-items:center;gap:4px;min-height:40px;max-height:48px;padding:4px 0;box-sizing:border-box;white-space:nowrap;min-width:0}'
+    + '.dsh-chat-method-chip,.dsh-chat-status-chip,.dsh-chat-stop-button{display:inline-flex;align-items:center;gap:4px;height:32px;min-width:0;padding:0 8px;border:1px solid transparent;border-radius:6px;background:transparent;color:inherit;font:inherit;cursor:pointer}'
+    // 这里的 max-width 必须带 .dsh-chat-setup 前缀：通用 `.dsh-chat-setup button{max-width:100%}`
+    // 的特异性高于单类选择器，否则长方法名/长状态会把宽度上限冲掉，挤压相邻入口。
+    + '.dsh-chat-setup .dsh-chat-method-chip{max-width:min(280px,34vw);background:var(--dsw-alias-bg-l1,rgba(128,128,128,.055))}.dsh-chat-setup .dsh-chat-method-chip>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}'
+    + '.dsh-chat-method-chip>small,.dsh-chat-status-chip>small{margin:0;display:inline;font-size:var(--dsh-content-font-size-secondary,0.93em);opacity:.75;color:var(--dsw-alias-label-secondary,inherit)}'
+    + '.dsh-chat-method-chip.is-active,.dsh-chat-status-chip.is-active{color:var(--dsw-alias-state-business-primary,#4b74d9);background:var(--dsw-alias-state-business-primary-alpha,rgba(75,116,217,.08))}'
+    + '.dsh-chat-setup .dsh-chat-status-chip{max-width:220px;color:var(--dsw-alias-label-secondary,inherit)}.dsh-chat-setup .dsh-chat-status-chip>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+    + '.dsh-chat-setup .dsh-chat-status-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+    + '.dsh-chat-status-dot{display:inline-block;flex:0 0 6px;width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-state-business-primary,#4b74d9)}'
+    + '.dsh-chat-stop-button{color:var(--dsw-alias-state-error-primary,#c84040);border-color:var(--dsw-alias-state-error-primary,#c84040)}'
+    + '.dsh-chat-compact-bar>.dsh-chat-toolbar-button{flex:0 0 auto}.dsh-chat-compact-bar>.dsh-chat-compact-optional{display:inline-flex;flex:0 0 auto}.dsh-chat-compact-bar>.dsh-chat-more-button{margin-left:auto}'
+    + '.dsh-chat-compact-menu{width:min(260px,calc(100vw - 24px))}.dsh-chat-compact-menu-body{display:grid;gap:4px;padding:4px 0}.dsh-chat-compact-menu-body button{justify-content:flex-start;width:100%;text-align:left;border-color:transparent;background:transparent;height:36px;padding:0 10px}'
+    + '.dsh-chat-task-detail{width:min(680px,calc(100vw - 32px))}.dsh-chat-task-detail-body{display:flex;flex:1 1 auto;flex-direction:column;gap:8px;min-height:0;overflow:auto;overscroll-behavior:contain;padding:4px 0 8px}'
+    + '.dsh-chat-task-detail-scope{margin:0;overflow-wrap:anywhere;line-height:1.5}.dsh-chat-task-detail-stats{margin:0;color:var(--dsw-alias-label-secondary,inherit)}'
+    + '.dsh-chat-component-summary,.dsh-chat-role-summary{display:flex;flex:0 0 auto;flex-direction:column;gap:8px;min-height:0}.dsh-chat-component-details{flex:0 0 auto;min-height:0}.dsh-chat-component-details summary{cursor:pointer;line-height:1.5}.dsh-chat-component-list{display:flex;flex-direction:column;gap:4px;max-height:220px;overflow:auto;margin-top:8px;padding-left:8px}.dsh-chat-component-list p{margin:0;line-height:1.5;overflow-wrap:anywhere}'
+    + '@media(max-width:800px){.dsh-chat-compact-bar{flex-wrap:wrap;max-height:72px;white-space:normal;row-gap:4px}.dsh-chat-setup .dsh-chat-method-chip{max-width:min(240px,52vw)}.dsh-chat-setup .dsh-chat-status-chip{max-width:180px}}'
+    + '@media(max-width:520px){.dsh-chat-compact-bar{max-height:72px}.dsh-chat-compact-bar>.dsh-chat-compact-optional{display:none}.dsh-chat-setup .dsh-chat-method-chip{max-width:calc(100% - 180px)}.dsh-chat-setup .dsh-chat-status-chip{max-width:150px}}';
   style.textContent += '.dsh-accounts{display:block;margin:12px 0}.dsh-accounts summary{cursor:pointer;line-height:1.5}.dsh-account-row{display:flex;align-items:center;gap:8px;margin:8px 0}.dsh-account-add{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}.dsh-account-add input,.dsh-account-add select{flex:1 1 140px;min-width:0}';
-  // 提示词模板是右侧抽屉（v6 第 3.2 节）：贴内容区右上角，高度不超过输入框上方的可用空间，
-  // 打开模板时必须还能看见会话（2026-10-17 用户反馈：视口右上角的 880×520 抽屉把整条会话列
-  // 和标题栏一起盖住，只剩输入框）。改成和「设置」浮层同一套定位：贴着输入框工具行向上展开、
-  // 右对齐到会话列，宽度只占 560px，会话列左侧保持原样可见；高度同时受可用高度与视口高度限制，
-  // 短视口下不会把标题和关闭按钮顶出屏幕。宿主给 .dsh-chat-setup 设的 contain 只影响 fixed 定位，
-  // 这里仍显式改回 container-type:normal，并用 @media 承担窄窗样式。
-  style.textContent += '.dsh-chat-setup .dsh-prompt-drawer{position:fixed;top:auto;right:var(--dsh-chat-overlay-right,16px);bottom:var(--dsh-chat-overlay-bottom,100px);left:auto;z-index:660;box-sizing:border-box;width:min(560px,var(--dsh-chat-overlay-width,100%),calc(100vw - 24px));display:flex;flex-direction:column;max-height:var(--dsh-chat-overlay-max-height,min(70vh,520px));background:var(--dsw-alias-bg-base,#fff);border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.18));border-radius:12px;box-shadow:0 12px 36px rgba(0,0,0,.2);overflow:hidden;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-primary,inherit)}'
+  // 独立的大编辑窗口，避开 Desktop 标题栏；列表、正文和底栏分别分配空间。
+  style.textContent += '.dsh-prompt-overlay{position:fixed;inset:48px 0 0;z-index:660;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;background:rgba(20,28,44,.24);-webkit-app-region:no-drag}.dsh-chat-setup .dsh-prompt-drawer{position:relative;box-sizing:border-box;width:min(1100px,100%);height:min(760px,100%);max-height:100%;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base,#fff);border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.18));border-radius:12px;box-shadow:0 20px 70px rgba(0,0,0,.22);overflow:hidden;font-size:var(--dsh-content-font-size,1em);line-height:1.5;color:var(--dsw-alias-label-primary,inherit)}'
     + '.dsh-chat-setup{container-type:normal}'
-    + '.dsh-chat-attention{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:8px;padding:8px 12px;border:1px solid var(--dsw-alias-state-warning-primary,#c8912a);border-radius:8px;background:var(--dsw-alias-bg-l1,rgba(200,145,42,.08));font-size:12px}'
+    + '.dsh-chat-attention{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:8px;padding:8px 12px;border:1px solid var(--dsw-alias-state-warning-primary,#b45309);border-radius:8px;background:var(--dsw-alias-bg-l1,rgba(180,83,9,.07));font-size:var(--dsh-content-font-size-secondary,0.93em)}'
     + '.dsh-chat-attention button{padding:2px 8px}'
     + '.dsh-chat-action{max-width:min(320px,50vw);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
     + '.dsh-execution-scope{margin:8px 0;padding:8px 12px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));border-radius:8px}'
-    + '.dsh-execution-scope ul{margin:8px 0 0;padding-left:16px;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-secondary,inherit)}'
+    + '.dsh-execution-scope ul{margin:8px 0 0;padding-left:16px;font-size:var(--dsh-content-font-size-secondary,0.93em);line-height:1.5;color:var(--dsw-alias-label-secondary,inherit)}'
+    + '.dsh-settings-note{margin:12px 0 0;padding:8px 12px;border-radius:6px;background:var(--dsw-alias-bg-l1,rgba(128,128,128,.055));font-size:var(--dsh-content-font-size-secondary,0.93em);line-height:1.5;color:var(--dsw-alias-label-secondary,inherit)}'
+    + '.dsh-chat-more.saker-workflow-panel{width:min(1040px,calc(100vw - 32px))!important;max-height:var(--dsh-chat-overlay-max-height,760px)}.saker-workflow-panel{box-sizing:border-box;padding:16px;overflow:auto}'
+    + '.saker-workflow-layout{display:grid;grid-template-columns:minmax(210px,260px) minmax(0,1fr);gap:16px;min-height:0}'
+    + '.saker-workflow-list{display:flex;flex-direction:column;gap:8px;min-width:0;padding-right:12px;border-right:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16))}'
+    + '.saker-workflow-list>input{font:inherit;height:34px;box-sizing:border-box;padding:8px;border-radius:6px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));background:transparent;color:inherit}'
+    + '.saker-workflow-list-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.saker-workflow-list-head strong{font-size:var(--dsh-content-font-size,1em)}.saker-workflow-list-head button{padding:4px 8px}'
+    + '.saker-workflow-item{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;width:100%;padding:12px;border:1px solid transparent;border-radius:6px;background:transparent;color:inherit;text-align:left;font:inherit;cursor:pointer}.saker-workflow-item:hover{background:var(--dsw-alias-bg-hover,rgba(128,128,128,.08))}.saker-workflow-item.is-active{border-color:var(--dsw-alias-state-business-primary,#4b74d9);background:var(--dsw-alias-state-business-primary-alpha,rgba(75,116,217,.08))}.saker-workflow-item>span{display:flex;flex-direction:column;gap:4px;min-width:0}.saker-workflow-item strong{font-size:var(--dsh-content-font-size,1em);font-weight:500}.saker-workflow-item small{font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-secondary,inherit)}.saker-workflow-item em{flex:none;font-style:normal;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-state-business-primary,#4b74d9)}'
+    + '.saker-workflow-main{min-width:0;display:flex;flex-direction:column;gap:12px}.saker-workflow-stage-wrap,.saker-workflow-preview{display:flex;flex-direction:column;gap:12px;min-width:0}.saker-workflow-stage-head,.saker-workflow-editor-head,.saker-workflow-preview-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.saker-workflow-stage-head strong,.saker-workflow-editor-head strong,.saker-workflow-preview-head strong{font-size:16px}.saker-workflow-stage-head p,.saker-workflow-editor-head small,.saker-workflow-preview-head p{margin:4px 0 0;color:var(--dsw-alias-label-secondary,inherit);line-height:1.5;font-size:var(--dsh-content-font-size-secondary,0.93em)}'
+    + '.saker-stage-rail{display:flex;gap:12px;overflow:auto;padding:4px 0 8px}.saker-stage{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:4px;flex:0 0 142px;min-height:82px;padding:12px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;background:var(--dsw-alias-bg-base,transparent);color:inherit;font:inherit;text-align:left;cursor:pointer}.saker-stage:not(:last-child):after{content:"→";position:absolute;right:-12px;top:36px;color:var(--dsw-alias-label-tertiary,inherit);font-size:var(--dsh-content-font-size,1em)}.saker-stage.is-active{border-color:var(--dsw-alias-state-business-primary,#4b74d9);background:var(--dsw-alias-state-business-primary-alpha,rgba(75,116,217,.08))}.saker-stage>span{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--dsw-alias-bg-hover,rgba(128,128,128,.12));font-size:var(--dsh-content-font-size-secondary,0.93em)}.saker-stage strong{font-size:var(--dsh-content-font-size-secondary,0.93em);font-weight:500;line-height:1.5}.saker-stage small{font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-secondary,inherit);line-height:1.5;overflow-wrap:anywhere}'
+    + '.saker-workflow-preview-head .is-primary,.saker-workflow-actions .is-primary,.saker-workflow-save .is-primary{background:var(--dsw-alias-state-business-primary,#4b74d9);color:#fff;border-color:transparent}'
+    + '.saker-workflow-step{padding:12px 0;border-top:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.14))}.saker-workflow-step summary{cursor:pointer;font-weight:500}.saker-workflow-step p{margin:8px 0 4px;line-height:1.5}.saker-workflow-step small{color:var(--dsw-alias-label-secondary,inherit)}'
+    + '.saker-workflow-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px}.saker-workflow-actions button,.saker-workflow-save button{height:32px;padding:0 8px}'
+    + '.saker-workflow-editor-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(180px,240px);gap:16px;min-height:0}.saker-workflow-fields{display:flex;flex-direction:column;gap:8px;min-width:0}.saker-workflow-node-edit{display:flex;flex-direction:column;gap:8px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.14))}.saker-workflow-node-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}.saker-workflow-node-actions span{display:flex;gap:4px}.saker-workflow-node-actions button{height:28px;padding:0 8px}'
+    + '.saker-workflow-note{padding:12px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));border-radius:6px;background:var(--dsw-alias-bg-l1,rgba(128,128,128,.04));line-height:1.5}.saker-workflow-note p{margin:8px 0 0;color:var(--dsw-alias-label-secondary,inherit);font-size:var(--dsh-content-font-size-secondary,0.93em)}.saker-workflow-save{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16))}'
+    + '@media(max-width:760px){.saker-workflow-layout,.saker-workflow-editor-grid{grid-template-columns:1fr}.saker-workflow-list{padding-right:0;padding-bottom:8px;border-right:0;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16))}.saker-stage{flex-basis:120px}.saker-workflow-preview-head,.saker-workflow-stage-head,.saker-workflow-editor-head{flex-direction:column}.saker-workflow-save{justify-content:flex-start}}'
+    + '.dsh-chat-error{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0;color:var(--dsw-alias-state-error-primary,#c84040)}.dsh-chat-error button{font:inherit;padding:2px 8px}'
     + '@media(max-width:540px){.dsh-chat-toolbar-spacer{display:none}.dsh-chat-settings-row{gap:4px}.dsh-chat-chip{padding-inline:6px}}'
-    + '.dsh-prompt-head{display:flex;align-items:center;justify-content:space-between;height:52px;padding:0 16px;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16))}'
-    + '.dsh-prompt-head strong{font-size:14px}'
-    + '.dsh-prompt-hint{margin:0;padding:8px 16px;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));color:var(--dsw-alias-label-secondary,inherit);font-size:12px}'
+    + '.dsh-prompt-head{display:flex;flex:0 0 52px;align-items:center;justify-content:space-between;padding:0 16px;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16))}.dsh-prompt-head button{font:inherit;padding:4px 12px;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;background:transparent;color:inherit;cursor:pointer}'
+    + '.dsh-prompt-head strong{font-size:var(--dsh-content-font-size,1em)}'
+    + '.dsh-prompt-hint{flex-shrink:0;margin:0;padding:8px 16px;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));color:var(--dsw-alias-label-secondary,inherit);font-size:var(--dsh-content-font-size-secondary,0.93em)}'
     + '.dsh-prompt-body{display:flex;flex:1;min-height:0}'
-    + '.dsh-prompt-list{width:208px;flex-shrink:0;border-right:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));display:flex;flex-direction:column;min-height:0}'
+    + '.dsh-prompt-list{width:240px;flex-shrink:0;border-right:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));display:flex;flex-direction:column;min-height:0}'
     + '.dsh-prompt-list input[type=search]{margin:12px;padding:6px 8px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;background:transparent;color:inherit;font:inherit}'
     + '.dsh-prompt-io{display:flex;gap:8px;padding:0 12px 8px}'
-    + '.dsh-prompt-io button{flex:1;height:28px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;background:transparent;color:inherit;cursor:pointer;font:inherit;font-size:12px}'
-    + '.dsh-prompt-more{margin:8px 12px;height:28px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;background:transparent;color:inherit;cursor:pointer;font:inherit;font-size:12px}'
+    + '.dsh-prompt-io button{flex:1;height:28px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;background:transparent;color:inherit;cursor:pointer;font:inherit;font-size:var(--dsh-content-font-size,1em)}'
+    + '.dsh-prompt-more{margin:8px 12px;height:28px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;background:transparent;color:inherit;cursor:pointer;font:inherit;font-size:var(--dsh-content-font-size-secondary,0.93em)}'
     + '.dsh-prompt-scopes{display:flex;gap:4px;padding:0 12px 8px}'
     + '.dsh-prompt-scopes button{flex:1;border:0;border-radius:6px;padding:4px 0;background:transparent;color:var(--dsw-alias-label-secondary,inherit);cursor:pointer;font:inherit}'
     + '.dsh-prompt-scopes button.is-active{background:var(--dsw-alias-bg-hover,rgba(75,116,217,.10));color:var(--dsw-alias-state-business-primary,#4b74d9)}'
@@ -2748,68 +3841,73 @@ function installChatSetupStyles() {
     + '.dsh-prompt-items button:hover{background:var(--dsw-alias-bg-hover,rgba(128,128,128,.08))}'
     + '.dsh-prompt-items button.is-active{background:var(--dsw-alias-state-business-primary-alpha,rgba(75,116,217,.12));color:var(--dsw-alias-state-business-primary,#4b74d9)}'
     + '.dsh-prompt-item-title{font-weight:500}'
-    + '.dsh-prompt-item-hint{font-size:12px;opacity:.7}'
-    + '.dsh-prompt-empty{padding:8px 12px;color:var(--dsw-alias-label-secondary,inherit);font-size:12px}'
+    + '.dsh-prompt-item-hint{font-size:var(--dsh-content-font-size-secondary,0.93em);opacity:.7}'
+    + '.dsh-prompt-empty{padding:8px 12px;color:var(--dsw-alias-label-secondary,inherit);font-size:var(--dsh-content-font-size-secondary,0.93em)}'
     + '.dsh-prompt-blank{display:flex;flex-direction:column;gap:8px;margin:auto 0;padding:16px 4px;color:var(--dsw-alias-label-secondary,inherit)}'
-    + '.dsh-prompt-blank strong{color:var(--dsw-alias-label-primary,inherit);font-size:14px}'
-    + '.dsh-prompt-blank p{margin:0;font-size:12px;line-height:1.5}'
-    + '.dsh-prompt-blank ol{margin:0;padding-left:16px;display:flex;flex-direction:column;gap:4px;font-size:12px;line-height:1.5}'
-    + '.dsh-prompt-main{flex:1;min-width:0;display:flex;flex-direction:column;padding:12px 16px;overflow:auto}'
-    + '.dsh-prompt-titlebar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}'
+    + '.dsh-prompt-blank strong{color:var(--dsw-alias-label-primary,inherit);font-size:var(--dsh-content-font-size,1em)}'
+    + '.dsh-prompt-blank p{margin:0;font-size:var(--dsh-content-font-size-secondary,0.93em);line-height:1.5}'
+    + '.dsh-prompt-blank ol{margin:0;padding-left:16px;display:flex;flex-direction:column;gap:4px;font-size:var(--dsh-content-font-size-secondary,0.93em);line-height:1.5}'
+    + '.dsh-prompt-main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;padding:16px;overflow:auto}.dsh-prompt-main>p[role=status]{flex-shrink:0;margin:4px 0;font-size:var(--dsh-content-font-size-secondary,0.93em)}'
+    + '.dsh-prompt-titlebar{display:flex;flex-shrink:0;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}.dsh-prompt-titlebar>button{font:inherit;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;padding:4px 8px;background:transparent;color:inherit;cursor:pointer}'
     + '.dsh-prompt-titlebar strong{font-size:16px;margin-right:auto}'
     + '.dsh-prompt-modes{display:inline-flex;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;overflow:hidden}'
     + '.dsh-prompt-modes button{border:0;padding:4px 10px;background:transparent;color:inherit;cursor:pointer;font:inherit}'
     + '.dsh-prompt-modes button.is-active{background:var(--dsw-alias-state-business-primary,#4b74d9);color:#fff}'
-    + '.dsh-prompt-fields{display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:12px}'
+    + '.dsh-prompt-fields{display:grid;flex-shrink:0;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:12px}.dsh-prompt-fields>details{grid-column:1/-1}.dsh-prompt-fields>details[open]{display:grid;gap:8px}'
     + '.dsh-prompt-field{display:flex;flex-direction:column;gap:4px}'
     + '.dsh-prompt-field input,.dsh-prompt-field textarea,.dsh-prompt-full textarea{width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;background:transparent;color:inherit;font:inherit}'
     + '.dsh-prompt-field textarea{min-height:54px;resize:vertical}'
-    + '.dsh-prompt-field.is-missing input,.dsh-prompt-field.is-missing textarea{border-color:var(--dsw-alias-state-error-primary,#c84040)}'
-    + '.dsh-prompt-need{color:var(--dsw-alias-state-error-primary,#c84040)}'
-    + '.dsh-prompt-full{display:block;margin-bottom:8px}'
-    + '.dsh-prompt-full textarea{min-height:200px;resize:vertical;line-height:1.5}'
-    + '.dsh-prompt-conflict{margin:8px 0;padding:8px 12px;border:1px solid var(--dsw-alias-state-warning-primary,#c8912a);border-radius:6px}'
+    + '.dsh-prompt-field.is-missing input,.dsh-prompt-field.is-missing textarea{border-style:dashed;border-color:var(--dsw-alias-border-l2,rgba(128,128,128,.34))}'
+    + '.dsh-prompt-field.is-missing .dsh-prompt-label em{font-style:normal;margin-left:8px;color:var(--dsw-alias-label-secondary,inherit);font-size:var(--dsh-content-font-size-secondary,0.93em)}'
+    + '.dsh-prompt-label{display:flex;align-items:center;gap:8px}.dsh-prompt-label em{font-style:normal;font-size:var(--dsh-content-font-size-secondary,0.93em);line-height:18px;padding:0 4px;border-radius:4px;color:var(--dsw-alias-state-warning-primary,#9a3412);background:rgba(180,83,9,.10)}'
+    + '.dsh-prompt-need{color:var(--dsw-alias-label-secondary,inherit)}'
+    + '.dsh-prompt-full{display:flex;flex:1 0 220px;flex-direction:column;gap:8px;margin-bottom:8px;color:var(--dsw-alias-label-secondary,inherit);font-size:var(--dsh-content-font-size-secondary,0.93em)}'
+    + '.dsh-prompt-full textarea{flex:1;min-height:190px;resize:vertical;line-height:1.5;font-size:var(--dsh-content-font-size,1em);color:var(--dsw-alias-label-primary,inherit);padding:12px}'
+    + '.dsh-prompt-conflict{margin:8px 0;padding:8px 12px;border:1px solid var(--dsw-alias-state-warning-primary,#b45309);border-radius:6px}'
     + '.dsh-prompt-conflict button{margin-right:8px}'
-    + '.dsh-prompt-foot{display:flex;align-items:center;gap:8px;height:56px;padding:0 16px;border-top:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));flex-wrap:nowrap}'
-    + '.dsh-prompt-foot [role=status]{margin-right:auto;color:var(--dsw-alias-label-secondary,inherit);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+    + '.dsh-prompt-foot{display:flex;flex-shrink:0;align-items:center;gap:8px;min-height:64px;padding:8px 16px;box-sizing:border-box;border-top:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));flex-wrap:wrap}'
+    + '.dsh-prompt-foot [role=status]{margin-right:auto;color:var(--dsw-alias-label-secondary,inherit);font-size:var(--dsh-content-font-size-secondary,0.93em);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
     + '.dsh-prompt-saveas{display:inline-flex;align-items:center;gap:4px}'
-    + '.dsh-prompt-saveas input{width:96px;padding:4px 6px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;background:transparent;color:inherit;font:inherit}'
+    + '.dsh-prompt-saveas input{width:180px;padding:6px 8px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;background:transparent;color:inherit;font:inherit}'
     + '.dsh-prompt-foot button{border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;padding:6px 12px;background:transparent;color:inherit;cursor:pointer;font:inherit;white-space:nowrap}'
     + '.dsh-prompt-foot button.is-primary{background:var(--dsw-alias-state-business-primary,#4b74d9);border-color:transparent;color:#fff}'
     + '.dsh-prompt-foot button:disabled{opacity:.5;cursor:default}'
-    + '@media(max-width:720px){.dsh-chat-setup .dsh-prompt-drawer{width:100%}.dsh-prompt-body{flex-direction:column}.dsh-prompt-list{width:auto;max-height:180px;border-right:0;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16))}}';
+    + '@media(max-width:760px){.dsh-prompt-list{width:200px}.dsh-prompt-foot [role=status]{display:block;max-width:100%;white-space:normal}.dsh-prompt-fields{grid-template-columns:1fr}}@media(max-width:600px){.dsh-prompt-overlay{padding:8px}.dsh-prompt-body{flex-direction:column}.dsh-prompt-list{width:auto;flex:0 0 190px;max-height:190px;border-right:0;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16))}.dsh-prompt-main{padding:12px}.dsh-prompt-foot{padding:8px 12px}.dsh-prompt-saveas input{width:140px}}';
   style.textContent += '.dsh-materials-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}'
     + '.dsh-materials-types{display:inline-flex;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:8px;overflow:hidden}'
     + '.dsh-materials-types button{border:0;padding:6px 12px;background:transparent;color:inherit;cursor:pointer;font:inherit}'
     + '.dsh-materials-types button.is-active{background:var(--dsw-alias-state-business-primary,#4b74d9);color:#fff}'
     + '.dsh-materials-tools input[type=search]{flex:1;min-width:160px;padding:6px 9px;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;background:transparent;color:inherit;font:inherit}'
     + '.dsh-materials-tools button{border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;padding:6px 12px;background:transparent;color:inherit;cursor:pointer;font:inherit}'
-    + '.dsh-materials-tools label{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--dsw-alias-label-secondary,inherit)}'
+    + '.dsh-materials-tools label{display:inline-flex;align-items:center;gap:4px;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-secondary,inherit)}'
     + '.dsh-materials-tools select{font:inherit;color:inherit;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;padding:6px 8px;background:var(--dsw-alias-bg-base,transparent);max-width:140px}'
     + '.dsh-materials-tools button.is-primary{background:var(--dsw-alias-state-business-primary,#4b74d9);border-color:transparent;color:#fff}'
     + '.dsh-materials-tools button:disabled{opacity:.5;cursor:default}'
-    + '.dsh-materials-table{width:100%;border-collapse:collapse;font-size:12px}'
+    + '.dsh-materials-table{width:100%;border-collapse:collapse;font-size:var(--dsh-content-font-size,1em)}'
     + '.dsh-materials-table th,.dsh-materials-table td{text-align:left;padding:8px 8px;border-bottom:1px solid var(--dsw-alias-border-l1,#eee);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
     + '.dsh-materials-table th{color:var(--dsw-alias-label-secondary,inherit);font-weight:500}'
     + '.dsh-materials-table td button{border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;padding:3px 8px;background:transparent;color:inherit;cursor:pointer;font:inherit}'
-    + '.dsh-materials-foot{display:flex;align-items:center;gap:12px;margin-top:12px;color:var(--dsw-alias-label-secondary,inherit);font-size:12px}'
+    + '.dsh-materials-foot{display:flex;align-items:center;gap:12px;margin-top:12px;color:var(--dsw-alias-label-secondary,inherit);font-size:var(--dsh-content-font-size-secondary,0.93em)}'
     + '.dsh-materials-foot button{border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;padding:4px 10px;background:transparent;color:inherit;cursor:pointer;font:inherit}'
     + '.dsh-materials-foot button:disabled{opacity:.5;cursor:default}'
     + '.dsh-materials-empty{padding:16px;border:1px dashed var(--dsw-alias-border-l1,#ddd);border-radius:8px;color:var(--dsw-alias-label-secondary,inherit)}';
-  style.textContent += '.dsh-materials-new{display:flex;align-items:center;gap:8px;margin:0 0 8px;padding:6px 10px;border:1px solid var(--dsw-alias-state-business-primary,#4b74d9);border-radius:8px;background:var(--dsw-alias-state-business-primary-alpha,rgba(75,116,217,.08));font-size:12px}'
+  style.textContent += '.dsh-materials-new{display:flex;align-items:center;gap:8px;margin:0 0 8px;padding:6px 10px;border:1px solid var(--dsw-alias-state-business-primary,#4b74d9);border-radius:8px;background:var(--dsw-alias-state-business-primary-alpha,rgba(75,116,217,.08));font-size:var(--dsh-content-font-size-secondary,0.93em)}'
     + '.dsh-materials-new button{border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;padding:2px 8px;background:transparent;color:inherit;cursor:pointer;font:inherit}';
+  style.textContent += '.dsh-materials-workspace{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 12px;padding:9px 12px;border:1px dashed var(--dsw-alias-border-l1,rgba(128,128,128,.28));border-radius:8px;background:var(--dsw-alias-bg-l1,rgba(128,128,128,.035));font-size:var(--dsh-content-font-size-secondary,0.93em)}'
+    + '.dsh-materials-workspace>div{display:grid;gap:4px;min-width:0}.dsh-materials-workspace strong{font-size:var(--dsh-content-font-size,1em);font-weight:600}.dsh-materials-workspace span{color:var(--dsw-alias-label-secondary,inherit);line-height:1.5}'
+    + '.dsh-materials-workspace button{border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;padding:5px 10px;background:transparent;color:inherit;cursor:pointer;font:inherit;white-space:nowrap}';
   style.textContent += '.dsh-materials-detail{margin:12px 0;padding:12px 14px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.18));border-radius:10px;background:var(--dsw-alias-bg-l1,rgba(128,128,128,.04))}'
     + '.dsh-materials-panes{display:grid;grid-template-columns:1fr 1fr;gap:12px}'
     + '@media(max-width:720px){.dsh-materials-panes{grid-template-columns:1fr}}'
-    + '.dsh-materials-panes pre{max-height:220px;overflow:auto;margin:4px 0 0;padding:8px;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;background:var(--dsw-alias-bg-base,#fff);font-size:12px;white-space:pre-wrap;word-break:break-all}'
-    + '.dsh-materials-preview{max-height:220px;overflow:auto;margin:8px 0;padding:8px;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;font-size:12px;white-space:pre-wrap}'
+    + '.dsh-materials-panes pre{max-height:220px;overflow:auto;margin:4px 0 0;padding:8px;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;background:var(--dsw-alias-bg-base,#fff);font-size:var(--dsh-content-font-size-secondary,0.93em);white-space:pre-wrap;word-break:break-all}'
+    + '.dsh-materials-preview{max-height:220px;overflow:auto;margin:8px 0;padding:8px;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;font-size:var(--dsh-content-font-size-secondary,0.93em);white-space:pre-wrap}'
     + '.dsh-materials-detail small{display:block;color:var(--dsw-alias-label-secondary,inherit);margin-top:8px}'
     + '.dsh-materials-table td button+button{margin-left:8px}';
   style.textContent += '.dsh-execution-tools{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}'
-    + '.dsh-execution-usage{color:var(--dsw-alias-label-secondary,inherit);font-size:12px}'
+    + '.dsh-execution-usage{color:var(--dsw-alias-label-secondary,inherit);font-size:var(--dsh-content-font-size-secondary,0.93em)}'
     + '.dsh-execution-tools>button{margin-left:auto;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;padding:4px 12px;background:transparent;color:inherit;cursor:pointer;font:inherit}'
     + '.dsh-execution-tools>button:disabled{opacity:.5;cursor:default}';
-  style.textContent += '.dsh-usage-row{display:flex;align-items:center;flex-wrap:wrap;gap:12px;min-height:24px;margin-top:4px;font-size:12px;color:var(--dsw-alias-label-secondary,inherit)}'
+  style.textContent += '.dsh-usage-row{display:flex;align-items:center;flex-wrap:wrap;gap:12px;min-height:24px;margin-top:4px;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-secondary,inherit)}'
     + '.dsh-usage-row button{border:0;background:transparent;color:inherit;cursor:pointer;font:inherit;text-decoration:underline;padding:0}'
     + '.dsh-usage-diagnostics{display:flex;flex-direction:column;gap:4px;margin-top:8px;padding-top:8px;border-top:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16))}'
     + '.dsh-usage-diag-items{display:flex;flex-wrap:wrap;gap:8px}'
@@ -2818,59 +3916,135 @@ function installChatSetupStyles() {
     + '.dsh-usage-detail small{display:block;color:var(--dsw-alias-label-secondary,inherit);margin-top:4px}';
   style.textContent += '.dsh-chat-explain{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0}'
     + '.dsh-chat-explain input{padding:0;accent-color:var(--dsw-alias-state-business-primary,#4b74d9)}'
-    + '.dsh-chat-explain small{flex-basis:100%;margin:0;color:var(--dsw-alias-label-secondary,inherit);font-size:12px}';
+    + '.dsh-chat-explain small{flex-basis:100%;margin:0;color:var(--dsw-alias-label-secondary,inherit);font-size:var(--dsh-content-font-size-secondary,0.93em)}';
   style.textContent += '.dsh-test-content{margin:12px 0;padding:8px 10px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.18));border-radius:8px}'
     + '.dsh-test-content summary{cursor:pointer;font-weight:500}'
-    + '.dsh-test-content p{margin:8px 0;font-size:12px;color:var(--dsw-alias-label-secondary,inherit)}'
+    + '.dsh-test-content p{margin:8px 0;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-secondary,inherit)}'
     + '.dsh-test-content-actions{display:flex;gap:8px;margin:8px 0}'
     + '.dsh-test-content-actions button{border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;padding:4px 10px;background:transparent;color:inherit;cursor:pointer;font:inherit}'
     + '.dsh-test-content-actions button:disabled{opacity:.5;cursor:default}'
     + '.dsh-test-content fieldset{border:0;padding:0;margin:8px 0}'
-    + '.dsh-test-content legend{font-weight:600;font-size:12px;color:var(--dsw-alias-label-secondary,inherit);margin-bottom:4px}'
-    + '.dsh-test-content label{display:inline-flex;align-items:center;gap:4px;margin:4px 16px 4px 0;font-size:12px}'
+    + '.dsh-test-content legend{font-weight:600;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-secondary,inherit);margin-bottom:4px}'
+    + '.dsh-test-content label{display:inline-flex;align-items:center;gap:4px;margin:4px 16px 4px 0;font-size:var(--dsh-content-font-size-secondary,0.93em)}'
     + '.dsh-test-content input{padding:0;accent-color:var(--dsw-alias-state-business-primary,#4b74d9)}';
   style.textContent += '.dsh-materials-entry{position:relative;display:inline-flex}'
-    + '.dsh-materials-import{position:absolute;bottom:calc(100% + 6px);left:0;z-index:660;box-sizing:border-box;width:min(420px,calc(100vw - 32px));max-height:min(70vh,540px);overflow:auto;padding:12px 16px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.18));border-radius:10px;background:var(--dsw-alias-bg-base,#fff);box-shadow:0 10px 32px rgba(0,0,0,.18);font-size:12px;line-height:1.5;color:var(--dsw-alias-label-primary,inherit)}'
+    + '.dsh-materials-import{position:absolute;bottom:calc(100% + 6px);left:0;z-index:660;box-sizing:border-box;width:min(420px,calc(100vw - 32px));max-height:min(70vh,540px);overflow:hidden;display:flex;flex-direction:column;padding:12px 16px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.18));border-radius:10px;background:var(--dsw-alias-bg-base,#fff);box-shadow:0 10px 32px rgba(0,0,0,.18);font-size:var(--dsh-content-font-size-secondary,0.93em);line-height:1.5;color:var(--dsw-alias-label-primary,inherit)}'
+    + '.dsh-materials-import>.dsh-chat-panel-head{flex:0 0 auto}'
+    + '.dsh-materials-import-body{flex:1 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;padding-right:4px}'
+    + '.dsh-materials-import-foot{flex:0 0 auto;display:flex;flex-direction:column;align-items:stretch;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16))}'
+    + '.dsh-materials-import-foot button.is-primary{margin-top:0}'
+    + '.dsh-materials-success{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.18));border-radius:6px;background:var(--dsw-alias-bg-l1,rgba(128,128,128,.04))}'
+    + '.dsh-materials-success span{min-width:0;overflow-wrap:anywhere}'
+    + '.dsh-materials-success button{flex:0 0 auto;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;padding:4px 10px;background:transparent;color:inherit;cursor:pointer;font:inherit}'
+    + '.dsh-materials-viewer-meta{display:flex;flex-direction:column;gap:4px;margin-bottom:8px}'
+    + '.dsh-materials-viewer-meta small{display:block;color:var(--dsw-alias-label-secondary,inherit)}'
+    + '.dsh-materials-viewer-text{max-height:min(46vh,360px);overflow:auto;margin:8px 0;padding:8px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.18));border-radius:6px;background:var(--dsw-alias-bg-base,#fff);white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-family:ui-monospace,Consolas,monospace}'
+    + '.dsh-materials-viewer-foot{flex-direction:row;justify-content:flex-end;flex-wrap:wrap}'
+    + '.dsh-materials-viewer-foot button{border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;padding:5px 10px;background:transparent;color:inherit;cursor:pointer;font:inherit}'
     + '.dsh-materials-progress{display:flex;flex-direction:column;gap:4px;margin-top:8px}'
-    + '.dsh-materials-steps{color:var(--dsw-alias-label-secondary,inherit);font-size:12px}'
+    + '.dsh-materials-steps{color:var(--dsw-alias-label-secondary,inherit);font-size:var(--dsh-content-font-size-secondary,0.93em)}'
     + '.dsh-materials-errors{margin-top:4px}'
-    + '.dsh-materials-errors summary{cursor:pointer;font-size:12px;color:var(--dsw-alias-label-secondary,inherit)}'
-    + '.dsh-materials-errors ul{margin:4px 0 0;padding-left:16px;font-size:12px;color:var(--dsw-alias-state-error-primary,#c84040)}'
+    + '.dsh-materials-errors summary{cursor:pointer;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-secondary,inherit)}'
+    + '.dsh-materials-errors ul{margin:4px 0 0;padding-left:16px;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-state-error-primary,#c84040)}'
     + '.dsh-materials-import-actions{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}'
     + '.dsh-materials-import-actions button{border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;padding:5px 10px;background:transparent;color:inherit;cursor:pointer;font:inherit}'
     + '.dsh-materials-import label{display:block;margin:8px 0}'
     + '.dsh-materials-import textarea,.dsh-materials-import input[type=text],.dsh-materials-import-name input{display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:6px 8px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:6px;background:transparent;color:inherit;font:inherit}'
     + '.dsh-materials-import textarea{min-height:90px;resize:vertical;font-family:ui-monospace,Consolas,monospace}'
-    + '.dsh-materials-import button.is-primary{margin-top:8px;background:var(--dsw-alias-state-business-primary,#4b74d9);border-color:transparent;color:#fff}'
+    + '.dsh-materials-import button.is-primary{background:var(--dsw-alias-state-business-primary,#4b74d9);border-color:transparent;color:#fff}'
     + '.dsh-materials-import small{display:block;margin-top:8px;color:var(--dsw-alias-label-secondary,inherit)}'
     + '.dsh-materials-import [role=alert]{color:var(--dsw-alias-state-error-primary,#c84040)}';
   style.textContent += [
-    '.dsh-task-workspace{max-width:none;margin:0;padding:12px 16px 16px;font-size:12px;line-height:1.5}',
-    '.dsh-task-nav{margin-bottom:12px;padding-bottom:8px;gap:4px}.dsh-task-nav button{padding:5px 11px;font-size:12px}',
+    '.dsh-task-workspace{max-width:none;margin:0;padding:12px 16px 16px;font-size:inherit;line-height:1.5}',
+    '.dsh-task-nav{margin-bottom:12px;padding-bottom:8px;gap:4px}.dsh-task-nav button{padding:5px 11px;font-size:var(--dsh-content-font-size,1em)}',
     '.dsh-task-nav select{margin-left:auto;font:inherit;color:inherit;background:var(--dsw-alias-bg-base,transparent);border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;padding:4px 7px;max-width:100%}',
-    '.dsh-task-heading{margin-bottom:8px;gap:8px}.dsh-task-panel h3,.dsh-task-panel h4{font-size:13px;margin:0;font-weight:600}.dsh-task-panel p{margin:4px 0;line-height:1.5}',
-    '.dsh-task-summary{padding:8px 0;border:0;border-bottom:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:0}.dsh-task-eyebrow{font-size:12px;color:var(--dsw-alias-label-secondary,inherit)}.dsh-task-summary h2{font-size:14px;line-height:1.5;margin:4px 0;font-weight:600;overflow-wrap:anywhere}.dsh-task-summary p{color:var(--dsw-alias-label-secondary,inherit);overflow-wrap:anywhere}',
+    '.dsh-task-heading{margin-bottom:8px;gap:8px}.dsh-task-panel h3,.dsh-task-panel h4{font-size:var(--dsh-content-font-size,1em);margin:0;font-weight:600}.dsh-task-panel p{margin:4px 0;line-height:1.5}',
+    '.dsh-task-summary{padding:8px 0;border:0;border-bottom:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:0}.dsh-task-eyebrow{font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-secondary,inherit)}.dsh-task-summary h2{font-size:var(--dsh-content-font-size,1em);line-height:1.5;margin:4px 0;font-weight:600;overflow-wrap:anywhere}.dsh-task-summary p{color:var(--dsw-alias-label-secondary,inherit);overflow-wrap:anywhere}',
     '.dsh-task-next{padding:4px 0;margin:4px 0;background:transparent;border-radius:0}.dsh-task-next p{margin:4px 0}',
-    '.dsh-task-metrics{display:flex;flex-wrap:wrap;gap:8px 24px;margin:8px 0 12px;padding:8px 0;border-top:1px solid var(--dsw-alias-border-l1,#ddd);border-bottom:1px solid var(--dsw-alias-border-l1,#ddd)}.dsh-task-metrics strong{font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}',
+    '.dsh-task-metrics{display:flex;flex-wrap:wrap;gap:8px 24px;margin:8px 0 12px;padding:8px 0;border-top:1px solid var(--dsw-alias-border-l1,#ddd);border-bottom:1px solid var(--dsw-alias-border-l1,#ddd)}.dsh-task-metrics strong{font-size:var(--dsh-content-font-size-secondary,0.93em);font-weight:600;font-variant-numeric:tabular-nums}',
     '.dsh-task-recent-row{padding:8px 0;border-top:1px solid var(--dsw-alias-border-l1,#ddd);overflow-wrap:anywhere}.dsh-task-recent-row>div{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}.dsh-task-recent-row p{margin:4px 0;color:var(--dsw-alias-label-secondary,inherit)}',
-    '.dsh-task-panel details,.dsh-task-fold{margin:8px 0;padding:8px 8px;border-radius:5px}.dsh-task-panel .dsh-rtr-btn{font-size:12px;padding:4px 8px;border-radius:6px}',
-    '.dsh-task-file-list{display:grid;gap:8px}.dsh-task-file,.dsh-task-empty{padding:8px 12px;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;overflow-wrap:anywhere}.dsh-task-empty{margin:12px 0;padding:12px}.dsh-task-file-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.dsh-task-file-head small{display:block;margin-top:4px}.dsh-task-file code{user-select:text;font-size:12px}',
-    '.dsh-finding-preview{padding:0 12px 8px;font-size:12px;overflow-wrap:anywhere}.dsh-finding-preview p{margin:4px 0;line-height:1.5}.dsh-task-workspace .dsh-rtr-rowhead{flex-wrap:wrap;gap:8px;padding:8px 12px}.dsh-task-workspace .dsh-rtr-title{flex:1;min-width:140px;white-space:normal;font-size:12px}.dsh-task-actions{display:flex;gap:8px;margin-top:8px}',
-    '.dsh-task-state-line{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.dsh-task-mode{font-size:12px;color:var(--dsw-alias-label-secondary,#666)}.dsh-task-stop-reason{font-size:12px;padding:4px 8px;border-radius:4px;background:var(--dsw-alias-bg-layer-2,#f4f5f7);color:var(--dsw-alias-label-secondary,#666)}',
-    '.dsh-task-scope-summary{font-size:12px;line-height:1.5;margin:4px 0}.dsh-task-summary-actions{display:flex;gap:8px;flex-wrap:wrap;margin:4px 0}.dsh-task-pending-change{padding:8px 12px;border-left:3px solid var(--dsw-alias-state-business-primary,#4c6ef5);background:color-mix(in srgb,var(--dsw-alias-state-business-primary,#4c6ef5) 8%,transparent)}.dsh-task-pending-change p{margin:4px 0 8px}',
-    '.dsh-task-result{display:flex;align-items:baseline;gap:24px;margin:8px 0 8px;font-size:12px}.dsh-task-result strong{font-size:16px;font-weight:600;font-variant-numeric:tabular-nums;margin-right:4px}.dsh-task-pending{color:var(--dsw-alias-label-primary,inherit)}.dsh-task-metrics{color:var(--dsw-alias-label-secondary,#666);border-top:0;margin-top:0;padding-top:4px;gap:8px 16px}',
-    '.dsh-task-project-table{width:100%;display:block;overflow-x:auto;border-collapse:collapse;font-size:12px}.dsh-task-project-table th,.dsh-task-project-table td{padding:8px;border-bottom:1px solid rgba(120,150,190,.18);text-align:left;white-space:normal;word-break:break-word;vertical-align:top}.dsh-task-project-table th{color:var(--dsw-alias-label-secondary,#666);font-weight:600}',
-    '.dsh-task-brief{display:flex;flex-wrap:wrap;gap:4px 16px;margin:4px 0 4px;font-size:12px;color:var(--dsw-alias-label-secondary,#666)}.dsh-task-brief span{overflow-wrap:anywhere}.dsh-task-gaps{margin:4px 0 4px;font-size:12px}.dsh-task-gaps p{margin:4px 0 0;color:var(--dsw-alias-label-secondary,#666);overflow-wrap:anywhere}.dsh-task-entries{margin:4px 0 4px;font-size:12px}.dsh-task-entries p{margin:4px 0 0;color:var(--dsw-alias-label-secondary,#666);overflow-wrap:anywhere}',
+    '.dsh-task-panel details,.dsh-task-fold{margin:8px 0;padding:8px 8px;border-radius:5px}.dsh-task-panel .dsh-rtr-btn{font-size:var(--dsh-content-font-size,1em);padding:4px 8px;border-radius:6px}',
+    '.dsh-task-file-list{display:grid;gap:8px}.dsh-task-file,.dsh-task-empty{padding:8px 12px;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;overflow-wrap:anywhere}.dsh-task-empty{margin:12px 0;padding:12px}.dsh-task-file-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.dsh-task-file-head small{display:block;margin-top:4px}.dsh-task-file code{user-select:text;font-size:var(--dsh-content-font-size-secondary,0.93em)}',
+    '.dsh-finding-preview{padding:0 12px 8px;font-size:var(--dsh-content-font-size-secondary,0.93em);overflow-wrap:anywhere}.dsh-finding-preview p{margin:4px 0;line-height:1.5}.dsh-task-workspace .dsh-rtr-rowhead{flex-wrap:wrap;gap:8px;padding:8px 12px}.dsh-task-workspace .dsh-rtr-title{flex:1;min-width:140px;white-space:normal;font-size:var(--dsh-content-font-size-secondary,0.93em)}.dsh-task-actions{display:flex;gap:8px;margin-top:8px}',
+    '.dsh-task-state-line{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.dsh-task-mode{font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-secondary,#666)}.dsh-task-stop-reason{font-size:var(--dsh-content-font-size-secondary,0.93em);padding:4px 8px;border-radius:4px;background:var(--dsw-alias-bg-layer-2,#f4f5f7);color:var(--dsw-alias-label-secondary,#666)}',
+    '.dsh-task-scope-summary{font-size:var(--dsh-content-font-size-secondary,0.93em);line-height:1.5;margin:4px 0}.dsh-task-summary-actions{display:flex;gap:8px;flex-wrap:wrap;margin:4px 0}.dsh-task-pending-change{padding:8px 12px;border-left:3px solid var(--dsw-alias-state-business-primary,#4c6ef5);background:color-mix(in srgb,var(--dsw-alias-state-business-primary,#4c6ef5) 8%,transparent)}.dsh-task-pending-change p{margin:4px 0 8px}',
+    '.dsh-task-result{display:flex;align-items:baseline;gap:24px;margin:8px 0 8px;font-size:var(--dsh-content-font-size-secondary,0.93em)}.dsh-task-result strong{font-size:16px;font-weight:600;font-variant-numeric:tabular-nums;margin-right:4px}.dsh-task-pending{color:var(--dsw-alias-label-primary,inherit)}.dsh-task-metrics{color:var(--dsw-alias-label-secondary,#666);border-top:0;margin-top:0;padding-top:4px;gap:8px 16px}',
+    '.dsh-task-project-table{width:100%;display:block;overflow-x:auto;border-collapse:collapse;font-size:var(--dsh-content-font-size,1em)}.dsh-task-project-table th,.dsh-task-project-table td{padding:8px;border-bottom:1px solid rgba(120,150,190,.18);text-align:left;white-space:normal;word-break:break-word;vertical-align:top}.dsh-task-project-table th{color:var(--dsw-alias-label-secondary,#666);font-weight:600}',
+    '.dsh-task-brief{display:flex;flex-wrap:wrap;gap:4px 16px;margin:4px 0 4px;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-secondary,#666)}.dsh-task-brief span{overflow-wrap:anywhere}.dsh-task-gaps{margin:4px 0 4px;font-size:var(--dsh-content-font-size-secondary,0.93em)}.dsh-task-gaps p{margin:4px 0 0;color:var(--dsw-alias-label-secondary,#666);overflow-wrap:anywhere}.dsh-task-entries{margin:4px 0 4px;font-size:var(--dsh-content-font-size-secondary,0.93em)}.dsh-task-entries p{margin:4px 0 0;color:var(--dsw-alias-label-secondary,#666);overflow-wrap:anywhere}',
     '.dsh-task-panel .dsh-task-recent-row{margin:0;padding:8px 0;border:0;border-top:1px solid var(--dsw-alias-border-l1,#e7e8eb);border-radius:0}.dsh-task-recent-row>summary{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;cursor:pointer;list-style:none}.dsh-task-recent-row>summary::-webkit-details-marker{display:none}.dsh-task-recent-row>summary:focus-visible{outline:2px solid var(--dsw-alias-border-focus,#587cf6);outline-offset:3px}.dsh-task-finding-title{font-weight:600}.dsh-task-finding-title:before{content:"›";display:inline-block;margin-right:8px;color:var(--dsw-alias-label-secondary,#888)}.dsh-task-recent-row[open] .dsh-task-finding-title:before{transform:rotate(90deg)}.dsh-task-finding-target,.dsh-task-finding-note{grid-column:1/-1;color:var(--dsw-alias-label-secondary,#666);overflow-wrap:anywhere}.dsh-task-finding-note{color:var(--dsw-alias-label-primary,inherit)}.dsh-task-recent-row[open]>summary{margin-bottom:8px}.dsh-task-summary{padding-top:0px;border-bottom:0}',
     '.dsh-task-field{display:grid;grid-template-columns:118px minmax(0,600px);align-items:center;gap:8px;margin:8px 0}.dsh-task-field input,.dsh-task-field select{box-sizing:border-box;max-width:100%;min-width:0;font:inherit;color:inherit;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;background:var(--dsw-alias-bg-base,transparent);padding:5px 7px}.dsh-task-field input[type=number]{width:76px}.dsh-task-field select{width:fit-content}.dsh-task-mode-options{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}',
-    '.dsh-chat-project-status{margin:8px 0;padding:8px 0;border-top:1px solid var(--dsw-alias-border-l1,#e3e5e8);border-bottom:1px solid var(--dsw-alias-border-l1,#e3e5e8);font-size:12px}.dsh-chat-project-status-row{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap}.dsh-chat-project-status-row strong{font-variant-numeric:tabular-nums}.dsh-chat-project-status-row .dsh-chat-project-current{color:var(--dsw-alias-label-secondary,#666);overflow-wrap:anywhere}',
-    '.dsh-project-modal-backdrop{position:fixed;inset:0;z-index:1000;background:rgba(15,23,42,.38);display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box}.dsh-project-modal{width:min(1100px,calc(100vw - 48px));max-height:70vh;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#111);border:1px solid var(--dsw-alias-border-l1,#d8dde6);border-radius:12px;box-shadow:0 18px 60px rgba(15,23,42,.28);overflow:hidden}.dsh-project-modal-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-bottom:1px solid var(--dsw-alias-border-l1,#e3e5e8);flex:0 0 auto}.dsh-project-modal-head strong{font-size:14px}.dsh-project-modal-body{overflow:auto;padding:0 16px 16px;min-height:0}.dsh-project-table{width:100%;min-width:900px;border-collapse:collapse;table-layout:fixed;font-size:12px}.dsh-project-table th,.dsh-project-table td{padding:8px;border-bottom:1px solid rgba(120,150,190,.18);text-align:left;white-space:normal;word-break:break-word;vertical-align:top}.dsh-project-table th{position:sticky;top:0;z-index:1;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-secondary,#666);font-weight:600}.dsh-project-note{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere}.dsh-project-detail-link{margin-top:4px;padding:0;border:0;background:transparent;color:var(--dsw-alias-state-business-primary,#4b74d9);cursor:pointer;font:inherit;text-align:left}.dsh-project-detail{border:1px solid var(--dsw-alias-border-l1,#d8dde6);border-radius:8px;margin-top:12px;max-height:42vh;overflow:auto}.dsh-project-detail-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 12px;border-bottom:1px solid var(--dsw-alias-border-l1,#e3e5e8);position:sticky;top:0;background:var(--dsw-alias-bg-base,#fff)}.dsh-project-detail-body{margin:0;padding:12px;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.6 Consolas,"Microsoft YaHei",monospace;max-height:36vh;overflow:auto}',
+    '.dsh-chat-project-status{margin:8px 0;padding:8px 0;border-top:1px solid var(--dsw-alias-border-l1,#e3e5e8);border-bottom:1px solid var(--dsw-alias-border-l1,#e3e5e8);font-size:var(--dsh-content-font-size-secondary,0.93em)}.dsh-chat-project-status-row{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap}.dsh-chat-project-status-row strong{font-variant-numeric:tabular-nums}.dsh-chat-project-status-row .dsh-chat-project-current{color:var(--dsw-alias-label-secondary,#666);overflow-wrap:anywhere}',
+    '.dsh-project-modal-backdrop{position:fixed;inset:0;z-index:1000;background:rgba(15,23,42,.38);display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box}.dsh-project-modal{width:min(1100px,calc(100vw - 48px));max-height:70vh;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#111);border:1px solid var(--dsw-alias-border-l1,#d8dde6);border-radius:12px;box-shadow:0 18px 60px rgba(15,23,42,.28);overflow:hidden}.dsh-project-modal-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-bottom:1px solid var(--dsw-alias-border-l1,#e3e5e8);flex:0 0 auto}.dsh-project-modal-head strong{font-size:var(--dsh-content-font-size,1em)}.dsh-project-modal-body{overflow:auto;padding:0 16px 16px;min-height:0}.dsh-project-table{width:100%;min-width:900px;border-collapse:collapse;table-layout:fixed;font-size:var(--dsh-content-font-size-secondary,0.93em)}.dsh-project-table th,.dsh-project-table td{padding:8px;border-bottom:1px solid rgba(120,150,190,.18);text-align:left;white-space:normal;word-break:break-word;vertical-align:top}.dsh-project-table th{position:sticky;top:0;z-index:1;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-secondary,#666);font-weight:600}.dsh-project-note{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere}.dsh-project-detail-link{margin-top:4px;padding:0;border:0;background:transparent;color:var(--dsw-alias-state-business-primary,#4b74d9);cursor:pointer;font:inherit;text-align:left}.dsh-project-detail{border:1px solid var(--dsw-alias-border-l1,#d8dde6);border-radius:8px;margin-top:12px;max-height:42vh;overflow:auto}.dsh-project-detail-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 12px;border-bottom:1px solid var(--dsw-alias-border-l1,#e3e5e8);position:sticky;top:0;background:var(--dsw-alias-bg-base,#fff)}.dsh-project-detail-body{margin:0;padding:12px;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.6 Consolas,"Microsoft YaHei",monospace;max-height:36vh;overflow:auto}',
+    '.dsh-research-view{display:flex;flex-direction:column;gap:12px;font-size:var(--dsh-content-font-size,1em)}.dsh-research-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.dsh-research-head strong{font-size:var(--dsh-content-font-size,1em);font-weight:600}.dsh-research-head p{margin:4px 0 0;font-size:var(--dsh-content-font-size-secondary,0.93em);line-height:1.5;color:var(--dsw-alias-label-secondary,#666)}'
+      + '.dsh-research-empty{padding:16px;border:1px dashed var(--dsw-alias-border-l1,#d8dde6);border-radius:6px}.dsh-research-empty p{margin:0 0 12px;line-height:1.5;color:var(--dsw-alias-label-secondary,#666)}'
+      + '.dsh-research-list{display:flex;flex-direction:column;gap:8px}.dsh-research-row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 8px;width:100%;padding:8px 12px;text-align:left;font:inherit;color:inherit;background:transparent;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:6px;cursor:pointer}.dsh-research-row:hover{background:var(--dsw-alias-bg-hover,rgba(75,116,217,.06))}.dsh-research-row.is-active{border-color:var(--dsw-alias-state-business-primary,#4b74d9);background:var(--dsw-alias-state-business-primary-alpha,rgba(75,116,217,.08))}'
+      + '.dsh-research-state{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:6px;font-size:var(--dsh-content-font-size-secondary,0.93em);line-height:1.5;background:var(--dsw-alias-bg-l1,rgba(128,128,128,.08));color:var(--dsw-alias-label-secondary,#555);white-space:nowrap}.dsh-research-state[data-state=active]{color:var(--dsw-alias-state-business-primary,#4b74d9)}.dsh-research-state[data-state=refuted],.dsh-research-state[data-state=blocked]{color:var(--dsw-alias-state-error-primary,#c84040)}.dsh-research-state[data-state=supported]{color:var(--dsw-alias-state-success-primary,#2f9e44)}'
+      + '.dsh-research-title{font-weight:600;line-height:1.5;overflow-wrap:anywhere}.dsh-research-meta{grid-column:1/-1;font-size:var(--dsh-content-font-size-secondary,0.93em);line-height:1.5;color:var(--dsw-alias-label-secondary,#666);overflow-wrap:anywhere}'
+      + '.dsh-research-pager{display:flex;align-items:center;gap:8px;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-secondary,#666)}'
+      + '.dsh-research-findings{display:flex;flex-direction:column;gap:8px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l1,#e3e5e8)}.dsh-research-finding{display:flex;flex-direction:column;gap:4px;padding:8px 0}.dsh-research-finding-title{font-weight:600;line-height:1.5;overflow-wrap:anywhere}.dsh-research-finding-meta{font-size:var(--dsh-content-font-size-secondary,0.93em);line-height:1.5;color:var(--dsw-alias-label-secondary,#666);overflow-wrap:anywhere}'
+      + '.dsh-research-detail{padding:8px 12px;border-left:3px solid var(--dsw-alias-state-business-primary,#4b74d9);background:var(--dsw-alias-bg-l1,rgba(128,128,128,.04));border-radius:6px}.dsh-research-detail h4{margin:0 0 4px;font-size:var(--dsh-content-font-size,1em);font-weight:600;overflow-wrap:anywhere}.dsh-research-detail p{margin:4px 0;line-height:1.5;overflow-wrap:anywhere}.dsh-research-detail-meta,.dsh-research-boundary{font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsw-alias-label-secondary,#666)}.dsh-research-warning{color:var(--dsw-alias-state-error-primary,#c84040)}'
+      + '.dsh-research-observations{margin-top:8px}.dsh-research-observations summary{cursor:pointer;line-height:1.5}.dsh-research-observations pre{margin:8px 0 0;padding:8px;max-height:240px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 Consolas,"Microsoft YaHei",monospace;background:var(--dsw-alias-bg-base,#fff);border:1px solid var(--dsw-alias-border-l1,#e3e5e8);border-radius:6px}',
     '@media(max-width:760px){.dsh-project-modal-backdrop{padding:12px}.dsh-project-modal{width:calc(100vw - 24px);max-height:80vh}.dsh-project-modal-head{padding:8px 12px}.dsh-project-modal-body{padding:0 12px 12px}}',
     '@media(max-width:600px){.dsh-task-workspace{padding:8px 12px}.dsh-task-file-head{align-items:flex-start;flex-wrap:wrap}.dsh-task-metrics{gap:4px 12px}.dsh-task-field{grid-template-columns:1fr;gap:4px}}'
   ].join('');
   // v6 第 5.7 节共享组件层：控件尺寸改由 shared/ui-kit/ui-kit.css 提供
   // （scripts/sync-ui-kit.mjs 注入到 SAKER_UI_KIT_CSS），这里不再重复写一套。
   style.textContent += SAKER_UI_KIT_CSS;
+  // 2026-11-07 UX 重构：统一面板标题、分节、空状态与表单行。
+  // 目标是让新用户先看到"现在能做什么"，而不是实现说明；控件尺寸继续走共享 UI kit。
+  style.textContent += '.saker-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:0 0 12px;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));margin:0 0 12px}'
+    + '.saker-panel-headtext{display:flex;flex-direction:column;gap:4px;min-width:0}.saker-panel-head strong{font-size:var(--dsh-content-font-size,1em);font-weight:600}'
+    + '.saker-panel-subtitle{font-size:var(--dsh-content-font-size-secondary,0.93em);line-height:1.5;color:var(--dsw-alias-label-secondary,inherit);margin:0}'
+    + '.saker-panel-section{margin:16px 0 0;padding:16px 0 0;border-top:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16))}'
+    + '.saker-panel-section:first-of-type{margin-top:0;padding-top:0;border-top:0}'
+    + '.saker-panel-section h4{font-size:var(--dsh-content-font-size,1em);font-weight:600;margin:0 0 4px}'
+    + '.saker-panel-section-desc{font-size:var(--dsh-content-font-size-secondary,0.93em);line-height:1.5;color:var(--dsw-alias-label-secondary,inherit);margin:0 0 12px}'
+    + '.saker-panel-hint{font-size:var(--dsh-content-font-size-secondary,0.93em);line-height:1.5;color:var(--dsw-alias-label-secondary,inherit);margin:4px 0 0}'
+    + '.saker-panel-empty{display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:16px;border:1px dashed var(--dsw-alias-border-l1,rgba(128,128,128,.24));border-radius:6px;color:var(--dsw-alias-label-secondary,inherit);font-size:var(--dsh-content-font-size-secondary,0.93em);line-height:1.5}'
+    + '.saker-panel-empty strong{font-size:var(--dsh-content-font-size,1em);font-weight:600;color:var(--dsw-alias-label-primary,inherit)}'
+    + '.saker-panel-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin:16px 0 0}'
+    + '.saker-panel-actions .is-primary{background:var(--dsw-alias-state-business-primary,#4b74d9);color:#fff;border-color:transparent}'
+    + '.saker-check{display:flex;align-items:flex-start;gap:8px;font-size:var(--dsh-content-font-size,1em);line-height:1.5}'
+    + '.saker-check input{margin:4px 0 0;flex:0 0 auto}'
+    + '.saker-field{display:flex;flex-direction:column;gap:4px;margin:12px 0}'
+    + '.saker-field>span{font-size:var(--dsh-content-font-size,1em);font-weight:500}.saker-field>small{font-size:var(--dsh-content-font-size-secondary,0.93em);line-height:1.5;color:var(--dsw-alias-label-secondary,inherit)}'
+    + '.saker-field input,.saker-field select,.saker-field textarea{font:inherit;color:inherit;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.24));border-radius:6px;background:var(--dsw-alias-bg-base,transparent);padding:6px 8px;box-sizing:border-box;max-width:100%}'
+    + '.saker-field input,.saker-field select{height:32px;padding:0 8px}.saker-field textarea{min-height:64px;resize:vertical;line-height:1.5}'
+    + '.saker-grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}'
+    + '.dsh-settings-layout{display:grid;grid-template-columns:200px minmax(0,1fr);gap:24px;min-height:0;flex:1 1 auto;overflow:hidden}'
+    + '.dsh-settings-side{display:flex;flex-direction:column;gap:12px;min-height:0;padding-right:16px;border-right:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16))}'
+    + '.dsh-settings-nav{display:flex;flex-direction:column;gap:4px;padding:0;margin:0;border:0}'
+    + '.dsh-settings-nav button{display:flex;flex-direction:column;align-items:flex-start;gap:4px;width:100%;height:auto;padding:8px 10px;border:0;border-radius:6px;background:transparent;color:inherit;text-align:left;font:inherit;cursor:pointer}'
+    + '.dsh-settings-nav button small{font-size:var(--dsh-content-font-size-secondary,0.93em);line-height:1.5;color:var(--dsw-alias-label-secondary,inherit)}'
+    + '.dsh-settings-nav button.is-active{background:var(--dsw-alias-bg-hover,rgba(75,116,217,.10));color:var(--dsw-alias-state-business-primary,#4b74d9)}'
+    + '.dsh-settings-content{min-width:0;min-height:0;overflow:auto;padding-right:4px}'
+    + '.dsh-knowledge-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:16px;min-height:0}'
+    + '.dsh-knowledge-list{min-width:0}.dsh-knowledge-reader{min-width:0;border-left:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16));padding-left:16px;overflow:auto}'
+    + '.dsh-knowledge-row{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16))}'
+    + '.dsh-knowledge-row>div{display:flex;flex-direction:column;gap:4px;min-width:0}.dsh-knowledge-row strong{font-size:var(--dsh-content-font-size,1em);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+    + '.dsh-knowledge-row small{font-size:var(--dsh-content-font-size-secondary,0.93em);line-height:1.5;color:var(--dsw-alias-label-secondary,inherit)}.dsh-knowledge-row-actions{display:flex;gap:4px;flex:0 0 auto}'
+    + '@media(max-width:720px){.dsh-settings-layout{grid-template-columns:1fr;gap:12px;overflow:visible}.dsh-settings-side{padding-right:0;padding-bottom:12px;border-right:0;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16))}.dsh-settings-nav{flex-direction:row;overflow:auto}.dsh-settings-nav button{width:auto;flex:0 0 auto;flex-direction:row;align-items:center}.dsh-settings-nav button small{display:none}.dsh-settings-content{overflow:visible}.dsh-knowledge-layout{grid-template-columns:1fr}.dsh-knowledge-reader{border-left:0;padding-left:0;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.16))}}'
+    + '@media(max-width:640px){.saker-grid2{grid-template-columns:1fr}}';
+  // 2026-11-10 UX cleanup: the old full-screen ledger used a dark neon/3D globe
+  // visual that read as a demo rather than a working tool. Keep the data view,
+  // but render it with the host theme and ordinary cards.
+  style.textContent += '.dsh-rtr-screen{background:var(--dsw-alias-bg-base,#fff)!important;color:var(--dsw-alias-label-primary,inherit)!important}'
+    + '.dsh-rtr-screen::before{display:none!important}.dsh-rtr-screen::after{display:none!important}'
+    + '.dsh-scr-header{background:var(--dsw-alias-bg-l1,rgba(128,128,128,.04))!important;border-color:var(--dsw-alias-border-l1,rgba(128,128,128,.18))!important;box-shadow:none!important;backdrop-filter:none!important}'
+    + '.dsh-scr-title{background:none!important;-webkit-text-fill-color:currentColor!important;color:var(--dsw-alias-label-primary,inherit)!important;letter-spacing:0!important;font-size:20px!important}'
+    + '.dsh-scr-title small{display:block;margin-top:4px;font-size:var(--dsh-content-font-size-secondary,0.93em);font-weight:400;letter-spacing:0;color:var(--dsw-alias-label-secondary,inherit)}'
+    + '.dsh-scr-dot{background:#2f9e62!important;box-shadow:none!important;animation:none!important}'
+    + '.dsh-scr-panel,.dsh-scr-num{background:var(--dsw-alias-bg-l1,rgba(128,128,128,.04))!important;border-color:var(--dsw-alias-border-l1,rgba(128,128,128,.18))!important;box-shadow:none!important;backdrop-filter:none!important}'
+    + '.dsh-scr-globewrap{display:none!important}.dsh-scr-hero{gap:16px!important}'
+    + '.dsh-scr-donut{box-shadow:none!important}'
+    + '.dsh-scr-num:hover{transform:none!important;box-shadow:none!important}'
+    + '.dsh-rtr-screen .dsh-rtr-btn{background:var(--dsw-alias-bg-base,#fff)!important;color:inherit!important;border-color:var(--dsw-alias-border-l1,rgba(128,128,128,.24))!important;box-shadow:none!important;backdrop-filter:none!important}'
+    + '.dsh-rtr-screen .dsh-rtr-btn:hover{background:var(--dsw-alias-bg-hover,rgba(128,128,128,.08))!important}';
+  // 0.9.13: typography follows the host text-size setting. The composer reads
+  // the host body size explicitly instead of inheriting the shell chrome size.
+  style.textContent += '.dsh-chat-setup,.dsh-task-workspace,.dsh-chat-more,.dsh-prompt-drawer,.dsh-curation-dialog,.dsh-settings-layout,.dsh-materials-view,.dsh-knowledge-layout{font-size:var(--dsh-content-font-size,inherit)}'
+    + '.dsh-task-workspace{padding:12px 16px 16px}'
+    + '.dsh-prompt-full textarea{font-size:var(--dsh-content-font-size,inherit);min-height:160px;padding:8px}';
   document.head.appendChild(style);return function(){style.remove();};
 }
 
@@ -3113,7 +4287,7 @@ function TaskPanel(props) {
   var flow=useState('single'), interaction=useState('auto');
   function load(){var revision=++request.current;return api('task.status',{sessionId:props.sessionId}).then(function(value){if(!value.ok)throw Error(value.error||'读取任务失败');if(revision!==request.current)return;error[1]('');status[1](value);if(!value.configured){if(value.choice)selected[1](value.choice);if(value.options){flow[1](value.options.workflow);var nextWorkers=Number(value.options.workers);if(value.hostWorkerLimit&&nextWorkers>value.hostWorkerLimit)nextWorkers=value.hostWorkerLimit;workers[1](String(nextWorkers));interaction[1](value.options.interaction||'continuous');}}if(value.configured&&value.isPentest)return api('findings.list',{sessionId:props.sessionId,scope:'session',mode:'pentest',page:1,pageSize:5}).then(function(value){if(revision!==request.current)return;if(value.ok===false)throw Error(value.error||'读取最近记录失败');records[1]({rows:value.list?.rows||[],stats:value.stats||null,loading:false,error:''});}).catch(function(failure){if(revision===request.current)records[1]({rows:[],stats:null,loading:false,error:failure.message||String(failure)});});}).catch(function(e){if(revision===request.current)error[1](e.message);});}
   useEffect(function(){var active=true;status[1](null);error[1]('');records[1]({rows:[],stats:null,loading:true,error:''});load();var timer=setInterval(function(){if(active)load();},5000);return function(){active=false;request.current++;clearInterval(timer);};},[props.sessionId,props.blank]);
-  function run(endpoint,payload){busy[1](true);error[1]('');return api(endpoint,Object.assign({sessionId:props.sessionId},payload||{})).then(function(value){if(!value.ok)throw Error(value.error||'操作失败');status[1](value);return value;}).catch(function(e){error[1](e.message);}).finally(function(){busy[1](false);});}
+  function run(endpoint,payload){busy[1](true);error[1]('');return api(endpoint,Object.assign({sessionId:props.sessionId},payload||{})).then(function(value){if(!value.ok)throw Error(value.error||'操作失败');if(['task.choose','task.settings','task.interaction','task.workers','task.explain','task.limits','task.mode','task.budget'].includes(endpoint)){return load().then(function(){return value;});}status[1](value);return value;}).catch(function(e){error[1](e.message);}).finally(function(){busy[1](false);});}
   function choose(mode){selected[1](mode);flow[1]('single');return run('task.choose',{mode:mode,workflow:'single',workers:Number(workers[0]),interaction:interaction[0],startMode:'direct-test'});}
   function start(){var callsValue=String(budgetPair('calls')[0]||'').trim(),modelCallsValue=String(budgetPair('modelCalls')[0]||'').trim(),tokensValue=String(budgetPair('tokens')[0]||'').trim(),minutesValue=String(budgetPair('minutes')[0]||'').trim(),unmeteredValue=String(budgetPair('unmetered')[0]||'').trim();var budget={workers:Number(workers[0])};if(callsValue)budget.toolCalls=Number(callsValue);if(unmeteredValue)budget.unmeteredToolCalls=Number(unmeteredValue);if(modelCallsValue)budget.modelCalls=Number(modelCallsValue);if(tokensValue)budget.tokens=Number(tokensValue);if(minutesValue)budget.minutes=Number(minutesValue);var policy={workflow:'single',interaction:interaction[0],question:questionValue.trim(),budget:budget};var targetText=props.targetState?String(props.targetState[0]||''):target[0];if(targetText.trim())policy.target=targetText.trim();if(projectMode){busy[1](true);error[1]('');return api('project.start',{sessionId:props.sessionId,policy:policy}).then(function(value){if(!value.ok)throw Error(value.error||'开始案例测试失败');setQuestion('');return load();}).catch(function(failure){error[1](failure.message);}).finally(function(){busy[1](false);});}policy.mode=selected[0];return run('task.choose',{mode:selected[0],workflow:flow[0],workers:budget.workers,interaction:interaction[0],startMode:'direct-test'}).then(function(value){if(value)return run('task.start',{policy:policy}).then(function(started){if(started)setQuestion('');return started;});});}
   var current=status[0], labels={regular:'常规测试',nday:'Nday发现','0day':'0Day挖掘'}, workerLabels={starting:'正在启动',running:'正在工作',closing:'正在关闭','cleanup-failed':'关闭失败',released:'已释放'};
@@ -3136,7 +4310,7 @@ function TaskPanel(props) {
         React.createElement('div',{className:'dsh-task-state-line'},React.createElement('span',{className:'dsh-task-mode'},labels[current.policy.mode]),(current.stopped||current.idle)?React.createElement('span',{className:'dsh-task-stop-reason'},reasons[current.reason]||'测试已暂停'):null),
         React.createElement('p',{className:'dsh-task-scope-summary'},'范围：'+taskScopeDisplay(current.scope,current.policy.target)
           +' · 重点：'+(labels[current.policy.mode]||current.policy.mode||'按任务判断')
-          +' · 资产 '+(counts.assets||0)+' · 已发请求/回执 '+(counts.receipts||0)+' · 运行助手 '+(counts.runningWorkers||0)+' · 待你确认 '+(counts.needsUser||0)),
+          +' · 资产 '+(counts.assets||0)+' · 已发请求/回执 '+(counts.receipts||0)+' · 并行任务 '+(counts.runningWorkers||0)+' · 待你处理 '+(counts.needsUser||0)),
         React.createElement('div',{className:'dsh-task-summary-actions'},React.createElement(Btn,{onClick:function(){assetView[1](!assetView[0]);}},'查看资产')),
         current.pendingChange?React.createElement('div',{role:'status',className:'dsh-task-pending-change'},
           React.createElement('strong',null,'待确认的任务变更'),
@@ -3153,7 +4327,7 @@ function TaskPanel(props) {
           React.createElement('span',null,'入口：'+(briefEndpoint||'尚未记录')),
           React.createElement('span',null,'身份：'+(briefIdentity||'尚未记录')),
           React.createElement('span',null,'下一步：'+(briefAction||'等待已有材料')),
-          React.createElement('span',null,'依据：资产 '+(counts.assets||0)+' · 请求 '+(counts.requests||0)+' · 方法 '+(counts.methods||0)+' · 检查记录 '+(counts.checks||0))),
+      React.createElement('span',null,'依据：资产 '+(counts.assets||0)+' · 请求 '+(counts.requests||0)+' · 测试流程 '+(counts.methods||0)+' · 检查记录 '+(counts.checks||0))),
         (next&&next.requests||[]).length?React.createElement('details',{className:'dsh-task-entries','aria-label':'可测入口'},
           React.createElement('summary',null,'可测入口（'+next.requests.length+'，另有 '+(next.moreRequests||0)+' 条）'),
           next.requests.map(function(row){return React.createElement('p',{key:row.requestId+'|'+row.requestRevision},
@@ -3190,7 +4364,7 @@ function TaskPanel(props) {
       current.roundCost?React.createElement('p',null,'本轮模型运行含收尾 '+(current.roundCost.elapsedModelMs===null?'未取得':Math.ceil(current.roundCost.elapsedModelMs/1000)+' 秒')+'；父子代理并发时间合并计算。'):null,
       current.cost?React.createElement('details',null,React.createElement('summary',null,'主代理与全部子代理累计成本'),
         React.createElement('p',null,'总 token '+(current.cost.totalTokens===null?'未取得':current.cost.totalTokens)+' · 模型调用 '+current.cost.modelCalls+' · 工具调用 '+current.cost.toolCalls),
-        current.cost.sessions.map(function(row){return React.createElement('p',{key:row.sessionId},(row.role==='main'?'主代理':'子代理')+' '+row.sessionId+'：token '+(row.totalTokens===null?'未取得':row.totalTokens)+'，缓存读取 '+(row.cacheReadTokens===null?'未知':row.cacheReadTokens)+'，工具调用 '+row.toolCalls);}),
+        current.cost.sessions.map(function(row){return React.createElement('p',{key:row.sessionId},(row.role==='main'?'主代理':row.role==='knowledge-curation'?'知识整理（独立费用）':'子代理')+' '+row.sessionId+'：token '+(row.totalTokens===null?'未取得':row.totalTokens)+'，缓存读取 '+(row.cacheReadTokens===null?'未知':row.cacheReadTokens)+'，工具调用 '+row.toolCalls);}),
         React.createElement('p',null,'缺少用量的模型调用 '+current.cost.unknownUsageCalls+'；无法读取的会话 '+current.cost.unavailableSessions+'。不含后台标题生成，不估算金额。')):null),
       current.policy.blocker?React.createElement('div',{role:'alert'},React.createElement('p',null,current.policy.blocker.reason),React.createElement('p',null,'证据：'+current.policy.blocker.evidence),input('访问恢复情况',resolution),React.createElement(Btn,{disabled:busy[0]||!resolution[0].trim(),onClick:function(){return run('task.resume',{note:resolution[0]});}},'已处理阻碍，先复查正常访问')):null,
       (current.workers||[]).length?React.createElement('details',null,React.createElement('summary',null,'查看子代理任务（'+(current.workers||[]).length+'）'),
@@ -3227,14 +4401,14 @@ function ContextPanel(props) {
     }).catch(function (failure) { error[1](failure.message || String(failure)); });
   }
   return React.createElement('details', { style: { padding: 16 }, 'aria-label': '共享资产与请求记录' },
-    React.createElement('summary', null, '共享资产、请求与方法'),
+    React.createElement('summary', null, '共享资产、请求与测试流程'),
     React.createElement('p', null, '查看本会话已有记录，按入口、身份和版本复用。'),
     React.createElement('label', null, '索引偏移 ', React.createElement('input', { type: 'number', min: 0, max: 2000, value: offset[0], onChange: function (event) { offset[1](Number(event.target.value)); } })),
     React.createElement(Btn, { onClick: function () { return read(false); } }, '读取索引'),
     React.createElement('select', { 'aria-label': '记录类型', value: kind[0], onChange: function (event) { kind[1](event.target.value); } },
-      ['asset', 'request', 'method'].map(function (item) { return React.createElement('option', { key: item, value: item }, { asset: '资产', request: '请求', method: '方法' }[item]); })),
+    ['asset', 'request', 'method'].map(function (item) { return React.createElement('option', { key: item, value: item }, { asset: '资产', request: '请求', method: '测试流程' }[item]); })),
     React.createElement('input', { 'aria-label': '记录ID', value: id[0], onChange: function (event) { id[1](event.target.value); } }),
-    React.createElement('input', { 'aria-label': '请求或方法版本', value: version[0], onChange: function (event) { version[1](event.target.value); } }),
+    React.createElement('input', { 'aria-label': '请求或测试流程版本', value: version[0], onChange: function (event) { version[1](event.target.value); } }),
     React.createElement(Btn, { onClick: function () { return read(true); } }, '读取详情'),
     error[0] ? React.createElement('div', { role: 'alert' }, error[0]) : null,
     text[0] ? React.createElement('pre', { style: { whiteSpace: 'pre-wrap', overflow: 'auto', maxHeight: 360 } }, text[0]) : null);
@@ -3276,12 +4450,124 @@ function ResearchPanel(props) {
     error[0] ? React.createElement('div', { role: 'alert' }, error[0]) : null);
 }
 
+// 测试结果的主视图：用户先看到“正在验证什么”，而不是一串执行流水。
+// 数据来自现有 research_hypotheses；每条绑定已存请求/身份，未确认前不当作漏洞。
+function ResearchView(props) {
+  var index = useState(null), selected = useState(null), error = useState(''), busy = useState(false), offset = useState(0);
+  var results = useState(null), resultsError = useState('');
+  var request = useRef(0), resultsRequest = useRef(0);
+  var stateLabels = { active: '正在验证', stopped: '已停止', restricted: '缺条件/未覆盖', refuted: '出现反证', supported: '重复观察支持', blocked: '基线已失效' };
+  var classLabels = { 'known-vulnerability': '已知漏洞', 'new-variant': '新变体', 'suspected-unpublished': '疑似未公开', 'unconfirmed-anomaly': '未证实异常' };
+  var stopReasons = { no_new_information: '连续没有新信息，已停止这个方向', hypothesis_budget_exhausted: '本问题的尝试次数已用完',
+    falsifier_observed: '观察到反证，已结束这个方向', repeat_with_normal_control: '已保存两次带正常对照的支持观察' };
+  function load(next) {
+    var revision = ++request.current;
+    busy[1](true); error[1]('');
+    return api('research.index', { sessionId: props.sessionId, offset: next }).then(function (result) {
+      if (revision !== request.current) return;
+      if (!result.ok) throw Error(result.error || '读取正在验证的问题失败');
+      index[1](result); offset[1](next); selected[1](null);
+    }).catch(function (failure) {
+      if (revision === request.current) error[1](failure.message || String(failure));
+    }).finally(function () { if (revision === request.current) busy[1](false); });
+  }
+  function detail(id) {
+    var revision = ++request.current;
+    busy[1](true); error[1]('');
+    return api('research.detail', { sessionId: props.sessionId, id: id }).then(function (result) {
+      if (revision !== request.current) return;
+      if (!result.ok) throw Error(result.error || '读取问题详情失败');
+      selected[1](result);
+    }).catch(function (failure) {
+      if (revision === request.current) error[1](failure.message || String(failure));
+    }).finally(function () { if (revision === request.current) busy[1](false); });
+  }
+  function loadResults() {
+    var revision = ++resultsRequest.current;
+    return api('findings.list', { sessionId: props.sessionId, scope: 'session', mode: 'pentest', page: 1, pageSize: 5 }).then(function (result) {
+      if (revision !== resultsRequest.current) return;
+      if (result.ok === false) throw Error(result.error || '读取结果失败');
+      results[1]({ rows: result.list && result.list.rows || [], stats: result.stats || null });
+      resultsError[1]('');
+    }).catch(function (failure) {
+      if (revision === resultsRequest.current) resultsError[1](failure.message || String(failure));
+    });
+  }
+  useEffect(function () {
+    load(0);
+    loadResults();
+    return function () { request.current++; resultsRequest.current++; };
+  }, [props.sessionId]);
+  var current = index[0], row = selected[0];
+  return React.createElement('div', { className: 'dsh-research-view', 'aria-label': '正在验证的问题' },
+    React.createElement('div', { className: 'dsh-research-head' },
+      React.createElement('div', null,
+        React.createElement('strong', null, '正在验证的问题'),
+        React.createElement('p', null, '每条问题都绑定已存请求和身份；未确认前不会当成漏洞。')),
+      React.createElement(Btn, { disabled: busy[0], onClick: function () { return load(offset[0]); } }, '刷新')),
+    error[0] ? React.createElement('p', { role: 'alert' }, error[0]) : null,
+    resultsError[0] ? React.createElement('p', { role: 'alert' }, '结果读取失败：' + resultsError[0]) : null,
+    !current ? React.createElement('p', { role: 'status' }, error[0] ? '读取失败，可重试。' : '正在读取问题…')
+      : !current.total ? React.createElement('div', { className: 'dsh-research-empty' },
+        React.createElement('p', null, '还没有具体问题。给目标和已有请求后，Saker 会把方向拆成可验证的问题；这里会显示每条问题绑定的请求、身份、正常对照和下一步。'),
+        React.createElement(Btn, { onClick: function () { if (props.onShowExecution) props.onShowExecution(); } }, '查看执行记录'))
+      : React.createElement('div', { className: 'dsh-research-list' },
+        current.items.map(function (item) {
+          var state = stateLabels[item.state] || item.state;
+          return React.createElement('button', { key: item.id, type: 'button', className: 'dsh-research-row' + (row && row.id === item.id ? ' is-active' : ''),
+            'aria-expanded': row && row.id === item.id, onClick: function () { return detail(item.id); } },
+            React.createElement('span', { className: 'dsh-research-state', 'data-state': item.state }, state),
+            React.createElement('span', { className: 'dsh-research-title' }, item.title),
+            React.createElement('span', { className: 'dsh-research-meta' },
+              (item.endpoint || '地址未记录') + ' · 身份 ' + (item.authContext || '未记录')
+              + ' · 尝试 ' + item.attempts + '/' + item.maxAttempts
+              + (item.noInformation ? ' · 连续无新信息 ' + item.noInformation + ' 次' : '')
+              + (item.restriction ? ' · ' + (item.restriction.code || '缺条件') : '')));
+        }),
+        current.total > 20 ? React.createElement('div', { className: 'dsh-research-pager' },
+          React.createElement(Btn, { disabled: busy[0] || offset[0] === 0, onClick: function () { return load(Math.max(0, offset[0] - 20)); } }, '上一页'),
+          React.createElement('span', null, '第 ' + (Math.floor(offset[0] / 20) + 1) + ' 页 · 共 ' + current.total + ' 条'),
+          React.createElement(Btn, { disabled: busy[0] || offset[0] + 20 >= current.total, onClick: function () { return load(offset[0] + 20); } }, '下一页')) : null),
+    results[0] ? React.createElement('div', { className: 'dsh-research-findings' },
+      React.createElement('div', { className: 'dsh-research-head' },
+        React.createElement('div', null,
+          React.createElement('strong', null, '已有结果'),
+          React.createElement('p', null, results[0].stats && results[0].stats.delivery
+            ? '已确认 ' + results[0].stats.delivery.ready + ' · 待验证 ' + Math.max(0, results[0].stats.delivery.incomplete - (results[0].stats.byStatus && results[0].stats.byStatus['false-positive'] || 0) - (results[0].stats.byStatus && results[0].stats.byStatus.fixed || 0))
+            : '本会话的候选与已确认结果')),
+        React.createElement(Btn, { onClick: function () { if (props.onShowFindings) props.onShowFindings(); } }, '查看全部发现')),
+      results[0].rows.length ? results[0].rows.slice(0, 3).map(function (finding) {
+        return React.createElement('div', { className: 'dsh-research-finding', key: finding.id },
+          React.createElement('span', { className: 'dsh-research-finding-title' }, finding.title),
+          React.createElement('span', { className: 'dsh-research-finding-meta' },
+            (SEVERITY_LABEL[finding.severity] || finding.severity || '未定级') + ' · '
+            + statusTextFor(finding, 'pentest', STATUS_LABEL) + ' · ' + (finding.target || '地址未记录')));
+      }) : React.createElement('p', { className: 'dsh-research-meta' }, '还没有结果记录。未确认的问题不会出现在这里。')) : null,
+    row ? React.createElement('div', { className: 'dsh-research-detail' },
+      React.createElement('h4', null, row.title),
+      React.createElement('p', { className: 'dsh-research-detail-meta' },
+        (stateLabels[row.state === 'restricted' || row.current ? row.state : 'blocked'] || row.state) + ' · '
+        + (classLabels[row.classification] || row.classification) + ' · ' + (row.binding.endpoint || '地址未记录')
+        + ' · 身份 ' + (row.binding.authContext || '未记录') + ' · 请求版本 ' + (row.binding.requestRevision || '未记录')),
+      row.restriction ? React.createElement('p', { className: 'dsh-research-warning' },
+        '缺条件/未覆盖：' + (row.restriction.code || '未知') + '；结论未知。' + (row.reason ? '原因：' + (stopReasons[row.reason] || row.reason) : '')) : null,
+      row.blockedReason ? React.createElement('p', { className: 'dsh-research-warning' }, '当前基线失效：' + row.blockedReason) : null,
+      [['boundary', '边界'], ['normalBehavior', '正常应该怎样'], ['supportCriterion', '什么证据算支持'], ['falsifier', '什么证据算反证'], ['nextInformation', '下一步需要的信息'], ['serverPath', '处理路径']].map(function (item) {
+        return row[item[0]] ? React.createElement('p', { key: item[0] }, React.createElement('strong', null, item[1] + '：'), row[item[0]]) : null;
+      }),
+      row.reason && !row.restriction ? React.createElement('p', null, React.createElement('strong', null, '停止原因：'), stopReasons[row.reason] || row.reason) : null,
+      React.createElement('p', { className: 'dsh-research-boundary' }, '仍须独立核对影响与复现；缺少 CVE 不证明首次发现。'),
+      row.observations && row.observations.length ? React.createElement('details', { className: 'dsh-research-observations' },
+        React.createElement('summary', null, '正常对照、观察与公开解释（' + row.observations.length + '）'),
+        React.createElement('pre', null, JSON.stringify({ knownCheck: row.knownCheck, observations: row.observations }, null, 2))) : null) : null);
+}
+
 function MethodPackagesPanel(props) {
   var index = useState(null), selected = useState(null), notes = useState(''), error = useState(''), offset = useState(0), busy = useState(false);
   function run(action, payload) {
     error[1](''); busy[1](true);
     return api('methods.action', Object.assign({ sessionId: props.sessionId, action: action }, payload || {})).then(function (result) {
-      if (!result.ok) throw new Error(typeof result.error === 'string' ? result.error : result.error && result.error.message || '方法操作失败');
+    if (!result.ok) throw new Error(typeof result.error === 'string' ? result.error : result.error && result.error.message || '测试流程操作失败');
       return result;
     }).catch(function (failure) { error[1](failure.message || String(failure)); return null; }).finally(function () { busy[1](false); });
   }
@@ -3306,27 +4592,27 @@ function MethodPackagesPanel(props) {
       .then(function (result) { if (result) return load(offset[0]).then(function () { return detail(result.digest); }); });
   }
   var method = selected[0], doc = method && method.document;
-  return React.createElement('details', { style: { padding: 16 }, 'aria-label': '精选方法包管理' },
-    React.createElement('summary', null, '精选方法包'),
+  return React.createElement('details', { style: { padding: 16 }, 'aria-label': '精选流程包管理' },
+    React.createElement('summary', null, '精选流程包'),
     React.createElement('div', { style: { display: 'flex', gap: 12, alignItems: 'center', marginTop: 12 } },
-      React.createElement(Btn, { disabled: busy[0], onClick: function () { return load(offset[0]); } }, '读取方法目录'),
-      React.createElement('label', null, '导入方法包 ', React.createElement('input', { type: 'file', accept: '.json,application/json', disabled: busy[0], 'aria-label': '导入方法包', onChange: function (event) { return importFile(event, 'stage'); } }))),
+      React.createElement(Btn, { disabled: busy[0], onClick: function () { return load(offset[0]); } }, '读取流程目录'),
+      React.createElement('label', null, '导入流程包 ', React.createElement('input', { type: 'file', accept: '.json,application/json', disabled: busy[0], 'aria-label': '导入流程包', onChange: function (event) { return importFile(event, 'stage'); } }))),
     index[0] ? React.createElement('div', null,
       index[0].items.length ? index[0].items.map(function (item) { return React.createElement('div', { key: item.digest, style: { display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--dsw-alias-border-l1,#e9e9ec)' } },
         React.createElement('span', { style: { flex: 1 } }, item.title + ' · ' + item.version + ' · ' + (item.active ? '已激活' : item.status === 'trusted' ? '审阅及测试通过' : item.status === 'rejected' ? '已否决' : '待审阅')),
-        React.createElement(Btn, { disabled: busy[0], onClick: function () { return detail(item.digest); } }, '查看资料')); }) : React.createElement('p', null, '尚未导入精选方法'),
+        React.createElement(Btn, { disabled: busy[0], onClick: function () { return detail(item.digest); } }, '查看资料')); }) : React.createElement('p', null, '尚未导入精选流程'),
       React.createElement(Btn, { disabled: busy[0] || offset[0] === 0, onClick: function () { return load(Math.max(0, offset[0] - 20)); } }, '上一页'),
       React.createElement(Btn, { disabled: busy[0] || offset[0] + 20 >= index[0].total, onClick: function () { return load(offset[0] + 20); } }, '下一页')) : null,
     doc ? React.createElement('div', { style: { marginTop: 12 } },
       React.createElement('h4', null, doc.title + ' · ' + method.version),
       React.createElement('p', null, '产品：' + doc.products.join('、') + '；机制：' + doc.mechanism),
-      React.createElement('p', null, '方法摘要：' + method.digest),
+      React.createElement('p', null, '流程摘要：' + method.digest),
       React.createElement('details', null, React.createElement('summary', null, '请求、对照、代码、依赖与来源'), React.createElement('pre', { style: { whiteSpace: 'pre-wrap', overflow: 'auto', maxHeight: 360 } }, JSON.stringify(doc, null, 2))),
       React.createElement('details', null, React.createElement('summary', null, '审阅和测试记录'), React.createElement('pre', { style: { whiteSpace: 'pre-wrap', overflow: 'auto', maxHeight: 280 } }, JSON.stringify({ review: method.review, verification: method.verification }, null, 2))),
-      React.createElement('textarea', { 'aria-label': '方法审阅意见', placeholder: '记录对方法、判据、代码及测试证据的审阅意见', value: notes[0], rows: 3, style: { width: '100%' }, onChange: function (event) { notes[1](event.target.value); } }),
+      React.createElement('textarea', { 'aria-label': '流程审阅意见', placeholder: '记录对流程、判据、代码及测试证据的审阅意见', value: notes[0], rows: 3, style: { width: '100%' }, onChange: function (event) { notes[1](event.target.value); } }),
       React.createElement(Btn, { disabled: busy[0] || !notes[0].trim(), onClick: function () { return review('approved'); } }, '审阅通过'),
-      React.createElement(Btn, { disabled: busy[0] || !notes[0].trim(), onClick: function () { return review('rejected'); } }, '否决方法'),
-      React.createElement('label', { style: { marginLeft: 12 } }, '导入正反例测试证据 ', React.createElement('input', { type: 'file', accept: '.json,application/json', disabled: busy[0], 'aria-label': '导入方法测试证据', onChange: function (event) { return importFile(event, 'verify'); } })),
+      React.createElement(Btn, { disabled: busy[0] || !notes[0].trim(), onClick: function () { return review('rejected'); } }, '否决流程'),
+      React.createElement('label', { style: { marginLeft: 12 } }, '导入正反例测试证据 ', React.createElement('input', { type: 'file', accept: '.json,application/json', disabled: busy[0], 'aria-label': '导入流程测试证据', onChange: function (event) { return importFile(event, 'verify'); } })),
       React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } },
         React.createElement(Btn, { disabled: busy[0] || method.status !== 'trusted' || method.active, onClick: function () { return activate(false); } }, '激活此版本'),
         React.createElement(Btn, { disabled: busy[0] || method.status !== 'trusted' || method.active, onClick: function () { return activate(true); } }, '回退到此版本'))) : null,
@@ -3352,12 +4638,12 @@ function CheckedList(props) {
 	}
 	function exportBundle() {
 		return api('delivery.bundle', { sessionId: props.sessionId }).then(function (result) {
-			if (!result.ok) throw new Error(result.error || '交付包生成失败');
+			if (!result.ok) throw new Error(result.error || '报告包生成失败');
 			downloadArchive(result.filename, result.archive);
 		}).catch(function (failure) { setError(failure.message); });
 	}
 	return React.createElement('div', {className:'dsh-task-delivery'},
-		React.createElement(Btn, { onClick: exportBundle }, '导出本会话完整交付包'),
+		React.createElement(Btn, { onClick: exportBundle }, '导出本会话完整报告包'),
 		React.createElement('details', {className:'dsh-task-fold'},React.createElement('summary',null,'查看已检查的项目'),
 		React.createElement(Btn, { onClick: load }, '读取检查记录'),
 		React.createElement(Btn, { onClick: exportChecks }, '导出检查清单'),
@@ -3406,6 +4692,8 @@ function ModePage(props) {
 	var rvStatus = useState(""); var setRvStatus = rvStatus[1];
 	var rvNote = useState(""); var setRvNote = rvNote[1];
 	var rvSecond = useState("high"); var setRvSecond = rvSecond[1];
+	var workerReview = useState(null); var setWorkerReview = workerReview[1];
+	var workerReviewBusy = useState(false); var setWorkerReviewBusy = workerReviewBusy[1];
 
 	var fetchList = useCallback(function (opts) {
 		var o = opts || {};
@@ -3528,6 +4816,18 @@ function ModePage(props) {
 								setNotice("验证请求失败：" + ((r && r.error) || "未知错误"));
 			})
 			.catch(function (e) { setNotice("验证请求失败：" + (e && e.message ? e.message : e)); });
+	}
+	function onWorkerReview(f) {
+		var uid = uidOf(f);
+		setWorkerReview(null); setWorkerReviewBusy(true); setNotice("独立复核中：只读取现有证据，按当前任务范围和预算运行。");
+		api("task.review", { sessionId: f.sessionId || sessionId })
+			.then(function (r) {
+				if (!r || r.ok === false) throw Error((r && r.error) || "独立复核未完成");
+        setWorkerReview({ uid: uid, text: r.output || "独立复核已完成，但没有返回文本。" });
+				setNotice("独立复核完成；结果已展开在当前候选下，不会自动改状态。");
+			})
+			.catch(function (e) { setNotice("独立复核失败：" + (e && e.message ? e.message : e)); })
+			.finally(function () { setWorkerReviewBusy(false); });
 	}
 	var LIVE_BUSY = {}; // 实测 in-flight 防重（key=sessionId:id——流水线含搜索+探测，连点会并发跑多条并重复扣平台配额）
 	function onLiveVerify(f) {
@@ -3667,7 +4967,7 @@ function ModePage(props) {
 				f.summary ? React.createElement('p',null,f.summary) : null,
 				React.createElement('p',null,findingSummary(f)),
 				expanded[0]===uid?React.createElement('div',{className:'dsh-task-actions'},React.createElement(Btn,{onClick:function(){onVerify(f);}},'复核状态'),React.createElement(Btn,{danger:true,onClick:function(){onDelete(f);}},confirmDel[0]===uid?'确认删除':'删除记录')):null):null,
-				expanded[0] === uid ? React.createElement(Detail, { f: f, mode: mode, meta: meta, onVerify: onVerify, onLiveVerify: onLiveVerify, onExportOne: exportOne, onEffectReview: onEffectReview, onPreview: previewReport, onClose: function () { toggle(f); }, onOpenExecution: props.onOpenExecution }) : null);
+				expanded[0] === uid ? React.createElement(Detail, { f: f, mode: mode, meta: meta, onVerify: onVerify, onLiveVerify: onLiveVerify, onWorkerReview: onWorkerReview, workerReview: workerReview[0] && workerReview[0].uid === uid ? workerReview[0] : null, workerReviewBusy: workerReviewBusy[0], onExportOne: exportOne, onEffectReview: onEffectReview, onPreview: previewReport, onClose: function () { toggle(f); }, onOpenExecution: props.onOpenExecution }) : null);
 	};
 
 	var tlItem = function (f) {
@@ -3699,7 +4999,7 @@ function ModePage(props) {
 						React.createElement("span", null, "主机 ", React.createElement("b", null, f.target || "（未填）")),
 						React.createElement("span", null, "证据 ", React.createElement("b", null, f.evidence || "（未填）")),
 						React.createElement("span", { className: "dsh-rtr-tl-concl" }, f.summary || "")),
-					open ? React.createElement(Detail, { f: f, mode: mode, meta: meta, onVerify: onVerify, onLiveVerify: onLiveVerify, onExportOne: exportOne, onEffectReview: onEffectReview, onPreview: previewReport, onClose: function () { toggle(f); }, onOpenExecution: props.onOpenExecution }) : null)));
+					open ? React.createElement(Detail, { f: f, mode: mode, meta: meta, onVerify: onVerify, onLiveVerify: onLiveVerify, onWorkerReview: onWorkerReview, workerReview: workerReview[0] && workerReview[0].uid === uid ? workerReview[0] : null, workerReviewBusy: workerReviewBusy[0], onExportOne: exportOne, onEffectReview: onEffectReview, onPreview: previewReport, onClose: function () { toggle(f); }, onOpenExecution: props.onOpenExecution }) : null)));
 	};
 
 	var cpItem = function (f) {
@@ -3733,7 +5033,7 @@ function ModePage(props) {
 					hop("权限", f.permission),
 					hop("资源", f.resource || f.target),
 					hop("影响", f.impact || f.summary)),
-				open ? React.createElement(Detail, { f: f, mode: mode, meta: meta, onVerify: onVerify, onLiveVerify: onLiveVerify, onExportOne: exportOne, onEffectReview: onEffectReview, onPreview: previewReport, onClose: function () { toggle(f); }, onOpenExecution: props.onOpenExecution }) : null));
+				open ? React.createElement(Detail, { f: f, mode: mode, meta: meta, onVerify: onVerify, onLiveVerify: onLiveVerify, onWorkerReview: onWorkerReview, workerReview: workerReview[0] && workerReview[0].uid === uid ? workerReview[0] : null, workerReviewBusy: workerReviewBusy[0], onExportOne: exportOne, onEffectReview: onEffectReview, onPreview: previewReport, onClose: function () { toggle(f); }, onOpenExecution: props.onOpenExecution }) : null));
 	};
 
 	var listBody;
@@ -3782,12 +5082,12 @@ function ModePage(props) {
 				? React.createElement("div", { className: "dsh-rtr-empty" },
 					"测试中发现的异常会保存在这里。",
 					React.createElement("br", null),
-					"添加网站请求或代码，AI 就能从这些内容开始检查。",
+          "添加网站请求或代码，Saker 就能从这些内容开始检查。",
 					props.onAddMaterials ? React.createElement("div", { className: "dsh-rtr-empty-actions" },
-						React.createElement("button", { type: "button", onClick: function () { props.onAddMaterials(); } }, "添加测试资料")) : null)
+						React.createElement("button", { type: "button", onClick: function () { props.onAddMaterials(); } }, "添加资料")) : null)
 				: React.createElement("div", { className: "dsh-rtr-empty" },
 					emptyMessage, React.createElement("br", null),
-					"发现会在保存后显示。若对话中已有结论，可请 AI 整理并保存发现与证据。"))
+          "发现会在保存后显示。若对话中已有结论，可让 Saker 整理并保存发现与证据。"))
 			: rows.map(rowEl);
 	}
 
@@ -3806,7 +5106,7 @@ function ModePage(props) {
 		// 人工复核向导弹层（原生对话框会阻塞渲染进程，故全部就地渲染）
 		(rv[0] ? React.createElement("div", { style: { position: "fixed", left: "50%", top: "72px", transform: "translateX(-50%)", zIndex: 3000, width: "min(580px, 92vw)", maxHeight: "70vh", overflowY: "auto", background: "var(--dsw-alias-bg-base,#fff)", border: "1px solid var(--dsw-alias-border-l1,#d9d9de)", borderRadius: 6, boxShadow: "0 12px 40px rgba(0,0,0,.2)", padding: "14px 16px", whiteSpace: "normal" } },
 			React.createElement("div", { style: { fontWeight: 700, marginBottom: 8 } }, "人工复核标记 #" + rv[0].f.seq + " " + rv[0].f.title),
-			React.createElement("div", { style: { fontSize: 12, color: "#b45309", marginBottom: 12, whiteSpace: "pre-wrap", maxHeight: 140, overflowY: "auto" } }, rv[0].error),
+			React.createElement("div", { style: { fontSize:'var(--dsh-content-font-size-secondary,0.93em)', color: "#b45309", marginBottom: 12, whiteSpace: "pre-wrap", maxHeight: 140, overflowY: "auto" } }, rv[0].error),
 			rvStep[0] === 1 ? React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
 				React.createElement(Btn, { primary: true, onClick: function () { setRvStatus("verified"); setRvNote(reviewNoteFor("verified")); setRvStep(2); } }, "标记「" + rv[0].posText + "」"),
 				(rv[0].negativeOptions || []).map(function (opt) {
@@ -3814,14 +5114,14 @@ function ModePage(props) {
 				}),
 				React.createElement(Btn, { onClick: function () { setRv(null); setNotice("已取消标记——成果保持原状态"); } }, "取消")) : null,
 			rvStep[0] === 2 ? React.createElement("div", null,
-				React.createElement("div", { style: { fontSize: 12, marginBottom: 4 } }, rvStatus[0] === "verified" ? "复核结论（写入验证记录，至少 40 字）：" : "复核结论（写入验证记录）："),
-				React.createElement("textarea", { value: rvNote[0], onChange: function (e) { setRvNote(e.target.value); }, rows: 4, style: { width: "100%", fontSize: 12, padding: 8, borderRadius: 6, border: "1px solid var(--dsw-alias-border-l1,#d9d9de)", boxSizing: "border-box", fontFamily: "inherit" } }),
+				React.createElement("div", { style: { fontSize:'var(--dsh-content-font-size-secondary,0.93em)', marginBottom: 4 } }, rvStatus[0] === "verified" ? "复核结论（写入验证记录，至少 40 字）：" : "复核结论（写入验证记录）："),
+				React.createElement("textarea", { value: rvNote[0], onChange: function (e) { setRvNote(e.target.value); }, rows: 4, style: { width: "100%", fontSize:'var(--dsh-content-font-size-secondary,0.93em)', padding: 8, borderRadius: 6, border: "1px solid var(--dsw-alias-border-l1,#d9d9de)", boxSizing: "border-box", fontFamily: "inherit" } }),
 				React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" } },
 					React.createElement(Btn, { primary: true, onClick: function () { if (rvStatus[0] === "verified") { if (String(rvNote[0]).trim().length < 40) { setNotice("转为「已验证」需至少 40 字复核依据（当前 " + String(rvNote[0]).trim().length + " 字）"); return; } setRvStep(3); } else reviewSubmit(rvStatus[0]); } }, rvStatus[0] === "verified" ? "下一步：独立二次评级" : "提交标记"),
 					React.createElement(Btn, { onClick: function () { setRvStep(1); } }, "上一步"),
-					React.createElement("span", { style: { fontSize: 12, color: "#6e6e73" } }, "当前 " + String(rvNote[0]).trim().length + " 字"))) : null,
+					React.createElement("span", { style: { fontSize:'var(--dsh-content-font-size-secondary,0.93em)', color: "#6e6e73" } }, "当前 " + String(rvNote[0]).trim().length + " 字"))) : null,
 			rvStep[0] === 3 ? React.createElement("div", null,
-				React.createElement("div", { style: { fontSize: 12, marginBottom: 4 } }, "独立二次评级（未能复现所声称的影响就选 info）："),
+				React.createElement("div", { style: { fontSize:'var(--dsh-content-font-size-secondary,0.93em)', marginBottom: 4 } }, "独立二次评级（未能复现所声称的影响就选 info）："),
 				React.createElement("select", { className: "dsh-rtr-select", value: rvSecond[0], onChange: function (e) { setRvSecond(e.target.value); } },
 					SECOND_RATING_LIST.map(function (s) { return React.createElement("option", { key: s, value: s }, s); })),
 				React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 8 } },
@@ -3842,10 +5142,10 @@ function ModePage(props) {
 		})),
 		scope !== 'all' && (view.ordinaryReports || []).length ? React.createElement('details', { className: 'dsh-task-fold' },
 			React.createElement('summary', null, '普通结果（' + view.ordinaryReports.length + '）'),
-			React.createElement('p', { style: { margin: '8px 0', fontSize: 12, color: '#6e6e73' } }, '模型最终答复会进入完整交付包；未独立确认的业务结论不等同于有效漏洞。'),
+			React.createElement('p', { style: { margin: '8px 0', fontSize:'var(--dsh-content-font-size-secondary,0.93em)', color: '#6e6e73' } }, '模型最终答复会进入完整报告包；未独立确认的业务结论不等同于有效漏洞。'),
 			view.ordinaryReports.map(function (item) {
 				return React.createElement('div', { key: item.id, style: { padding: '8px 0', borderTop: '1px solid color-mix(in srgb,currentColor 10%,transparent)' } },
-					React.createElement('div', { style: { fontSize: 12, marginBottom: 4 } },
+					React.createElement('div', { style: { fontSize:'var(--dsh-content-font-size-secondary,0.93em)', marginBottom: 4 } },
 						(item.complete === false ? '不完整 · ' : '完整 · ') + (item.inProgress ? '本轮执行中 · ' : ''),
 						'原件 ' + Number(item.originalChars || item.text.length) + ' 字符',
 						item.omittedRange ? ' · 缺少 ' + item.omittedRange.from + '-' + (item.omittedRange.to || '末尾') : ''),
@@ -3943,7 +5243,7 @@ function BigScreen(props) {
 	var total = ov.total || 0;
 	var maxMode = Math.max(1, ...SCR_MODE_VOCAB.map(function (m) { return (ov.byMode[m] || 0); }));
 	var sevOrder = ["critical", "high", "medium", "low"];
-	var sevColors = { critical: "#c2182f", high: "#ff4d4d", medium: "#ffdd33", low: "#3a9dff" };
+	var sevColors = { critical: "#c2182f", high: "#ff4d4d", medium: "#ffb454", low: "#3a9dff" };
 	// 风险口径：严重度统计只计漏洞型四模式（渗透/代审/应急/云）——binary/av 等产物型的默认 medium 不混入漏洞等级口径
 	var SEV_SCOPE_MODES = { "pentest": 1, "code-audit": 1, "incident-response": 1, "cloud-security": 1 };
 	var sevScoped = { critical: 0, high: 0, medium: 0, low: 0 };
@@ -3965,7 +5265,7 @@ function BigScreen(props) {
 	var modeOf = function (m) { return SCR_MODE_LABEL[m] || m; };
 	var satSpecs = [
 		{ key: "verified", color: "#36f1b0", r: 150, dur: 16, size: 10, spin: 10 },
-		{ key: "pending", color: "#ffc93c", r: 172, dur: 22, size: 12, spin: 12 },
+		{ key: "pending", color: "#ffb454", r: 172, dur: 22, size: 12, spin: 12 },
 		{ key: "risk", color: "#ff6b8a", r: 194, dur: 28, size: 14, spin: 14 }
 	];
 	var orbitParts = [];
@@ -3989,8 +5289,8 @@ function BigScreen(props) {
 			React.createElement("div", { className: "dsh-scr-header" },
 				React.createElement("div", { className: "dsh-scr-hleft" },
 					React.createElement(Btn, { onClick: toggleFs }, fsOn[0] ? "退出全屏" : "全屏"),
-					React.createElement("div", { className: "dsh-scr-live" }, React.createElement("span", { className: "dsh-scr-dot" }), "LIVE · 跨会话全局")),
-				React.createElement("div", { className: "dsh-scr-title" }, "REDTEAM 任务台账作战大屏", React.createElement("small", null, "GLOBAL LEDGER · 跨会话聚合")),
+					React.createElement("div", { className: "dsh-scr-live" }, React.createElement("span", { className: "dsh-scr-dot" }), "跨会话汇总")),
+				React.createElement("div", { className: "dsh-scr-title" }, "安全测试总览", React.createElement("small", null, "当前所有会话的成果与运行状态")),
 				React.createElement("div", { className: "dsh-scr-clockwrap" },
 					React.createElement("select", { className: "dsh-scr-range", value: range[0], onChange: function (e) { setRange(e.target.value); setScrPg(0); } },
 						[["today", "今日"], ["3d", "近3天"], ["7d", "近7天"], ["30d", "近30天"], ["all", "全部"], ["custom", "自定义"]].map(function (r) { return React.createElement("option", { key: r[0], value: r[0] }, r[1]); })),
@@ -4007,7 +5307,7 @@ function BigScreen(props) {
 							React.createElement("div", { className: "dsh-scr-grat" }),
 							React.createElement("div", { className: "dsh-scr-sweep" })),
 						orbitStage,
-						React.createElement("div", { className: "dsh-scr-herotag" }, "GLOBAL OPS · " + (ov.sessions || 0) + " 会话")),
+						React.createElement("div", { className: "dsh-scr-herotag" }, (ov.sessions || 0) + " 个会话")),
 				React.createElement("div", { className: "dsh-scr-heronums" },
 					numCard(ov.byStatus.pending || 0, "进行中·待验证", "is-warn"),
 					numCard((function () { // 严重+高危只计漏洞型模式（渗透/代审/应急/云）——ad 权限价值级/av 检出等不混入漏洞等级口径
@@ -4021,7 +5321,7 @@ function BigScreen(props) {
 						SCR_MODE_VOCAB.map(function (m, i) {
 							return React.createElement("div", { key: m, className: "dsh-scr-bar" },
 								React.createElement("span", { className: "lbl" }, modeOf(m).slice(0, 6)),
-								React.createElement("span", { className: "track" }, React.createElement("span", { className: "dsh-fill " + (i % 2 ? "is-alt" : ""), style: { display: "block", width: ((ov.byMode[m] || 0) / maxMode * 100) + "%", height: "100%", borderRadius: 4, background: (i === 2 || i === 3 || i === 4) ? "#ffc93c" : "#3a9dff", boxShadow: (i === 2 || i === 3 || i === 4) ? "0 0 6px rgba(255,201,60,.55)" : "0 0 6px rgba(58,157,255,.55)" } })),
+								React.createElement("span", { className: "track" }, React.createElement("span", { className: "dsh-fill " + (i % 2 ? "is-alt" : ""), style: { display: "block", width: ((ov.byMode[m] || 0) / maxMode * 100) + "%", height: "100%", borderRadius: 4, background: (i === 2 || i === 3 || i === 4) ? "#ffb454" : "#3a9dff", boxShadow: (i === 2 || i === 3 || i === 4) ? "0 0 6px rgba(255,180,84,.5)" : "0 0 6px rgba(58,157,255,.55)" } })),
 								React.createElement("span", { className: "val" }, ov.byMode[m] || 0));
 						})),
 					React.createElement("div", { className: "dsh-scr-panel" },
@@ -4030,7 +5330,7 @@ function BigScreen(props) {
 							var names = { pending: "待验证·进行中", suspect: "疑似·未定论", verified: "已验证·有效", detected: "被检出", stuck: "卡点", "false-positive": "证伪·失效", fixed: "已交付·路由" };
 							return React.createElement("div", { key: s, className: "dsh-scr-bar" },
 								React.createElement("span", { className: "lbl" }, names[s].slice(0, 7)),
-								React.createElement("span", { className: "track" }, React.createElement("span", { style: { display: "block", width: ((ov.byStatus[s] || 0) / Math.max(1, total) * 100) + "%", height: "100%", borderRadius: 4, background: i === 1 ? "#36f1b0" : i === 2 ? "#8fb4d9" : i === 3 ? "#3a9dff" : "#ffc93c" } })),
+								React.createElement("span", { className: "track" }, React.createElement("span", { style: { display: "block", width: ((ov.byStatus[s] || 0) / Math.max(1, total) * 100) + "%", height: "100%", borderRadius: 4, background: i === 1 ? "#36f1b0" : i === 2 ? "#8fb4d9" : i === 3 ? "#3a9dff" : "#ffb454" } })),
 								React.createElement("span", { className: "val" }, ov.byStatus[s] || 0));
 						}))),
 				React.createElement("div", { className: "dsh-scr-center" },
@@ -4077,7 +5377,7 @@ function BigScreen(props) {
 							var v = ov.byEvidence[e] || 0;
 							return React.createElement("div", { key: e, className: "dsh-scr-bar" },
 								React.createElement("span", { className: "lbl" }, names[e]),
-								React.createElement("span", { className: "track" }, React.createElement("span", { style: { display: "block", width: (v / Math.max(1, total) * 100) + "%", height: "100%", borderRadius: 4, background: ["#36f1b0", "#7ce8ff", "#ffc93c", "#8fb4d9"][i] } })),
+								React.createElement("span", { className: "track" }, React.createElement("span", { style: { display: "block", width: (v / Math.max(1, total) * 100) + "%", height: "100%", borderRadius: 4, background: ["#36f1b0", "#7ce8ff", "#ffb454", "#8fb4d9"][i] } })),
 								React.createElement("span", { className: "val" }, v));
 						}))))));
 }
@@ -4100,13 +5400,13 @@ function ProjectFilesPanel(props) {
   function load() {
     var request = ++revision.current;
     state[1](function (old) { return { loading: true, snapshot: old.snapshot, error: '' }; });
-    if (!workspace || !props.connection || !props.connection.rpc) {
+    if (!props.sessionId) {
       state[1]({ loading: false, snapshot: null, error: '暂时无法读取工作区，请刷新重试。' });
       return Promise.resolve();
     }
-    return props.connection.rpc.call('/dsh-stage-gate-project', 'status', { workspace: workspace }).then(function (result) {
-      if (!result || !result.ok || !result.value || !result.value.ok) throw Error(result?.value?.error || result?.error?.message || '读取文件失败');
-      if (request === revision.current) state[1]({ loading: false, snapshot: result.value.snapshot, error: '' });
+    return api('workbench.query', { kind: 'project.files', context: { sessionId: props.sessionId } }).then(function (result) {
+      if (!result || result.ok === false) throw Error((result && result.error) || '读取文件失败');
+      if (request === revision.current) state[1]({ loading: false, snapshot: result.data, error: '' });
     }).catch(function (failure) { if (request === revision.current) state[1]({ loading: false, snapshot: null, error: failure.message || String(failure) }); });
   }
   useEffect(function () { load(); return function () { revision.current++; }; }, [workspace, props.sessionId]);
@@ -4151,10 +5451,21 @@ function ProjectFilesPanel(props) {
 }
 
 // 执行记录页（v6 第 5.3 节）：只列真实发生的调用、时间、结果与用量；请求原文留在测试资料页。
-var EXECUTION_RESULT_LABEL = { all: '全部', returned: '已返回', failed: '失败', unknown: '结果未知' };
+var EXECUTION_RESULT_LABEL = { all: '全部', returned: '已完成', failed: '失败', unknown: '结果未知' };
 // 调用状态（v6 第 8.2 节）：比结果分类多一档「取消」，用于显示被用户/任务停止打断的那一次。
-var EXECUTION_CALL_STATE_LABEL = { returned: '已返回', failed: '失败', cancelled: '取消', unknown: '结果未知' };
+var EXECUTION_CALL_STATE_LABEL = { returned: '已完成', failed: '失败', cancelled: '取消', unknown: '结果未知' };
 function executionWhen(value) { if (!value) return '—'; var d = new Date(value); return isNaN(d.getTime()) ? String(value) : d.toLocaleString(); }
+function executionStatusText(row) {
+  var callState = EXECUTION_CALL_STATE_LABEL[row.callState] || EXECUTION_RESULT_LABEL[row.result] || '';
+  if (row.kind === 'http') {
+    if (row.status != null) return 'HTTP ' + row.status + (row.result === 'failed' ? ' · 失败' : '');
+    return callState || '—';
+  }
+  if (row.status == null) return callState || row.outcome || '—';
+  var raw = String(row.status);
+  var known = { ok: '成功', returned: '已完成', failed: '失败', error: '失败', cancelled: '已取消', unknown: '结果未知' };
+  return known[raw] || raw;
+}
 function ExecutionPanel(props) {
   var result = useState('all'), page = useState(1);
   var data = useState(null), error = useState(''), loading = useState(false);
@@ -4174,31 +5485,37 @@ function ExecutionPanel(props) {
         return React.createElement('button', { key: key, type: 'button', role: 'tab', 'aria-selected': result[0] === key, className: result[0] === key ? 'is-active' : '',
           onClick: function () { page[1](1); result[1](key); } }, EXECUTION_RESULT_LABEL[key] + (current ? ' ' + (counts[key] || 0) : ' —'));
       })),
-      current ? React.createElement('span', { className: 'dsh-execution-usage' }, '工具调用 ' + current.usage.toolCalls + ' · 模型调用 ' + current.usage.modelCalls + (current.usage.unknownUsageCalls ? '（其中 ' + current.usage.unknownUsageCalls + ' 次用量未知）' : '')) : null,
-      React.createElement('button', { type: 'button', disabled: !props.onOpenMaterials, onClick: function () { if (props.onOpenMaterials) props.onOpenMaterials(); } }, '查看请求原文')),
+      current ? React.createElement('span', { className: 'dsh-execution-usage' }, '工具 ' + current.usage.toolCalls + ' 次 · 模型 ' + current.usage.modelCalls + ' 次' + (current.usage.unknownUsageCalls ? '（其中 ' + current.usage.unknownUsageCalls + ' 次用量未知）' : '')) : null,
+      React.createElement('button', { type: 'button', disabled: !props.onOpenMaterials, onClick: function () { if (props.onOpenMaterials) props.onOpenMaterials(); } }, '查看原始请求')),
+    React.createElement('details', { className: 'dsh-execution-scope' }, React.createElement('summary', null, '这里记录什么？'),
+      React.createElement('ul', null,
+        React.createElement('li', null, '网站请求以实际回执为准；工具内部发了多少请求，可能无法统计。'),
+        React.createElement('li', null, '模型调用显示宿主返回的用量；未知就写“未知”，不会按 0 计算。'),
+        React.createElement('li', null, '“已完成”只说明请求完成，不等于存在漏洞。'))),
     error[0] ? React.createElement('div', { role: 'alert' }, error[0], ' ',
       React.createElement('button', { type: 'button', disabled: loading[0], onClick: load }, '重试')) : null,
     loading[0] && !current ? React.createElement('p', { role: 'status' }, '正在读取执行记录…') : null,
     loading[0] && current ? React.createElement('p', { role: 'status' }, '正在更新执行记录…') : null,
-    current && current.total === 0 ? React.createElement('p', { className: 'dsh-materials-empty' }, '还没有执行记录。正常调用、失败和检查未见异常都会保存在这里；异常结论在“发现的问题”。') : null,
+    current && current.total === 0 ? React.createElement('p', { className: 'dsh-materials-empty' }, '还没有执行记录。正常调用、失败和检查未见异常都会保存在这里；异常结论在“发现”。') : null,
+    current && current.total > 0 ? React.createElement('p', { className: 'saker-panel-hint' }, '这里只记录真实发生的操作。完成请求不等于发现漏洞。') : null,
     current && current.total > 0 ? React.createElement('table', { className: 'dsh-materials-table saker-ui-table' },
-      React.createElement('thead', null, React.createElement('tr', null, ['时间', '来源/动作', '目标', '结果', '状态', '身份', '用时', '引用/用量'].map(function (label) { return React.createElement('th', { key: label }, label); }))),
+      React.createElement('thead', null, React.createElement('tr', null, ['时间', '做了什么', '对象', '状态', '账号', '用时', '依据'].map(function (label) { return React.createElement('th', { key: label }, label); }))),
       React.createElement('tbody', null, current.rows.map(function (row) {
         var action = row.kind === 'http' ? 'HTTP ' + (row.host || row.target || '')
-          : row.kind === 'model' ? '模型调用' + (row.usage && row.usage.totalTokens != null ? ' · ' + row.usage.totalTokens + ' tok' : ' · 用量未知')
+          : row.kind === 'model' ? '模型回合' + (row.usage && row.usage.totalTokens != null ? ' · ' + Number(row.usage.totalTokens).toLocaleString() + ' tokens' : ' · 用量未知')
             : '工具 ' + (row.toolName || '未知');
         var target = row.kind === 'http' ? (row.host || row.target || '—') : '—';
         var ref = row.kind === 'http' ? (row.requestRef || row.id) : (row.callId || row.id);
+        var refLabel = row.kind === 'http' ? '请求记录' : row.kind === 'model' ? '模型回合' : '工具调用';
         return React.createElement('tr', { key: row.id },
           React.createElement('td', null, executionWhen(row.at)),
           React.createElement('td', { title: action }, action),
           React.createElement('td', { title: row.target }, target),
-          React.createElement('td', null, EXECUTION_CALL_STATE_LABEL[row.callState] || EXECUTION_RESULT_LABEL[row.result] || row.result),
-          React.createElement('td', null, row.status == null ? (row.outcome || '—') : String(row.status)),
+          React.createElement('td', null, executionStatusText(row)),
           // 身份引用（v6 第 8.1 节）：只显示本任务请求记录里的身份名，秘密仍留在账号管理。
           React.createElement('td', { title: row.identity || '' }, row.identity || '—'),
           React.createElement('td', null, row.elapsedMs == null ? '—' : row.elapsedMs + ' ms'),
-          React.createElement('td', { title: ref }, ref));
+          React.createElement('td', { title: ref, className: 'dsh-execution-ref' }, refLabel));
       })) ) : null,
     current && current.total > 0 ? React.createElement('div', { className: 'dsh-materials-foot' },
       React.createElement('span', null, '共 ' + current.total + ' 条'),
@@ -4211,16 +5528,16 @@ function ExecutionPanel(props) {
 // 引用到输入框只更新输入内容，不发送、不标记为已读取、不调用模型。
 var MATERIALS_TYPE_LABEL = { all: '全部', asset: '网站与端口', request: '请求', file: '文件' };
 function materialsColumns(kind) {
-if (kind === 'asset') return ['主机/地址', '协议', '端口', '产品线索', '来源', '范围', 'AI 是否读过'];
-if (kind === 'request') return ['方法', '主机/路径', '账号', '响应', '状态', 'AI 是否读过'];
-return ['名称', '来源', '线索', '状态', 'AI 是否读过'];
+if (kind === 'asset') return ['主机/地址', '协议', '端口', '产品线索', '来源', '范围', '模型是否读过'];
+if (kind === 'request') return ['HTTP 方法', '主机/路径', '账号', '响应', '状态', '模型是否读过'];
+return ['名称', '来源', '线索', '状态', '模型是否读过'];
 }
 function materialsCells(row) {
   var m = row.meta || {};
 // 「模型是否读过」只认模型真的读过原文那一次；本地浏览详情单独标「本地看过」，
 // 引用到输入框仍显示「尚未读取」（v6 第 5.4 节：本地查看与模型收到分别保存）。
-var readCell = row.modelRead ? '已收到对应片段' : (row.viewedAt ? '本地看过' : '尚未读取');
-if (row.kind === 'asset') return [m.host || row.title, m.protocol || '—', m.port || '—', m.product || '—', m.source || '—', m.inScope ? '范围内' : '范围外', readCell];
+var readCell = row.modelRead ? '已读过' : (row.viewedAt ? '本地看过' : '尚未读取');
+if (row.kind === 'asset') return [m.host || row.title, m.protocol || '—', m.port || '—', m.product || '—', m.source || '—', m.inScope ? '范围内' : (m.origin === 'inventory' ? '工作区账本' : '范围外'), readCell];
 if (row.kind === 'request') return [m.method || '—', (m.host || '') + (m.path || ''), m.account || '—', m.status == null ? '—' : String(m.status), m.valid ? '正常' : '待确认', readCell];
   var detail = m.hints != null ? m.hints + ' 条' : '—';
   if (m.format) detail += ' · ' + String(m.format).toUpperCase();
@@ -4231,7 +5548,7 @@ if (row.kind === 'request') return [m.method || '—', (m.host || '') + (m.path 
 return [row.title, m.source || '—', detail, m.broken ? '有坏记录' : (m.unresolved ? '存在未解析' : '已索引'), readCell];
 }
 function MaterialsPanel(props) {
-  var type = useState('all'), query = useState(''), page = useState(1), read = useState('all');
+  var type = useState('all'), query = useState(''), page = useState(1), read = useState('all'), includeWorkspace = useState(false);
   var data = useState(null), error = useState(''), loading = useState(false), notice = useState('');
   var detail = useState(null);
   // 「有 N 条新记录」（v6 第 5.7 节）：轮询发现新行时只提示数量，不跳页、不打断正在看的内容。
@@ -4239,7 +5556,7 @@ function MaterialsPanel(props) {
   var request = useRef(0);
   function load() {
     var revision = ++request.current; loading[1](true);
-    return api('materials.list', { sessionId: props.sessionId, type: type[0], query: query[0], read: read[0], page: page[0], pageSize: 50 })
+    return api('materials.list', { sessionId: props.sessionId, type: type[0], query: query[0], read: read[0], page: page[0], pageSize: 50, includeWorkspace: includeWorkspace[0] })
       .then(function (result) {
         if (!result.ok) throw Error(result.error || '读取测试资料失败');
         if (revision !== request.current) return;
@@ -4254,13 +5571,13 @@ function MaterialsPanel(props) {
       .catch(function (failure) { if (revision === request.current) error[1](failure.message); })
       .finally(function () { if (revision === request.current) loading[1](false); });
   }
-  useEffect(function () { if (!props.sessionId) return; load(); return function () { request.current++; }; }, [props.sessionId, type[0], read[0], page[0]]);
+  useEffect(function () { if (!props.sessionId) return; load(); return function () { request.current++; }; }, [props.sessionId, type[0], read[0], page[0], includeWorkspace[0]]);
   // 轻量轮询（v6 第 5.7 节）：只读本地列表接口，不调模型；发现新行时由上面的比较给出数量提示。
   useEffect(function () {
     if (!props.sessionId || typeof setInterval !== 'function') return;
     var timer = setInterval(function () { if (!loading[0]) load(); }, 8000);
     return function () { clearInterval(timer); };
-  }, [props.sessionId, type[0], read[0], page[0]]);
+  }, [props.sessionId, type[0], read[0], page[0], includeWorkspace[0]]);
   // 引用文案：可读名称 + 内部引用 + 必要定位信息。列表行与详情主操作共用一处，
   // 保证送进输入框的东西完全一致，且只含被选中的这一条（不含全库清单）。
   function referenceText(item) {
@@ -4334,10 +5651,14 @@ function MaterialsPanel(props) {
       // 本地看过与模型收到分开，互不冒充。
       React.createElement('label', { className: 'dsh-materials-read' }, '读取状态',
         React.createElement('select', { 'aria-label': '读取状态筛选', value: read[0], onChange: function (event) { page[1](1); read[1](event.target.value); } },
-          [['all', '全部'], ['model', 'AI 读过'], ['local', '本地看过'], ['unread', '都没读过']].map(function (option) {
+          [['all', '全部'], ['model', '模型读过'], ['local', '本地看过'], ['unread', '都没读过']].map(function (option) {
             return React.createElement('option', { key: option[0], value: option[0] }, option[1]);
           }))),
-      React.createElement('button', { type: 'button', className: 'is-primary', disabled: !props.onAddMaterials, title: props.onAddMaterials ? '' : '请用输入框左侧的“添加测试资料”', onClick: function () { if (props.onAddMaterials) props.onAddMaterials(); } }, '添加测试资料')),
+      React.createElement('button', { type: 'button', className: 'is-primary', disabled: !props.onAddMaterials, title: props.onAddMaterials ? '' : '请用输入框左侧的附件按钮', onClick: function () { if (props.onAddMaterials) props.onAddMaterials(); } }, '添加文件')),
+    current && current.workspace && current.workspace.count ? React.createElement('div', { className: 'dsh-materials-workspace', role: 'status' },
+      React.createElement('div', null, React.createElement('strong', null, '工作区其他资产 ' + current.workspace.count),
+        React.createElement('span', null, '来自工作区资产账本，不属于当前任务范围；展开只用于查找线索。')),
+      React.createElement('button', { type: 'button', 'aria-expanded': includeWorkspace[0], onClick: function () { page[1](1); includeWorkspace[1](!includeWorkspace[0]); } }, includeWorkspace[0] ? '收起' : '展开查看')) : null,
     // 新记录只提示数量（v6 第 5.7 节）：不自动跳页、不打断正在看的内容。
     newCount[0] > 0 ? React.createElement('div', { className: 'dsh-materials-new', role: 'status' },
       React.createElement('span', null, '有 ' + newCount[0] + ' 条新资料'),
@@ -4346,7 +5667,7 @@ function MaterialsPanel(props) {
     loading[0] && !current ? React.createElement('p', { role: 'status' }, '正在读取测试资料…') : null,
     current && current.total === 0 ? React.createElement('div', { className: 'dsh-materials-empty' },
       // 只有真的没有任何资料时才说“添加…开始检查”；类型/搜索/读取状态筛掉全部时要说“没有匹配”。
-      React.createElement('p', null, (query[0] || type[0] !== 'all' || read[0] !== 'all') ? '没有匹配的资料。' : '添加网站请求或代码，AI 就能从这些内容开始检查。'),
+      React.createElement('p', null, (query[0] || type[0] !== 'all' || read[0] !== 'all') ? '没有匹配的资料。' : '添加网站请求或代码，Saker 就能从这些内容开始检查。'),
       React.createElement('small', null, '支持原始 HTTP、HAR、curl 文本、JS、源码与扫描导出；保存原文，按需要读取。')) : null,
     current && current.total > 0 ? React.createElement('table', { className: 'dsh-materials-table saker-ui-table' },
       React.createElement('thead', null, React.createElement('tr', null,
@@ -4402,7 +5723,8 @@ function ResultsView(props) {
 	// 任务工作区里的「添加测试资料」走模块级桥接打开输入框上方的同一个面板（v6 第 5.3/5.4 节）。
 	var openMaterialsPanel = props.onAddMaterials || function () { if (materialsPanelBridge.open) materialsPanelBridge.open(); };
 	var mode = useState(props.defaultMode === 'code-audit' ? 'code-audit' : 'pentest');
-	var area = useState(props.fixedArea || (props.defaultMode === 'code-audit' ? 'findings' : 'execution'));
+	// 测试结果默认先回答“现在在验证什么”，执行流水、发现和资料按需切换。
+	var area = useState(props.fixedArea || (props.defaultMode === 'code-audit' ? 'findings' : 'research'));
 	var historyMode = useState('pentest');
 	var counts = useState({}), countError = useState(''), countRequest = useRef(0);
 	var history = area[0] === 'history';
@@ -4418,11 +5740,13 @@ function ResultsView(props) {
 	return React.createElement('div', { className: 'dsh-task-workspace' },
 		countError[0] ? React.createElement('p', { role: 'alert' }, countError[0]) : null,
 		React.createElement('div', { className: 'dsh-task-nav dsh-task-result-nav', role: 'tablist', 'aria-label': '测试结果分类' },
-			[['execution', '执行记录'], ['findings', '发现的问题'], ['materials', '测试资料']].map(function (entry) {
+			[['research', '正在验证'], ['execution', '执行记录'], ['findings', '发现'], ['materials', '附件']].map(function (entry) {
 				return React.createElement(Btn, { key: entry[0], 'aria-current': area[0] === entry[0] ? 'page' : undefined,
 					onClick: function () { area[1](entry[0]); } }, entry[1]);
 			})),
 		area[0] === 'materials' ? React.createElement(MaterialsPanel, { key: sessionId + '-materials', sessionId: sessionId, inputActions: props.inputActions, onAddMaterials: openMaterialsPanel }) : null,
+		area[0] === 'research' ? React.createElement(ResearchView, { key: sessionId + '-research', sessionId: sessionId,
+			onShowExecution: function () { area[1]('execution'); }, onShowFindings: function () { area[1]('findings'); } }) : null,
 		area[0] === 'execution' ? React.createElement(ExecutionPanel, { key: sessionId + '-execution', sessionId: sessionId, onOpenMaterials: function () { area[1]('materials'); } }) : null,
 		area[0] === 'findings' || history ? React.createElement('div', null,
 			React.createElement('div', { className: 'dsh-task-scope' }, React.createElement('strong', null, history ? '所有会话的历史记录' : '本会话发现'),
@@ -4438,6 +5762,3608 @@ function ResultsView(props) {
 }
 
 var REDTEAM_MANAGER_UI_NAMESPACE = "redteam-manager-ui";
+
+//#region Saker security workbench (main page + sidebar entry)
+var h = React.createElement;
+var SAKER_WB_NAV = [
+	{ group: "测试", items: [
+		{ id: "dashboard", label: "概览", icon: "dashboard" }, { id: "tasks", label: "测试任务", icon: "tasks" },
+		{ id: "findings", label: "发现", icon: "findings" }, { id: "traffic", label: "请求", icon: "traffic" },
+		{ id: "assets", label: "资产与文件", icon: "assets" }, { id: "conversation", label: "对话", icon: "conversation" },
+	] },
+	{ group: "资源", items: [
+		{ id: "modules", label: "测试模块", icon: "modules" }, { id: "roles", label: "协作角色", icon: "roles" },
+		{ id: "knowledge", label: "知识库", icon: "knowledge" }, { id: "capabilities", label: "工具清单", icon: "capabilities" },
+	] },
+	{ group: "运行", items: [{ id: "attention", label: "待办事项", icon: "attention" }, { id: "logs", label: "执行日志", icon: "logs" }] },
+];
+var SAKER_WB_TASK_TABS = [
+	{ id: "overview", label: "概览" }, { id: "execution", label: "执行记录" }, { id: "exploration", label: "测试路径" },
+	{ id: "findings", label: "发现" }, { id: "assets", label: "资产与文件" },
+];
+var SAKER_WB_CSS = "\n.saker-wb{--saker-accent:var(--dsw-alias-state-business-primary,#4b74d9);--saker-accent-soft:color-mix(in srgb,var(--saker-accent) 12%,transparent);--saker-accent-faint:color-mix(in srgb,var(--saker-accent) 7%,transparent);--saker-accent-text:#fff;\n  --saker-muted:color-mix(in srgb,var(--dsh-text-secondary,CanvasText) 78%,Canvas 22%);\n  --saker-ok:color-mix(in srgb,#2f8a58 66%,CanvasText 34%);\n  --saker-ok-bg:color-mix(in srgb,#2f8a58 12%,Canvas);\n  --saker-warn:color-mix(in srgb,#b45309 62%,CanvasText 38%);\n  --saker-warn-bg:color-mix(in srgb,#b45309 12%,Canvas);\n  --saker-bad:color-mix(in srgb,#c62828 66%,CanvasText 34%);\n  --saker-bad-bg:color-mix(in srgb,#c62828 12%,Canvas);\n  height:100%;min-height:0;display:flex;color:var(--dsh-text-primary,CanvasText);background:var(--dsh-bg-primary,Canvas);font-size:var(--dsh-content-font-size,1em);line-height:1.5}\n.saker-wb *{box-sizing:border-box}\n.saker-wb-nav{width:168px;flex:0 0 168px;border-right:1px solid var(--dsh-border,rgba(127,127,127,.26));padding:8px 4px;display:flex;flex-direction:column;gap:8px;overflow:auto;background:var(--dsh-bg-secondary,color-mix(in srgb,Canvas 96%,CanvasText 4%))}\n.saker-wb-brand{display:flex;align-items:center;gap:8px;padding:4px 8px;font-weight:600;font-size:var(--dsh-content-font-size-secondary,0.93em)}\n.saker-wb-brand svg{width:22px;height:22px;color:var(--saker-accent)}\n.saker-wb-group{font-size:var(--dsh-content-font-size-secondary,0.93em);letter-spacing:.04em;color:var(--dsh-text-tertiary,color-mix(in srgb,CanvasText 60%,Canvas 40%));padding:0 8px}\n.saker-wb-navbtn{width:100%;height:28px;display:flex;align-items:center;gap:8px;padding:0 8px;border:0;border-radius:6px;background:transparent;color:inherit;cursor:pointer;text-align:left;font-size:var(--dsh-content-font-size-secondary,0.93em)}\n.saker-wb-navbtn:hover{background:var(--dsh-bg-hover,rgba(127,127,127,.12))}\n.saker-wb-navbtn.active{background:var(--saker-accent-soft);font-weight:600;color:var(--saker-accent)}\n.saker-wb-main{flex:1;min-width:0;display:flex;flex-direction:column;container-type:inline-size}\n.saker-wb-head{min-height:36px;display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--dsh-border,rgba(127,127,127,.24))}\n.saker-wb-title{font-size:var(--dsh-content-font-size,1em);font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n.saker-wb-sub{color:var(--dsh-text-secondary,color-mix(in srgb,CanvasText 70%,Canvas 30%));font-size:var(--dsh-content-font-size-secondary,0.93em);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n.saker-wb-spacer{flex:1}\n.saker-wb-content{flex:1;min-height:0;overflow:auto;padding:8px 12px 16px}\n.saker-wb-btn{height:28px;padding:0 8px;border:1px solid var(--dsh-border,rgba(127,127,127,.35));border-radius:6px;background:var(--dsh-bg-secondary,Canvas);color:inherit;cursor:pointer;font-size:var(--dsh-content-font-size,1em);display:inline-flex;align-items:center;gap:4px}\n.saker-wb-btn:hover{background:var(--dsh-bg-hover,rgba(127,127,127,.12))}\n.saker-wb-btn.primary{border-color:var(--saker-accent);background:var(--saker-accent);color:var(--saker-accent-text);font-weight:600}\n.saker-wb-btn.danger{border-color:var(--dsh-danger,#d9534f);color:var(--dsh-danger,#d9534f)}\n.saker-wb-btn:disabled{opacity:.45;cursor:not-allowed}\n.saker-wb-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:8px}\n.saker-wb-kpi{border:1px solid var(--dsh-border,rgba(127,127,127,.24));border-radius:8px;padding:8px;background:var(--dsh-bg-secondary,transparent);min-width:0}\n.saker-wb-kpi b{display:block;font-size:var(--dsh-content-font-size,1em);line-height:1.5;font-variant-numeric:tabular-nums}\n.saker-wb-kpi span{font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsh-text-secondary,color-mix(in srgb,CanvasText 70%,Canvas 30%))}\n.saker-wb-card{border:1px solid var(--dsh-border,rgba(127,127,127,.24));border-radius:8px;padding:8px;background:var(--dsh-bg-secondary,transparent);margin-bottom:8px;min-width:0}\n.saker-wb-card h3{margin:0 0 4px;font-size:var(--dsh-content-font-size,1em);font-weight:600}\n.saker-wb-table{width:100%;border-collapse:collapse;font-size:var(--dsh-content-font-size,1em)}\n.saker-wb-table-wrap{width:100%;overflow:auto}\n.saker-wb-table td,.saker-wb-table th{white-space:nowrap}\n.saker-wb-table th{text-align:left;font-size:var(--dsh-content-font-size,1em);font-weight:600;color:var(--dsh-text-tertiary,color-mix(in srgb,CanvasText 60%,Canvas 40%));padding:0 8px 4px;white-space:nowrap}\n.saker-wb-table td{border-top:1px solid var(--dsh-border,rgba(127,127,127,.18));padding:4px 8px;height:32px;vertical-align:middle}\n.saker-wb-table tbody tr{cursor:pointer}\n.saker-wb-table tbody tr:hover{background:var(--dsh-bg-hover,rgba(127,127,127,.1))}\n.saker-wb-cell-main{font-weight:550;max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n.saker-wb-cell-sub{font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsh-text-secondary,color-mix(in srgb,CanvasText 70%,Canvas 30%));max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n.saker-wb-chip{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 8px;border-radius:999px;border:1px solid var(--dsh-border,rgba(127,127,127,.3));font-size:var(--dsh-content-font-size-secondary,0.93em);white-space:nowrap}\n.saker-wb-chip.ok{color:var(--saker-ok);border-color:color-mix(in srgb,var(--saker-ok) 48%,transparent);background:var(--saker-ok-bg)}\n.saker-wb-chip.warn{color:var(--saker-warn);border-color:color-mix(in srgb,var(--saker-warn) 48%,transparent);background:var(--saker-warn-bg)}\n.saker-wb-chip.bad{color:var(--saker-bad);border-color:color-mix(in srgb,var(--saker-bad) 48%,transparent);background:var(--saker-bad-bg)}\n.saker-wb-tabs{display:flex;gap:4px;border-bottom:1px solid var(--dsh-border,rgba(127,127,127,.24));margin-bottom:8px}\n.saker-wb-tab{height:28px;padding:0 8px;border:0;border-bottom:2px solid transparent;background:transparent;color:inherit;cursor:pointer;font-size:var(--dsh-content-font-size-secondary,0.93em)}\n.saker-wb-tab.active{border-bottom-color:var(--saker-accent);font-weight:600;color:var(--saker-accent)}\n.saker-wb-empty,.saker-wb-error{border:1px dashed var(--dsh-border,rgba(127,127,127,.35));border-radius:8px;padding:12px;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsh-text-secondary,color-mix(in srgb,CanvasText 70%,Canvas 30%))}\n.saker-wb-error{color:var(--dsh-danger,#d9534f);border-style:solid}\n.saker-wb-detail{flex:0 0 280px;border-left:1px solid var(--dsh-border,rgba(127,127,127,.24));padding:8px;overflow:auto;min-width:0}\n.saker-wb-split{display:flex;min-height:0;gap:0}\n.saker-wb-graph{width:100%;height:300px;border:1px solid var(--dsh-border,rgba(127,127,127,.24));border-radius:8px;background:var(--dsh-bg-secondary,transparent)}\n.saker-wb-graph text{font-family:inherit;font-size:var(--dsh-content-font-size-secondary,0.93em);fill:var(--dsh-text-primary,CanvasText)}\n.saker-wb-graph line{stroke:var(--dsh-border,rgba(127,127,127,.45));stroke-width:1}\n.saker-wb-form{display:grid;gap:8px;max-width:620px}\n.saker-wb-form label{display:grid;gap:4px;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsh-text-secondary,color-mix(in srgb,CanvasText 70%,Canvas 30%))}\n.saker-wb-form input,.saker-wb-form textarea{width:100%;border:1px solid var(--dsh-border,rgba(127,127,127,.35));border-radius:6px;background:var(--dsh-bg-primary,Canvas);color:inherit;padding:4px 8px;font:inherit}\n.saker-wb-form textarea{min-height:70px;resize:vertical}\n.saker-wb-row{display:flex;align-items:center;gap:8px;min-width:0}\n.saker-wb-notice{border:1px solid color-mix(in srgb,var(--saker-accent) 28%,transparent);background:var(--saker-accent-faint);padding:8px;border-radius:6px;margin-bottom:8px;display:flex;gap:8px;align-items:center;font-size:var(--dsh-content-font-size-secondary,0.93em)}\n@container (max-width:980px){.saker-wb-table .saker-col-secondary{display:none}.saker-wb-cell-main,.saker-wb-cell-sub{max-width:360px}}\n@media (max-width:800px){.saker-wb-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.saker-wb-detail{display:none}.saker-wb-content{padding:8px 8px 16px}}\n.saker-mod{display:grid;grid-template-columns:200px minmax(0,1fr);gap:12px;align-items:start}\n.saker-mod-cats{border:1px solid var(--dsh-border,rgba(127,127,127,.24));border-radius:8px;padding:8px;background:var(--dsh-bg-secondary,transparent)}\n.saker-mod-cat{width:100%;display:flex;justify-content:space-between;align-items:center;gap:8px;border:0;background:transparent;color:inherit;border-radius:6px;padding:8px;font-size:var(--dsh-content-font-size,1em);cursor:pointer;text-align:left}\n.saker-mod-cat:hover{background:var(--dsh-bg-hover,rgba(127,127,127,.12))}\n.saker-mod-cat.active{background:var(--saker-accent-soft);font-weight:600;color:var(--saker-accent)}\n.saker-mod-cat span{color:var(--dsh-text-tertiary,color-mix(in srgb,CanvasText 60%,Canvas 40%));font-size:var(--dsh-content-font-size-secondary,0.93em)}\n.saker-mod-list{display:flex;flex-direction:column;gap:8px;min-width:0}\n.saker-mod-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px;min-width:0}\n.saker-mod-search{display:flex;gap:8px;align-items:center}\n.saker-mod-search input{flex:1;height:36px;border:1px solid var(--dsh-border,rgba(127,127,127,.35));border-radius:6px;background:var(--dsh-bg-primary,Canvas);color:inherit;padding:0 10px;font-size:var(--dsh-content-font-size,1em)}\n.saker-mod-search select{height:36px;border:1px solid var(--dsh-border,rgba(127,127,127,.35));border-radius:6px;background:var(--dsh-bg-primary,Canvas);color:inherit;padding:0 8px;font:inherit;max-width:132px}\n.saker-mod-item{display:flex;gap:8px;align-items:flex-start;border:1px solid var(--dsh-border,rgba(127,127,127,.24));border-radius:6px;padding:8px;background:var(--dsh-bg-secondary,transparent);cursor:pointer;min-width:0}\n.saker-mod-item:hover{background:var(--dsh-bg-hover,rgba(127,127,127,.1))}\n.saker-mod-item.active{border-color:var(--saker-accent);background:var(--saker-accent-faint)}\n.saker-mod-item-main{flex:1;min-width:0}\n.saker-mod-item-title{font-size:var(--dsh-content-font-size,1em);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n.saker-mod-item-sub{font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsh-text-secondary,color-mix(in srgb,CanvasText 70%,Canvas 30%));margin-top:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}\n.saker-mod-fav{border:0;background:transparent;color:var(--dsh-text-tertiary,color-mix(in srgb,CanvasText 60%,Canvas 40%));cursor:pointer;font-size:var(--dsh-content-font-size,1em);line-height:1.5;padding:4px}\n.saker-mod-fav.on{color:var(--saker-accent)}\n.saker-mod-detail{position:fixed;top:0;right:0;bottom:0;width:min(440px,92vw);z-index:60;overflow:auto;border-left:1px solid var(--dsh-border,rgba(127,127,127,.3));padding:16px;background:var(--dsh-bg-primary,Canvas);box-shadow:-8px 0 24px rgba(0,0,0,.18);font-size:var(--dsh-content-font-size,1em);min-width:0}\n.saker-mod-detail h3{margin:0 0 4px;font-size:var(--dsh-content-font-size,1em)}\n.saker-mod-detail h4{margin:12px 0 4px;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsh-text-tertiary,color-mix(in srgb,CanvasText 60%,Canvas 40%))}\n.saker-mod-detail pre{margin:0;white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:var(--dsh-content-font-size,1em);line-height:1.5;max-height:300px;overflow:auto}\n.saker-mod-pager{display:flex;gap:8px;align-items:center;justify-content:center;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsh-text-secondary,color-mix(in srgb,CanvasText 70%,Canvas 30%))}\n.saker-module-picker{width:min(460px,calc(100vw - 32px))}\n.saker-module-search{width:100%;height:36px;border:1px solid var(--dsh-border,rgba(127,127,127,.35));border-radius:6px;padding:0 8px;font-size:var(--dsh-content-font-size,1em);background:var(--dsh-bg-primary,Canvas);color:inherit;margin:8px 0}\n.saker-module-search-row{display:flex;align-items:center;gap:8px;margin:8px 0;min-width:0}\n.saker-module-search-row .saker-module-search{flex:1;min-width:0;margin:0}\n.saker-module-search-row select{height:36px;border:1px solid var(--dsh-border,rgba(127,127,127,.35));border-radius:6px;background:var(--dsh-bg-primary,Canvas);color:inherit;padding:0 8px;font:inherit;max-width:180px}\n.saker-module-rows{display:flex;flex-direction:column;gap:8px;max-height:360px;overflow:auto}\n.saker-module-row{display:flex;flex-direction:column;gap:4px;width:100%;text-align:left;border:1px solid var(--dsh-border,rgba(127,127,127,.24));border-radius:6px;padding:8px;background:transparent;color:inherit;cursor:pointer;font-size:var(--dsh-content-font-size,1em)}\n.saker-module-row:hover{background:var(--dsh-bg-hover,rgba(127,127,127,.12))}\n.saker-module-row strong{font-size:var(--dsh-content-font-size,1em)}\n.saker-module-row small{font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsh-text-secondary,color-mix(in srgb,CanvasText 70%,Canvas 30%))}\n@media (max-width:1300px){.saker-mod{grid-template-columns:180px minmax(0,1fr)}}\n.saker-wb-detail h4{margin:12px 0 4px;font-size:var(--dsh-content-font-size-secondary,0.93em);line-height:1.5;color:var(--dsh-text-tertiary,color-mix(in srgb,CanvasText 60%,Canvas 40%))}\n.saker-wb-detail pre{margin:0;padding:8px;border:1px solid var(--dsh-border,rgba(127,127,127,.24));border-radius:6px;white-space:pre-wrap;word-break:break-word;font-size:var(--dsh-content-font-size-secondary,0.93em);line-height:1.5;max-height:260px;overflow:auto;background:var(--dsh-bg-primary,Canvas)}\n\n/* 0.9.13: typography follows the host text-size setting instead of a fixed\n   density pass. Only genuinely secondary labels use the host secondary tier. */\n.saker-wb{font-size:var(--dsh-content-font-size,inherit)}\n.saker-wb-title,.saker-wb-btn,.saker-wb-table,.saker-wb-table th,.saker-wb-navbtn,.saker-wb-brand,.saker-wb-card h3,.saker-wb-kpi b,.saker-mod-cat,.saker-mod-item-title,.saker-mod-detail,.saker-mod-detail h3,.saker-mod-detail pre,.saker-module-search,.saker-module-row,.saker-module-row strong{font-size:var(--dsh-content-font-size,inherit)}\n.saker-wb-sub,.saker-wb-group,.saker-wb-kpi span,.saker-wb-cell-sub,.saker-wb-chip,.saker-wb-tab,.saker-wb-empty,.saker-wb-error,.saker-wb-form label,.saker-wb-notice,.saker-mod-cat span,.saker-mod-item-sub,.saker-mod-detail h4,.saker-mod-pager,.saker-module-row small,.saker-wb-detail h4{font-size:var(--dsh-content-font-size-secondary,0.93em)}\n.saker-wb-chip{height:auto;min-height:23px;line-height:1.5}\n.saker-wb-head{flex-wrap:wrap;align-items:flex-start}\n.saker-wb-head>div:first-child{flex:1 1 320px;min-width:0}\n.saker-wb-head>.saker-wb-row{flex:0 0 auto;flex-wrap:wrap;justify-content:flex-end}\n.saker-wb-btn{white-space:nowrap;flex:0 0 auto}\n.saker-wb-tab{height:auto;padding:6px 8px}\n\n/* 0.9.30: 可收起内导航与语义图标 */\n.saker-wb-navtoggle{margin-left:auto;border:0;background:transparent;color:inherit;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:4px;flex:0 0 auto}\n.saker-wb-navtoggle:hover{background:var(--dsh-bg-hover,rgba(127,127,127,.12))}\n.saker-wb-navbtn svg{flex:0 0 16px}\n.saker-wb.is-nav-collapsed .saker-wb-nav{width:52px;flex-basis:52px;padding:8px 4px}\n.saker-wb.is-nav-collapsed .saker-wb-navlabel,.saker-wb.is-nav-collapsed .saker-wb-group,.saker-wb.is-nav-collapsed .saker-wb-brand-name{display:none}\n.saker-wb.is-nav-collapsed .saker-wb-navbtn{justify-content:center;padding:0}\n.saker-wb.is-nav-collapsed .saker-wb-brand{justify-content:center;padding:0 0 8px;flex-wrap:wrap;gap:4px}\n.saker-wb.is-nav-collapsed .saker-wb-navtoggle{margin:0}\n\n/* 列表工具栏、范围选择与分页 */\n.saker-wb-scope{display:inline-flex;align-items:center;gap:8px;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsh-text-secondary,color-mix(in srgb,CanvasText 70%,Canvas 30%));min-width:0}\n.saker-wb-scope select{max-width:260px;height:28px;border:1px solid var(--dsh-border,rgba(127,127,127,.35));border-radius:6px;background:var(--dsh-bg-primary,Canvas);color:inherit;padding:0 6px;font:inherit}\n.saker-wb-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;min-width:0}\n.saker-wb-search{height:30px;min-width:200px;flex:1 1 240px;max-width:420px;border:1px solid var(--dsh-border,rgba(127,127,127,.35));border-radius:6px;background:var(--dsh-bg-primary,Canvas);color:inherit;padding:0 8px;font:inherit}\n.saker-wb-toolbar select{height:30px;border:1px solid var(--dsh-border,rgba(127,127,127,.35));border-radius:6px;background:var(--dsh-bg-primary,Canvas);color:inherit;padding:0 6px;font:inherit;max-width:220px}\n.saker-wb-pager{display:flex;align-items:center;justify-content:center;gap:8px;padding:8px 0;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsh-text-secondary,color-mix(in srgb,CanvasText 70%,Canvas 30%))}\n.saker-wb-table-wrap{width:100%;overflow:auto}\n.saker-wb-scroll{max-height:360px;overflow:auto}\n.saker-wb-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px}\n.saker-wb-cardbtn{width:100%;text-align:left;border:1px solid var(--dsh-border,rgba(127,127,127,.24));background:var(--dsh-bg-secondary,transparent);color:inherit;cursor:pointer;font:inherit}\n.saker-wb-cardbtn:hover{background:var(--dsh-bg-hover,rgba(127,127,127,.1))}\n.saker-wb-cardbtn.active{border-color:var(--saker-accent);background:var(--saker-accent-faint)}\n.saker-wb-detail-card{margin-top:12px}\n.saker-wb-field{display:grid;gap:4px;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsh-text-secondary,color-mix(in srgb,CanvasText 70%,Canvas 30%));margin:8px 0}\n.saker-wb-field input{height:30px;border:1px solid var(--dsh-border,rgba(127,127,127,.35));border-radius:6px;background:var(--dsh-bg-primary,Canvas);color:inherit;padding:0 8px;font:inherit}\n.saker-wb-advanced{margin-top:8px;border-top:1px solid var(--dsh-border,rgba(127,127,127,.18));padding-top:8px}\n.saker-wb-advanced summary{cursor:pointer;color:var(--dsh-text-secondary,color-mix(in srgb,CanvasText 70%,Canvas 30%));font-size:var(--dsh-content-font-size-secondary,0.93em)}\n.saker-wb-notice.warn{border-color:color-mix(in srgb,var(--saker-warn) 40%,transparent);background:var(--saker-warn-bg);color:var(--saker-warn)}\n.saker-wb-error .saker-wb-sub{color:inherit;opacity:.85}\n\n/* 模块库 */\n.saker-modlib{display:flex;flex-direction:column;min-height:0}\n.saker-mod-body{min-height:0}\n.saker-mod-subcats{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;padding-top:8px;border-top:1px solid var(--dsh-border,rgba(127,127,127,.18))}\n.saker-mod-subcat{display:flex;justify-content:space-between;gap:8px;border:0;border-radius:6px;background:transparent;color:inherit;padding:4px 8px;font-size:var(--dsh-content-font-size-secondary,0.93em);cursor:pointer;text-align:left;width:100%}\n.saker-mod-subcat:hover{background:var(--dsh-bg-hover,rgba(127,127,127,.12))}\n.saker-mod-subcat.active{background:var(--saker-accent-soft);color:var(--saker-accent);font-weight:600}\n@container (max-width:900px){.saker-mod{grid-template-columns:1fr}.saker-mod-cats{display:flex;flex-wrap:wrap;gap:4px;align-items:center}.saker-mod-cat{width:auto}.saker-mod-subcats{width:100%}}\n\n/* 角色库 */\n.saker-roles{display:flex;flex-direction:column;gap:8px;min-height:0}\n.saker-roles .saker-wb-detail-card{max-width:760px}\n.saker-roles select{height:30px;border:1px solid var(--dsh-border,rgba(127,127,127,.35));border-radius:6px;background:var(--dsh-bg-primary,Canvas);color:inherit;padding:0 6px;font:inherit;max-width:420px}\n\n/* 知识 */\n.saker-knowledge{gap:12px;align-items:stretch;min-height:0}\n.saker-knowledge .saker-wb-main{overflow:auto}\n.saker-knowledge .saker-wb-detail{display:block;flex:0 0 min(460px,42%);overflow:auto;border-left:1px solid var(--dsh-border,rgba(127,127,127,.24));padding-left:12px}\n\n/* 图：分层、关系方向、缩放与图例 */\n.saker-graph{border:1px solid var(--dsh-border,rgba(127,127,127,.24));border-radius:8px;background:var(--dsh-bg-secondary,transparent);overflow:hidden}\n.saker-graph-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px;border-bottom:1px solid var(--dsh-border,rgba(127,127,127,.18))}\n.saker-graph-legend{display:flex;flex-wrap:wrap;gap:8px;padding:8px;font-size:var(--dsh-content-font-size-secondary,0.93em);color:var(--dsh-text-secondary,color-mix(in srgb,CanvasText 70%,Canvas 30%))}\n.saker-graph-legend-item{display:inline-flex;align-items:center;gap:4px}\n.saker-graph-legend-item i{width:9px;height:9px;border-radius:2px;display:inline-block}\n.saker-graph-canvas{overflow:auto;max-height:560px;min-height:240px;cursor:grab;padding:8px;background:color-mix(in srgb,var(--dsh-bg-primary,Canvas) 88%,CanvasText 12%)}\n.saker-graph-canvas:active{cursor:grabbing}\n.saker-graph-canvas svg{display:block;overflow:visible}\n.saker-graph-node{cursor:pointer}\n.saker-graph-node text{font-family:inherit;font-size:var(--dsh-content-font-size-secondary,0.93em);fill:var(--dsh-text-primary,CanvasText)}\n.saker-graph-node-title{font-size:var(--dsh-content-font-size,1em);line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--dsh-text-primary,CanvasText)}\n.saker-graph-node .saker-graph-node-sub{font-size:var(--dsh-content-font-size-secondary,0.93em);opacity:.72}\n.saker-graph-node.is-hit rect{stroke-width:2px}\n.saker-graph-node.is-selected rect{stroke:var(--saker-accent);stroke-width:2.5px}\n.saker-graph-edge-label{font-family:inherit;font-size:var(--dsh-content-font-size-secondary,0.93em);fill:var(--dsh-text-tertiary,color-mix(in srgb,CanvasText 60%,Canvas 40%));pointer-events:none}\n.saker-graph-detail{border-top:1px solid var(--dsh-border,rgba(127,127,127,.18));padding:8px}\n\n@container (max-width:760px){.saker-wb-toolbar .saker-wb-search{max-width:none;flex:1 1 100%}.saker-wb-scope select{max-width:180px}}\n\n/* 2026-11-18 workspace redesign: task/evidence first, visible inspector. */\n.saker-wb-v2{background:var(--dsh-bg-primary,Canvas);color:var(--dsh-text-primary,CanvasText);overflow:hidden;container-type:inline-size}\n.saker-wb-v2 .saker-wb-nav{width:168px;flex-basis:168px;padding:8px;gap:4px;background:color-mix(in srgb,var(--dsh-bg-primary,Canvas) 88%,var(--dsh-text-primary,CanvasText) 12%)}\n.saker-wb-v2 .saker-wb-brand{min-height:36px;padding:8px;gap:8px;font-size:var(--dsh-content-font-size,1em);font-weight:700}\n.saker-wb-v2 .saker-wb-brand svg{color:var(--saker-accent)}\n.saker-wb-v2 .saker-wb-navgroup{display:flex;flex-direction:column;gap:4px;min-height:0}\n.saker-wb-v2 .saker-wb-group{padding:8px;letter-spacing:0;color:var(--saker-muted)}\n.saker-wb-v2 .saker-wb-navbtn{height:36px;padding:0 8px;border-radius:6px;gap:8px;font-size:var(--dsh-content-font-size,1em);font-weight:500}\n.saker-wb-v2 .saker-wb-navbtn.active{background:var(--saker-accent-soft);color:var(--saker-accent);font-weight:700}\n.saker-wb-v2 .saker-wb-navfoot{margin-top:auto;padding:8px;border-top:1px solid var(--dsh-border,rgba(127,127,127,.18));color:var(--saker-muted);display:flex;flex-direction:column;gap:4px}\n.saker-wb-v2 .saker-wb-navfoot small{font-size:var(--dsh-content-font-size-secondary,.93em);line-height:1.5;color:var(--saker-muted);white-space:normal}\n.saker-wb-v2 .saker-wb-main{container-type:normal}\n.saker-wb-v2.is-topnav .saker-wb-nav{display:none}\n.saker-wb-v2.is-nav-collapsed .saker-wb-navfoot{display:none}\n.saker-wb-v2 .saker-wb-main{min-height:0;min-width:0;overflow:hidden}\n.saker-wb-v2 .saker-wb-context{height:46px;min-height:46px;padding:0 16px;border-bottom:1px solid var(--dsh-border,rgba(127,127,127,.24));background:var(--dsh-bg-secondary,Canvas);display:flex;align-items:center;gap:8px;min-width:0}\n.saker-wb-crumb{display:flex;align-items:center;gap:8px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n.saker-wb-crumb strong{font-weight:750}\n.saker-wb-crumb span{color:var(--saker-muted);overflow:hidden;text-overflow:ellipsis}\n.saker-wb-context-note{font-size:var(--dsh-content-font-size-secondary,.93em);color:var(--saker-muted);white-space:nowrap}\n.saker-wb-mobile-nav{display:none;height:32px;max-width:160px;border:1px solid var(--dsh-border,rgba(127,127,127,.35));border-radius:6px;background:var(--dsh-bg-primary,Canvas);color:inherit;padding:0 8px;font:inherit}\n.saker-wb-v2 .saker-wb-scroll{flex:1;min-height:0;max-height:none;overflow:auto;scrollbar-gutter:stable;container-type:inline-size}\n.saker-wb-page{max-width:1480px;margin:0 auto;padding:24px;min-width:0}\n.saker-wb-intro{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:12px;min-width:0}\n.saker-wb-intro h1,.saker-wb-page-title{margin:0;font-size:calc(var(--dsh-content-font-size,1em) * 1.3);line-height:1.5;font-weight:740}\n.saker-wb-intro-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}\n.saker-wb-eyebrow{color:var(--saker-accent);font-size:var(--dsh-content-font-size-secondary,.93em);line-height:1.5;font-weight:700;margin-bottom:4px}\n.saker-wb-page-sub{margin:4px 0 0;color:var(--saker-muted);font-size:var(--dsh-content-font-size-secondary,.93em);line-height:1.5}\n.saker-wb-facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--dsh-border,rgba(127,127,127,.24));border-radius:8px;background:var(--dsh-bg-secondary,Canvas);margin-bottom:12px}\n.saker-wb-facts.compact{margin:8px 0}\n.saker-wb-fact{padding:8px 12px;min-width:0;border-left:1px solid var(--dsh-border,rgba(127,127,127,.18))}\n.saker-wb-fact:first-child{border-left:0}\n.saker-wb-fact.clickable{border-top:0;border-right:0;border-bottom:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}\n.saker-wb-fact.clickable:hover{background:var(--dsh-bg-hover,rgba(127,127,127,.1))}\n.saker-wb-fact strong{display:block;font-size:var(--dsh-content-font-size,1em);line-height:1.5;font-variant-numeric:tabular-nums}\n.saker-wb-fact span{font-size:var(--dsh-content-font-size-secondary,.93em);color:var(--saker-muted)}\n.saker-wb-dash-next{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.5fr);gap:12px;align-items:start}\n.saker-wb-band{border:1px solid var(--dsh-border,rgba(127,127,127,.24));border-radius:8px;background:var(--dsh-bg-secondary,Canvas);min-width:0}\n.saker-wb-bandhead{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;border-bottom:1px solid var(--dsh-border,rgba(127,127,127,.18))}\n.saker-wb-bandhead h2{margin:0;font-size:var(--dsh-content-font-size,1em);font-weight:700}\n.saker-wb-bandhead small,.saker-wb-bandfoot small{color:var(--saker-muted);font-size:var(--dsh-content-font-size-secondary,.93em)}\n.saker-wb-bandfoot{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;border-top:1px solid var(--dsh-border,rgba(127,127,127,.18))}\n.saker-wb-actions{padding:0 12px}\n.saker-wb-actionrow{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px;padding:8px 0;border-top:1px solid var(--dsh-border,rgba(127,127,127,.18))}\n.saker-wb-actionrow:first-child{border-top:0}\n.saker-wb-actionrow strong{font-weight:650}\n.saker-wb-actionrow p{margin:4px 0 0;color:var(--saker-muted);font-size:var(--dsh-content-font-size-secondary,.93em);line-height:1.5}\n.saker-wb-listing{padding-bottom:0}\n.saker-wb-tabbar{display:flex;align-items:center;flex-wrap:wrap;gap:4px;padding:0 0 8px;margin-bottom:8px;border-bottom:1px solid var(--dsh-border,rgba(127,127,127,.24))}\n.saker-wb-tabbar .saker-wb-tab{min-height:32px;padding:5px 10px;border-radius:6px;border-bottom:0}\n.saker-wb-tabbar .saker-wb-tab.active{background:var(--saker-accent-soft);color:var(--saker-accent);font-weight:700}\n.saker-wb-v2 .saker-wb-toolbar{padding:8px 0;margin-bottom:0}\n.saker-wb-v2 .saker-wb-scopebar{padding:0 0 8px}\n.saker-wb-v2 .saker-wb-scope{display:flex;align-items:center;gap:8px;flex-wrap:wrap}\n.saker-wb-v2 .saker-wb-scope input{height:32px;min-width:180px;max-width:260px;border:1px solid var(--dsh-border,rgba(127,127,127,.35));border-radius:6px;background:var(--dsh-bg-primary,Canvas);color:inherit;padding:0 8px;font:inherit}\n.saker-wb-v2 .saker-wb-scope select{height:32px;max-width:320px}\n.saker-wb-v2 .saker-wb-table{width:100%;table-layout:fixed;font-size:var(--dsh-content-font-size,1em)}\n.saker-wb-v2 .saker-wb-table th{padding:8px 12px;background:color-mix(in srgb,var(--dsh-bg-secondary,Canvas) 78%,var(--dsh-text-primary,CanvasText) 22%);border-bottom:1px solid var(--dsh-border,rgba(127,127,127,.22));font-size:var(--dsh-content-font-size-secondary,.93em);line-height:1.5}\n.saker-wb-v2 .saker-wb-table td{padding:8px 12px;height:38px;white-space:normal;overflow-wrap:anywhere;vertical-align:middle;line-height:1.5}\n.saker-wb-v2 .saker-wb-table th{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n.saker-wb-v2 .saker-wb-table .saker-wb-cell-main,.saker-wb-v2 .saker-wb-table .saker-wb-cell-sub{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}\n.saker-wb-v2 .saker-wb-table .saker-wb-clamp-2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}\n.saker-wb-v2 .saker-wb-table tbody tr{outline:none}\n.saker-wb-v2 .saker-wb-table tbody tr.selected td{background:var(--saker-accent-soft)}\n.saker-wb-v2 .saker-wb-table tbody tr:focus-visible td{box-shadow:inset 0 2px 0 var(--saker-accent),inset 0 -2px 0 var(--saker-accent)}\n.saker-wb-v2 .saker-wb-cell-main{font-weight:600;max-width:none;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}\n.saker-wb-v2 .saker-wb-cell-sub{max-width:none;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;line-height:1.5}\n.saker-wb-v2 .saker-wb-task-table col:first-child{min-width:260px}\n.saker-wb-v2 .saker-wb-pager{position:sticky;bottom:0;z-index:3;margin-top:0;padding:8px 12px;background:var(--dsh-bg-secondary,Canvas);border-top:1px solid var(--dsh-border,rgba(127,127,127,.18));justify-content:space-between}\n.saker-wb-workgrid{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-items:start;min-width:0}\n.saker-wb-workgrid.has-detail{grid-template-columns:minmax(480px,1fr) minmax(340px,38%)}\n.saker-wb-workgrid.is-detail-only{grid-template-columns:minmax(0,1fr)}\n.saker-wb-listpane,.saker-wb-detailpane{min-width:0}\n.saker-wb-detailpane{position:sticky;top:0}\n.saker-wb-workgrid.is-detail-only .saker-wb-listpane{display:none}\n.saker-wb-workgrid.is-detail-only .saker-wb-detailpane{position:static}\n.saker-wb-detailback{margin:0 0 8px;justify-self:start}\n.saker-wb-inspector{border:1px solid var(--dsh-border,rgba(127,127,127,.28));border-radius:8px;background:var(--dsh-bg-primary,Canvas);min-width:0;overflow:hidden;display:flex;flex-direction:column;max-height:calc(100dvh - 250px)}\n.saker-wb-workgrid.is-detail-only .saker-wb-inspector{max-height:none}\n.saker-wb-inspector-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;padding:12px;border-bottom:1px solid var(--dsh-border,rgba(127,127,127,.2));min-width:0}\n.saker-wb-inspector-title{min-width:0}\n.saker-wb-inspector-title h2{margin:0;font-size:var(--dsh-content-font-size,1em);line-height:1.5;font-weight:700;overflow-wrap:anywhere;outline:none}\n.saker-wb-inspector-body{padding:12px;overflow:auto;min-height:120px;scrollbar-gutter:stable}\n.saker-wb-inspector-foot{padding:8px 12px;border-top:1px solid var(--dsh-border,rgba(127,127,127,.2));display:flex;flex-wrap:wrap;gap:8px;background:var(--dsh-bg-secondary,Canvas)}\n.saker-wb-inspect-tabs{display:flex;gap:4px;flex-wrap:wrap;padding:8px 12px 0;border-bottom:1px solid var(--dsh-border,rgba(127,127,127,.18))}\n.saker-wb-inspect-tab{min-height:32px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--saker-muted);padding:4px 8px;border-radius:6px;font:inherit;font-size:var(--dsh-content-font-size-secondary,.93em);cursor:pointer}\n.saker-wb-inspect-tab.active{border-bottom-color:var(--saker-accent);color:var(--saker-accent);font-weight:700}\n.saker-wb-inspector h3{font-size:var(--dsh-content-font-size,1em);margin:12px 0 8px;font-weight:700;line-height:1.5}\n.saker-wb-inspector p{margin:8px 0;line-height:1.5}\n.saker-wb-chiprow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 8px}\n.saker-wb-summary{font-size:var(--dsh-content-font-size,1em);line-height:1.5}\n.saker-wb-metadl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 12px;margin:8px 0;font-size:var(--dsh-content-font-size-secondary,.93em)}\n.saker-wb-metadl dt{color:var(--saker-muted);white-space:nowrap}\n.saker-wb-metadl dd{margin:0;overflow-wrap:anywhere;line-height:1.5}\n.saker-wb-detailsec{border-top:1px solid var(--dsh-border,rgba(127,127,127,.16));padding-top:4px;margin-top:8px}\n.saker-wb-original{margin:8px 0;padding:12px;background:color-mix(in srgb,var(--dsh-bg-secondary,Canvas) 80%,CanvasText 20%);border:1px solid var(--dsh-border,rgba(127,127,127,.2));border-radius:6px;white-space:pre;overflow:auto;max-height:360px;font-family:Consolas,\"Cascadia Mono\",monospace;font-size:var(--dsh-content-font-size-secondary,.93em);line-height:1.5}\n.saker-wb-linklist{display:flex;flex-direction:column}\n.saker-wb-linkrow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px;min-height:38px;padding:4px 0;border-top:1px solid var(--dsh-border,rgba(127,127,127,.15));min-width:0}\n.saker-wb-linkrow:first-child{border-top:0}\n.saker-wb-linkrow .saker-wb-cell-main{white-space:normal;overflow-wrap:anywhere}\n.saker-wb-history{padding:8px 0;border-top:1px solid var(--dsh-border,rgba(127,127,127,.15))}\n.saker-wb-history:first-child{border-top:0}\n.saker-wb-history small{color:var(--saker-muted);font-size:var(--dsh-content-font-size-secondary,.93em)}\n.saker-wb-history p{margin:4px 0 0}\n.saker-wb-callout{padding:8px 12px;margin:8px 0;border-left:3px solid var(--saker-accent);background:var(--saker-accent-faint);font-size:var(--dsh-content-font-size-secondary,.93em);line-height:1.5}\n.saker-wb-skeleton{display:flex;flex-direction:column;gap:8px;padding:4px 0 8px}\n.saker-wb-skeleton-line{display:block;height:12px;border-radius:4px;background:var(--dsh-bg-hover,rgba(127,127,127,.14));width:86%}\n.saker-wb-skeleton-line.wide{width:100%;height:16px}.saker-wb-skeleton-line.short{width:52%}\n.saker-wb-gap-list{padding:0 12px 8px}\n.saker-wb-gap-list p{margin:4px 0;font-size:var(--dsh-content-font-size-secondary,.93em);color:var(--saker-muted)}\n.saker-wb-mocknote{grid-column:1/-1;color:var(--saker-muted);font-size:var(--dsh-content-font-size-secondary,.93em);line-height:1.5;padding:4px 0 0}\n.saker-wb-taskpage{padding-top:0}\n.saker-wb-task-head{position:sticky;top:0;z-index:5;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:12px 0 8px;margin:0 0 8px;background:var(--dsh-bg-primary,Canvas);border-bottom:1px solid var(--dsh-border,rgba(127,127,127,.24))}\n.saker-wb-task-headmain{min-width:0}\n.saker-wb-task-title{margin:8px 0 0;font-size:calc(var(--dsh-content-font-size,1em) * 1.3);line-height:1.5;font-weight:740;overflow-wrap:anywhere}\n.saker-wb-task-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;max-width:620px}\n.saker-wb-taskgrid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(280px,.75fr);gap:12px;align-items:start}\n.saker-wb-graph-links{margin-top:12px}\n.saker-wb-linkrow[class]{font:inherit}\nbutton.saker-wb-linkrow{width:100%;border-left:0;border-right:0;border-bottom:0;background:transparent;color:inherit;text-align:left;cursor:pointer}\nbutton.saker-wb-linkrow:hover{background:var(--dsh-bg-hover,rgba(127,127,127,.1))}\n.saker-wb-filelist{max-height:280px;overflow:auto;padding:8px 12px;font-family:Consolas,\"Cascadia Mono\",monospace;font-size:var(--dsh-content-font-size-secondary,.93em);line-height:1.5}\n.saker-wb-file{padding:4px 0;overflow-wrap:anywhere;border-bottom:1px solid var(--dsh-border,rgba(127,127,127,.12))}\n.saker-wb-handoff .saker-wb-taskgrid{margin-top:12px}\n.saker-wb-advanced summary{cursor:pointer;color:var(--saker-muted);font-size:var(--dsh-content-font-size-secondary,.93em);padding:8px 12px;border-top:1px solid var(--dsh-border,rgba(127,127,127,.18))}\n.saker-wb-v2 :focus-visible{outline:2px solid var(--saker-accent);outline-offset:2px}\n.saker-wb-v2 .saker-wb-empty{padding:16px;border-style:solid;background:color-mix(in srgb,var(--dsh-bg-secondary,Canvas) 82%,CanvasText 18%)}\n.saker-wb-v2 .saker-wb-error{padding:12px;background:var(--saker-bad-bg)}\n@media(max-width:760px){.saker-wb-page{padding:12px}.saker-wb-dash-next,.saker-wb-taskgrid{grid-template-columns:1fr}.saker-wb-facts{grid-template-columns:repeat(2,minmax(0,1fr))}.saker-wb-fact:nth-child(3){border-left:0}.saker-wb-intro{align-items:flex-start;flex-direction:column}.saker-wb-intro-actions{justify-content:flex-start}.saker-wb-context-note{display:none}.saker-wb-task-head{position:static;flex-direction:column}.saker-wb-task-actions{justify-content:flex-start;max-width:none}.saker-wb-workgrid.has-detail{grid-template-columns:1fr}.saker-wb-detailpane{position:static}}\n@container (max-width:899px){.saker-wb-v2 .saker-wb-nav{display:none}.saker-wb-v2 .saker-wb-mobile-nav{display:block}}\n@container (max-width:860px){.saker-wb-workgrid.has-detail{grid-template-columns:1fr}.saker-wb-workgrid.has-detail .saker-wb-listpane{display:none}.saker-wb-detailpane{position:static}.saker-wb-inspector{max-height:calc(100dvh - 286px)}}\n@container (max-width:700px){.saker-wb-dash-next,.saker-wb-taskgrid{grid-template-columns:1fr}.saker-wb-facts{grid-template-columns:repeat(2,minmax(0,1fr))}}\n.saker-roles-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,38%);gap:12px;align-items:start}\n.saker-roles-detailpane{position:sticky;top:0;min-width:0}\n@container (max-width:700px){.saker-roles-layout{grid-template-columns:1fr}.saker-roles-detailpane{position:static;order:-1}}\n@media(max-width:640px){.saker-wb-v2 .saker-wb-context{padding:0 8px}.saker-wb-crumb span{white-space:nowrap}.saker-wb-v2 .saker-wb-table .saker-col-secondary{display:none}.saker-wb-v2 .saker-wb-table td,.saker-wb-v2 .saker-wb-table th{padding-inline:8px}.saker-wb-inspector-head{flex-wrap:wrap}.saker-wb-actionrow{grid-template-columns:1fr}.saker-wb-actionrow .saker-wb-btn{justify-self:start}.saker-wb-metadl{grid-template-columns:1fr}.saker-wb-metadl dt{font-weight:650;margin-top:4px}}\n";
+var SAKER_DESIGN_CSS = "/* Saker design system 1.0\n   One type scale, one spacing scale, one control rhythm. Host typography and\n   color variables stay the source of truth; this layer only replaces Saker's\n   own cards, controls and panels. */\n.saker-wb,\n.dsh-chat-setup,\n.dsh-task-workspace {\n  --saker-accent: var(--dsw-alias-state-business-primary, #4b74d9);\n  --saker-accent-soft: color-mix(in srgb, var(--saker-accent) 12%, transparent);\n  --saker-accent-faint: color-mix(in srgb, var(--saker-accent) 6%, transparent);\n  --saker-ok: color-mix(in srgb, #2f8a58 66%, CanvasText 34%);\n  --saker-ok-bg: color-mix(in srgb, #2f8a58 12%, Canvas);\n  --saker-warn: color-mix(in srgb, #b45309 62%, CanvasText 38%);\n  --saker-warn-bg: color-mix(in srgb, #b45309 12%, Canvas);\n  --saker-bad: color-mix(in srgb, #c62828 66%, CanvasText 34%);\n  --saker-bad-bg: color-mix(in srgb, #c62828 12%, Canvas);\n  --saker-danger: var(--dsh-danger, #c62828);\n  --saker-line: color-mix(in srgb, CanvasText 10%, transparent);\n  --saker-line-strong: color-mix(in srgb, CanvasText 16%, transparent);\n  --saker-surface: color-mix(in srgb, Canvas 98%, CanvasText 2%);\n  --saker-surface-strong: color-mix(in srgb, Canvas 95%, CanvasText 5%);\n  --saker-text-2: var(--dsh-text-secondary, color-mix(in srgb, CanvasText 68%, Canvas 32%));\n  --saker-text-3: var(--dsh-text-tertiary, color-mix(in srgb, CanvasText 52%, Canvas 48%));\n  --saker-shadow: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.05);\n  --saker-shadow-pop: 0 12px 40px rgba(0,0,0,.16);\n  --saker-radius-card: 12px;\n  --saker-radius-control: 6px;\n}\n\n/* ---------------------------------------------------------------- chat */\n.dsh-chat-setup .dsh-chat-compact-bar {\n  min-height: 36px;\n  height: auto;\n  max-height: none;\n  padding: 4px 0;\n  gap: 4px;\n  border: 0;\n  background: transparent;\n}\n.dsh-chat-setup .dsh-chat-method-chip,\n.dsh-chat-setup .dsh-chat-toolbar-button,\n.dsh-chat-setup .dsh-chat-status-chip {\n  height: 32px;\n  padding: 0 8px;\n  border: 1px solid transparent;\n  border-radius: 6px;\n  background: transparent;\n  color: var(--saker-text-2);\n  font-size: var(--dsh-content-font-size, 1em);\n  font-weight: 500;\n  display: inline-flex;\n  align-items: center;\n  gap: 4px;\n}\n.dsh-chat-setup .dsh-chat-method-chip:hover,\n.dsh-chat-setup .dsh-chat-toolbar-button:hover {\n  border-color: var(--saker-line);\n  background: var(--saker-surface-strong);\n  color: var(--saker-text-2);\n}\n.dsh-chat-setup .dsh-chat-method-chip { color: inherit; font-weight: 600; max-width: 360px; }\n.dsh-chat-setup .dsh-chat-method-chip > span {\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n.dsh-chat-setup .dsh-chat-status-chip {\n  cursor: pointer;\n  font-size: var(--dsh-content-font-size-secondary, 0.93em);\n  color: var(--saker-text-3);\n}\n.dsh-chat-setup .dsh-chat-status-chip:hover {\n  border-color: var(--saker-line);\n  background: var(--saker-surface-strong);\n  color: var(--saker-text-2);\n}\n.dsh-chat-setup .dsh-chat-status-dot {\n  width: 6px;\n  height: 6px;\n  border-radius: 999px;\n  background: var(--saker-ok);\n  box-shadow: 0 0 0 2px var(--saker-ok-bg);\n}\n.dsh-chat-setup .dsh-chat-more-button { margin-left: auto; }\n.dsh-chat-setup .dsh-chat-toolbar-button svg,\n.dsh-chat-setup .dsh-chat-method-chip svg { opacity: .82; }\n\n.dsh-chat-setup .dsh-chat-more,\n.dsh-chat-setup .dsh-chat-prompt {\n  max-height: min(64vh, 560px);\n  padding: 16px;\n  margin: 0;\n  border: 1px solid var(--saker-line);\n  border-radius: var(--saker-radius-card);\n  background: var(--dsh-bg-primary, Canvas);\n  box-shadow: var(--saker-shadow-pop);\n  display: flex;\n  flex-direction: column;\n  overflow: hidden;\n}\n.dsh-chat-setup .dsh-chat-more > .dsh-chat-panel-head,\n.dsh-chat-setup .dsh-chat-prompt > .dsh-chat-panel-head {\n  margin: 0 -16px 12px;\n  padding: 12px 16px;\n  border-bottom: 1px solid var(--saker-line);\n  background: var(--dsh-bg-primary, Canvas);\n}\n.dsh-chat-setup .dsh-chat-panel-head strong { font-size: var(--dsh-content-font-size, 1em); font-weight: 600; }\n.dsh-chat-setup .dsh-chat-panel-head button {\n  height: 28px;\n  padding: 0 8px;\n  border: 1px solid transparent;\n  border-radius: 6px;\n  background: transparent;\n  color: var(--saker-text-2);\n  font-size: var(--dsh-content-font-size-secondary, 0.93em);\n}\n.dsh-chat-setup .dsh-chat-panel-head button:hover {\n  border-color: var(--saker-line);\n  background: var(--saker-surface-strong);\n}\n.dsh-chat-setup .dsh-chat-settings-actions {\n  gap: 8px;\n  margin: 12px -16px 0;\n  padding: 12px 16px;\n  border-top: 1px solid var(--saker-line);\n  background: var(--dsh-bg-primary, Canvas);\n}\n.dsh-chat-setup .dsh-chat-settings-body { flex: 1 1 auto; min-height: 0; overflow: auto; }\n.dsh-chat-setup .dsh-chat-compact-menu-body {\n  display: grid;\n  grid-template-columns: 1fr 1fr;\n  gap: 4px;\n}\n.dsh-chat-setup .dsh-chat-compact-menu-body button {\n  height: 36px;\n  padding: 0 12px;\n  border: 1px solid transparent;\n  border-radius: 6px;\n  background: transparent;\n  color: var(--saker-text-2);\n  font-size: var(--dsh-content-font-size, 1em);\n  text-align: left;\n}\n.dsh-chat-setup .dsh-chat-compact-menu-body button:hover {\n  border-color: var(--saker-line);\n  background: var(--saker-surface-strong);\n  color: inherit;\n}\n.dsh-chat-setup .dsh-chat-fields,\n.dsh-chat-setup .dsh-limit-row { gap: 8px; margin: 8px 0; }\n.dsh-chat-setup .dsh-chat-field { gap: 4px; margin: 8px 0; }\n.dsh-chat-setup .dsh-chat-field > span,\n.dsh-chat-setup .dsh-chat-target span,\n.dsh-chat-setup .dsh-chat-exclude span,\n.dsh-chat-setup .dsh-limit-row label {\n  font-size: var(--dsh-content-font-size-secondary, 0.93em);\n  color: var(--saker-text-2);\n}\n.dsh-chat-setup .dsh-chat-field > input,\n.dsh-chat-setup .dsh-chat-field > textarea,\n.dsh-chat-setup .dsh-chat-field > select,\n.dsh-chat-setup .dsh-chat-target input,\n.dsh-chat-setup .dsh-chat-target textarea,\n.dsh-chat-setup .dsh-chat-exclude textarea,\n.dsh-chat-setup .dsh-limit-row input {\n  min-height: 32px;\n  border: 1px solid var(--saker-line-strong);\n  border-radius: 6px;\n  background: var(--dsh-bg-primary, Canvas);\n  color: inherit;\n  padding: 4px 8px;\n  font-size: var(--dsh-content-font-size, 1em);\n}\n.dsh-chat-setup .dsh-chat-field > textarea,\n.dsh-chat-setup .dsh-chat-target textarea,\n.dsh-chat-setup .dsh-chat-exclude textarea { min-height: 76px; }\n.dsh-chat-setup .dsh-chat-field > input:focus,\n.dsh-chat-setup .dsh-chat-field > textarea:focus,\n.dsh-chat-setup .dsh-chat-field > select:focus,\n.dsh-chat-setup .dsh-chat-target input:focus,\n.dsh-chat-setup .dsh-chat-target textarea:focus,\n.dsh-chat-setup .dsh-chat-exclude textarea:focus {\n  outline: none;\n  border-color: var(--saker-accent);\n  box-shadow: 0 0 0 3px var(--saker-accent-soft);\n}\n.dsh-chat-setup .dsh-settings-nav {\n  display: flex;\n  flex-direction: column;\n  gap: 4px;\n  padding: 4px;\n  border: 1px solid var(--saker-line);\n  border-radius: 6px;\n  background: var(--saker-surface);\n}\n.dsh-chat-setup .dsh-settings-nav button {\n  min-height: 48px;\n  height: auto;\n  padding: 4px 8px;\n  border: 0;\n  border-radius: 6px;\n  background: transparent;\n  color: var(--saker-text-2);\n  font-size: var(--dsh-content-font-size-secondary, 0.93em);\n  line-height: 1.5;\n  display: flex;\n  flex-direction: column;\n  align-items: flex-start;\n  justify-content: center;\n  gap: 0;\n  text-align: left;\n  width: 100%;\n}\n.dsh-chat-setup .dsh-settings-nav button strong { font-size: var(--dsh-content-font-size, 1em); font-weight: 600; }\n.dsh-chat-setup .dsh-settings-nav button small { font-size: var(--dsh-content-font-size-secondary, 0.93em); color: var(--saker-text-3); }\n.dsh-chat-setup .dsh-settings-nav button[aria-selected=\"true\"],\n.dsh-chat-setup .dsh-settings-nav button.is-active {\n  background: var(--dsh-bg-primary, Canvas);\n  color: inherit;\n  font-weight: 600;\n}\n.dsh-chat-setup .saker-panel-headtext strong { font-size: var(--dsh-content-font-size, 1em); }\n.dsh-chat-setup .saker-panel-subtitle,\n.dsh-chat-setup .saker-panel-section-desc { font-size: var(--dsh-content-font-size-secondary, 0.93em); color: var(--saker-text-2); }\n\n/* ------------------------------------------------------- task / results */\n.dsh-task-workspace {\n  max-width: 1180px;\n  padding: 24px;\n  font-size: var(--dsh-content-font-size, inherit);\n  color: var(--dsh-text-primary, CanvasText);\n}\n.dsh-task-nav {\n  display: inline-flex;\n  gap: 4px;\n  width: auto;\n  padding: 4px;\n  margin-bottom: 16px;\n  border: 1px solid var(--saker-line);\n  border-radius: 6px;\n  background: var(--saker-surface);\n}\n.dsh-task-nav button {\n  height: 30px;\n  padding: 0 12px;\n  border: 0;\n  border-radius: 6px;\n  background: transparent;\n  color: var(--saker-text-2);\n  font-size: var(--dsh-content-font-size, 1em);\n}\n.dsh-task-nav button[aria-current=\"page\"] {\n  background: var(--dsh-bg-primary, Canvas);\n  color: inherit;\n  font-weight: 600;\n}\n.dsh-task-workspace .dsh-task-heading { margin-bottom: 16px; gap: 12px; }\n.dsh-task-workspace .dsh-task-heading h2,\n.dsh-task-workspace .dsh-task-heading h3 {\n  margin: 0;\n  font-size: var(--dsh-content-font-size, 1em);\n  font-weight: 600;\n  letter-spacing: -.01em;\n}\n.dsh-task-workspace .dsh-task-panel,\n.dsh-task-workspace .dsh-rtr-card,\n.dsh-task-workspace .dsh-rtr-detail,\n.dsh-task-workspace .dsh-rtr-cp-card,\n.dsh-task-workspace .dsh-rtr-dist,\n.dsh-task-workspace .dsh-rtr-notice,\n.dsh-task-workspace .dsh-rtr-preview {\n  border: 1px solid var(--saker-line);\n  border-radius: var(--saker-radius-card);\n  background: var(--saker-surface);\n  box-shadow: none;\n}\n.dsh-task-workspace .dsh-task-panel { padding: 16px; }\n.dsh-task-workspace .dsh-task-panel h3 { font-size: var(--dsh-content-font-size, 1em); font-weight: 600; }\n.dsh-task-workspace .dsh-task-panel p { margin: 8px 0; line-height: 1.5; }\n.dsh-task-workspace button {\n  min-height: 32px;\n  border-radius: 6px;\n  font-size: var(--dsh-content-font-size, 1em);\n}\n.dsh-task-workspace select,\n.dsh-task-workspace input:not([type=\"checkbox\"]):not([type=\"radio\"]),\n.dsh-task-workspace textarea {\n  min-height: 32px;\n  border: 1px solid var(--saker-line-strong);\n  border-radius: 6px;\n  background: var(--dsh-bg-primary, Canvas);\n  color: inherit;\n  font-size: var(--dsh-content-font-size, 1em);\n}\n.dsh-task-workspace :focus-visible,\n.dsh-chat-setup :focus-visible,\n.saker-wb :focus-visible {\n  outline: 2px solid var(--saker-accent);\n  outline-offset: 2px;\n}\n\n/* ------------------------------------------------------------ workbench */\n.saker-wb { font-size: var(--dsh-content-font-size, inherit); }\n.saker-wb-nav {\n  width: 200px;\n  flex: 0 0 200px;\n  padding: 12px 8px;\n  gap: 12px;\n  background: var(--saker-surface);\n  border-right: 1px solid var(--saker-line);\n}\n.saker-wb-brand {\n  height: 36px;\n  padding: 0 8px;\n  gap: 8px;\n  font-size: var(--dsh-content-font-size, 1em);\n  font-weight: 600;\n}\n.saker-wb-brand svg { width: 20px; height: 20px; }\n.saker-wb-group {\n  padding: 8px 8px 4px;\n  font-size: var(--dsh-content-font-size-secondary, 0.93em);\n  font-weight: 600;\n  letter-spacing: .02em;\n  color: var(--saker-text-3);\n}\n.saker-wb-navbtn {\n  height: 34px;\n  padding: 0 8px;\n  gap: 8px;\n  border-radius: 6px;\n  color: var(--saker-text-2);\n  font-size: var(--dsh-content-font-size-secondary, 0.93em);\n}\n.saker-wb-navbtn:hover { background: var(--saker-surface-strong); }\n.saker-wb-navbtn.active {\n  background: var(--saker-accent-soft);\n  color: var(--saker-accent);\n  font-weight: 600;\n}\n.saker-wb-main { background: var(--dsh-bg-primary, Canvas); }\n.saker-wb-head {\n  min-height: 60px;\n  padding: 16px 24px;\n  gap: 8px;\n  border-bottom: 1px solid var(--saker-line);\n}\n.saker-wb-title {\n  font-size: var(--dsh-content-font-size, 1em);\n  font-weight: 600;\n  letter-spacing: -.01em;\n}\n.saker-wb-headtext { min-width: 0; }\n.saker-wb-headtext .saker-wb-sub { margin-top: 4px; }\n.saker-wb-sub { font-size: var(--dsh-content-font-size-secondary, 0.93em); color: var(--saker-text-3); }\n.saker-wb-content {\n  padding: 24px;\n  max-width: 1320px;\n  width: 100%;\n  margin: 0 auto;\n}\n.saker-wb-card {\n  padding: 16px;\n  margin-bottom: 12px;\n  border: 1px solid var(--saker-line);\n  border-radius: var(--saker-radius-card);\n  background: var(--saker-surface);\n}\n.saker-wb-card h3 { font-size: var(--dsh-content-font-size, 1em); font-weight: 600; margin: 0 0 8px; }\n.saker-wb-kpis { gap: 12px; margin-bottom: 16px; }\n.saker-wb-kpi {\n  padding: 16px;\n  border: 1px solid var(--saker-line);\n  border-radius: var(--saker-radius-card);\n  background: var(--saker-surface);\n}\n.saker-wb-kpi b {\n  font-size: var(--dsh-content-font-size, 1em);\n  font-weight: 600;\n  letter-spacing: -.01em;\n  font-variant-numeric: tabular-nums;\n}\n.saker-wb-kpi span { font-size: var(--dsh-content-font-size-secondary, 0.93em); color: var(--saker-text-3); }\n.saker-dash-grid {\n  display: grid;\n  grid-template-columns: minmax(0, 1.8fr) minmax(300px, 1fr);\n  gap: 16px;\n  align-items: start;\n}\n.saker-dash-grid .saker-wb-table th:nth-child(n+4),\n.saker-dash-grid .saker-wb-table td:nth-child(n+4) { display: none; }\n.saker-dash-grid .saker-wb-table { table-layout: fixed; }\n.saker-dash-grid .saker-wb-table td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.saker-dash-grid .saker-wb-table th:nth-child(1) { width: 58%; }\n.saker-dash-grid .saker-wb-table th:nth-child(2) { width: 16%; }\n.saker-dash-grid .saker-wb-table th:nth-child(3) { width: 26%; }\n.saker-dash-grid .saker-wb-table td:nth-child(3) { font-size: var(--dsh-content-font-size-secondary, 0.93em); }\n.saker-dash-side { display: flex; flex-direction: column; gap: 16px; }\n.saker-card-head {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  gap: 8px;\n  margin-bottom: 8px;\n}\n.saker-card-head h3 { margin: 0; }\n.saker-card-head .saker-wb-btn { height: 28px; padding: 0 8px; font-size: var(--dsh-content-font-size-secondary, 0.93em); }\n.saker-dash-list { display: flex; flex-direction: column; }\n.saker-dash-row {\n  display: grid;\n  grid-template-columns: auto minmax(0, 1fr);\n  align-items: center;\n  gap: 4px 8px;\n  width: 100%;\n  padding: 8px;\n  border: 0;\n  border-top: 1px solid var(--saker-line);\n  border-radius: 6px;\n  background: transparent;\n  color: inherit;\n  text-align: left;\n  cursor: pointer;\n}\n.saker-dash-row:hover { background: var(--saker-surface-strong); }\n.saker-dash-kicker { font-size: var(--dsh-content-font-size-secondary, 0.93em); font-weight: 600; color: var(--saker-warn); white-space: nowrap; }\n.saker-dash-row-main {\n  min-width: 0;\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n  font-size: var(--dsh-content-font-size, 1em);\n  font-weight: 600;\n}\n.saker-dash-row .saker-wb-sub { grid-column: 2; }\n.saker-dash-all {\n  width: 100%;\n  height: 30px;\n  margin-top: 4px;\n  border: 0;\n  border-top: 1px solid var(--saker-line);\n  border-radius: 6px;\n  background: transparent;\n  color: var(--saker-text-2);\n  font-size: var(--dsh-content-font-size-secondary, 0.93em);\n  cursor: pointer;\n}\n.saker-dash-all:hover { background: var(--saker-surface-strong); }\n.saker-dash-empty {\n  padding: 16px 8px;\n  color: var(--saker-text-3);\n  font-size: var(--dsh-content-font-size-secondary, 0.93em);\n}\n.saker-dash-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }\n.saker-dash-stats b {\n  display: block;\n  font-size: var(--dsh-content-font-size, 1em);\n  font-weight: 600;\n  font-variant-numeric: tabular-nums;\n}\n.saker-dash-stats span { display: block; margin-top: 4px; font-size: var(--dsh-content-font-size-secondary, 0.93em); color: var(--saker-text-3); }\n.saker-wb-btn {\n  height: 32px;\n  padding: 0 12px;\n  gap: 4px;\n  border: 1px solid var(--saker-line-strong);\n  border-radius: 6px;\n  background: var(--dsh-bg-primary, Canvas);\n  color: inherit;\n  font-size: var(--dsh-content-font-size, 1em);\n  font-weight: 500;\n  transition: background 120ms ease, border-color 120ms ease;\n}\n.saker-wb-btn:hover {\n  background: var(--saker-surface-strong);\n  border-color: var(--saker-line-strong);\n}\n.saker-wb-btn.primary {\n  border-color: var(--saker-accent);\n  background: var(--saker-accent);\n  color: #fff;\n}\n.saker-wb-btn.primary:hover { background: color-mix(in srgb, var(--saker-accent) 88%, #000); }\n.saker-wb-btn.danger { border-color: color-mix(in srgb, var(--saker-danger) 55%, transparent); color: var(--saker-danger); }\n.saker-wb-btn:disabled { opacity: .45; }\n.saker-wb-table { font-size: var(--dsh-content-font-size, 1em); border-collapse: separate; border-spacing: 0; }\n.saker-wb-table th {\n  padding: 0 12px 8px;\n  font-size: var(--dsh-content-font-size-secondary, 0.93em);\n  font-weight: 600;\n  color: var(--saker-text-3);\n  border-bottom: 1px solid var(--saker-line);\n}\n.saker-wb-table td {\n  height: 40px;\n  padding: 8px 12px;\n  border-top: 1px solid var(--saker-line);\n}\n.saker-wb-table tbody tr:hover { background: var(--saker-surface-strong); }\n.saker-wb-cell-main { font-size: var(--dsh-content-font-size, 1em); font-weight: 600; max-width: 560px; }\n.saker-wb-cell-sub { font-size: var(--dsh-content-font-size-secondary, 0.93em); color: var(--saker-text-3); max-width: 560px; }\n.saker-wb-chip {\n  min-height: 22px;\n  height: 22px;\n  padding: 0 8px;\n  border-radius: 6px;\n  border: 1px solid var(--saker-line);\n  background: var(--saker-surface-strong);\n  font-size: var(--dsh-content-font-size-secondary, 0.93em);\n  font-weight: 500;\n}\n.saker-wb-chip.ok { background: var(--saker-ok-bg); border-color: color-mix(in srgb, var(--saker-ok) 35%, transparent); color: var(--saker-ok); }\n.saker-wb-chip.warn { background: var(--saker-warn-bg); border-color: color-mix(in srgb, var(--saker-warn) 35%, transparent); color: var(--saker-warn); }\n.saker-wb-chip.bad { background: var(--saker-bad-bg); border-color: color-mix(in srgb, var(--saker-bad) 35%, transparent); color: var(--saker-bad); }\n.saker-wb-tabs {\n  display: inline-flex;\n  gap: 4px;\n  padding: 4px;\n  margin-bottom: 16px;\n  border: 1px solid var(--saker-line);\n  border-radius: 6px;\n  background: var(--saker-surface);\n}\n.saker-wb-tab {\n  height: 30px;\n  padding: 0 12px;\n  border: 0;\n  border-radius: 6px;\n  color: var(--saker-text-2);\n  font-size: var(--dsh-content-font-size, 1em);\n}\n.saker-wb-tab.active {\n  background: var(--dsh-bg-primary, Canvas);\n  color: inherit;\n  font-weight: 600;\n}\n.saker-wb-empty,\n.saker-wb-error {\n  padding: 24px;\n  border: 1px solid var(--saker-line);\n  border-radius: var(--saker-radius-card);\n  background: var(--saker-surface);\n  color: var(--saker-text-2);\n  font-size: var(--dsh-content-font-size, 1em);\n  text-align: center;\n}\n.saker-wb-error { text-align: left; border-color: color-mix(in srgb, var(--saker-bad) 28%, var(--saker-line)); background: var(--saker-bad-bg); color: var(--saker-bad); }\n.saker-wb-notice {\n  padding: 8px 12px;\n  margin-bottom: 12px;\n  border: 1px solid color-mix(in srgb, var(--saker-accent) 22%, var(--saker-line));\n  border-radius: 6px;\n  background: var(--saker-accent-faint);\n  font-size: var(--dsh-content-font-size-secondary, 0.93em);\n}\n.saker-wb-notice.warn { border-color: color-mix(in srgb, var(--saker-warn) 30%, transparent); background: var(--saker-warn-bg); }\n.saker-wb-toolbar { gap: 8px; margin-bottom: 12px; }\n.saker-wb-search,\n.saker-wb-toolbar select,\n.saker-wb-scope select {\n  height: 32px;\n  border: 1px solid var(--saker-line-strong);\n  border-radius: 6px;\n  background: var(--dsh-bg-primary, Canvas);\n  color: inherit;\n  font-size: var(--dsh-content-font-size, 1em);\n  padding: 0 8px;\n}\n.saker-wb-search { flex: 1 1 240px; max-width: 360px; }\n.saker-wb-scope { gap: 8px; font-size: var(--dsh-content-font-size-secondary, 0.93em); }\n.saker-wb-pager { padding: 12px 0; font-size: var(--dsh-content-font-size-secondary, 0.93em); color: var(--saker-text-3); }\n.saker-wb-pager .saker-wb-btn { height: 30px; }\n.saker-mod { grid-template-columns: 200px minmax(0, 1fr); gap: 16px; }\n.saker-mod-cats { padding: 8px; border: 1px solid var(--saker-line); border-radius: var(--saker-radius-card); background: var(--saker-surface); }\n.saker-mod-cat { height: 32px; padding: 0 8px; gap: 8px; font-size: var(--dsh-content-font-size, 1em); border-radius: 6px; }\n.saker-mod-cat.active { background: var(--saker-accent-soft); color: var(--saker-accent); }\n.saker-mod-subcat { min-height: 30px; padding: 0 8px; font-size: var(--dsh-content-font-size-secondary, 0.93em); border-radius: 6px; }\n.saker-mod-search { gap: 8px; flex-wrap: wrap; }\n.saker-mod-search input,\n.saker-mod-search select { height: 32px; font-size: var(--dsh-content-font-size, 1em); }\n.saker-mod-grid { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }\n.saker-mod-item { padding: 16px; gap: 12px; border: 1px solid var(--saker-line); border-radius: 6px; background: var(--saker-surface); transition: border-color 120ms ease, box-shadow 120ms ease; }\n.saker-mod-item.active { border-color: var(--saker-accent); background: var(--saker-accent-faint); }\n.saker-mod-item-title { font-size: var(--dsh-content-font-size, 1em); font-weight: 600; }\n.saker-mod-item-sub { margin-top: 4px; font-size: var(--dsh-content-font-size-secondary, 0.93em); line-height: 1.5; color: var(--saker-text-2); }\n.saker-mod-fav { width: 28px; height: 28px; padding: 0; border-radius: 6px; font-size: var(--dsh-content-font-size, 1em); }\n.saker-mod-detail { width: min(480px, 94vw); padding: 24px; border-left: 1px solid var(--saker-line); box-shadow: -16px 0 40px rgba(0,0,0,.12); }\n.saker-mod-detail h3 { font-size: var(--dsh-content-font-size, 1em); font-weight: 600; }\n.saker-mod-detail h4 { margin: 16px 0 8px; font-size: var(--dsh-content-font-size-secondary, 0.93em); color: var(--saker-text-3); }\n.saker-mod-detail pre { padding: 12px; border: 1px solid var(--saker-line); border-radius: 6px; background: var(--saker-surface-strong); font-size: var(--dsh-content-font-size, 1em); line-height: 1.5; }\n.saker-roles { gap: 12px; }\n.saker-roles .saker-wb-card { padding: 16px; }\n.saker-roles select { height: 32px; font-size: var(--dsh-content-font-size, 1em); }\n.saker-wb-field { margin: 8px 0; font-size: var(--dsh-content-font-size-secondary, 0.93em); }\n.saker-wb-field input { height: 32px; font-size: var(--dsh-content-font-size, 1em); }\n.saker-graph { border: 1px solid var(--saker-line); border-radius: var(--saker-radius-card); background: var(--saker-surface); }\n.saker-graph-toolbar { gap: 8px; padding: 12px; border-bottom: 1px solid var(--saker-line); }\n.saker-graph-legend { gap: 8px; padding: 8px 12px; font-size: var(--dsh-content-font-size-secondary, 0.93em); color: var(--saker-text-3); }\n.saker-graph-canvas { background: radial-gradient(circle at 1px 1px, var(--saker-line) 1px, transparent 0) 0 0 / 16px 16px, var(--dsh-bg-primary, Canvas); padding: 12px; }\n.saker-graph-node-title { font-size: var(--dsh-content-font-size, 1em); font-weight: 600; }\n.saker-graph-node .saker-graph-node-sub { font-size: var(--dsh-content-font-size-secondary, 0.93em); fill: var(--saker-text-3); }\n.saker-graph-detail { padding: 12px; border-top: 1px solid var(--saker-line); }\n.saker-knowledge { gap: 16px; }\n.saker-knowledge .saker-wb-detail { flex-basis: min(440px, 40%); padding-left: 16px; }\n.saker-knowledge .saker-wb-card { padding: 12px 16px; }\n\n@media (max-width: 1100px) {\n  .saker-dash-grid { grid-template-columns: 1fr; }\n  .saker-wb-content { padding: 16px; }\n  .saker-mod { grid-template-columns: 1fr; }\n  .saker-mod-cats { display: flex; flex-wrap: nowrap; gap: 4px; overflow-x: auto; scrollbar-width: thin; }\n  .saker-mod-cat { width: auto; white-space: nowrap; }\n}\n@media (max-width: 760px) {\n  .saker-wb-head { padding: 12px 16px; }\n  .saker-wb-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }\n  .saker-mod-grid { grid-template-columns: 1fr; }\n}\n";
+function installDesignSystemStyles() {
+	if (typeof document === "undefined") return function () {};
+	var id = "saker-design-system-css";
+	var existing = document.getElementById(id);
+	if (existing) return function () {};
+	var tag = document.createElement("style");
+	tag.id = id; tag.textContent = SAKER_DESIGN_CSS;
+	document.head.appendChild(tag);
+	return function () { try { tag.remove(); } catch (_) {} };
+}
+function installWorkbenchStyles() {
+	if (typeof document === "undefined") return function () {};
+	var id = "saker-workbench-css";
+	var existing = document.getElementById(id);
+	if (existing) return function () {};
+	var tag = document.createElement("style");
+	tag.id = id; tag.textContent = SAKER_WB_CSS;
+	document.head.appendChild(tag);
+	return function () { try { tag.remove(); } catch (_) {} };
+}
+function SakerFalcon(props) {
+	return h("svg", { viewBox: "0 0 64 64", width: props.size || 22, height: props.size || 22, "aria-hidden": "true" },
+		h("path", { fill: "currentColor", fillRule: "evenodd", d: "M7 35 18 18Q24 10 36 10h9l12 11-10 3-2 8-10-5-9 4-9 8Zm27-18 10 2-6 4Z" }),
+		h("path", { fill: "currentColor", d: "m20 34 17-5-7 12-18 13 6-14-11 3Z" }));
+}
+function wbStateLabel(state) {
+	return ({ active: "进行中", paused: "已暂停", stopped: "已停止", completed: "已结束", ready: "待开始" })[state] || state || "未知";
+}
+function wbStateTone(state) {
+	return state === "active" ? "ok" : state === "paused" ? "warn" : state === "stopped" ? "bad" : "";
+}
+function attentionLabel(kind) {
+	return ({ "root-blocker": "任务阻塞", cleanup: "清理待确认", command: "命令待确认" })[kind] || "待处理";
+}
+function wbVerificationLabel(state) {
+	return ({ verified: "已验证", candidate: "待确认", "needs-recheck": "待复核", "not-reproduced": "未复现", fixed: "已处置" })[state] || state || "未知";
+}
+function wbTime(value) {
+	if (!value) return "—";
+	var n = typeof value === "number" ? value : Date.parse(value);
+	if (!Number.isFinite(n)) return String(value).slice(0, 19);
+	try { return new Date(n).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }); }
+	catch (_) { return String(value).slice(0, 19); }
+}
+function wbReasonLabel(value) {
+	var text = String(value || "");
+	if (!text) return "无阻塞";
+	if (text === "time_budget_exhausted") return "时限已到";
+	if (text === "tool_budget_exhausted") return "工具次数已用完";
+	if (text === "turn_ended") return "当前回合已结束，等待下一步";
+	if (text === "plan_complete") return "当前测试流程已完成，仍有未测部分需单独查看";
+	if (text === "queue_complete") return "队列已完成";
+	if (text === "interaction_confirmation_required") return "等待你的确认";
+	if (text === "cancelled") return "已取消";
+	if (text.startsWith("paused:")) return "等待用户：" + text.slice(7);
+	if (text.startsWith("model_budget:")) return "模型额度不足：" + text.slice(13);
+	return text;
+}
+var scopeContextCache = {};
+function scopeContextFor(sessionId) {
+	var id = String(sessionId || "");
+	if (!id) return Promise.resolve({});
+	var cached = scopeContextCache[id];
+	if (cached && Date.now() - cached.at < 30000) return Promise.resolve(cached.value);
+	return api("workbench.query", { kind: "scope.resolve", context: { sessionId: id } })
+		.then(function (response) {
+			var data = response && response.data;
+			var value = data ? {
+				entrySessionId: id,
+				projectKey: data.projectKey,
+				workspaceKey: data.workspaceKey,
+				scopeRevision: data.scopeRevision,
+			} : {};
+			scopeContextCache[id] = { at: Date.now(), value: value };
+			return value;
+		})
+		.catch(function () { return {}; });
+}
+function wbStableJson(value) {
+	if (value === null || value === undefined) return "null";
+	if (typeof value !== "object") return JSON.stringify(value);
+	if (Array.isArray(value)) return "[" + value.map(wbStableJson).join(",") + "]";
+	return "{" + Object.keys(value).sort().map(function (key) {
+		return JSON.stringify(key) + ":" + wbStableJson(value[key]);
+	}).join(",") + "}";
+}
+function wbQueryKey(kind, context, filter, page) {
+	return kind + "|" + wbStableJson(context || {}) + "|" + wbStableJson(filter || {}) + "|" + wbStableJson(page || {});
+}
+function wbIntentKey(kind, context, payload) {
+	return kind + "|" + wbStableJson(context || {}) + "|" + wbStableJson(payload || {});
+}
+function wbNewCommandId() {
+	return "cmd-" + ((typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2)));
+}
+function wbResponseError(response, fallback) {
+	if (response && response.ok === false) {
+		var failure = Error(response.error || fallback || "操作未完成");
+		failure.code = response.code;
+		failure.commandId = response.commandId;
+		failure.status = response.status;
+		failure.decided = true;
+		if (["command-in-flight", "HOST_RESULT_UNKNOWN", "command-state-unknown"].indexOf(String(response.code || "")) >= 0) {
+			failure.unknown = true;
+			failure.decided = false;
+		}
+		return failure;
+	}
+	if (response && response.error && response.ok !== true) {
+		var other = Error(typeof response.error === "string" ? response.error : (response.error.message || fallback || "操作未完成"));
+		other.code = response.code;
+		other.decided = true;
+		return other;
+	}
+	return null;
+}
+function wbErrorText(error) {
+	var message = String(error && error.message ? error.message : (error || ""));
+	if (/failed to fetch|fetch failed|networkerror|load failed|network request failed/i.test(message))
+		return "无法连接本机 Saker 接口（Host 或网络未就绪）；本次没有拿到结果。";
+	if (/timeout|timed out|AbortError/i.test(message))
+		return "请求超时：结果可能尚未返回，不要直接重复发送同一操作。";
+	if (/commandId is already running|already running in another/i.test(message))
+		return "同一命令仍在处理中；请先确认原命令结果，不要重复发送。";
+	if (/HOST_RESULT_UNKNOWN|结果未知/i.test(message))
+		return "上一次操作结果未知；请先确认原命令，确认未受理后再重试。";
+	return message;
+}
+// 同一个“用户意图”只允许一个 commandId。传输失败时记录为结果未知；
+// 重试先查询原 ID，服务端没有记录才用同一个 ID 重发，避免重复外部执行。
+var wbCommandRecords = {};
+var WB_COMMAND_STORAGE_PREFIX = "saker.command.v1.";
+function wbCommandHash(value) {
+	var text = String(value || ""), hash = 0x811c9dc5;
+	for (var index = 0; index < text.length; index += 1) {
+		hash ^= text.charCodeAt(index);
+		hash = Math.imul(hash, 0x01000193) >>> 0;
+	}
+	return hash.toString(16).padStart(8, "0") + "-" + text.length.toString(16);
+}
+function wbCommandPayloadHasSecret(value, depth) {
+	if (depth > 5 || value === null || value === undefined) return false;
+	if (Array.isArray(value)) return value.some(function (item) { return wbCommandPayloadHasSecret(item, (depth || 0) + 1); });
+	if (typeof value !== "object") return false;
+	return Object.keys(value).some(function (key) {
+		return /(?:token|secret|password|passwd|authorization|cookie|api[-_]?key|credential)/i.test(key)
+			|| wbCommandPayloadHasSecret(value[key], (depth || 0) + 1);
+	});
+}
+function wbLoadPersistedCommand(intent) {
+	try {
+		var raw = window.localStorage.getItem(WB_COMMAND_STORAGE_PREFIX + wbCommandHash(intent));
+		var value = raw ? JSON.parse(raw) : null;
+		if (!value || value.intent !== intent || !value.commandId || value.status !== "unknown") return null;
+		// Persist only the non-secret recovery pointer. The current intent
+		// supplies the context and payload again; the Host checks their hashes.
+		return { commandId: value.commandId, status: "unknown", kind: value.kind, promise: null };
+	} catch (_error) { return null; }
+}
+function wbPersistUnknownCommand(intent, commandId, kind, context, payload) {
+	try {
+		if (wbCommandPayloadHasSecret(context, 0) || wbCommandPayloadHasSecret(payload, 0)) return;
+		window.localStorage.setItem(WB_COMMAND_STORAGE_PREFIX + wbCommandHash(intent), JSON.stringify({
+			intent: intent, commandId: commandId, kind: kind, status: "unknown", savedAt: Date.now(),
+		}));
+	} catch (_error) { /* storage unavailable: keep in-memory unknown state */ }
+}
+function wbClearPersistedCommand(intent) {
+	try { window.localStorage.removeItem(WB_COMMAND_STORAGE_PREFIX + wbCommandHash(intent)); } catch (_error) {}
+}
+function wbDispatchCommand(commandId, kind, context, payload) {
+	return api("workbench.command", { commandId: commandId, kind: kind, context: context, payload: payload || {} })
+		.then(function (response) {
+			var failure = wbResponseError(response, "命令未完成");
+			if (failure) throw failure;
+			return response && Object.prototype.hasOwnProperty.call(response, "result") && response.result !== undefined ? response.result : response;
+		});
+}
+function wbReconcileCommand(commandId, kind, context, payload) {
+	return api("workbench.query", { kind: "command.status", context: Object.assign({}, context, { commandId: commandId }) })
+		.then(function (response) {
+			var failure = wbResponseError(response, "无法确认原命令");
+			if (failure) throw failure;
+			var data = response && response.data;
+			if (!data || !data.status || data.status === "unknown") return { action: "dispatch" };
+			if (data.status === "completed" || data.status === "accepted") return { action: "reuse", value: data.result };
+			if (data.status === "rejected") {
+				var rejected = Error(data.error || "原命令已被拒绝");
+				rejected.code = "command-rejected";
+				rejected.decided = true;
+				rejected.commandId = commandId;
+				throw rejected;
+			}
+			var pending = Error(data.error || "原命令仍在处理中；稍后再查询，不要重复发送");
+			pending.unknown = true;
+			pending.commandId = commandId;
+			pending.intent = wbIntentKey(kind, context, payload);
+			throw pending;
+		})
+		.catch(function (error) {
+			if (error && (error.decided === true || error.unknown === true)) throw error;
+			// 查询本身失败时无法证明命令未受理；只能复用同一个 ID 交给服务端去重。
+			return { action: "dispatch" };
+		});
+}
+function wbCommand(ctx, kind, context, payload) {
+	var base = context || {};
+	var intent = wbIntentKey(kind, base, payload);
+	var existing = wbCommandRecords[intent] || wbLoadPersistedCommand(intent);
+	if (existing && existing.status === "inflight" && existing.promise) return existing.promise;
+	if (existing && existing.status === "done" && Date.now() - Number(existing.doneAt || 0) < 5000) return Promise.resolve(existing.value);
+	if (existing && existing.status === "failed") { delete wbCommandRecords[intent]; existing = null; }
+	var commandId = existing && existing.commandId ? existing.commandId : wbNewCommandId();
+	var sessionId = String(base.entrySessionId || base.sessionId || "");
+	var entry = existing || { intent: intent, commandId: commandId, status: "inflight", context: base, payload: payload || {}, promise: null };
+	var wasUnknown = entry.status === "unknown";
+	entry.status = "inflight"; entry.context = base; entry.payload = payload || {};
+	wbCommandRecords[intent] = entry;
+	var promise = (sessionId ? scopeContextFor(sessionId) : Promise.resolve({})).then(function (scope) {
+		var full = Object.assign({}, base, scope);
+		if (wasUnknown) {
+			return wbReconcileCommand(commandId, kind, full, payload).then(function (outcome) {
+				if (outcome.action === "reuse") return outcome.value;
+				return wbDispatchCommand(commandId, kind, full, payload);
+			});
+		}
+		return wbDispatchCommand(commandId, kind, full, payload);
+	})
+		.then(function (value) {
+			entry.status = "done"; entry.value = value; entry.doneAt = Date.now();
+			wbClearPersistedCommand(intent);
+			return value;
+		})
+		.catch(function (error) {
+			if (error && error.unknown === true) {
+				entry.status = "unknown";
+				error.commandId = error.commandId || commandId;
+				error.intent = intent;
+				wbPersistUnknownCommand(intent, commandId, kind, base, payload);
+				throw error;
+			}
+			var reachedServer = error && (error.decided === true || error.status !== undefined || error.code === "command-rejected");
+			if (reachedServer) {
+				entry.status = "failed";
+				if (wbCommandRecords[intent] === entry) delete wbCommandRecords[intent];
+				wbClearPersistedCommand(intent);
+			} else {
+				entry.status = "unknown";
+				error.unknown = true;
+				error.commandId = commandId;
+				error.intent = intent;
+				wbPersistUnknownCommand(intent, commandId, kind, base, payload);
+			}
+			throw error;
+		});
+	entry.promise = promise;
+	return promise;
+}
+function wbCommandPendingError(commandId, message) {
+	var error = Error(message || "原命令结果仍未知");
+	error.unknown = true;
+	error.commandId = commandId;
+	return error;
+}
+function useWorkbenchQuery(kind, context, tick, enabled, options) {
+	var filter = (options && options.filter) || {};
+	var page = (options && options.page) || { limit: 50 };
+	var key = wbQueryKey(kind, context, filter, page);
+	var state = useState({ key: key, loading: enabled !== false, data: null, error: "", meta: null, kind: kind, stale: false });
+	var value = state[0], setValue = state[1];
+	var requestSeq = useRef(0);
+	useEffect(function () {
+		if (enabled === false) {
+			requestSeq.current += 1;
+			setValue({ key: key, loading: false, data: null, error: "", meta: null, kind: kind, stale: false });
+			return;
+		}
+		var current = ++requestSeq.current;
+		setValue(function (previous) {
+			var same = previous && previous.key === key;
+			return { key: key, loading: true, data: same ? previous.data : null, error: "", meta: same ? previous.meta : null, kind: kind, stale: same && !!previous.data };
+		});
+		var base = context || {};
+		var sessionId = String(base.entrySessionId || base.sessionId || "");
+		(sessionId ? scopeContextFor(sessionId) : Promise.resolve({}))
+			.then(function (scope) {
+				return api("workbench.query", { kind: kind, context: Object.assign({}, base, scope), filter: filter, page: page });
+			})
+			.then(function (response) {
+				if (current !== requestSeq.current) return;
+				var failure = wbResponseError(response, "读取失败");
+				if (failure) throw failure;
+				setValue({ key: key, loading: false, data: response.data, error: "", meta: response, kind: kind, stale: false });
+			})
+			.catch(function (error) {
+				if (current !== requestSeq.current) return;
+				setValue(function (previous) {
+					var same = previous && previous.key === key;
+					return { key: key, loading: false, data: same ? previous.data : null, error: wbErrorText(error),
+						meta: same ? previous.meta : null, kind: kind, stale: same && !!previous.data };
+				});
+			});
+		return function () { if (requestSeq.current === current) requestSeq.current += 1; };
+	}, [key, tick, enabled]);
+	if (value.key !== key) return { key: key, loading: enabled !== false, data: null, error: "", meta: null, kind: kind, stale: false };
+	return value;
+}
+function SakerWorkbenchIcon() {
+	return h("span", { "data-saker-workbench-icon": "1", style: { display: "inline-flex", width: "32px", height: "32px", alignItems: "center", justifyContent: "center", color: "var(--dsw-alias-state-business-primary,#4b74d9)" } },
+		h(SakerFalcon, { size: 22 }));
+}
+var SAKER_WB_NAV_V2 = [
+	{ group: "测试", items: [
+		{ id: "dashboard", label: "概览", icon: "dashboard" },
+		{ id: "tasks", label: "测试任务", icon: "tasks" },
+		{ id: "evidence", label: "发现与证据", icon: "findings" },
+		{ id: "attention", label: "待办事项", icon: "attention" },
+	] },
+	{ group: "资源", items: [
+		{ id: "resources", label: "配置与资料", icon: "modules" },
+		{ id: "logs", label: "执行日志", icon: "logs" },
+	] },
+];
+var SAKER_EVIDENCE_TABS_V2 = [
+	{ id: "findings", label: "发现" },
+	{ id: "traffic", label: "HTTP 记录" },
+	{ id: "assets", label: "资产与文件" },
+];
+var SAKER_RESOURCE_TABS_V2 = [
+	{ id: "modules", label: "测试模块" },
+	{ id: "roles", label: "协作角色" },
+	{ id: "knowledge", label: "知识库" },
+	{ id: "capabilities", label: "工具清单" },
+];
+var SAKER_TASK_TABS_V2 = [
+	{ id: "overview", label: "概览" },
+	{ id: "execution", label: "执行记录" },
+	{ id: "exploration", label: "测试路径" },
+	{ id: "findings", label: "发现" },
+	{ id: "assets", label: "资产与文件" },
+];
+function wbBusinessLabel(state) {
+	return ({
+		running: "运行中", "waiting-user": "待你处理", "turn-ended": "本回合结束",
+		paused: "已暂停", ended: "已结束", stopped: "已停止", failed: "失败", ready: "待开始",
+	})[state] || state || "未知";
+}
+function wbBusinessTone(state) {
+	if (state === "running") return "ok";
+	if (state === "waiting-user" || state === "paused") return "warn";
+	if (state === "stopped" || state === "failed") return "bad";
+	return "";
+}
+function wbDurationText(ms) {
+	if (ms === null || ms === undefined || !Number.isFinite(Number(ms))) return "用时未知";
+	var seconds = Math.max(0, Math.floor(Number(ms) / 1000));
+	if (seconds < 60) return "不足 1 分钟";
+	var minutes = Math.floor(seconds / 60);
+	if (minutes < 60) return minutes + " 分钟";
+	var hours = Math.floor(minutes / 60);
+	return hours + " 小时 " + (minutes % 60) + " 分";
+}
+function wbAttentionKindLabel(kind) {
+	return ({
+		"root-blocker": "任务受阻", "scope-confirmation": "范围确认", "scope-change": "范围变更",
+		cleanup: "释放未确认", command: "命令待确认",
+	})[kind] || "待办事项";
+}
+function wbGraphKindLabel(kind) {
+	return ({ root: "测试任务", work: "工作项", workflow: "测试流程", step: "步骤", attempt: "尝试",
+		asset: "资产", request: "请求", endpoint: "接口", check: "检查项", receipt: "HTTP 回执", finding: "发现", material: "文件", file: "文件" })[kind] || kind || "节点";
+}
+function wbNodeStateLabel(state) {
+	return ({ paused: "已暂停", running: "运行中", active: "进行中", waiting: "等待中", queued: "排队中",
+		starting: "启动中", proposed: "已提出", stopped: "已停止", released: "已释放",
+		"cleanup-failed": "释放未确认", failed: "失败", pending: "待开始",
+		verified: "已验证", unverified: "未验证", candidate: "候选",
+		done: "已完成", "needs-recheck": "待复核",
+		settled: "已结算", reserved: "等待发送", dispatched: "传输中", cancelled: "未发送",
+		current: "当前可用", historical: "历史可读", invalid: "完整性未通过",
+		completed: "已完成", "not-hit": "未命中", blocked: "受阻",
+		captured: "已采集", "not-tested": "未测", unknown: "未知" })[state] || state || "未知";
+}
+function wbExecutionKindLabel(kind) {
+	return ({ http: "HTTP 请求", model: "模型回合", attempt: "工作尝试", role: "角色实例" })[kind] || kind || "—";
+}
+function wbEvidenceRefKindLabel(kind) {
+	return ({ request: "请求", execution: "执行回执", receipt: "执行回执", http: "执行回执",
+		file: "文件", material: "文件", asset: "资产", source: "来源", command: "命令" })[kind] || kind || "引用";
+}
+function wbEvidenceQualityLabel(quality) {
+	return ({ current: "当前可用", historical: "历史可读", invalid: "完整性未通过",
+		unknown: "未核", "not-applicable": "不适用" })[quality] || quality || "未核";
+}
+function wbSelectionKey(ref) {
+	return ref ? [ref.kind, ref.rootId || "", ref.id || ""].join(":") : "";
+}
+function wbRootTitle(row) {
+	return String((row && row.title) || (row && row.rootId) || "未命名任务");
+}
+function SakerWorkbenchNav(props) {
+	var collapsed = props.collapsed;
+	return h("nav", { className: "saker-wb-nav", "aria-label": "Saker 工作区导航" },
+		h("div", { className: "saker-wb-brand" }, h(SakerFalcon, { size: 22 }),
+			h("span", { className: "saker-wb-brand-name" }, "Saker"),
+			h("button", { type: "button", className: "saker-wb-navtoggle",
+				title: collapsed ? "展开导航" : "收起导航", "aria-label": collapsed ? "展开导航" : "收起导航",
+				onClick: props.onToggle }, h(SakerNavIcon, { name: collapsed ? "expand" : "collapse", size: 14 }))),
+		SAKER_WB_NAV_V2.map(function (group) {
+			return h("div", { key: group.group, className: "saker-wb-navgroup" },
+				h("div", { className: "saker-wb-group" }, group.group),
+				group.items.map(function (item) {
+					return h("button", { key: item.id, type: "button", title: item.label,
+						"aria-label": item.label,
+						className: "saker-wb-navbtn" + (props.page === item.id ? " active" : ""),
+						"aria-current": props.page === item.id ? "page" : undefined,
+						onClick: function () { props.onNavigate(item.id); } },
+						h(SakerNavIcon, { name: item.icon, size: 16 }),
+						h("span", { className: "saker-wb-navlabel" }, item.label));
+				}));
+		}),
+		h("div", { className: "saker-wb-navfoot" },
+			h("span", null, collapsed ? "本地" : "本地工作台"),
+			collapsed ? null : h("small", null, "只读查询，不自动启动模型")));
+}
+function SakerDetailFrame(props) {
+	return h("aside", { className: "saker-wb-inspector", "aria-label": props.label || "详情" },
+		h("div", { className: "saker-wb-inspector-head" },
+			h("div", { className: "saker-wb-inspector-title" },
+				props.eyebrow ? h("div", { className: "saker-wb-eyebrow" }, props.eyebrow) : null,
+				h("h2", { tabIndex: -1, ref: props.headingRef }, props.title || "详情")),
+			h("div", { className: "saker-wb-row" },
+				props.back ? h("button", { type: "button", className: "saker-wb-btn", onClick: props.back }, "返回上一条") : null,
+				h("button", { type: "button", className: "saker-wb-btn", onClick: props.onClose }, "关闭"))),
+		props.tabs ? h("div", { className: "saker-wb-inspect-tabs", role: "tablist", "aria-label": "详情分区" }, props.tabs) : null,
+		h("div", { className: "saker-wb-inspector-body" }, props.children),
+		props.footer ? h("div", { className: "saker-wb-inspector-foot" }, props.footer) : null);
+}
+function SakerTaskTableV2(props) {
+	var rows = props.rows || [];
+	var compact = props.compact === true;
+	var columns = compact ? ["测试任务 / 范围", "状态", "结果 / 下一步"] : ["测试任务 / 范围", "状态", "结果 / 下一步", "资源释放", "更新时间"];
+	var widths = compact ? ["54%", "18%", "28%"] : ["38%", "14%", "28%", "10%", "10%"];
+	if (!rows.length) return h("div", { className: "saker-wb-empty" }, props.emptyText || "还没有测试任务。回到会话输入目标即可开始；这里不会自动启动模型。");
+	return h("div", { className: "saker-wb-table-wrap" },
+		h("table", { className: "saker-wb-table saker-wb-task-table" },
+			h("colgroup", null, widths.map(function (width, index) {
+				return h("col", { key: index, style: { width: width }, className: !compact && index >= 3 ? "saker-col-secondary" : "" });
+			})),
+			h("thead", null, h("tr", null, columns.map(function (label, index) {
+				return h("th", { key: label, className: !compact && index >= 3 ? "saker-col-secondary" : "" }, label);
+			}))),
+			h("tbody", null, rows.map(function (row) {
+				var key = "task:" + row.rootId;
+				var next = row.attentionReason || (row.reason ? wbReasonLabel(row.reason) :
+				row.cleanupState !== "clear" ? "并行任务待释放" :
+					"验证 " + (row.outcomeSummary?.verified || 0) + " · 待确认 " + (row.outcomeSummary?.pending || 0));
+				return h("tr", { key: row.rootId, tabIndex: 0, "data-saker-row": key,
+					className: props.selectedRoot === row.rootId ? "selected" : "",
+					onClick: function () { props.onOpen(row.rootId); },
+					onKeyDown: function (event) { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); props.onOpen(row.rootId); } } },
+					h("td", null, h("div", { className: "saker-wb-cell-main" }, wbRootTitle(row)),
+						h("div", { className: "saker-wb-cell-sub" },
+							[row.targetSummary, row.taskKind, "会话 " + String(row.rootId).slice(-8)].filter(Boolean).join(" · "))),
+					h("td", null, h("span", { className: "saker-wb-chip " + wbBusinessTone(row.businessState) }, wbBusinessLabel(row.businessState))),
+					h("td", null, next),
+					compact ? null : h("td", { className: "saker-col-secondary" }, row.cleanupState === "clear" ? "已核对" : row.cleanupState === "pending" ? "清理中" : "待确认"),
+					compact ? null : h("td", { className: "saker-col-secondary" }, wbTime(row.updatedAt)));
+			}))));
+}
+function SakerTaskListToolbar(props) {
+	return h(SakerListToolbar, { text: props.text, onText: props.onText, placeholder: "搜索测试任务、目标或会话 ID",
+		filters: h("select", { "aria-label": "按状态筛选测试任务", value: props.state,
+			onChange: function (event) { props.onState(event.target.value); } },
+			h("option", { value: "" }, "全部状态"),
+			[["running", "运行中"], ["waiting-user", "待你处理"], ["turn-ended", "本回合结束"], ["paused", "已暂停"],
+				["ended", "已结束"], ["stopped", "已停止"], ["failed", "失败"]].map(function (item) {
+				return h("option", { key: item[0], value: item[0] }, item[1]);
+			})),
+		dirty: !!(props.text || props.state), onClear: props.onClear, loadedLabel: props.loadedLabel });
+}
+function SakerPageIntro(props) {
+	return h("div", { className: "saker-wb-intro" },
+		h("div", null,
+			props.eyebrow ? h("div", { className: "saker-wb-eyebrow" }, props.eyebrow) : null,
+			h("h1", { className: "saker-wb-page-title" }, props.title),
+			props.subtitle ? h("p", { className: "saker-wb-page-sub" }, props.subtitle) : null),
+		props.actions ? h("div", { className: "saker-wb-intro-actions" }, props.actions) : null);
+}
+function SakerDetailTabs(props) {
+	return props.items.map(function (item) {
+		return h("button", { key: item.id, type: "button", role: "tab",
+			className: "saker-wb-inspect-tab" + (props.active === item.id ? " active" : ""),
+			"aria-selected": props.active === item.id ? "true" : "false",
+			onClick: function () { props.onChange(item.id); } }, item.label);
+	});
+}
+function SakerWorkbenchPageLegacy(props) {
+	var ctx = props.ctx;
+	var viewState = useState("dashboard"), view = viewState[0], setView = viewState[1];
+	var rootState = useState(""), rootId = rootState[0], setRootId = rootState[1];
+	var tabState = useState("overview"), tab = tabState[0], setTab = tabState[1];
+	var explorationNodeState = useState(null), explorationNode = explorationNodeState[0], setExplorationNode = explorationNodeState[1];
+	var coverageModeState = useState(false), coverageMode = coverageModeState[0], setCoverageMode = coverageModeState[1];
+	var tickState = useState(0), tick = tickState[0], setTick = tickState[1];
+	var busyState = useState(""), busy = busyState[0], setBusy = busyState[1];
+	var noticeState = useState(""), notice = noticeState[0], setNotice = noticeState[1];
+	var selectedFindingState = useState(""), selectedFinding = selectedFindingState[0], setSelectedFinding = selectedFindingState[1];
+	var selectedFindingRootState = useState(""), selectedFindingRoot = selectedFindingRootState[0], setSelectedFindingRoot = selectedFindingRootState[1];
+	var taskFindingTextState = useState(""), taskFindingText = taskFindingTextState[0], setTaskFindingText = taskFindingTextState[1];
+	var taskFindingVerifyState = useState(""), taskFindingVerify = taskFindingVerifyState[0], setTaskFindingVerify = taskFindingVerifyState[1];
+	var confirmState = useState(null), confirmAction = confirmState[0], setConfirmAction = confirmState[1];
+	var selectedGlobalExecutionState = useState(null), selectedGlobalExecution = selectedGlobalExecutionState[0], setSelectedGlobalExecution = selectedGlobalExecutionState[1];
+	var selectedAssetState = useState(null), selectedAsset = selectedAssetState[0], setSelectedAsset = selectedAssetState[1];
+	var unknownCommandState = useState(null), unknownCommand = unknownCommandState[0], setUnknownCommand = unknownCommandState[1];
+	var listStatesHook = useState({}), listStates = listStatesHook[0], setListStates = listStatesHook[1];
+	var navPrefState = useState(function () { try { return localStorage.getItem("saker.wb.nav") || ""; } catch (_error) { return ""; } });
+	var navPref = navPrefState[0], setNavPref = navPrefState[1];
+	var rootElState = useState(null), rootEl = rootElState[0], setRootEl = rootElState[1];
+	var widthState = useState(0), containerWidth = widthState[0], setContainerWidth = widthState[1];
+	useEffect(function () {
+		if (!rootEl || typeof ResizeObserver === "undefined") return;
+		var observer = new ResizeObserver(function (entries) {
+			var width = entries && entries[0] ? entries[0].contentRect.width : 0;
+			setContainerWidth(width);
+		});
+		observer.observe(rootEl);
+		return function () { observer.disconnect(); };
+	}, [rootEl]);
+	var autoCollapsed = containerWidth > 0 && containerWidth < 980;
+	var navCollapsed = navPref === "collapsed" || (navPref !== "expanded" && autoCollapsed);
+	function toggleNav() {
+		var next = navCollapsed ? "expanded" : "collapsed";
+		setNavPref(next);
+		try { localStorage.setItem("saker.wb.nav", next); } catch (_error) { /* 导航偏好失败不影响读取 */ }
+	}
+	function listStateFor(name) {
+		return Object.assign({ text: "", status: "", severity: "", verification: "", kind: "", limit: 50, cursor: "", stack: [] }, listStates[name] || {});
+	}
+	function patchList(name, patch) {
+		setListStates(function (previous) {
+			var next = Object.assign({}, previous);
+			next[name] = Object.assign({}, next[name] || {}, patch);
+			return next;
+		});
+	}
+	function resetList(name, patch) { patchList(name, Object.assign({ cursor: "", stack: [] }, patch || {})); }
+	function pageOf(state) { return state && state.meta && state.meta.page ? state.meta.page : null; }
+	function setPage(name, direction, state) {
+		var current = listStateFor(name);
+		var page = pageOf(state);
+		if (!page) return;
+		if (direction === "next" && page.nextCursor) {
+			patchList(name, { stack: current.stack.concat([current.cursor]), cursor: page.nextCursor });
+			return;
+		}
+		if (direction === "prev" && current.stack.length) {
+			patchList(name, { stack: current.stack.slice(0, -1), cursor: current.stack[current.stack.length - 1] || "" });
+		}
+	}
+	var roots = useWorkbenchQuery("roots.list", {}, tick, true, { filter: {}, page: { limit: 100 } });
+	var rootRows = (roots.data || []);
+	var queryKind = view === "dashboard" ? "dashboard.summary" : view === "tasks" ? "roots.list" :
+		view === "findings" ? "findings.list" : view === "traffic" ? "traffic.list" : view === "assets" ? "assets.list" :
+		view === "roles" ? "roles.list" : view === "capabilities" ? "capabilities.list" :
+		view === "attention" ? "attention.list" : "logs.list";
+	var scopedViews = ["findings", "traffic", "assets", "logs", "capabilities", "modules", "roles", "knowledge"];
+	var globalContext = { rootId: scopedViews.indexOf(view) >= 0 ? rootId : "" };
+	var globalList = listStateFor("global." + view);
+	var globalFilter = { text: globalList.text };
+	if (view === "tasks") globalFilter.state = globalList.status;
+	if (view === "findings") { globalFilter.verification = globalList.verification; globalFilter.severity = globalList.severity; }
+	if (view === "traffic") globalFilter.status = globalList.status;
+	if (view === "capabilities") globalFilter.kind = globalList.kind;
+	var global = useWorkbenchQuery(queryKind, globalContext, tick,
+		view !== "task" && view !== "modules" && view !== "knowledge",
+		{ filter: globalFilter, page: { limit: globalList.limit, cursor: globalList.cursor } });
+	var dashboardAttention = useWorkbenchQuery("attention.list", {}, tick, view === "dashboard",
+		{ filter: {}, page: { limit: 4 } });
+	var detail = useWorkbenchQuery("roots.detail", { rootId: rootId }, tick, view === "task" && !!rootId);
+	var taskExecutionList = listStateFor("task.execution");
+	var execution = useWorkbenchQuery("execution.records", { rootId: rootId }, tick, view === "task" && tab === "execution",
+		{ filter: { text: taskExecutionList.text, kind: taskExecutionList.kind }, page: { limit: taskExecutionList.limit, cursor: taskExecutionList.cursor } });
+	var executionSelected = useState(null), selectedExecution = executionSelected[0], setSelectedExecution = executionSelected[1];
+	var executionDetail = useWorkbenchQuery("execution.detail",
+		{ rootId: rootId, executionId: selectedExecution ? selectedExecution.id : "", executionKind: selectedExecution ? selectedExecution.kind : "" },
+		tick, !!selectedExecution);
+	var exploration = useWorkbenchQuery("exploration.graph", { rootId: rootId }, tick, view === "task" && tab === "exploration");
+	var taskAssetsList = listStateFor("task.assets");
+	var taskAssets = useWorkbenchQuery("assets.list", { rootId: rootId }, tick, view === "task" && tab === "assets",
+		{ filter: { text: taskAssetsList.text }, page: { limit: taskAssetsList.limit, cursor: taskAssetsList.cursor } });
+	var coverage = useWorkbenchQuery("assets.coverage", { rootId: rootId }, tick, view === "task" && tab === "assets" && coverageMode);
+	var findingDetailState = useWorkbenchQuery("findings.detail", { rootId: selectedFindingRoot || rootId, findingId: selectedFinding }, tick, !!selectedFinding);
+	var globalExecutionDetail = useWorkbenchQuery("execution.detail",
+		{ rootId: selectedGlobalExecution ? selectedGlobalExecution.rootId : "", executionId: selectedGlobalExecution ? selectedGlobalExecution.id : "",
+			executionKind: selectedGlobalExecution ? selectedGlobalExecution.kind : "" },
+		tick, !!selectedGlobalExecution);
+	function refresh() { setTick(function (value) { return value + 1; }); }
+	function openRoot(id) { setRootId(id); setTab("overview"); setView("task"); setSelectedFinding(""); setSelectedFindingRoot(""); setSelectedGlobalExecution(null); setNotice(""); }
+	function openConversation() {
+		if (!rootId) { setNotice("先在任务列表选择一个任务，再返回原会话；这里不会按第一条任务猜测。"); return; }
+		openConversationFor(rootId);
+	}
+	function openConversationFor(id) {
+		if (id && ctx.uiWorkspace && typeof ctx.uiWorkspace.openSession === "function") {
+			try { ctx.uiWorkspace.openSession(id); return; } catch (error) { setNotice("无法返回原会话：" + (error.message || error)); return; }
+		}
+		setNotice("当前 Host 没有可用的会话打开接口；请从左侧原生会话列表打开该任务。");
+	}
+	function run(kind, payload, after, contextOverride) {
+		if (busy) return;
+		setBusy(kind); setNotice("");
+		var effectiveRootId = (contextOverride && contextOverride.rootId) || rootId;
+		var commandContext = Object.assign({ rootId: effectiveRootId, sessionId: effectiveRootId, generation: detail.data?.root?.generation || 0 }, contextOverride || {});
+		wbCommand(ctx, kind, commandContext, payload)
+			.then(function (result) { setBusy(""); if (after) after(result); refresh(); })
+			.catch(function (error) {
+				setBusy("");
+				if (error && error.unknown) {
+					setUnknownCommand({ commandId: error.commandId || "", intent: error.intent || "", kind: kind, context: commandContext, payload: payload || {}, after: after });
+					setNotice("结果未知：命令 " + (error.commandId || "未记录") + " 已保留。先确认原命令结果，不要重复发起。");
+					return;
+				}
+				setNotice(wbErrorText(error));
+			});
+	}
+	function runForOwner(owner, kind, payload) {
+		var row = rootRows.find(function (item) { return item.rootId === owner; });
+		if (!owner || !row) {
+			setNotice("无法确认这条记录所属任务；请先打开所属任务再执行动作，工作台不会猜测 root。");
+			return;
+		}
+		run(kind, payload, null, { rootId: owner, sessionId: owner, generation: row.generation || 0 });
+	}
+	function reconcileUnknown() {
+		if (!unknownCommand || busy) return;
+		setBusy("command.reconcile"); setNotice("正在查询原命令 " + (unknownCommand.commandId || "") + "…");
+		wbReconcileCommand(unknownCommand.commandId, unknownCommand.kind, unknownCommand.context, unknownCommand.payload)
+			.then(function (outcome) {
+				if (outcome.action === "reuse") {
+					setUnknownCommand(null); setBusy(""); setNotice("原命令已完成；没有重复执行。");
+					if (unknownCommand.after) unknownCommand.after(outcome.value);
+					refresh();
+					return null;
+				}
+				return wbDispatchCommand(unknownCommand.commandId, unknownCommand.kind, unknownCommand.context, unknownCommand.payload)
+					.then(function (value) {
+						setUnknownCommand(null); setBusy(""); setNotice("原命令确认未被受理，已用同一命令 ID 继续执行。");
+						if (unknownCommand.after) unknownCommand.after(value);
+						refresh();
+					});
+			})
+			.catch(function (error) { setBusy(""); setNotice(wbErrorText(error)); });
+	}
+	var nav = h("nav", { className: "saker-wb-nav", "aria-label": "Saker 工作台导航" },
+		h("div", { className: "saker-wb-brand" }, h(SakerFalcon, { size: 22 }), h("span", { className: "saker-wb-brand-name" }, "Saker"),
+			h("button", { type: "button", className: "saker-wb-navtoggle", title: navCollapsed ? "展开导航" : "收起导航",
+				"aria-label": navCollapsed ? "展开导航" : "收起导航", onClick: toggleNav }, h(SakerNavIcon, { name: navCollapsed ? "expand" : "collapse", size: 14 }))),
+		SAKER_WB_NAV.map(function (group) {
+			return h("div", { key: group.group },
+				h("div", { className: "saker-wb-group" }, group.group),
+				group.items.map(function (item) {
+					return h("button", { key: item.id, type: "button",
+						className: "saker-wb-navbtn" + (view === item.id ? " active" : ""),
+						title: item.label,
+						onClick: function () {
+							if (item.id === "conversation") { openConversation(); return; }
+							setView(item.id); setSelectedFinding(""); setSelectedFindingRoot(""); setSelectedGlobalExecution(null); setNotice("");
+						} },
+						h(SakerNavIcon, { name: item.icon || item.id, size: 15 }), h("span", { className: "saker-wb-navlabel" }, item.label));
+				}));
+		}));
+	if (view === "task") {
+		var task = detail.data || {};
+		var root = task.root || {};
+		var actions = h("div", { className: "saker-wb-row" },
+		h("button", { className: "saker-wb-btn", onClick: function () { setView("tasks"); setRootId(""); } }, "返回测试任务"),
+			h("button", { className: "saker-wb-btn", onClick: openConversation }, "返回会话"),
+			root.canActions?.pause ? h("button", { className: "saker-wb-btn", disabled: !!busy, onClick: function () { run("root.pause", { reason: "工作台暂停" }); } }, "暂停") : null,
+			root.canActions?.resume ? h("button", { className: "saker-wb-btn", disabled: !!busy, onClick: function () { run("root.resume", { reason: "工作台恢复" }); } }, "继续") : null,
+			root.canActions?.continue ? h("button", { className: "saker-wb-btn primary", disabled: !!busy, onClick: function () { run("root.continue", { reason: "工作台明确继续" }); } }, "明确继续") : null,
+			root.canActions?.stop ? h("button", { className: "saker-wb-btn danger", disabled: !!busy, onClick: function () { setConfirmAction({ kind: "root.stop" }); } }, "停止本轮") : null);
+		var head = h("header", { className: "saker-wb-head" },
+			h("div", { style: { minWidth: 0 } },
+				h("div", { className: "saker-wb-title" }, root.title || "任务"),
+				h("div", { className: "saker-wb-sub" }, (root.targetSummary && root.targetSummary !== root.title ? root.targetSummary + " · " : "") +
+					wbStateLabel(root.controlState) + " · 第 " + (root.generation || 1) + " 代")),
+			h("div", { className: "saker-wb-spacer" }), actions);
+		var body;
+		if (tab === "overview") {
+			var counts = task.overview?.counts || {};
+			body = h("div", null,
+				h("div", { className: "saker-wb-kpis" },
+					h("div", { className: "saker-wb-kpi" }, h("b", null, counts.assets || 0), h("span", null, "资产")),
+					h("div", { className: "saker-wb-kpi" }, h("b", null, counts.requests || 0), h("span", null, "请求")),
+					h("div", { className: "saker-wb-kpi" }, h("b", null, (task.findings || []).filter(function (row) { return row.verificationState === "verified"; }).length), h("span", null, "已验证发现")),
+					h("div", { className: "saker-wb-kpi" }, h("b", null, counts.needsUser || 0), h("span", null, "待处理前提"))),
+				h("div", { className: "saker-wb-card" }, h("h3", null, "当前状态"), h("div", null, wbReasonLabel(task.status?.reason)),
+					h("div", { className: "saker-wb-sub" }, "工具 " + (task.cost?.toolCalls ?? task.policy?.used?.toolCalls ?? 0) + " 次 · 模型 " + (task.cost?.modelCalls ?? task.policy?.used?.modelCalls ?? 0) + " 次 · 时限 " + (task.policy?.budget?.minutes ?? "不限") + " 分钟")),
+				(task.overview?.gaps || []).length ? h("div", { className: "saker-wb-card" }, h("h3", null, "具体缺口"),
+					h("ul", null, task.overview.gaps.map(function (gap, index) { return h("li", { key: index }, gap.endpoint + "： " + gap.missing.join("、")); }))) : null,
+				h("div", { className: "saker-wb-card" }, h("h3", null, "工作与角色"),
+					h("div", null, "工作项 " + (task.roles?.workItems?.length || 0) + " · 角色 " + (task.roles?.roles?.length || 0) + " · 正在运行 " + (task.roles?.instances || []).filter(function (row) { return ["active", "starting", "waiting"].includes(row.state) && !row.settlement; }).length
+						+ ((task.roles?.settlementPending || 0) ? " · 待对账 " + task.roles.settlementPending : "")),
+		h("div", { className: "saker-wb-sub" }, "最多可同时运行 2 个并行任务；主任务不计入名额。全部模型和工具仍计入本任务。"),
+					(task.roles?.workItems || []).slice(0, 6).map(function (work) {
+						return h("div", { key: work.workId, className: "saker-wb-row", style: { padding: "4px 0" } },
+							h("span", { className: "saker-wb-chip" }, work.state || "proposed"),
+							h("span", { className: "saker-wb-cell-main" }, work.title || work.question || work.workId),
+							work.settlement ? h("span", { className: "saker-wb-chip warn" }, work.settlement.label) : null);
+					}),
+					(task.roles?.instances || []).filter(function (row) { return ["active", "starting", "waiting", "queued"].includes(row.state); }).slice(0, 4).map(function (row) {
+						return h("div", { key: row.childId, className: "saker-wb-row", style: { padding: "4px 0" } },
+							h("span", { className: "saker-wb-chip " + (row.state === "queued" || row.settlement ? "warn" : "ok") }, row.state),
+							h("span", { className: "saker-wb-cell-main" }, row.roleTitle || row.roleId),
+							h("span", { className: "saker-wb-sub" }, row.settlement ? row.settlement.label : row.logicalParent ? "逻辑父级 " + row.logicalParent : "根直接派工"),
+							row.state === "queued" ? h("button", { className: "saker-wb-btn", disabled: !!busy,
+								onClick: function () { run("role.resume", { reason: "工作台恢复排队角色" }); } }, "恢复排队") : null);
+					})));
+		} else if (tab === "execution") {
+			var execPage = execution.meta && execution.meta.page;
+			body = h("div", null,
+				h(SakerListToolbar, { text: taskExecutionList.text, onText: function (value) { resetList("task.execution", { text: value }); },
+					placeholder: "搜索执行 id、摘要、身份或状态",
+					filters: h("select", { "aria-label": "按执行类型筛选", value: taskExecutionList.kind,
+						onChange: function (event) { resetList("task.execution", { kind: event.target.value }); } },
+						h("option", { value: "" }, "全部类型"), h("option", { value: "http" }, "HTTP"), h("option", { value: "model" }, "模型"),
+						h("option", { value: "attempt" }, "尝试"), h("option", { value: "role" }, "角色")),
+					dirty: !!(taskExecutionList.text || taskExecutionList.kind),
+					onClear: function () { resetList("task.execution", { text: "", kind: "" }); },
+					loadedLabel: execution.loading ? "读取中…" : "当前 " + (execution.data || []).length + " 条" + (execPage ? " · 共 " + execPage.total + " 条" : "") }),
+				h(SakerQueryError, { state: execution, label: "执行记录", scope: "当前任务", onRetry: refresh }),
+				h("div", { className: "saker-wb-table-wrap" }, h("table", { className: "saker-wb-table" },
+					h("thead", null, h("tr", null, ["时间", "类型", "做了什么", "状态", "账号/来源"].map(function (label, index) {
+						return h("th", { key: label, className: index === 4 ? "saker-col-secondary" : "" }, label);
+					}))),
+					h("tbody", null, (execution.data || []).map(function (row) {
+						return h("tr", { key: row.kind + "/" + row.id, tabIndex: 0,
+							onClick: function () { setSelectedExecution({ id: row.id, kind: row.kind }); },
+							onKeyDown: function (event) { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedExecution({ id: row.id, kind: row.kind }); } } },
+							h("td", null, wbTime(row.at)), h("td", null, row.kind),
+							h("td", null, h("div", { className: "saker-wb-cell-main" }, row.summary), h("div", { className: "saker-wb-cell-sub" }, row.id)),
+							h("td", null, h("span", { className: "saker-wb-chip " + (row.state === "completed" || row.state === "captured" ? "ok" : row.state === "cleanup-failed" ? "bad" : "") }, row.state || "—")),
+							h("td", { className: "saker-col-secondary" }, row.identity || row.source || "—"));
+					})),
+					(execution.data || []).length ? null : h("tbody", null, h("tr", null, h("td", { colSpan: 5 }, "没有匹配的执行记录。"))))),
+				h(SakerPager, { page: execPage, loaded: (execution.data || []).length,
+					hasPrev: taskExecutionList.stack.length > 0,
+					onPrev: function () { setPage("task.execution", "prev", execution); },
+					onNext: function () { setPage("task.execution", "next", execution); } }),
+				h(SakerExecutionDetail, { selected: selectedExecution, state: executionDetail, onClose: function () { setSelectedExecution(null); },
+					onRetry: refresh, onConversation: openConversation, onBack: function () { setTab("overview"); } }));
+		} else if (tab === "exploration") {
+			var graph = (exploration.data || [])[0] || { nodes: [], edges: [] };
+			var openExplorationNode = function (node) {
+				if (!node) return;
+				if (node.kind === "finding") { setSelectedFinding(node.id); setSelectedFindingRoot(rootId); setTab("findings"); return; }
+				if (node.kind === "receipt") { setSelectedExecution({ id: node.id, kind: "http" }); setTab("execution"); return; }
+				if (node.kind === "attempt") { setSelectedExecution({ id: node.id, kind: "attempt" }); setTab("execution"); return; }
+				if (node.kind === "asset" || node.kind === "endpoint" || node.kind === "check") { setTab("assets"); return; }
+				setTab("overview");
+			};
+			body = h("div", null, exploration.error ? h("div", { className: "saker-wb-error" }, exploration.error) : null,
+				h(SakerGraph, { graph: graph, onSelect: function (node) { setExplorationNode(node); }, onOpenNode: openExplorationNode }),
+				explorationNode ? h("div", { className: "saker-wb-card", style: { marginTop: "12px" } },
+					h("div", { className: "saker-wb-row" }, h("h3", { style: { flex: 1 } }, (explorationNode.title || explorationNode.id)),
+						h("span", { className: "saker-wb-chip" }, explorationNode.kind),
+						h("button", { className: "saker-wb-btn", onClick: function () { setExplorationNode(null); } }, "关闭")),
+					h("div", { className: "saker-wb-sub" }, "id：" + explorationNode.id + " · 状态：" + (explorationNode.state || "—") + (explorationNode.revision ? " · revision：" + explorationNode.revision : "")),
+					explorationNode.sourceRefs ? h("pre", { style: { whiteSpace: "pre-wrap", margin: "8px 0 0" } }, JSON.stringify(explorationNode.sourceRefs, null, 2)) : null,
+					h("div", { className: "saker-wb-row", style: { marginTop: "8px" } },
+						h("button", { className: "saker-wb-btn primary", onClick: function () { openExplorationNode(explorationNode); } }, "打开对应原件"))) : null,
+				h("div", { className: "saker-wb-card", style: { marginTop: "12px" } }, h("h3", null, "节点来源"),
+					h("div", { className: "saker-wb-scroll" }, (graph.nodes || []).map(function (node) {
+						return h("button", { key: node.id, type: "button", className: "saker-wb-row", style: { padding: "4px 0", border: 0, background: "transparent", color: "inherit", cursor: "pointer", width: "100%", textAlign: "left" },
+							onClick: function () { setExplorationNode(node); } },
+							h("span", { className: "saker-wb-chip" }, node.kind), h("span", { className: "saker-wb-cell-main" }, node.title || node.id),
+							h("span", { className: "saker-wb-sub" }, node.state || ""));
+					}))));
+		} else if (tab === "findings") {
+			var taskFindingsAll = task.findings || [];
+			var taskFindings = taskFindingsAll.filter(function (row) {
+				if (taskFindingVerify && row.verificationState !== taskFindingVerify) return false;
+				if (!taskFindingText.trim()) return true;
+				var needle = taskFindingText.toLowerCase();
+				return [row.title, row.summary, row.target, row.findingId, row.severity]
+					.some(function (value) { return String(value || "").toLowerCase().includes(needle); });
+			});
+			body = h("div", null,
+				h(SakerListToolbar, { text: taskFindingText, onText: setTaskFindingText, placeholder: "搜索发现标题、摘要或目标",
+					filters: h("select", { "aria-label": "按验证状态筛选发现", value: taskFindingVerify,
+						onChange: function (event) { setTaskFindingVerify(event.target.value); } },
+						h("option", { value: "" }, "全部状态"), h("option", { value: "verified" }, "已验证"), h("option", { value: "candidate" }, "待确认"),
+						h("option", { value: "needs-recheck" }, "待复核"), h("option", { value: "not-reproduced" }, "未复现"), h("option", { value: "fixed" }, "已处置")),
+					dirty: !!(taskFindingText || taskFindingVerify), onClear: function () { setTaskFindingText(""); setTaskFindingVerify(""); },
+					loadedLabel: "显示 " + taskFindings.length + " / 共 " + taskFindingsAll.length + " 条" }),
+				h(SakerFindingsTable, { rows: taskFindings, showRoot: false, onSelect: function (id) { setSelectedFinding(id); setSelectedFindingRoot(rootId); } }),
+				h(SakerFindingDetail, { selected: selectedFinding, state: findingDetailState, onClose: function () { setSelectedFinding(""); setSelectedFindingRoot(""); }, onRetry: refresh,
+					onRetest: function () { run("work.retest", { findingRef: { id: selectedFinding }, reason: "从发现详情发起复测" }); },
+					onOpenConversation: openConversation,
+					onOpenEvidence: function (ref) { setTab("execution"); setSelectedExecution({ id: ref.id, kind: ref.kind === "request" ? "http" : "" }); } }));
+		} else {
+			var assets = taskAssets.data || [];
+			var cover = (coverage.data || [])[0] || { nodes: [], edges: [], checkDimensions: { total: 0, notHit: 0, blocked: 0, notTested: 0 }, knownDenominator: 0 };
+			var dims = cover.checkDimensions || {};
+			body = h("div", null,
+				h("div", { className: "saker-wb-row", style: { marginBottom: "8px" } },
+					h("button", { className: "saker-wb-btn" + (coverageMode ? "" : " primary"), onClick: function () { setCoverageMode(false); } }, "列表"),
+					h("button", { className: "saker-wb-btn" + (coverageMode ? " primary" : ""), onClick: function () { setCoverageMode(true); } }, "覆盖图")),
+				coverageMode ? h("div", null,
+					h("div", { className: "saker-wb-kpis" },
+						h("div", { className: "saker-wb-kpi" }, h("b", null, cover.knownDenominator || 0), h("span", null, "检查分母")),
+						h("div", { className: "saker-wb-kpi" }, h("b", null, dims.notHit || 0), h("span", null, "已测未命中")),
+						h("div", { className: "saker-wb-kpi" }, h("b", null, dims.notTested || 0), h("span", null, "未测")),
+						h("div", { className: "saker-wb-kpi" }, h("b", null, dims.blocked || 0), h("span", null, "受阻"))),
+					coverage.error ? h("div", { className: "saker-wb-error" }, coverage.error) : null,
+					h(SakerGraph, { graph: cover, emptyText: "当前任务还没有资产、请求或检查记录；先执行请求或导入资产，覆盖图才会出现节点。",
+						onSelect: function (node) { setSelectedAsset(node); },
+						onOpenNode: function (node) {
+							if (node.kind === "receipt" || node.kind === "endpoint") { resetList("task.execution", { text: node.id }); setTab("execution"); return; }
+							if (node.kind === "finding") { setSelectedFinding(node.id); setSelectedFindingRoot(rootId); setTab("findings"); return; }
+							setSelectedAsset(node);
+						} }),
+					h("div", { className: "saker-wb-card", style: { marginTop: "12px" } }, h("h3", null, "覆盖说明"),
+						h("p", null, "资产 → 已绑定请求 → 检查项；未测 " + (dims.notTested || 0) + " 项，受阻 " + (dims.blocked || 0) + " 项。节点来自当前任务的资产、材料和真实检查记录。"),
+						h("div", { className: "saker-wb-sub" }, "已知分母：" + (cover.knownDenominator || 0) + " · 已测未命中：" + (dims.notHit || 0) + " · 未测：" + (dims.notTested || 0) + " · 受阻：" + (dims.blocked || 0))))
+					: h("div", null, h("div", { className: "saker-wb-kpis" },
+						h("div", { className: "saker-wb-kpi" }, h("b", null, assets.filter(function (row) { return row.kind === "asset"; }).length), h("span", null, "资产")),
+						h("div", { className: "saker-wb-kpi" }, h("b", null, assets.filter(function (row) { return row.kind === "request"; }).length), h("span", null, "请求")),
+						h("div", { className: "saker-wb-kpi" }, h("b", null, assets.filter(function (row) { return row.kind === "material"; }).length), h("span", null, "材料")),
+						h("div", { className: "saker-wb-kpi" }, h("b", null, assets.find(function (row) { return row.kind === "check"; })?.total || 0), h("span", null, "检查项"))),
+						h(SakerListToolbar, { text: taskAssetsList.text, onText: function (value) { resetList("task.assets", { text: value }); },
+							placeholder: "搜索资产、请求、材料或检查",
+							dirty: !!taskAssetsList.text, onClear: function () { resetList("task.assets", { text: "" }); },
+							loadedLabel: taskAssets.loading ? "读取中…" : "当前 " + assets.length + " 条" + (taskAssets.meta && taskAssets.meta.page ? " · 共 " + taskAssets.meta.page.total + " 条" : "") }),
+		h(SakerQueryError, { state: taskAssets, label: "资产与文件", scope: "当前测试任务", onRetry: refresh }),
+						h("div", { className: "saker-wb-table-wrap" }, h(SakerAssetsTable, { rows: assets, onSelect: function (row) { setSelectedAsset(row); } })),
+						h(SakerPager, { page: taskAssets.meta && taskAssets.meta.page, loaded: assets.length, hasPrev: taskAssetsList.stack.length > 0,
+							onPrev: function () { setPage("task.assets", "prev", taskAssets); }, onNext: function () { setPage("task.assets", "next", taskAssets); } })));
+			if (selectedAsset && (coverageMode || assets)) {
+				body = h("div", null, body, h(SakerAssetDetail, { row: selectedAsset, onClose: function () { setSelectedAsset(null); },
+					onOpenRequest: function (request) { resetList("task.execution", { text: request.endpoint || request.id }); setTab("execution"); },
+					onOpenTask: null }));
+			}
+		}
+		return h("div", { className: "saker-wb" + (navCollapsed ? " is-nav-collapsed" : ""), ref: setRootEl }, nav, h("main", { className: "saker-wb-main" }, head,
+			h("div", { className: "saker-wb-content" },
+				notice ? h("div", { className: "saker-wb-notice" }, h("span", null, notice), h("button", { className: "saker-wb-btn", onClick: function () { setNotice(""); } }, "关闭")) : null,
+				unknownCommand ? h("div", { className: "saker-wb-notice warn", role: "status" },
+					h("span", null, "有一条命令结果未知（" + unknownCommand.commandId + "）。确认前不会重新发送。"),
+					h("button", { className: "saker-wb-btn", disabled: busy === "command.reconcile", onClick: reconcileUnknown }, busy === "command.reconcile" ? "查询中…" : "确认原命令")) : null,
+				h("div", { className: "saker-wb-tabs" }, SAKER_WB_TASK_TABS.map(function (item) {
+					return h("button", { key: item.id, className: "saker-wb-tab" + (tab === item.id ? " active" : ""), onClick: function () { setTab(item.id); } }, item.label);
+				})),
+				confirmAction ? h("div", { className: "saker-wb-notice" }, h("span", null, "停止本轮会撤销本代新执行许可，并保留在途事实与未完成项。确认停止？"),
+					h("button", { className: "saker-wb-btn danger", onClick: function () { setConfirmAction(null); run("scope.stop", { scopeKind: "root", reason: "工作台确认停止" }); } }, "确认停止"),
+					h("button", { className: "saker-wb-btn", onClick: function () { setConfirmAction(null); } }, "取消")) : null,
+				body)));
+	}
+	var title = ({ dashboard: "概览", tasks: "测试任务", findings: "发现", traffic: "HTTP 记录", assets: "资产与文件",
+		modules: "测试模块", roles: "协作角色", knowledge: "知识库", capabilities: "工具清单", attention: "待办事项", logs: "执行日志" })[view] || "Saker";
+	var subtitle = ({ dashboard: "全部测试任务、发现和待办事项", tasks: "全部测试任务与会话", findings: "当前范围的全部发现",
+		traffic: "真实 HTTP 回执与请求原文", assets: "资产、请求和文件", modules: "测试模块与我的流程",
+		roles: "角色版本、实例与分工", knowledge: "项目文档正文", capabilities: "当前 Host 暴露的工具",
+		attention: "需要你决定或补齐的事项", logs: "结构化运行事件" })[view] || "";
+	var scopedView = scopedViews.indexOf(view) >= 0;
+	var scopeRow = rootRows.find(function (row) { return row.rootId === rootId; });
+	var scopeLabel = !rootId ? (view === "modules" ? "个人与内置" : "全部测试任务（按项目聚合）") : ((scopeRow && scopeRow.title) || rootId);
+	var content = null;
+	if (view === "dashboard") {
+		var summary = global.data || {};
+		content = h("div", null, h("div", { className: "saker-wb-kpis" },
+			h("div", { className: "saker-wb-kpi" }, h("b", null, summary.roots || 0), h("span", null, "业务任务")),
+			h("div", { className: "saker-wb-kpi" }, h("b", null, summary.activeRoots || 0), h("span", null, "进行中")),
+			h("div", { className: "saker-wb-kpi" }, h("b", null, summary.verified || 0), h("span", null, "已验证发现")),
+			h("div", { className: "saker-wb-kpi" }, h("b", null, summary.pending || 0), h("span", null, "待确认/待复核"))),
+			h("div", { className: "saker-dash-grid" },
+				h("div", { className: "saker-wb-card" },
+					h("div", { className: "saker-card-head" }, h("h3", null, "最近任务"),
+						h("button", { className: "saker-wb-btn", onClick: function () { setView("tasks"); } }, "查看全部")),
+					h(SakerRootsTable, { rows: summary.recentRoots || [], onOpen: openRoot })),
+				h("div", { className: "saker-dash-side" },
+					h("div", { className: "saker-wb-card" },
+						h("div", { className: "saker-card-head" }, h("h3", null, "需要你处理"),
+							h("button", { className: "saker-wb-btn", onClick: function () { setView("attention"); } }, "全部 " + (summary.attention || 0))),
+						(dashboardAttention.data || []).length
+							? h("div", { className: "saker-dash-list" }, (dashboardAttention.data || []).slice(0, 4).map(function (row) {
+								return h("button", { key: row.id, type: "button", className: "saker-dash-row",
+									onClick: function () { if (row.rootId) openRoot(row.rootId); else setView("attention"); } },
+									h("span", { className: "saker-dash-kicker" }, attentionLabel(row.kind)),
+									h("span", { className: "saker-dash-row-main" }, row.title || row.reason || row.id),
+									h("span", { className: "saker-wb-sub" }, row.reason || row.next || ""));
+							}))
+							: h("div", { className: "saker-dash-empty" }, dashboardAttention.loading ? "读取中…" : "没有需要你处理的事项。"),
+						(summary.attention || 0) > 4 ? h("button", { className: "saker-dash-all", type: "button",
+							onClick: function () { setView("attention"); } }, "还有 " + ((summary.attention || 0) - 4) + " 项") : null))));
+	} else if (view === "tasks") content = h("div", null,
+		h(SakerListToolbar, { text: globalList.text, onText: function (value) { resetList("global.tasks", { text: value }); }, placeholder: "搜索任务名、目标或会话 ID",
+			filters: h("select", { "aria-label": "按控制状态筛选任务", value: globalList.status,
+				onChange: function (event) { resetList("global.tasks", { status: event.target.value }); } },
+				h("option", { value: "" }, "全部状态"), h("option", { value: "active" }, "进行中"), h("option", { value: "paused" }, "已暂停"),
+				h("option", { value: "stopped" }, "已停止"), h("option", { value: "completed" }, "已结束")),
+			dirty: !!(globalList.text || globalList.status), onClear: function () { resetList("global.tasks", { text: "", status: "" }); },
+			loadedLabel: global.loading ? "读取中…" : "当前 " + (global.data || []).length + " 条" + (global.meta && global.meta.page ? " · 共 " + global.meta.page.total + " 条" : "") }),
+	h(SakerQueryError, { state: global, label: "测试任务", scope: "全部测试任务", onRetry: refresh }),
+		h("div", { className: "saker-wb-table-wrap" }, h(SakerRootsTable, { rows: global.data || [], onOpen: openRoot,
+			emptyText: globalList.text || globalList.status ? "没有匹配的任务。清除搜索或换一个状态。" : "" })),
+		h(SakerPager, { page: global.meta && global.meta.page, loaded: (global.data || []).length, hasPrev: globalList.stack.length > 0,
+			onPrev: function () { setPage("global.tasks", "prev", global); }, onNext: function () { setPage("global.tasks", "next", global); } }));
+	else if (view === "findings") content = h("div", null,
+		h(SakerListToolbar, { text: globalList.text, onText: function (value) { resetList("global.findings", { text: value }); }, placeholder: "搜索发现标题、摘要或目标",
+			filters: h("span", { className: "saker-wb-row" },
+				h("select", { "aria-label": "按验证状态筛选发现", value: globalList.verification, onChange: function (event) { resetList("global.findings", { verification: event.target.value }); } },
+					h("option", { value: "" }, "全部状态"), h("option", { value: "verified" }, "已验证"), h("option", { value: "candidate" }, "待确认"),
+					h("option", { value: "needs-recheck" }, "待复核"), h("option", { value: "not-reproduced" }, "未复现"), h("option", { value: "fixed" }, "已处置")),
+				h("select", { "aria-label": "按严重度筛选发现", value: globalList.severity, onChange: function (event) { resetList("global.findings", { severity: event.target.value }); } },
+					h("option", { value: "" }, "全部严重度"), h("option", { value: "critical" }, "严重"), h("option", { value: "high" }, "高危"),
+					h("option", { value: "medium" }, "中危"), h("option", { value: "low" }, "低危"))),
+			dirty: !!(globalList.text || globalList.verification || globalList.severity),
+			onClear: function () { resetList("global.findings", { text: "", verification: "", severity: "" }); },
+			loadedLabel: global.loading ? "读取中…" : "当前 " + (global.data || []).length + " 条" + (global.meta && global.meta.page ? " · 共 " + global.meta.page.total + " 条" : "") }),
+		h(SakerQueryError, { state: global, label: "发现", scope: scopeLabel, onRetry: refresh }),
+		h("div", { className: "saker-wb-table-wrap" }, h(SakerFindingsTable, { rows: global.data || [], showRoot: true,
+			onSelect: function (id, sessionId) { setSelectedFinding(id); setSelectedFindingRoot(sessionId || ""); } })),
+		h(SakerPager, { page: global.meta && global.meta.page, loaded: (global.data || []).length, hasPrev: globalList.stack.length > 0,
+			onPrev: function () { setPage("global.findings", "prev", global); }, onNext: function () { setPage("global.findings", "next", global); } }),
+		h(SakerFindingDetail, { selected: selectedFinding, state: findingDetailState, onClose: function () { setSelectedFinding(""); setSelectedFindingRoot(""); }, onRetry: refresh,
+			onRetest: function () { run("work.retest", { findingRef: { id: selectedFinding }, reason: "从发现详情发起复测" }); },
+			onOpenConversation: function () { openConversationFor(findingDetailState.data?.sessionId || selectedFindingRoot); },
+			onOpenEvidence: function (ref) { var owner = findingDetailState.data?.sessionId || selectedFindingRoot; if (owner) { setRootId(owner); setView("task"); setTab("execution"); setSelectedExecution({ id: ref.id, kind: ref.kind === "request" ? "http" : "" }); } } }));
+	else if (view === "traffic") content = h("div", null,
+		h(SakerListToolbar, { text: globalList.text, onText: function (value) { resetList("global.traffic", { text: value }); }, placeholder: "搜索请求、ID、账号或状态",
+			filters: h("select", { "aria-label": "按 HTTP 状态筛选流量", value: globalList.status, onChange: function (event) { resetList("global.traffic", { status: event.target.value }); } },
+				h("option", { value: "" }, "全部状态码"), ["200", "201", "204", "301", "302", "400", "401", "403", "404", "500"].map(function (code) { return h("option", { key: code, value: code }, code); })),
+			dirty: !!(globalList.text || globalList.status), onClear: function () { resetList("global.traffic", { text: "", status: "" }); },
+			loadedLabel: global.loading ? "读取中…" : "当前 " + (global.data || []).length + " 条" + (global.meta && global.meta.page ? " · 共 " + global.meta.page.total + " 条" : "") }),
+		h(SakerQueryError, { state: global, label: "流量", scope: scopeLabel, onRetry: refresh }),
+		h("div", { className: "saker-wb-table-wrap" }, h(SakerTrafficTable, { rows: global.data || [],
+			onSelect: function (row) { setSelectedGlobalExecution({ rootId: row.rootId, id: row.id, kind: "http" }); } })),
+		h(SakerPager, { page: global.meta && global.meta.page, loaded: (global.data || []).length, hasPrev: globalList.stack.length > 0,
+			onPrev: function () { setPage("global.traffic", "prev", global); }, onNext: function () { setPage("global.traffic", "next", global); } }),
+		h(SakerExecutionDetail, { selected: selectedGlobalExecution, state: globalExecutionDetail, onClose: function () { setSelectedGlobalExecution(null); }, onRetry: refresh,
+			onConversation: function () { if (selectedGlobalExecution) openConversationFor(selectedGlobalExecution.rootId); } }));
+	else if (view === "assets") content = h("div", null,
+		h(SakerListToolbar, { text: globalList.text, onText: function (value) { resetList("global.assets", { text: value }); }, placeholder: "搜索资产、请求 ID 或账号",
+			dirty: !!globalList.text, onClear: function () { resetList("global.assets", { text: "" }); },
+			loadedLabel: global.loading ? "读取中…" : "当前 " + (global.data || []).length + " 条" + (global.meta && global.meta.page ? " · 共 " + global.meta.page.total + " 条" : "") }),
+		h(SakerQueryError, { state: global, label: "资产与文件", scope: scopeLabel, onRetry: refresh }),
+		h("div", { className: "saker-wb-table-wrap" }, h(SakerAssetsTable, { rows: global.data || [], showRoot: true, onSelect: function (row) { setSelectedAsset(row); } })),
+		h(SakerPager, { page: global.meta && global.meta.page, loaded: (global.data || []).length, hasPrev: globalList.stack.length > 0,
+			onPrev: function () { setPage("global.assets", "prev", global); }, onNext: function () { setPage("global.assets", "next", global); } }),
+		h(SakerAssetDetail, { row: selectedAsset, onClose: function () { setSelectedAsset(null); },
+			onOpenTask: selectedAsset && selectedAsset.rootId ? function () { setRootId(selectedAsset.rootId); setView("task"); setTab("assets"); setSelectedAsset(null); } : null,
+			onOpenRequest: function (request) { if (selectedAsset && selectedAsset.rootId) { setRootId(selectedAsset.rootId); setView("task"); setTab("execution"); resetList("task.execution", { text: request.endpoint || request.id }); } } }));
+	else if (view === "modules") content = h(SakerModulesPage, { rootId: rootId, tick: tick, run: run });
+	else if (view === "roles") content = h(SakerRolesPage, { rows: global.data || [], run: run, rootId: rootId, tick: tick });
+	else if (view === "knowledge") content = h(SakerKnowledgePage, { rootId: rootId, tick: tick });
+	else if (view === "capabilities") content = h("div", null,
+		h(SakerListToolbar, { text: globalList.text, onText: function (value) { resetList("global.capabilities", { text: value }); }, placeholder: "搜索工具名、用途或来源",
+			dirty: !!globalList.text, onClear: function () { resetList("global.capabilities", { text: "" }); },
+			loadedLabel: global.loading ? "读取中…" : "当前 " + (global.data || []).length + " 条" }),
+		h(SakerQueryError, { state: global, label: "可用工具", scope: scopeLabel, onRetry: refresh }),
+		!rootId ? h("div", { className: "saker-wb-empty" }, "先在范围里选择一个任务，才能读取该 Host 会话实际暴露的工具。") : null,
+		rootId ? h("div", { className: "saker-wb-table-wrap" }, h(SakerCapabilitiesTable, { rows: global.data || [] })) : null);
+	else if (view === "attention") content = h("div", null,
+		h(SakerListToolbar, { text: globalList.text, onText: function (value) { resetList("global.attention", { text: value }); }, placeholder: "搜索待处理原因或任务",
+			dirty: !!globalList.text, onClear: function () { resetList("global.attention", { text: "" }); },
+			loadedLabel: global.loading ? "读取中…" : "当前 " + (global.data || []).length + " 条" + (global.meta && global.meta.page ? " · 共 " + global.meta.page.total + " 条" : "") }),
+	h(SakerQueryError, { state: global, label: "待办事项", scope: "全部测试任务", onRetry: refresh }),
+		h(SakerAttentionList, { rows: global.data || [], onOpen: openRoot }),
+		h(SakerPager, { page: global.meta && global.meta.page, loaded: (global.data || []).length, hasPrev: globalList.stack.length > 0,
+			onPrev: function () { setPage("global.attention", "prev", global); }, onNext: function () { setPage("global.attention", "next", global); } }));
+	else if (view === "logs") content = h("div", null,
+		h(SakerListToolbar, { text: globalList.text, onText: function (value) { resetList("global.logs", { text: value }); }, placeholder: "搜索事件类型或内容",
+			dirty: !!globalList.text, onClear: function () { resetList("global.logs", { text: "" }); },
+			loadedLabel: global.loading ? "读取中…" : "当前 " + (global.data || []).length + " 条" + (global.meta && global.meta.page ? " · 共 " + global.meta.page.total + " 条" : "") }),
+		h(SakerQueryError, { state: global, label: "执行日志", scope: scopeLabel, onRetry: refresh }),
+		!rootId ? h("div", { className: "saker-wb-empty" }, "先在范围里选择一个任务，再查看它的结构事件记录。") : null,
+		h(SakerLogsList, { rows: global.data || [] }),
+		h(SakerPager, { page: global.meta && global.meta.page, loaded: (global.data || []).length, hasPrev: globalList.stack.length > 0,
+			onPrev: function () { setPage("global.logs", "prev", global); }, onNext: function () { setPage("global.logs", "next", global); } }));
+	var scopeChoices = rootRows.slice();
+	if (rootId && !scopeChoices.some(function (row) { return row.rootId === rootId; })) scopeChoices.unshift({ rootId: rootId, title: rootId });
+	var scopePicker = scopedView ? h("label", { className: "saker-wb-scope" }, h("span", null, "范围"),
+		h("select", { value: rootId, onChange: function (event) { setRootId(event.target.value); resetList("global." + view); setSelectedFinding(""); setSelectedFindingRoot(""); setSelectedGlobalExecution(null); setSelectedAsset(null); } },
+	h("option", { value: "" }, view === "modules" ? "个人与内置" : view === "capabilities" || view === "logs" ? "请选择任务" : "全部测试任务（按项目聚合）"),
+			scopeChoices.map(function (row) { return h("option", { key: row.rootId, value: row.rootId }, (row.title || row.rootId).slice(0, 32)); }))) : null;
+	var globalHeader = h("header", { className: "saker-wb-head" },
+		h("div", { className: "saker-wb-headtext" }, h("div", { className: "saker-wb-title" }, title),
+			subtitle ? h("div", { className: "saker-wb-sub" }, subtitle) : null),
+		scopePicker,
+		h("div", { className: "saker-wb-spacer" }),
+		h("button", { className: "saker-wb-btn", onClick: refresh }, global.loading ? "刷新中…" : "刷新"));
+	var globalContent = h("div", { className: "saker-wb-content" },
+		notice ? h("div", { className: "saker-wb-notice" }, h("span", null, notice), h("button", { className: "saker-wb-btn", onClick: function () { setNotice(""); } }, "关闭")) : null,
+		unknownCommand ? h("div", { className: "saker-wb-notice warn", role: "status" },
+			h("span", null, "有一条命令结果未知（" + unknownCommand.commandId + "）。确认前不会重新发送。"),
+			h("button", { className: "saker-wb-btn", disabled: busy === "command.reconcile", onClick: reconcileUnknown }, busy === "command.reconcile" ? "查询中…" : "确认原命令")) : null,
+		global.loading && !global.data && view !== "modules" && view !== "knowledge" ? h("div", { className: "saker-wb-empty" }, "读取中…") : content);
+	var globalBody = h("div", { className: "saker-wb" + (navCollapsed ? " is-nav-collapsed" : ""), ref: setRootEl }, nav,
+		h("main", { className: "saker-wb-main" }, globalHeader, globalContent));
+	return globalBody;
+}
+// 一个坏记录不能让整个 Saker 白屏；错误边界只替换当前页，保留导航、重试和返回。
+class SakerRenderBoundary extends React.Component {
+	constructor(props) {
+		super(props);
+		this.state = { error: null };
+		this.retry = this.retry.bind(this);
+		this.back = this.back.bind(this);
+	}
+	static getDerivedStateFromError(error) {
+		return { error: error };
+	}
+	componentDidCatch(error, info) {
+		try { console.error("Saker page render failed", error, info); } catch (_error) { /* 宿主可能没有 console */ }
+	}
+	retry() {
+		this.setState({ error: null });
+		if (this.props.onRetry) this.props.onRetry();
+	}
+	back() {
+		this.setState({ error: null });
+		if (this.props.onBack) this.props.onBack();
+	}
+	render() {
+		if (this.state.error) {
+			return h("section", { className: "saker-wb-page", role: "alert" },
+				h("div", { className: "saker-wb-error" },
+					h("strong", null, "当前页加载失败"),
+					h("p", null, String(this.state.error && this.state.error.message || this.state.error)),
+			h("p", null, "页面数据没有因此重跑；可以重试当前页或返回测试任务。"),
+					h("div", { className: "saker-wb-row" },
+						h("button", { type: "button", className: "saker-wb-btn", onClick: this.retry }, "重试"),
+			h("button", { type: "button", className: "saker-wb-btn", onClick: this.back }, "返回测试任务"))));
+		}
+		return this.props.children;
+	}
+}
+function SakerBoundaryContent(props) {
+	return props.build();
+}
+function SakerWorkbenchPage(props) {
+	var ctx = props.ctx;
+	var pageState = useState("dashboard"), page = pageState[0], setPage = pageState[1];
+	var rootState = useState(""), rootId = rootState[0], setRootId = rootState[1];
+	var scopeTextState = useState(""), scopeText = scopeTextState[0], setScopeText = scopeTextState[1];
+	var taskTabState = useState("overview"), taskTab = taskTabState[0], setTaskTab = taskTabState[1];
+	var evidenceTabState = useState("findings"), evidenceTab = evidenceTabState[0], setEvidenceTab = evidenceTabState[1];
+	var resourceTabState = useState("modules"), resourceTab = resourceTabState[0], setResourceTab = resourceTabState[1];
+	var selectedStackState = useState([]), selectedStack = selectedStackState[0], setSelectedStack = selectedStackState[1];
+	var detailTabState = useState("summary"), detailTab = detailTabState[0], setDetailTab = detailTabState[1];
+	var materialOffsetState = useState(0), materialOffset = materialOffsetState[0], setMaterialOffset = materialOffsetState[1];
+	var explorationNodeState = useState(null), explorationNode = explorationNodeState[0], setExplorationNode = explorationNodeState[1];
+	var coverageModeState = useState(false), coverageMode = coverageModeState[0], setCoverageMode = coverageModeState[1];
+	var tickState = useState(0), tick = tickState[0], setTick = tickState[1];
+	var busyState = useState(""), busy = busyState[0], setBusy = busyState[1];
+	var noticeState = useState(""), notice = noticeState[0], setNotice = noticeState[1];
+	var unknownCommandState = useState(null), unknownCommand = unknownCommandState[0], setUnknownCommand = unknownCommandState[1];
+	var confirmState = useState(false), confirmStop = confirmState[0], setConfirmStop = confirmState[1];
+	var handoffState = useState(null), handoff = handoffState[0], setHandoff = handoffState[1];
+	var listStatesHook = useState({}), listStates = listStatesHook[0], setListStates = listStatesHook[1];
+	var navPrefState = useState(function () { try { return localStorage.getItem("saker.wb.nav") || ""; } catch (_error) { return ""; } });
+	var navPref = navPrefState[0], setNavPref = navPrefState[1];
+	var rootElState = useState(null), rootEl = rootElState[0], setRootEl = rootElState[1];
+	var widthState = useState(0), containerWidth = widthState[0], setContainerWidth = widthState[1];
+	var rootRows = [];
+	var contentRef = useRef(null);
+	var detailHeadingRef = useRef(null);
+	var scopeComposing = useRef(false);
+	var scopeDraftState = useState(null), scopeDraft = scopeDraftState[0], setScopeDraft = scopeDraftState[1];
+	var returnFocusRef = useRef("");
+	var returnScrollRef = useRef(0);
+	var handoffSeqRef = useRef(0);
+	var focusRequestState = useState(""), focusRequest = focusRequestState[0], setFocusRequest = focusRequestState[1];
+	var selectionObservedRef = useRef(false);
+	var taskOriginRef = useRef(null);
+
+	useEffect(function () {
+		if (!rootEl || typeof ResizeObserver === "undefined") return;
+		var observer = new ResizeObserver(function (entries) {
+			setContainerWidth(entries && entries[0] ? entries[0].contentRect.width : 0);
+		});
+		observer.observe(rootEl);
+		return function () { observer.disconnect(); };
+	}, [rootEl]);
+
+	var topNavMode = containerWidth > 0 && containerWidth < 900;
+	var navCollapsed = navPref === "collapsed";
+	var detailOnly = topNavMode || (containerWidth > 0 && containerWidth - (navCollapsed ? 52 : 168) - 72 < 832);
+	var compactRows = containerWidth > 0 && containerWidth < 700;
+	var selectedRef = selectedStack.length ? selectedStack[selectedStack.length - 1] : null;
+	var selectionKey = wbSelectionKey(selectedRef);
+
+	function listStateFor(name) {
+		return Object.assign({ text: "", state: "", status: "", severity: "", verification: "", kind: "", limit: 50, cursor: "", stack: [] }, listStates[name] || {});
+	}
+	function patchList(name, patch) {
+		setListStates(function (previous) {
+			var next = Object.assign({}, previous);
+			next[name] = Object.assign({}, next[name] || {}, patch);
+			return next;
+		});
+	}
+	function resetList(name, patch) { patchList(name, Object.assign({ cursor: "", stack: [] }, patch || {})); }
+	function pageOf(state) { return state && state.meta && state.meta.page ? state.meta.page : null; }
+	function setPageCursor(name, direction, state) {
+		var current = listStateFor(name), pageInfo = pageOf(state);
+		if (!pageInfo) return;
+		if (direction === "next" && pageInfo.nextCursor) {
+			patchList(name, { stack: current.stack.concat([current.cursor]), cursor: pageInfo.nextCursor });
+			return;
+		}
+		if (direction === "prev" && current.stack.length) {
+			patchList(name, { stack: current.stack.slice(0, -1), cursor: current.stack[current.stack.length - 1] || "" });
+		}
+	}
+	function toggleNav() {
+		var next = navCollapsed ? "expanded" : "collapsed";
+		setNavPref(next);
+		try { localStorage.setItem("saker.wb.nav", next); } catch (_error) {}
+	}
+	function refresh() { setTick(function (value) { return value + 1; }); }
+	function focusRow(key) {
+		if (!key || !contentRef.current) return;
+		var rows = contentRef.current.querySelectorAll("[data-saker-row]");
+		for (var index = 0; index < rows.length; index += 1) {
+			if (rows[index].getAttribute("data-saker-row") === key) {
+				try { rows[index].focus({ preventScroll: true }); } catch (_error) { try { rows[index].focus(); } catch (__error) {} }
+				return;
+			}
+		}
+	}
+	useEffect(function () {
+		var timer = setTimeout(function () {
+			if (selectedRef) {
+				selectionObservedRef.current = true;
+				if (detailHeadingRef.current) {
+					try { detailHeadingRef.current.focus({ preventScroll: true }); } catch (_error) { try { detailHeadingRef.current.focus(); } catch (__error) {} }
+				}
+				return;
+			}
+			if (selectionObservedRef.current) {
+				selectionObservedRef.current = false;
+				focusRow(returnFocusRef.current);
+			}
+		}, 0);
+		return function () { clearTimeout(timer); };
+	}, [selectionKey]);
+	useEffect(function () {
+		if (!focusRequest) return;
+		var timer = setTimeout(function () {
+			if (contentRef.current) contentRef.current.scrollTop = returnScrollRef.current || 0;
+			focusRow(focusRequest);
+			setFocusRequest("");
+		}, 0);
+		return function () { clearTimeout(timer); };
+	}, [page, focusRequest]);
+	useEffect(function () {
+		function onKeyDown(event) {
+			if (event.key !== "Escape" || event.isComposing || event.defaultPrevented) return;
+			if (handoff) {
+				event.preventDefault();
+				closeHandoff();
+				return;
+			}
+			if (confirmStop) { event.preventDefault(); setConfirmStop(false); return; }
+			if (selectedStack.length) { event.preventDefault(); closeDetail(); return; }
+			if (explorationNode) { event.preventDefault(); setExplorationNode(null); }
+		}
+		document.addEventListener("keydown", onKeyDown);
+		return function () { document.removeEventListener("keydown", onKeyDown); };
+	}, [!!handoff, confirmStop, selectedStack.length, !!explorationNode]);
+
+	function openRoot(id, tab) {
+		if (!id) return;
+		var originHasDetail = page === "evidence" && selectedStack.length > 0;
+		taskOriginRef.current = {
+			page: page,
+			rootId: rootId,
+			scrollTop: contentRef.current ? contentRef.current.scrollTop : 0,
+			evidenceTab: evidenceTab,
+			resourceTab: resourceTab,
+			selectedStack: selectedStack.slice(),
+			detailTab: detailTab,
+			listStates: Object.assign({}, listStates),
+			focusKey: originHasDetail ? returnFocusRef.current : "task:" + id,
+		};
+		returnScrollRef.current = taskOriginRef.current.scrollTop;
+		if (!originHasDetail) returnFocusRef.current = "task:" + id;
+		setRootId(id);
+		setTaskTab(tab || "overview");
+		setPage("task");
+		setSelectedStack([]);
+		setExplorationNode(null);
+		setNotice("");
+		setConfirmStop(false);
+		return id;
+	}
+	function backFromTask() {
+		var origin = taskOriginRef.current;
+		setPage(origin && origin.page ? origin.page : "tasks");
+		if (origin) {
+			setRootId(origin.rootId || "");
+			setEvidenceTab(origin.evidenceTab || "findings");
+			setResourceTab(origin.resourceTab || "modules");
+			setSelectedStack(origin.selectedStack || []);
+			setDetailTab(origin.detailTab || "summary");
+			setListStates(origin.listStates || {});
+			returnScrollRef.current = origin.scrollTop || 0;
+			setFocusRequest((origin.selectedStack || []).length
+				? "__restore-scroll__"
+				: (origin.focusKey || returnFocusRef.current));
+		}
+		setTaskTab("overview");
+		setExplorationNode(null);
+	}
+	function openConversationFor(id) {
+		if (id && ctx.uiWorkspace && typeof ctx.uiWorkspace.openSession === "function") {
+			try { ctx.uiWorkspace.openSession(id); return; } catch (error) { setNotice("无法返回原会话：" + (error.message || error)); return; }
+		}
+		setNotice("当前 Host 没有可用的会话打开接口；请从左侧原生会话列表打开该任务。");
+	}
+	function openConversation() {
+		if (!rootId) { setNotice("先在任务列表选择一个任务，再返回原会话；这里不会按第一条任务猜测。"); return; }
+		openConversationFor(rootId);
+	}
+	function pushRef(ref) {
+		var key = wbSelectionKey(ref);
+		if (!selectedStack.length) returnFocusRef.current = key;
+		if (ref.kind === "material") setMaterialOffset(0);
+		setSelectedStack(function (previous) { return previous.concat([Object.assign({}, ref)]); });
+		setDetailTab("summary");
+	}
+	function closeDetail() {
+		setSelectedStack(function (previous) { return previous.slice(0, -1); });
+		setDetailTab("summary");
+	}
+	function showVisibleNotice(message) {
+		setNotice(message);
+		try { if (contentRef.current && contentRef.current.scrollTo) contentRef.current.scrollTo({ top: 0, behavior: "smooth" }); } catch (_error) { /* 老宿主不支持平滑滚动 */ }
+	}
+	function openReviewItem(item) {
+		if (!item) return;
+		if (item.kind === "command") {
+			api("workbench.query", { kind: "command.status",
+				context: { rootId: item.rootId || rootId, generation: 0, sessionId: "", commandId: item.commandId || item.id } })
+				.then(function (response) {
+					var failure = wbResponseError(response, "查询操作进度失败");
+					if (failure) throw failure;
+					var status = response.data || {};
+					showVisibleNotice("操作 " + (item.commandId || item.id) + "：" + (status.status || "未知")
+						+ (status.error ? " · " + status.error : "") + "。不会重新发送这条操作。");
+				})
+				.catch(function (error) { showVisibleNotice(wbErrorText(error)); });
+			return;
+		}
+		if (item.kind === "http") {
+			pushRef({ kind: "http", id: item.id, rootId: item.rootId || rootId, summary: item.title || item.id });
+			return;
+		}
+		if (item.kind === "finding") {
+			pushRef({ kind: "finding", id: item.id, rootId: item.rootId || rootId, summary: item.title || item.id });
+			setDetailTab("evidence");
+		}
+	}
+	function openTaskFromEvidence(owner, tab) {
+		tab = tab || "findings";
+		if (!owner) {
+			showVisibleNotice("这条记录没有可确认的所属任务；请在证据详情继续核对依据。");
+			return;
+		}
+		if (page === "task" && owner === rootId) {
+			setTaskTab(tab);
+			setSelectedStack([]);
+			return;
+		}
+		if (rootRows.some(function (row) { return row.rootId === owner; })) {
+			openRoot(owner, tab);
+			return;
+		}
+		// 全局发现可能来自旧会话、子会话或只做过资料核对的会话；它们没有 task_policy 根。
+		// 先按 rootId 精确查一次，确认是任务再跳，不能把空任务页当成“可打开”。
+		api("workbench.query", { kind: "roots.list", context: {}, filter: { text: owner }, page: { limit: 20 } })
+			.then(function (value) {
+				if (!value || value.ok === false) throw Error(wbErrorText(value));
+				var hit = (value.data || []).find(function (row) { return row.rootId === owner; });
+				if (!hit) {
+					showVisibleNotice("这条发现所属的会话不是独立任务，无法打开任务概要；可继续在证据详情查看依据，或从左侧原生会话进入。");
+					return;
+				}
+				openRoot(owner, tab);
+			})
+			.catch(function (error) { showVisibleNotice("无法确认这条记录所属任务：" + wbErrorText(error)); });
+	}
+	function onNavigate(id) {
+		if (id === "conversation") { openConversation(); return; }
+		setPage(id);
+		setSelectedStack([]);
+		setExplorationNode(null);
+		setNotice("");
+		setConfirmStop(false);
+		if (id !== "task") setHandoff(null);
+	}
+	function run(kind, payload, after, contextOverride) {
+		if (busy) return;
+		setBusy(kind); setNotice("");
+		var effectiveRootId = (contextOverride && contextOverride.rootId) || rootId;
+		var commandContext = Object.assign({ rootId: effectiveRootId, sessionId: effectiveRootId,
+			generation: taskDetail.data?.root?.generation || 0 }, contextOverride || {});
+		wbCommand(ctx, kind, commandContext, payload)
+			.then(function (result) { setBusy(""); if (after) after(result); refresh(); })
+			.catch(function (error) {
+				setBusy("");
+				if (error && error.unknown) {
+					setUnknownCommand({ commandId: error.commandId || "", intent: error.intent || "", kind: kind,
+						context: commandContext, payload: payload || {}, after: after });
+					setNotice("结果未知：命令 " + (error.commandId || "未记录") + " 已保留。先确认原命令结果，不要重复发起。");
+					return;
+				}
+				setNotice(wbErrorText(error));
+			});
+	}
+	function reconcileUnknown() {
+		if (!unknownCommand || busy) return;
+		setBusy("command.reconcile");
+		wbReconcileCommand(unknownCommand.commandId, unknownCommand.kind, unknownCommand.context, unknownCommand.payload)
+			.then(function (outcome) {
+				if (outcome.action === "reuse") {
+					setUnknownCommand(null); setBusy(""); setNotice("原命令已完成；没有重复执行。"); refresh(); return null;
+				}
+				return wbDispatchCommand(unknownCommand.commandId, unknownCommand.kind, unknownCommand.context, unknownCommand.payload)
+					.then(function (value) {
+						setUnknownCommand(null); setBusy(""); setNotice("原命令确认未被受理，已用同一命令 ID 继续执行。");
+						if (unknownCommand.after) unknownCommand.after(value);
+						refresh();
+					});
+			})
+			.catch(function (error) { setBusy(""); setNotice(wbErrorText(error)); });
+	}
+	function openHandoff() {
+		if (!rootId || (handoff && handoff.loading)) return;
+		var seq = ++handoffSeqRef.current;
+		var owner = rootId;
+		returnFocusRef.current = "action:export";
+		setHandoff({ loading: true, data: null, error: "", rootId: owner });
+		api("delivery.bundle", { sessionId: owner, preview: true })
+			.then(function (value) {
+				if (seq !== handoffSeqRef.current) return;
+				if (!value || value.ok === false) throw Error((value && value.error) || "报告预览读取失败");
+				setHandoff({ loading: false, data: value, error: "", rootId: owner });
+			})
+			.catch(function (error) {
+				if (seq !== handoffSeqRef.current) return;
+				setHandoff({ loading: false, data: null, error: wbErrorText(error), rootId: owner });
+			});
+	}
+	function closeHandoff() {
+		handoffSeqRef.current += 1;
+		setHandoff(null);
+		setTimeout(function () {
+			var trigger = contentRef.current && contentRef.current.querySelector('[data-saker-action="export"]');
+			if (trigger) trigger.focus({ preventScroll: true });
+		}, 0);
+	}
+	function downloadHandoff() {
+		if (!handoff || !handoff.data || !handoff.data.snapshot || busy) return;
+		var owner = handoff.rootId || rootId;
+		setBusy("delivery.download");
+		api("delivery.bundle", { sessionId: owner, expectedSnapshot: handoff.data.snapshot })
+			.then(function (value) {
+				if (!value || value.ok === false) throw Error((value && value.error) || "报告包生成失败");
+				downloadArchive(value.filename || "saker-delivery.zip", value.archive);
+				setBusy("");
+			})
+			.catch(function (error) { setBusy(""); setNotice(wbErrorText(error)); });
+	}
+
+	var roots = useWorkbenchQuery("roots.list", {}, tick, true, { filter: {}, page: { limit: 100 } });
+	rootRows = roots.data || [];
+	var scopeQuery = useWorkbenchQuery("roots.list", {}, tick, !!scopeText.trim(),
+		{ filter: { text: scopeText }, page: { limit: 50 } });
+	var taskList = listStateFor("tasks");
+	var taskQuery = useWorkbenchQuery("roots.list", {}, tick, true, {
+		filter: { text: taskList.text, business: taskList.state },
+		page: { limit: taskList.limit, cursor: taskList.cursor },
+	});
+	var dashboard = useWorkbenchQuery("dashboard.summary", {}, tick, page === "dashboard");
+	var attentionList = listStateFor("attention");
+	var attentionQuery = useWorkbenchQuery("attention.list", {}, tick, page === "dashboard" || page === "attention",
+		{ filter: page === "attention" ? { text: attentionList.text } : {},
+			page: { limit: page === "dashboard" ? 3 : 50, cursor: page === "attention" ? attentionList.cursor : "" } });
+	var evidenceList = listStateFor("evidence." + evidenceTab);
+	var evidenceKind = evidenceTab === "findings" ? "findings.list" : evidenceTab === "traffic" ? "traffic.list" : "assets.list";
+	var evidenceFilter = { text: evidenceList.text };
+	if (evidenceTab === "findings") { evidenceFilter.verification = evidenceList.verification; evidenceFilter.severity = evidenceList.severity; }
+	if (evidenceTab === "traffic") evidenceFilter.status = evidenceList.status;
+	var evidenceQuery = useWorkbenchQuery(evidenceKind, { rootId: rootId }, tick, page === "evidence",
+		{ filter: evidenceFilter, page: { limit: evidenceList.limit, cursor: evidenceList.cursor } });
+	var resourceList = listStateFor("resources." + resourceTab);
+	var rolesQuery = useWorkbenchQuery("roles.list", { rootId: rootId }, tick,
+		page === "resources" && resourceTab === "roles", { filter: { text: resourceList.text }, page: { limit: 100 } });
+	var capabilitiesQuery = useWorkbenchQuery("capabilities.list", { rootId: rootId }, tick,
+		page === "resources" && resourceTab === "capabilities", { filter: { text: resourceList.text }, page: { limit: 100 } });
+	var logsList = listStateFor("logs");
+	var logsQuery = useWorkbenchQuery("logs.list", { rootId: rootId }, tick, page === "logs",
+		{ filter: { text: logsList.text }, page: { limit: logsList.limit, cursor: logsList.cursor } });
+	var taskDetail = useWorkbenchQuery("roots.detail", { rootId: rootId, detailMode: "summary" }, tick, page === "task" && !!rootId);
+	var reviewQuery = useWorkbenchQuery("review.summary", { rootId: rootId }, tick,
+		page === "task" && taskTab === "overview" && !!rootId);
+	var executionViewState = useState("records"), executionView = executionViewState[0], setExecutionView = executionViewState[1];
+	var usageCursorState = useState(""), usageCursor = usageCursorState[0], setUsageCursor = usageCursorState[1];
+	var usageQuery = useWorkbenchQuery("usage.round", { rootId: rootId }, tick,
+		page === "task" && taskTab === "execution" && executionView === "usage" && !!rootId,
+		{ page: { limit: 20, cursor: usageCursor } });
+	var taskFindingsList = listStateFor("task.findings");
+	var taskFindingsQuery = useWorkbenchQuery("findings.list", { rootId: rootId }, tick,
+		page === "task" && taskTab === "findings" && !!rootId,
+		{ filter: { text: taskFindingsList.text, verification: taskFindingsList.verification },
+			page: { limit: taskFindingsList.limit, cursor: taskFindingsList.cursor } });
+	var taskExecutionList = listStateFor("task.execution");
+	var taskExecution = useWorkbenchQuery("execution.records", { rootId: rootId }, tick,
+		page === "task" && taskTab === "execution",
+		{ filter: { text: taskExecutionList.text, kind: taskExecutionList.kind },
+			page: { limit: taskExecutionList.limit, cursor: taskExecutionList.cursor } });
+	var taskAssetsList = listStateFor("task.assets");
+	var taskAssets = useWorkbenchQuery("assets.list", { rootId: rootId }, tick,
+		page === "task" && taskTab === "assets" && !coverageMode,
+		{ filter: { text: taskAssetsList.text }, page: { limit: taskAssetsList.limit, cursor: taskAssetsList.cursor } });
+	var coverage = useWorkbenchQuery("assets.coverage", { rootId: rootId }, tick,
+		page === "task" && taskTab === "assets" && coverageMode);
+	var exploration = useWorkbenchQuery("exploration.graph", { rootId: rootId }, tick,
+		page === "task" && taskTab === "exploration");
+	var findingDetail = useWorkbenchQuery("findings.detail",
+		{ rootId: selectedRef && selectedRef.kind === "finding" ? (selectedRef.rootId || rootId) : "",
+			findingId: selectedRef && selectedRef.kind === "finding" ? selectedRef.id : "" },
+		tick, !!(selectedRef && selectedRef.kind === "finding"));
+	var executionDetail = useWorkbenchQuery("execution.detail",
+		{ rootId: selectedRef && ["http", "model", "attempt", "role"].indexOf(selectedRef.kind) >= 0 ? (selectedRef.rootId || rootId) : "",
+			executionId: selectedRef && ["http", "model", "attempt", "role"].indexOf(selectedRef.kind) >= 0 ? selectedRef.id : "",
+			executionKind: selectedRef ? selectedRef.kind : "" },
+		tick, !!(selectedRef && ["http", "model", "attempt", "role"].indexOf(selectedRef.kind) >= 0));
+	var materialDetail = useWorkbenchQuery("evidence.material",
+		{ rootId: selectedRef && selectedRef.kind === "material" ? (selectedRef.rootId || rootId) : "",
+			materialKind: selectedRef && selectedRef.kind === "material" ? (selectedRef.materialKind || "file") : "file",
+			materialId: selectedRef && selectedRef.kind === "material" ? selectedRef.id : "",
+			offset: materialOffset, limit: 8192 },
+		tick, !!(selectedRef && selectedRef.kind === "material"));
+
+	var task = taskDetail.data || {};
+	var taskRoot = task.root || {};
+	function currentScopeLabel() {
+		if (!rootId) return "全部测试任务";
+		var row = rootRows.find(function (item) { return item.rootId === rootId; });
+		return (row && wbRootTitle(row)) || rootId;
+	}
+	function renderScopePicker(extraClass) {
+		var choices = (scopeText.trim() ? (scopeQuery.data || []) : rootRows).slice();
+		if (rootId && !choices.some(function (row) { return row.rootId === rootId; })) choices.unshift({ rootId: rootId, title: rootId });
+		return h("div", { className: "saker-wb-scope" + (extraClass ? " " + extraClass : ""), role: "group", "aria-label": "范围选择" },
+			h("span", null, "范围"),
+			h("input", { type: "search", value: scopeComposing.current ? (scopeDraft == null ? scopeText : scopeDraft) : scopeText,
+				placeholder: "搜索测试任务", "aria-label": "搜索测试任务",
+				onChange: function (event) {
+					var value = event.target.value;
+					if (scopeComposing.current || (event.nativeEvent && event.nativeEvent.isComposing)) { setScopeDraft(value); return; }
+					setScopeDraft(null);
+					setScopeText(value);
+				},
+				onCompositionStart: function () { scopeComposing.current = true; setScopeDraft(scopeText); },
+				onCompositionEnd: function (event) { scopeComposing.current = false; setScopeDraft(null); setScopeText(event.target.value); } }),
+			h("select", { value: rootId, "aria-label": "选择测试任务",
+				onChange: function (event) {
+					setRootId(event.target.value);
+					setSelectedStack([]);
+					if (page === "evidence") resetList("evidence." + evidenceTab);
+					if (page === "logs") resetList("logs");
+				} },
+			h("option", { value: "" }, "全部测试任务（按项目汇总）"),
+				choices.map(function (row) { return h("option", { key: row.rootId, value: row.rootId }, wbRootTitle(row).slice(0, 42)); })),
+			scopeText ? h("button", { type: "button", className: "saker-wb-btn", onClick: function () { setScopeText(""); } }, "清除搜索") : null);
+	}
+	function renderPager(name, state, hasPrev) {
+		return h(SakerPager, { page: state && state.meta && state.meta.page,
+			loaded: (state && state.data || []).length, hasPrev: hasPrev,
+			onPrev: function () { setPageCursor(name, "prev", state); },
+			onNext: function () { setPageCursor(name, "next", state); } });
+	}
+	function renderInspector() {
+		if (!selectedRef) return null;
+		if (selectedRef.kind === "finding") {
+			return h(SakerFindingInspector, { selected: selectedRef, state: findingDetail,
+				tab: detailTab, onTab: setDetailTab, headingRef: detailHeadingRef,
+				onClose: closeDetail, back: selectedStack.length > 1 ? closeDetail : null,
+				onRetry: refresh, onRetest: function () {
+					var owner = findingDetail.data?.sessionId || selectedRef.rootId || rootId;
+					runForOwner(owner, "work.retest", { findingRef: { id: selectedRef.id }, reason: "从发现详情发起复测" });
+				},
+				onConversation: function () { openConversationFor(findingDetail.data?.sessionId || selectedRef.rootId || rootId); },
+				onOpenTask: function () { openTaskFromEvidence(findingDetail.data?.sessionId || selectedRef.rootId || rootId); },
+				onOpenMaterial: function (material) { pushRef({ kind: "material", id: material.materialId || material.id,
+					rootId: material.rootId || findingDetail.data?.sessionId || selectedRef.rootId || rootId,
+					materialKind: material.kind === "material" ? "file" : (material.kind || "file"),
+					summary: material.label || material.id }); },
+				onOpenRequest: function (ref) { pushRef({ kind: "material",
+					id: String(ref.id || "") + (ref.revision ? ":" + ref.revision : ""),
+					rootId: ref.ownerSessionId || findingDetail.data?.sessionId || selectedRef.rootId || rootId,
+					materialKind: "request", requestKind: "request",
+					summary: "请求 " + String(ref.id || "") + (ref.revision ? ":" + ref.revision : "") }); },
+				onOpenEvidence: function (receipt) { pushRef({ kind: "http", id: receipt.id, rootId: receipt.rootId || findingDetail.data?.sessionId || selectedRef.rootId || rootId,
+					summary: (findingDetail.data?.title || "执行回执") + " · " + receipt.id }); } });
+		}
+		if (["http", "model", "attempt", "role"].indexOf(selectedRef.kind) >= 0) {
+			return h(SakerExecutionInspector, { selected: selectedRef, state: executionDetail,
+				tab: detailTab, onTab: setDetailTab, headingRef: detailHeadingRef,
+				onClose: closeDetail, back: selectedStack.length > 1 ? closeDetail : null,
+				onRetry: refresh, onConversation: function () { openConversationFor(selectedRef.rootId || rootId); },
+				onOpenTask: function () { openTaskFromEvidence(selectedRef.rootId || rootId, "execution"); } });
+		}
+		if (selectedRef.kind === "graph") {
+			return h(SakerGraphInspector, { selected: selectedRef, headingRef: detailHeadingRef,
+				onClose: closeDetail, back: selectedStack.length > 1 ? closeDetail : null,
+				onOpenNode: function (node) { openExplorationNode(node); } });
+		}
+		if (selectedRef.kind === "material") {
+			return h(SakerMaterialInspector, { selected: selectedRef, state: materialDetail,
+				tab: detailTab, onTab: setDetailTab,
+				headingRef: detailHeadingRef, onClose: closeDetail, back: selectedStack.length > 1 ? closeDetail : null,
+				onRetry: refresh, onLoadMore: function (offset) { setMaterialOffset(offset || 0); },
+				onOpenTask: function () { openTaskFromEvidence(selectedRef.rootId || rootId, "assets"); } });
+		}
+		return h(SakerAssetInspector, { selected: selectedRef, row: selectedRef.row,
+			tab: detailTab, onTab: setDetailTab, headingRef: detailHeadingRef,
+			onClose: closeDetail, back: selectedStack.length > 1 ? closeDetail : null,
+			onOpenTask: function () { openTaskFromEvidence(selectedRef.rootId || rootId, "assets"); },
+			onOpenReceipt: function (receipt) { pushRef({ kind: "http", id: receipt.id,
+				rootId: selectedRef.rootId || rootId, summary: receipt.id }); },
+			onFindRequest: function (request) {
+				var owner = selectedRef.rootId || rootId;
+				if (!owner) return;
+				openRoot(owner, "execution");
+				resetList("task.execution", { text: request.endpoint || request.id || "" });
+			} });
+	}
+	function renderWorkgrid(list, inspector, hint) {
+		if (!inspector) return h("div", { className: "saker-wb-workgrid" }, h("section", { className: "saker-wb-listpane" }, list));
+		return h("div", { className: "saker-wb-workgrid has-detail" + (detailOnly ? " is-detail-only" : "") },
+			h("section", { className: "saker-wb-listpane" }, list),
+			h("div", { className: "saker-wb-detailpane" },
+				detailOnly ? h("button", { type: "button", className: "saker-wb-btn saker-wb-detailback", onClick: closeDetail }, "← 返回列表") : null,
+				inspector),
+			hint ? h("div", { className: "saker-wb-mocknote" }, hint) : null);
+	}
+	function openFinding(id, owner) { pushRef({ kind: "finding", id: id, rootId: owner || rootId }); }
+	function openTraffic(row) { pushRef({ kind: "http", id: row.id, rootId: row.rootId, summary: row.method + " " + row.url }); }
+	function openAsset(row) {
+		if (row.kind === "material" || row.kind === "file") {
+			pushRef({ kind: "material", id: row.id, rootId: row.rootId || rootId, row: row, materialKind: "file",
+				summary: row.name || row.title || row.id });
+			return;
+		}
+		pushRef({ kind: "asset", id: row.id, rootId: row.rootId || rootId, row: row,
+			summary: row.url || row.endpoint || row.name || row.id });
+	}
+	function openExecutionRow(row) { pushRef({ kind: row.kind === "http" ? "http" : row.kind, id: row.id, rootId: rootId, summary: row.summary }); }
+	function openExplorationNode(node) {
+		if (!node) return;
+		// 从测试路径打开关联记录时保持该页，详情结束后仍回到原图上下文。
+		if (node.kind === "finding") { openFinding(node.id, rootId); return; }
+		if (node.kind === "request") {
+			pushRef({ kind: "material", id: String(node.requestId || node.id) + (node.revision ? ":" + node.revision : ""),
+				rootId: node.ownerSessionId || rootId, materialKind: "request", summary: node.title || node.id });
+			return;
+		}
+		if (node.kind === "receipt" || node.kind === "http") { pushRef({ kind: "http", id: node.id, rootId: rootId, summary: node.title }); return; }
+		if (node.kind === "attempt") { pushRef({ kind: "attempt", id: node.id, rootId: rootId, summary: node.title }); return; }
+		if (node.kind === "asset" || node.kind === "endpoint" || node.kind === "check") {
+			pushRef({ kind: "asset", id: node.id, rootId: rootId, row: node, summary: node.title });
+			return;
+		}
+		pushRef({ kind: "graph", id: node.id, rootId: rootId, node: node, summary: node.title || node.id });
+	}
+
+	var nav = h(SakerWorkbenchNav, { page: page === "task" ? "tasks" : page, collapsed: navCollapsed,
+		onToggle: toggleNav, onNavigate: onNavigate });
+	var pageLabel = ({ dashboard: "概览", tasks: "测试任务", task: "测试任务", evidence: "发现与证据", resources: "配置与资料",
+		attention: "待办事项", logs: "执行日志" })[page] || "概览";
+	function buildPageContent() {
+	var inspector = renderInspector();
+	var pageContent = null;
+
+	if (handoff) {
+		pageContent = h(SakerHandoffPanel, { state: handoff, task: task, headingRef: detailHeadingRef,
+			onClose: closeHandoff, onRetry: openHandoff,
+			onDownload: downloadHandoff, downloading: busy === "delivery.download",
+			onOpenFindings: function () { closeHandoff(); setPage("task"); setTaskTab("findings"); setSelectedStack([]); },
+			onOpenAssets: function () { closeHandoff(); setPage("task"); setTaskTab("assets"); setSelectedStack([]); } });
+	} else if (page === "dashboard") {
+		if (dashboard.loading && !dashboard.data) {
+			pageContent = h("div", { className: "saker-wb-page" },
+				h(SakerPageIntro, { eyebrow: "Saker / 测试", title: "测试概览", subtitle: "汇总全部测试任务、发现和待办事项；统计口径为全部测试任务。" }),
+				h(SakerInspectorLoading, { label: "读取测试任务、待办与发现统计…" }));
+		} else {
+			var summary = dashboard.data || {};
+			var attentionRows = attentionQuery.data || [];
+			pageContent = h("div", { className: "saker-wb-page" },
+			h(SakerPageIntro, { eyebrow: "Saker / 测试", title: "测试概览",
+				subtitle: "汇总全部测试任务、发现和待办事项；统计口径为全部测试任务。",
+				actions: h("div", { className: "saker-wb-row" },
+					h("button", { type: "button", className: "saker-wb-btn", onClick: function () { onNavigate("tasks"); } }, "查看全部任务"),
+					h("button", { type: "button", className: "saker-wb-btn primary", onClick: function () { onNavigate("evidence"); } }, "查看发现与证据")) }),
+			h("div", { className: "saker-wb-facts" },
+				[{ label: "测试任务", value: summary.roots || 0, onClick: function () { onNavigate("tasks"); } },
+					{ label: "运行中", value: summary.runningRoots ?? summary.activeRoots ?? 0, title: "只统计业务状态为运行中的任务；已结束、暂停和已停止不在这里",
+						onClick: function () { resetList("tasks", { state: "running" }); onNavigate("tasks"); } },
+					{ label: "待复核发现", value: summary.pending || 0, onClick: function () { resetList("evidence.findings", { verification: "needs-recheck" }); setEvidenceTab("findings"); onNavigate("evidence"); } },
+					{ label: "待办事项", value: summary.attention || 0, onClick: function () { onNavigate("attention"); } }].map(function (item) {
+					return h("button", { key: item.label, type: "button", className: "saker-wb-fact clickable", title: item.title || ("查看" + item.label), onClick: item.onClick },
+						h("strong", null, item.value), h("span", null, item.label));
+				})),
+			h("div", { className: "saker-wb-dash-next" },
+				h("section", { className: "saker-wb-band" },
+					h("div", { className: "saker-wb-bandhead" },
+						h("h2", null, "待办事项"), h("span", { className: "saker-wb-chip warn" }, (summary.attention || 0) + " 项")),
+					attentionRows.length ? h("div", { className: "saker-wb-actions" }, attentionRows.slice(0, 3).map(function (row) {
+						return h("div", { key: row.id, className: "saker-wb-actionrow" },
+							h("div", null, h("strong", null, row.title || row.reason),
+								h("p", null, wbAttentionKindLabel(row.kind) + " · " + row.reason),
+								row.evidence ? h("p", { className: "saker-wb-sub" }, "依据：" + row.evidence) : null,
+								h("p", { className: "saker-wb-sub" }, "下一步：" + (row.next || "打开任务核对具体缺项"))),
+							h("button", { type: "button", className: "saker-wb-btn",
+								onClick: function () { if (row.rootId) openRoot(row.rootId, row.kind === "cleanup" ? "overview" : "overview"); else onNavigate("attention"); } }, "查看任务"));
+					})) : h("div", { className: "saker-wb-empty" }, attentionQuery.loading ? "读取中…" : "没有待办事项。"),
+					(summary.attention || 0) > 3 ? h("div", { className: "saker-wb-bandfoot" },
+						h("button", { type: "button", className: "saker-wb-btn", onClick: function () { onNavigate("attention"); } }, "查看其余 " + ((summary.attention || 0) - 3) + " 项")) : null),
+				h("section", { className: "saker-wb-band" },
+					h("div", { className: "saker-wb-bandhead" }, h("h2", null, "最近测试任务"), h("small", null, "按更新时间")),
+					h(SakerTaskTableV2, { rows: summary.recentRoots || [], onOpen: openRoot, compact: true }),
+					h("div", { className: "saker-wb-bandfoot" },
+						h("small", null, "显示 " + Math.min(5, (summary.recentRoots || []).length) + " / " + (summary.roots || 0) + " 条"),
+						h("button", { type: "button", className: "saker-wb-btn", onClick: function () { onNavigate("tasks"); } }, "查看全部")))));
+		}
+	} else if (page === "tasks") {
+		pageContent = h("div", { className: "saker-wb-page" },
+			h(SakerPageIntro, { eyebrow: "Saker / 测试任务", title: "测试任务", subtitle: "搜索测试任务、范围或会话 ID；打开任务会保留当前筛选。" }),
+			h("section", { className: "saker-wb-band saker-wb-listing" },
+				h(SakerTaskListToolbar, { text: taskList.text, state: taskList.state,
+					onText: function (value) { resetList("tasks", { text: value }); },
+					onState: function (value) { resetList("tasks", { state: value }); },
+					onClear: function () { resetList("tasks", { text: "", state: "" }); },
+					loadedLabel: taskQuery.loading ? "读取中…" : "当前 " + (taskQuery.data || []).length + " 条" +
+						(taskQuery.meta && taskQuery.meta.page ? " · 共 " + taskQuery.meta.page.total + " 条" : "") }),
+				h(SakerQueryError, { state: taskQuery, label: "测试任务", scope: "全部测试任务", onRetry: refresh }),
+				h(SakerTaskTableV2, { rows: taskQuery.data || [], onOpen: openRoot,
+					emptyText: taskList.text || taskList.state ? "没有匹配的测试任务。清除搜索或更换状态。" : "" }),
+				renderPager("tasks", taskQuery, taskList.stack.length > 0)));
+	} else if (page === "evidence") {
+		var records = evidenceQuery.data || [];
+		var table = null;
+		if (evidenceTab === "findings") {
+			table = h(SakerFindingsTable, { rows: records, showRoot: true, compact: compactRows, selectedKey: selectedRef && selectedRef.kind === "finding" ? selectionKey : "",
+				rootLabel: function (id) {
+					var owner = rootRows.find(function (row) { return row.rootId === id; });
+					return owner ? (owner.title || "会话 " + String(id).slice(-8)) : "会话 " + String(id).slice(-8);
+				},
+				onSelect: openFinding });
+		} else if (evidenceTab === "traffic") {
+			table = h(SakerTrafficTable, { rows: records, selectedKey: selectedRef && selectedRef.kind === "http" ? selectionKey : "", onSelect: openTraffic });
+		} else {
+			table = h(SakerAssetsTable, { rows: records, showRoot: true,
+				rootLabel: function (id) {
+					var owner = rootRows.find(function (row) { return row.rootId === id; });
+					return owner ? wbRootTitle(owner) : "会话 " + String(id || "").slice(-8);
+				},
+				selectedKey: selectedRef && selectedRef.kind === "asset" ? selectionKey : "", onSelect: openAsset });
+		}
+		var evidenceToolbar = h(SakerListToolbar, { text: evidenceList.text,
+			onText: function (value) { resetList("evidence." + evidenceTab, { text: value }); },
+			placeholder: evidenceTab === "findings" ? "搜索发现标题、摘要、目标或任务 ID" :
+				evidenceTab === "traffic" ? "搜索 HTTP 请求、ID、账号或状态" : "搜索资产、请求、文件或检查项",
+			filters: evidenceTab === "findings" ? h("span", { className: "saker-wb-row" },
+				h("select", { value: evidenceList.verification, "aria-label": "按验证状态筛选发现",
+					onChange: function (event) { resetList("evidence.findings", { verification: event.target.value }); } },
+					h("option", { value: "" }, "全部验证状态"), h("option", { value: "verified" }, "已验证"),
+					h("option", { value: "candidate" }, "待确认"), h("option", { value: "needs-recheck" }, "待复核"),
+					h("option", { value: "not-reproduced" }, "未复现"), h("option", { value: "fixed" }, "已处置")),
+				h("select", { value: evidenceList.severity, "aria-label": "按严重度筛选发现",
+					onChange: function (event) { resetList("evidence.findings", { severity: event.target.value }); } },
+					h("option", { value: "" }, "全部严重度"), h("option", { value: "critical" }, "严重"),
+					h("option", { value: "high" }, "高危"), h("option", { value: "medium" }, "中危"), h("option", { value: "low" }, "低危")))
+				: evidenceTab === "traffic" ? h("select", { value: evidenceList.status, "aria-label": "按 HTTP 状态筛选流量",
+					onChange: function (event) { resetList("evidence.traffic", { status: event.target.value }); } },
+					h("option", { value: "" }, "全部状态码"), ["200", "201", "204", "301", "302", "400", "401", "403", "404", "500"].map(function (code) {
+						return h("option", { key: code, value: code }, code);
+					})) : null,
+			dirty: !!(evidenceList.text || evidenceList.verification || evidenceList.severity || evidenceList.status),
+			onClear: function () { resetList("evidence." + evidenceTab, { text: "", verification: "", severity: "", status: "" }); },
+			loadedLabel: evidenceQuery.loading ? "读取中…" : "当前 " + records.length + " 条" +
+				(evidenceQuery.meta && evidenceQuery.meta.page ? " · 共 " + evidenceQuery.meta.page.total + " 条" : "") });
+		var list = h("div", null,
+			h("div", { className: "saker-wb-tabbar", role: "tablist", "aria-label": "发现与证据分类" },
+				SAKER_EVIDENCE_TABS_V2.map(function (tab) {
+					return h("button", { key: tab.id, type: "button", role: "tab", "aria-selected": evidenceTab === tab.id ? "true" : "false",
+						className: "saker-wb-tab" + (evidenceTab === tab.id ? " active" : ""),
+						onClick: function () { setEvidenceTab(tab.id); setSelectedStack([]); } }, tab.label);
+				})),
+			evidenceToolbar,
+			h("div", { className: "saker-wb-row saker-wb-scopebar" }, renderScopePicker()),
+			h(SakerQueryError, { state: evidenceQuery, label: "发现与证据", scope: rootId ? (rootRows.find(function (row) { return row.rootId === rootId; })?.title || rootId) : "全部测试任务", onRetry: refresh }),
+			table,
+			renderPager("evidence." + evidenceTab, evidenceQuery, evidenceList.stack.length > 0),
+			h("div", { className: "saker-wb-mocknote" }, "记录与原件均为只读；选中后会立即打开详情，不会重新执行请求。"));
+		pageContent = h("div", { className: "saker-wb-page" },
+			h(SakerPageIntro, { eyebrow: "Saker / 发现与证据", title: "发现与证据",
+				subtitle: "范围：" + currentScopeLabel() + " · 当前 " + records.length + " 条" +
+					(evidenceQuery.meta && evidenceQuery.meta.page ? " / 共 " + evidenceQuery.meta.page.total + " 条" : "") +
+					"；关闭详情会回到原来的列表位置。" }),
+			renderWorkgrid(list, inspector, "左侧列表与右侧详情使用同一范围、同一筛选。"));
+	} else if (page === "resources") {
+		var resourceBody = null;
+		if (resourceTab === "modules") resourceBody = h(SakerModulesPage, { rootId: rootId, tick: tick, run: run });
+		else if (resourceTab === "roles") resourceBody = h(SakerRolesPage, { rows: rolesQuery.data || [], run: run, rootId: rootId, tick: tick });
+		else if (resourceTab === "knowledge") resourceBody = h(SakerKnowledgePage, { rootId: rootId, tick: tick });
+		else resourceBody = h("div", null,
+			h(SakerListToolbar, { text: resourceList.text, onText: function (value) { resetList("resources.capabilities", { text: value }); },
+				placeholder: "搜索工具名、用途或来源", dirty: !!resourceList.text,
+				onClear: function () { resetList("resources.capabilities", { text: "" }); },
+				loadedLabel: capabilitiesQuery.loading ? "读取中…" : "当前 " + (capabilitiesQuery.data || []).length + " 条" }),
+			h(SakerQueryError, { state: capabilitiesQuery, label: "工具清单", scope: rootId || "未选择任务", onRetry: refresh }),
+			!rootId ? h("div", { className: "saker-wb-empty" }, "先选择一个测试任务，才能读取该会话实际可用的工具。") : null,
+			rootId ? h(SakerCapabilitiesTable, { rows: capabilitiesQuery.data || [] }) : null);
+		pageContent = h("div", { className: "saker-wb-page" },
+			h(SakerPageIntro, { eyebrow: "Saker / 配置与资料", title: "配置与资料",
+				subtitle: "范围：" + (rootId ? currentScopeLabel() : "个人与内置") + "；测试模块、协作角色、知识库和工具清单使用现有定义与权限。",
+				actions: renderScopePicker() }),
+			h("div", { className: "saker-wb-tabbar", role: "tablist", "aria-label": "配置与资料分区" },
+				SAKER_RESOURCE_TABS_V2.map(function (tab) {
+					return h("button", { key: tab.id, type: "button", role: "tab", "aria-selected": resourceTab === tab.id ? "true" : "false",
+						className: "saker-wb-tab" + (resourceTab === tab.id ? " active" : ""),
+						onClick: function () { setResourceTab(tab.id); resetList("resources." + tab.id); } }, tab.label);
+				})),
+			resourceBody);
+	} else if (page === "attention") {
+		pageContent = h("div", { className: "saker-wb-page" },
+			h(SakerPageIntro, { eyebrow: "Saker / 待办事项", title: "待办事项", subtitle: "只列仍需你决定或补齐的事项；普通回合结束和已完成任务不会出现在这里。" }),
+			h("section", { className: "saker-wb-band" },
+				h(SakerListToolbar, { text: attentionList.text, onText: function (value) { resetList("attention", { text: value }); },
+					placeholder: "搜索待办原因或测试任务", dirty: !!attentionList.text,
+					onClear: function () { resetList("attention", { text: "" }); },
+					loadedLabel: attentionQuery.loading ? "读取中…" : "当前 " + (attentionQuery.data || []).length + " 条" +
+						(attentionQuery.meta && attentionQuery.meta.page ? " · 共 " + attentionQuery.meta.page.total + " 条" : "") }),
+				h(SakerQueryError, { state: attentionQuery, label: "待办事项", scope: "全部测试任务", onRetry: refresh }),
+				attentionQuery.loading && !attentionQuery.data ? h(SakerInspectorLoading, { label: "读取待办事项…" }) :
+					h(SakerAttentionList, { rows: attentionQuery.data || [], onOpen: openRoot }),
+				renderPager("attention", attentionQuery, attentionList.stack.length > 0)));
+	} else if (page === "logs") {
+		pageContent = h("div", { className: "saker-wb-page" },
+			h(SakerPageIntro, { eyebrow: "Saker / 执行日志", title: "执行日志", subtitle: "范围：" + currentScopeLabel() + "；事件摘要使用可读文本，内部码与原文留在高级区。", actions: renderScopePicker() }),
+			h("section", { className: "saker-wb-band" },
+				h(SakerListToolbar, { text: logsList.text, onText: function (value) { resetList("logs", { text: value }); },
+					placeholder: "搜索事件类型或内容", dirty: !!logsList.text,
+					onClear: function () { resetList("logs", { text: "" }); },
+					loadedLabel: logsQuery.loading ? "读取中…" : "当前 " + (logsQuery.data || []).length + " 条" }),
+				h(SakerQueryError, { state: logsQuery, label: "执行日志", scope: rootId || "未选择任务", onRetry: refresh }),
+				!rootId ? h("div", { className: "saker-wb-empty" }, "先选择一个测试任务，再查看它的执行日志。") : null,
+				rootId ? h(SakerLogsList, { rows: logsQuery.data || [] }) : null));
+	} else if (page === "task") {
+		if (!rootId) {
+			pageContent = h("div", { className: "saker-wb-page" }, h("div", { className: "saker-wb-empty" }, "从任务列表选择一个任务。"));
+		} else {
+			var currentTask = taskDetail.data ? task : {};
+			var currentRoot = currentTask.root || {};
+			var counts = currentTask.overview?.counts || {};
+			var taskFindings = taskFindingsQuery.data || [];
+			var taskFindingsTotal = taskFindingsQuery.meta && taskFindingsQuery.meta.page ? taskFindingsQuery.meta.page.total : taskFindings.length;
+	var taskBackLabel = taskOriginRef.current?.page === "evidence" ? "返回发现与证据"
+		: taskOriginRef.current?.page === "dashboard" ? "返回概览" : "返回测试任务";
+			var taskHead = h("header", { className: "saker-wb-task-head" },
+				h("div", { className: "saker-wb-task-headmain" },
+					h("div", { className: "saker-wb-row" },
+						h("button", { type: "button", className: "saker-wb-btn", onClick: backFromTask }, taskBackLabel),
+						h("span", { className: "saker-wb-chip " + wbBusinessTone(currentRoot.businessState) }, wbBusinessLabel(currentRoot.businessState)),
+						h("span", { className: "saker-wb-sub" }, "更新 " + wbTime(currentRoot.updatedAt) +
+							" · " + wbDurationText(currentRoot.duration?.elapsedMs) +
+							" · 第 " + (currentRoot.generation || 1) + " 代")),
+					h("h1", { className: "saker-wb-task-title" }, wbRootTitle(currentRoot)),
+					h("p", { className: "saker-wb-page-sub" }, [currentRoot.targetSummary, currentRoot.taskKind, "会话 " + String(rootId).slice(-8)]
+						.filter(Boolean).join(" · "))),
+				h("div", { className: "saker-wb-task-actions" },
+					h("button", { type: "button", className: "saker-wb-btn", onClick: openConversation }, "打开会话"),
+			h("button", { type: "button", className: "saker-wb-btn primary", "data-saker-action": "export", onClick: openHandoff }, "导出报告"),
+					currentRoot.canActions?.pause ? h("button", { type: "button", className: "saker-wb-btn", disabled: !!busy,
+						onClick: function () { run("root.pause", { reason: "工作台暂停" }); } }, "暂停") : null,
+					currentRoot.canActions?.resume ? h("button", { type: "button", className: "saker-wb-btn", disabled: !!busy,
+						onClick: function () { run("root.resume", { reason: "工作台恢复" }); } }, "继续") : null,
+					currentRoot.canActions?.stop ? h("button", { type: "button", className: "saker-wb-btn danger", disabled: !!busy,
+						onClick: function () { setConfirmStop(true); } }, "停止本轮") : null));
+			var body = null;
+		if (taskDetail.loading && !taskDetail.data) body = h("div", { className: "saker-wb-empty" }, "读取测试任务概览…");
+			else if (taskDetail.error && !taskDetail.data) body = h(SakerQueryError, { state: taskDetail, label: "测试任务", scope: rootId, onRetry: refresh });
+			else if (taskTab === "overview") {
+				var gaps = currentTask.overview?.gaps || [];
+				var settlement = currentTask.roles?.settlementPending || 0;
+				var nextTitle = currentRoot.attention?.reason || (gaps.length ? "仍缺 " + gaps.length + " 项证据或范围条件" :
+					settlement ? "有 " + settlement + " 个并行任务待释放" :
+					currentRoot.businessState === "turn-ended" ? "本回合已结束，等待下一步" : "按当前范围继续核实");
+				var reviewData = reviewQuery.data || {};
+				var reviewGroups = reviewData.items || [];
+				var reviewBand = h("section", { className: "saker-wb-band", style: { gridColumn: "1 / -1" }, "data-saker-review-summary": "1" },
+					h("div", { className: "saker-wb-bandhead" }, h("h2", null, "隔天复核摘要"),
+						h("span", { className: "saker-wb-chip" + (reviewData.state === "paused" ? " warn" : "") },
+							reviewData.reasonLabel || (reviewQuery.loading ? "读取中…" : "状态未知")),
+						reviewQuery.loading && reviewQuery.data ? h("span", { className: "saker-wb-sub" }, "正在更新…") : null,
+						h("button", { type: "button", className: "saker-wb-btn", onClick: refresh }, "刷新")),
+					reviewQuery.error && !reviewQuery.data
+						? h(SakerQueryError, { state: reviewQuery, label: "复核摘要", scope: rootId, onRetry: refresh })
+						: (!reviewGroups.length
+							? h("p", { className: "saker-wb-sub" }, reviewData.emptyLabel || "暂无已核对记录")
+							: h("div", { style: { display: "grid", gap: "8px" } }, reviewGroups.map(function (group) {
+								return h("div", { key: group[0].group },
+									h("h3", { style: { margin: "4px 0" } }, group[0].groupLabel),
+									h("div", { className: "saker-wb-linklist" }, group.map(function (item) {
+										return h("div", { key: item.group + ":" + item.kind + ":" + item.id, className: "saker-wb-linkrow" },
+											h("span", { className: "saker-wb-cell-main" },
+												h("span", null, item.title || item.id),
+												h("span", { className: "saker-wb-sub" }, " · " + (item.hint || item.groupLabel))),
+											h("button", { type: "button", className: "saker-wb-btn",
+												onClick: function () { openReviewItem(item); } },
+												item.kind === "command" ? "查看操作记录" : item.kind === "http" ? "查看回执" : (item.evidenceHint || "看依据")));
+									})));
+							}))),
+					reviewData.reasonDetail ? h("p", { className: "saker-wb-sub" }, "状态代码：" + reviewData.reasonDetail) : null,
+					h("p", { className: "saker-wb-sub" }, "只读当前任务记录；打开、刷新或跳转不会调用模型、重放请求或写入复核。"));
+				body = h("div", { className: "saker-wb-taskgrid" }, reviewBand,
+					h("section", { className: "saker-wb-band" },
+						h("div", { className: "saker-wb-bandhead" }, h("h2", null, "下一步"), h("span", { className: "saker-wb-chip " + wbBusinessTone(currentRoot.businessState) }, wbBusinessLabel(currentRoot.businessState))),
+						h("div", { className: "saker-wb-actions" },
+							h("div", { className: "saker-wb-actionrow" },
+								h("div", null, h("strong", null, nextTitle),
+									h("p", null, wbReasonLabel(currentTask.status?.reason) +
+										(gaps.length ? "；具体缺口见资产与文件。" : "。"))),
+								h("button", { type: "button", className: "saker-wb-btn", onClick: function () { setTaskTab("assets"); } }, "查看资产与文件"))),
+						gaps.length ? h("div", { className: "saker-wb-gap-list" }, gaps.slice(0, 4).map(function (gap, index) {
+							return h("p", { key: index }, (gap.endpoint || "范围") + "： " + (gap.missing || []).join("、"));
+						})) : null),
+					h("section", { className: "saker-wb-band" },
+			h("div", { className: "saker-wb-bandhead" }, h("h2", null, "本轮汇总")),
+						h("dl", { className: "saker-wb-metadl" },
+							h("dt", null, "业务状态"), h("dd", null, wbBusinessLabel(currentRoot.businessState)),
+							h("dt", null, "结果"), h("dd", null, "验证 " + (currentRoot.outcomeSummary?.verified || 0) + " · 待确认 " + (currentRoot.outcomeSummary?.pending || 0)),
+							h("dt", null, "范围"), h("dd", null, currentRoot.targetSummary || "未记录"),
+							h("dt", null, "用时"), h("dd", null, wbDurationText(currentRoot.duration?.elapsedMs) +
+								(currentRoot.duration?.cappedBy === "deadline" ? "（已到时间上限）" : "")),
+							h("dt", null, "用量"), h("dd", null, "工具 " + (currentTask.cost?.toolCalls ?? currentTask.policy?.used?.toolCalls ?? 0) +
+								" 次 · 模型 " + (currentTask.cost?.modelCalls ?? currentTask.policy?.used?.modelCalls ?? 0) + " 次" +
+								(currentTask.cost?.totalTokens != null ? " · 合计 " + currentTask.cost.totalTokens + " tokens" : "") +
+								(currentTask.cost?.cacheReadTokens != null ? " · 缓存读 " + currentTask.cost.cacheReadTokens : "") +
+								(currentTask.cost?.cacheWriteTokens != null ? " · 缓存写 " + currentTask.cost.cacheWriteTokens : "") +
+								(currentTask.cost?.unknownUsageCalls ? " · 未知用量 " + currentTask.cost.unknownUsageCalls + " 次" : "")),
+							h("dt", null, "身份"), h("dd", null, "由每次请求记录；概览不会猜测账号")),
+						h("div", { className: "saker-wb-bandfoot" },
+							h("small", null, "普通回合结束不会自动进入待办事项。"))));
+			} else if (taskTab === "execution") {
+				var execRows = taskExecution.data || [];
+				var execModeBar = h("div", { className: "saker-wb-actions", role: "group", "aria-label": "执行视图" },
+					h("button", { type: "button", className: "saker-wb-btn" + (executionView === "records" ? " primary" : ""),
+						"aria-pressed": executionView === "records" ? "true" : "false",
+						onClick: function () { setExecutionView("records"); setUsageCursor(""); } }, "执行记录"),
+					h("button", { type: "button", className: "saker-wb-btn" + (executionView === "usage" ? " primary" : ""),
+						"aria-pressed": executionView === "usage" ? "true" : "false",
+						onClick: function () { setExecutionView("usage"); } }, "模型用量"));
+				if (executionView === "usage") {
+					var usageData = usageQuery.data || {};
+					var usage = usageData.usage || {};
+					var usageRows = usageData.rows || [];
+					var fmtUsage = function (value) { return value === null || value === undefined ? "未知" : String(value); };
+					var usagePanel = h("div", null, execModeBar,
+						h(SakerQueryError, { state: usageQuery, label: "模型用量", scope: "当前任务本轮", onRetry: refresh }),
+						usageData.unavailable
+							? h("div", { className: "saker-wb-empty" }, usageData.reason || "暂无可观察用量")
+							: h("div", null,
+								h("div", { className: "saker-wb-kpis" },
+									h("div", { className: "saker-wb-kpi" }, h("b", null, fmtUsage(usage.knownTokens)), h("span", null, "已知合计 tokens")),
+									h("div", { className: "saker-wb-kpi" }, h("b", null, fmtUsage(usage.observedWireAttempts)), h("span", null, "传输尝试")),
+									h("div", { className: "saker-wb-kpi" }, h("b", null, fmtUsage(usage.settledUsageCount)), h("span", null, "已结算")),
+									h("div", { className: "saker-wb-kpi" }, h("b", null, fmtUsage(usage.unknownUsageCount)), h("span", null, "未知用量")),
+									h("div", { className: "saker-wb-kpi" }, h("b", null, fmtUsage(usage.inFlightCount)), h("span", null, "处理中")),
+									h("div", { className: "saker-wb-kpi" }, h("b", null, fmtUsage(usage.unobservedDispatchCount)), h("span", null, "未观测发送")),
+									h("div", { className: "saker-wb-kpi" }, h("b", null, fmtUsage(usage.cancelledBeforeDispatch)), h("span", null, "发出前撤销")),
+									h("div", { className: "saker-wb-kpi" }, h("b", null, fmtUsage(usage.excludedFromBudgetCount)), h("span", null, "不计预算只读"))),
+								h("p", { className: "saker-wb-sub" }, "输入 " + fmtUsage(usage.inputTokens) + " · 输出 " + fmtUsage(usage.outputTokens)
+									+ " · 缓存读 " + fmtUsage(usage.cacheReadTokens) + " · 缓存写 " + fmtUsage(usage.cacheWriteTokens)
+									+ (usage.partial ? "；存在未知或处理中的调用，已知合计不是最终费用。" : "；已结算样本完整。")
+									+ " 现金费用：未知。"),
+								usageData.budget
+									? h("p", { className: "saker-wb-sub" }, "本轮预算口径：已计调用 " + fmtUsage(usageData.budget.chargedCalls)
+										+ " · 已知 " + fmtUsage(usageData.budget.knownTokens) + " · 预留 " + fmtUsage(usageData.budget.heldTokens)
+										+ " · 未知 " + fmtUsage(usageData.budget.unknownCalls) + " · 未完成 " + fmtUsage(usageData.budget.unresolvedCalls))
+									: h("p", { className: "saker-wb-sub" }, usageData.currentRound ? "该轮预算未保存。" : "历史轮次只显示同账本根的已保存调用。"),
+								usageData.taskAuxiliary
+									? h("p", { className: "saker-wb-sub" }, "任务辅助用量：" + usageData.taskAuxiliary.label
+										+ " · 传输 " + usageData.taskAuxiliary.wireAttempts + " 次 · 已知 tokens " + fmtUsage(usageData.taskAuxiliary.knownTokens)
+										+ (usageData.taskAuxiliary.unknownCurations ? " · 未知 " + usageData.taskAuxiliary.unknownCurations + " 条" : "")
+										+ "（不计入本轮合计）")
+									: null,
+								h("div", { className: "saker-wb-table-wrap" }, h("table", { className: "saker-wb-table" },
+									h("thead", null, h("tr", null, ["时间", "调用 ID", "用途", "模型", "状态", "传输", "已知 tokens"].map(function (label) {
+										return h("th", { key: label }, label);
+									}))),
+									h("tbody", null, usageRows.map(function (row) {
+										return h("tr", { key: row.id },
+											h("td", null, row.at ? wbTime(new Date(Number(row.at)).toISOString()) : "—"),
+											h("td", null, row.id),
+											h("td", null, row.purpose || "—"),
+											h("td", null, (row.provider ? row.provider + " / " : "") + (row.model || "—")),
+											h("td", null, h("span", { className: "saker-wb-chip " + (row.state === "settled" ? "ok" : row.usageUnknown ? "warn" : "") },
+												wbNodeStateLabel(row.state))),
+											h("td", null, row.wire ? "已观察" : "未观察"),
+											h("td", null, row.usage ? String(row.usage.totalTokens) : "未知"));
+									})),
+									usageRows.length ? null : h("tbody", null, h("tr", null, h("td", { colSpan: 7 }, "这一页没有调用记录。"))))),
+								h("div", { className: "saker-wb-actions" },
+									usageCursor ? h("button", { type: "button", className: "saker-wb-btn",
+										onClick: function () { setUsageCursor(""); } }, "第一页") : null,
+									usageQuery.meta && usageQuery.meta.page && usageQuery.meta.page.nextCursor
+										? h("button", { type: "button", className: "saker-wb-btn",
+											onClick: function () { setUsageCursor(usageQuery.meta.page.nextCursor); } }, "下一页") : null)),
+						h("p", { className: "saker-wb-sub" }, "只读已保存账本；未知不显示为 0，现金费用统一未知；打开明细不会新增账本事件。"));
+					body = renderWorkgrid(usagePanel, null, "模型用量按账本归属和轮次查询，不启动模型。");
+				} else {
+				var executionTable = h("div", null, execModeBar,
+					h(SakerListToolbar, { text: taskExecutionList.text, onText: function (value) { resetList("task.execution", { text: value }); },
+						placeholder: "搜索执行 ID、摘要、身份或状态",
+						filters: h("select", { value: taskExecutionList.kind, "aria-label": "按执行类型筛选",
+							onChange: function (event) { resetList("task.execution", { kind: event.target.value }); } },
+							h("option", { value: "" }, "全部类型"), h("option", { value: "http" }, "HTTP"),
+							h("option", { value: "model" }, "模型"), h("option", { value: "attempt" }, "尝试"), h("option", { value: "role" }, "角色")),
+						dirty: !!(taskExecutionList.text || taskExecutionList.kind),
+						onClear: function () { resetList("task.execution", { text: "", kind: "" }); },
+						loadedLabel: taskExecution.loading ? "读取中…" : "当前 " + execRows.length + " 条" }),
+					h(SakerQueryError, { state: taskExecution, label: "执行记录", scope: "当前测试任务", onRetry: refresh }),
+					h("div", { className: "saker-wb-table-wrap" }, h("table", { className: "saker-wb-table saker-wb-exec-table" },
+						h("thead", null, h("tr", null, ["时间", "类型", "做了什么", "状态", "账号/来源"].map(function (label) {
+							return h("th", { key: label }, label);
+						}))),
+						h("tbody", null, execRows.map(function (row) {
+							var key = row.kind + ":" + rootId + ":" + row.id;
+							return h("tr", { key: row.kind + "/" + row.id, tabIndex: 0, "data-saker-row": key,
+								className: selectionKey === key ? "selected" : "",
+								onClick: function () { openExecutionRow(row); },
+								onKeyDown: function (event) { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openExecutionRow(row); } } },
+								h("td", null, wbTime(row.at)), h("td", null, wbExecutionKindLabel(row.kind)),
+								h("td", null, h("div", { className: "saker-wb-cell-main" }, row.summary), h("div", { className: "saker-wb-cell-sub" }, row.id)),
+								h("td", null, h("span", { className: "saker-wb-chip " + (row.state === "completed" || row.state === "captured" ? "ok" : row.state === "cleanup-failed" ? "bad" : "") }, wbNodeStateLabel(row.state))),
+								h("td", null, row.identity || row.source || "—"));
+						})),
+						execRows.length ? null : h("tbody", null, h("tr", null, h("td", { colSpan: 5 }, "没有匹配的执行记录。"))))),
+					renderPager("task.execution", taskExecution, taskExecutionList.stack.length > 0));
+				body = renderWorkgrid(executionTable, inspector, "执行详情在右侧打开，不会追加到列表末尾。");
+				}
+			} else if (taskTab === "exploration") {
+				var graph = (exploration.data || [])[0] || { nodes: [], edges: [] };
+				var graphList = h("div", null,
+					exploration.error ? h("div", { className: "saker-wb-error" }, exploration.error) : null,
+					h(SakerGraph, { graph: graph, onSelect: function (node) {
+						pushRef({ kind: "graph", id: node.id, rootId: rootId, node: node, summary: node.title || node.id });
+					},
+						onOpenNode: openExplorationNode }),
+					h("section", { className: "saker-wb-band saker-wb-graph-links" },
+						h("div", { className: "saker-wb-bandhead" }, h("h2", null, "测试路径节点"), h("small", null, "列表入口不依赖图缩放")),
+						h("div", { className: "saker-wb-scroll" }, (graph.nodes || []).map(function (node) {
+							return h("button", { key: node.id, type: "button", className: "saker-wb-linkrow",
+								onClick: function () {
+									pushRef({ kind: "graph", id: node.id, rootId: rootId, node: node, summary: node.title || node.id });
+								} },
+								h("span", { className: "saker-wb-chip" }, wbGraphKindLabel(node.kind)),
+								h("span", { className: "saker-wb-cell-main" }, node.title || node.id),
+								h("span", { className: "saker-wb-sub" }, wbNodeStateLabel(node.state)));
+						}))));
+				body = renderWorkgrid(graphList, inspector, "路径图只画真实引用；选中节点后只打开一个详情。");
+			} else if (taskTab === "findings") {
+				var findingList = h("div", null,
+					h(SakerListToolbar, { text: taskFindingsList.text, onText: function (value) { resetList("task.findings", { text: value }); },
+						placeholder: "搜索发现标题、摘要或目标",
+						filters: h("select", { value: taskFindingsList.verification, "aria-label": "按验证状态筛选发现",
+							onChange: function (event) { resetList("task.findings", { verification: event.target.value }); } },
+							h("option", { value: "" }, "全部状态"), h("option", { value: "verified" }, "已验证"),
+							h("option", { value: "candidate" }, "待确认"), h("option", { value: "needs-recheck" }, "待复核"),
+							h("option", { value: "not-reproduced" }, "未复现"), h("option", { value: "fixed" }, "已处置")),
+						dirty: !!(taskFindingsList.text || taskFindingsList.verification),
+						onClear: function () { resetList("task.findings", { text: "", verification: "" }); },
+						loadedLabel: taskFindingsQuery.loading ? "读取中…" : "当前 " + taskFindings.length + " 条 · 共 " + taskFindingsTotal + " 条" }),
+					h(SakerQueryError, { state: taskFindingsQuery, label: "发现", scope: currentRoot.title || rootId, onRetry: refresh }),
+					h(SakerFindingsTable, { rows: taskFindings, showRoot: false, compact: compactRows, rootId: rootId,
+						selectedKey: selectedRef && selectedRef.kind === "finding" ? selectionKey : "",
+						onSelect: function (id) { openFinding(id, rootId); } }),
+					renderPager("task.findings", taskFindingsQuery, taskFindingsList.stack.length > 0),
+					h("div", { className: "saker-wb-mocknote" }, "发现只来自已记录成果；未测缺口不是发现。"));
+				body = renderWorkgrid(findingList, inspector, "详情在可见区域打开，返回保留当前列表位置。");
+			} else {
+				var assets = taskAssets.data || [];
+				var cover = (coverage.data || [])[0] || { nodes: [], edges: [], checkDimensions: { total: 0, notHit: 0, blocked: 0, notTested: 0 }, knownDenominator: 0 };
+				var dims = cover.checkDimensions || {};
+				var assetsList = h("div", null,
+					h("div", { className: "saker-wb-tabbar", role: "tablist", "aria-label": "资产视图" },
+						h("button", { type: "button", role: "tab", "aria-selected": !coverageMode ? "true" : "false",
+							className: "saker-wb-tab" + (!coverageMode ? " active" : ""), onClick: function () { setCoverageMode(false); } }, "列表"),
+						h("button", { type: "button", role: "tab", "aria-selected": coverageMode ? "true" : "false",
+							className: "saker-wb-tab" + (coverageMode ? " active" : ""), onClick: function () { setCoverageMode(true); } }, "覆盖")),
+					coverageMode ? h("div", null,
+						h("div", { className: "saker-wb-facts compact" },
+							[["已知分母", cover.knownDenominator || 0], ["已测未命中", dims.notHit || 0],
+								["未测", dims.notTested || 0], ["受阻", dims.blocked || 0]].map(function (item) {
+								return h("div", { key: item[0], className: "saker-wb-fact" }, h("strong", null, item[1]), h("span", null, item[0]));
+							})),
+						h(SakerGraph, { graph: cover, emptyText: "当前任务还没有资产、请求或检查记录；先执行请求或导入资产，覆盖才会出现节点。",
+							onSelect: function (node) {
+								pushRef({ kind: "graph", id: node.id, rootId: rootId, node: node, summary: node.title || node.id });
+							},
+							onOpenNode: openExplorationNode }),
+						h("div", { className: "saker-wb-mocknote" }, "分母未知时写“覆盖分母未知”，不显示看似正确的百分比。"))
+						: h("div", null,
+							h(SakerListToolbar, { text: taskAssetsList.text, onText: function (value) { resetList("task.assets", { text: value }); },
+							placeholder: "搜索资产、请求、文件或检查", dirty: !!taskAssetsList.text,
+								onClear: function () { resetList("task.assets", { text: "" }); },
+								loadedLabel: taskAssets.loading ? "读取中…" : "当前 " + assets.length + " 条" }),
+					h(SakerQueryError, { state: taskAssets, label: "资产与文件", scope: "当前测试任务", onRetry: refresh }),
+							h(SakerAssetsTable, { rows: assets, showRoot: false, rootId: rootId,
+								selectedKey: selectedRef && selectedRef.kind === "asset" ? selectionKey : "", onSelect: openAsset }),
+							renderPager("task.assets", taskAssets, taskAssetsList.stack.length > 0)));
+				body = renderWorkgrid(assetsList, inspector, "文件不等于覆盖完成；没有分母时不会计算百分比。");
+			}
+			pageContent = h("div", { className: "saker-wb-page saker-wb-taskpage" }, taskHead,
+				h("div", { className: "saker-wb-tabbar", role: "tablist", "aria-label": "测试任务分区" },
+					SAKER_TASK_TABS_V2.map(function (tabItem) {
+						return h("button", { key: tabItem.id, type: "button", role: "tab", "aria-selected": taskTab === tabItem.id ? "true" : "false",
+							className: "saker-wb-tab" + (taskTab === tabItem.id ? " active" : ""),
+							onClick: function () { setTaskTab(tabItem.id); setSelectedStack([]); setExplorationNode(null); } }, tabItem.label);
+					})),
+				confirmStop ? h("div", { className: "saker-wb-notice warn" },
+					h("span", null, "停止本轮会撤销本代新执行许可，并保留在途事实与未完成项。确认停止？"),
+					h("button", { type: "button", className: "saker-wb-btn danger", disabled: !!busy,
+						onClick: function () { setConfirmStop(false); run("scope.stop", { scopeKind: "root", reason: "工作台确认停止" }); } }, "确认停止"),
+					h("button", { type: "button", className: "saker-wb-btn", onClick: function () { setConfirmStop(false); } }, "取消")) : null,
+				body);
+		}
+	}
+	return pageContent;
+	}
+
+	var mobileNav = h("select", { className: "saker-wb-mobile-nav", "aria-label": "切换工作台页面",
+		value: page === "task" ? "tasks" : page,
+		onChange: function (event) { onNavigate(event.target.value); } },
+		SAKER_WB_NAV_V2.map(function (group) {
+			return h("optgroup", { key: group.group, label: group.group },
+				group.items.map(function (item) { return h("option", { key: item.id, value: item.id }, item.label); }));
+		}));
+	var header = h("header", { className: "saker-wb-context" },
+		h("div", { className: "saker-wb-crumb" }, h("strong", null, "Saker"), h("span", null, "/ " + pageLabel +
+			(page === "task" && rootId ? " / " + String(rootId).slice(-8) : ""))),
+		mobileNav,
+		h("span", { className: "saker-wb-spacer" }),
+		h("span", { className: "saker-wb-context-note" }, "只读工作台 · 不自动启动模型"),
+		h("button", { type: "button", className: "saker-wb-btn", onClick: refresh },
+			(taskDetail.loading || evidenceQuery.loading || taskQuery.loading || dashboard.loading) ? "刷新中…" : "刷新"));
+	return h("div", { className: "saker-wb saker-wb-v2" + (navCollapsed ? " is-nav-collapsed" : "") + (topNavMode ? " is-topnav" : ""), ref: setRootEl },
+		nav,
+		h("main", { className: "saker-wb-main" }, header,
+			h("div", { className: "saker-wb-scroll", ref: contentRef },
+				notice ? h("div", { className: "saker-wb-notice" }, h("span", null, notice),
+					h("button", { type: "button", className: "saker-wb-btn", onClick: function () { setNotice(""); } }, "关闭")) : null,
+				unknownCommand ? h("div", { className: "saker-wb-notice warn", role: "status" },
+					h("span", null, "有一条命令结果未知（" + unknownCommand.commandId + "）。确认前不会重新发送。"),
+					h("button", { type: "button", className: "saker-wb-btn", disabled: busy === "command.reconcile",
+						onClick: reconcileUnknown }, busy === "command.reconcile" ? "查询中…" : "确认原命令")) : null,
+				h(SakerRenderBoundary, {
+					key: page + ":" + rootId + ":" + taskTab + ":" + detailTab + ":" + selectedStack.length,
+					onRetry: refresh,
+					onBack: function () { setPage("tasks"); setRootId(""); setTaskTab("overview"); setSelectedStack([]); },
+				}, h(SakerBoundaryContent, { build: buildPageContent })))));
+}
+function SakerInspectorLoading(props) {
+	return h("div", { className: "saker-wb-skeleton", "aria-live": "polite" },
+		h("span", { className: "saker-wb-skeleton-line wide" }), h("span", { className: "saker-wb-skeleton-line" }),
+		h("span", { className: "saker-wb-skeleton-line short" }),
+		h("div", { className: "saker-wb-sub" }, props.label || "读取详情…"));
+}
+function SakerInspectorError(props) {
+	return h("div", { className: "saker-wb-error", role: "alert" },
+		props.message,
+		props.stale ? h("div", { className: "saker-wb-sub" }, "下方保留的是同一记录上一次成功读取的数据，不是本次结果。") : null,
+		props.onRetry ? h("div", { style: { marginTop: "8px" } },
+			h("button", { type: "button", className: "saker-wb-btn", onClick: props.onRetry }, "重试")) : null);
+}
+function SakerFindingInspector(props) {
+	var state = props.state || {};
+	var data = state.data || {};
+	var refs = data.verificationBasis || data.evidenceRefs || [];
+	var resolvedRefs = data.evidenceReferences || [];
+	var receipts = data.receipts || [];
+	var retests = data.retests || [];
+	var hasData = !!state.data;
+	var tab = props.tab || "summary";
+	var owner = data.sessionId || props.selected.rootId || "";
+	var findingId = data.findingId || data.id || (props.selected && props.selected.id) || "";
+	var reviewOpenState = useState(false), reviewOpen = reviewOpenState[0], setReviewOpen = reviewOpenState[1];
+	var reviewDecisionState = useState("insufficient"), reviewDecision = reviewDecisionState[0], setReviewDecision = reviewDecisionState[1];
+	var reviewNoteState = useState(""), reviewNote = reviewNoteState[0], setReviewNote = reviewNoteState[1];
+	var reviewRefsState = useState([]), reviewRefs = reviewRefsState[0], setReviewRefs = reviewRefsState[1];
+	var reviewBusyState = useState(false), reviewBusy = reviewBusyState[0], setReviewBusy = reviewBusyState[1];
+	var reviewNoticeState = useState(""), reviewNotice = reviewNoticeState[0], setReviewNotice = reviewNoticeState[1];
+	var reviewRequest = useRef("");
+	var historyExtraState = useState([]), historyExtra = historyExtraState[0], setHistoryExtra = historyExtraState[1];
+	var historyCursorState = useState(data.reviewHistoryCursor || null), historyCursor = historyCursorState[0], setHistoryCursor = historyCursorState[1];
+	var historyTotalState = useState(Number(data.reviewTotal) || 0), historyTotal = historyTotalState[0], setHistoryTotal = historyTotalState[1];
+	var historyLoadingState = useState(false), historyLoading = historyLoadingState[0], setHistoryLoading = historyLoadingState[1];
+	var historySeq = useRef(0);
+	var historyCurrentRef = useRef({ owner: "", id: "" });
+	historyCurrentRef.current = { owner: owner, id: findingId };
+	useEffect(function () {
+		historySeq.current += 1;
+		setHistoryExtra([]);
+		setHistoryCursor(data.reviewHistoryCursor || null);
+		setHistoryTotal(Number(data.reviewTotal) || 0);
+		setHistoryLoading(false);
+	}, [owner, findingId, data.reviewHistoryCursor, data.reviewTotal]);
+	function reviewRefKey(ref) { return String(ref.kind || "") + "|" + String(ref.id || "") + "|" + String(ref.revision || ""); }
+	function reviewSelectable(ref) { return !!ref.openRef && ["exact", "unique-legacy"].indexOf(String(ref.location || "")) >= 0; }
+	function reviewSelectableRefs() { return resolvedRefs.filter(reviewSelectable); }
+	function toggleReviewRef(ref) {
+		var key = reviewRefKey(ref);
+		setReviewRefs(reviewRefs.indexOf(key) >= 0 ? reviewRefs.filter(function (item) { return item !== key; }) : reviewRefs.concat([key]));
+	}
+	function saveEvidenceReview() {
+		if (reviewBusy) return;
+		var note = String(reviewNote || "").trim();
+		if (!note) { setReviewNotice("请写明这次复核看到什么、还缺什么。"); return; }
+		var chosen = reviewSelectableRefs().filter(function (ref) { return reviewRefs.indexOf(reviewRefKey(ref)) >= 0; })
+			.map(function (ref) { return { kind: ref.kind, id: ref.id, revision: ref.revision || "" }; });
+		if (reviewDecision === "supported" && !chosen.length) {
+			setReviewNotice("标记“依据足以支持”至少选择一个可打开的原件。");
+			return;
+		}
+		var requestId = reviewRequest.current || ((typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : "review-" + Date.now() + "-" + Math.random().toString(36).slice(2));
+		reviewRequest.current = requestId;
+		setReviewBusy(true); setReviewNotice("");
+		api("finding.evidence-review.save", {
+			sessionId: owner, rootId: owner, findingId: findingId,
+			expectedFindingRevision: data.findingRevision || "",
+			expectedBasisDigest: data.basisDigest || "",
+			expectedHeadSeq: data.reviewHead ? Number(data.reviewHead.reviewSeq) || 0 : 0,
+			requestId: requestId, decision: reviewDecision, note: note, refs: chosen,
+		}).then(function (response) {
+			var failure = wbResponseError(response, "依据复核保存失败");
+			if (failure) throw failure;
+			reviewRequest.current = "";
+			setReviewBusy(false);
+			setReviewNotice(response.idempotent ? "已取回同一请求的复核结果。" : "依据复核已保存。");
+			setReviewOpen(false); setReviewNote(""); setReviewRefs([]);
+			if (props.onRetry) props.onRetry();
+		}).catch(function (error) {
+			setReviewBusy(false);
+			setReviewNotice(wbErrorText(error));
+			if (props.onRetry) props.onRetry();
+		});
+	}
+	function loadMoreHistory() {
+		if (!historyCursor || historyLoading) return;
+		var ownerAt = owner, idAt = findingId;
+		var seq = ++historySeq.current;
+		setHistoryLoading(true);
+		api("workbench.query", { kind: "findings.review-history",
+			context: { rootId: ownerAt, findingId: idAt }, page: { cursor: historyCursor, limit: 20 } })
+			.then(function (response) {
+				if (seq !== historySeq.current) return;
+				var current = historyCurrentRef.current;
+				if (current.owner !== ownerAt || current.id !== idAt) return;
+				var failure = wbResponseError(response, "读取更早复核记录失败");
+				if (failure) throw failure;
+				setHistoryExtra(function (previous) { return previous.concat(response.data || []); });
+				setHistoryCursor(response.page && response.page.nextCursor ? response.page.nextCursor : null);
+				setHistoryLoading(false);
+			})
+			.catch(function (error) {
+				if (seq !== historySeq.current) return;
+				setHistoryLoading(false);
+				setReviewNotice(wbErrorText(error));
+			});
+	}
+	function body() {
+		if (state.error && !hasData) return h(SakerInspectorError, { message: "读取发现详情失败：" + state.error, onRetry: props.onRetry });
+		if (!hasData && state.loading) return h(SakerInspectorLoading, { label: "读取发现详情…" });
+		if (!hasData) return h("div", { className: "saker-wb-empty" }, "这条发现的详情不可用。");
+		var chips = h("div", { className: "saker-wb-chiprow" },
+			h("span", { className: "saker-wb-chip " + (data.verificationState === "verified" ? "ok" : data.verificationState === "candidate" || data.verificationState === "needs-recheck" ? "warn" : "") },
+				wbVerificationLabel(data.verificationState)),
+			h("span", { className: "saker-wb-chip " + (data.severity === "critical" || data.severity === "high" ? "bad" : "") }, SEVERITY_LABEL[data.severity] || data.severity || "未评级"),
+			data.reviewHead ? h("span", { className: "saker-wb-chip " + (data.reviewHead.current ? "ok" : "warn") }, data.reviewHead.decisionLabel || "已记录依据复核")
+				: h("span", { className: "saker-wb-chip" }, "未记录依据复核"),
+			h("span", { className: "saker-wb-sub" }, "依据 " + (resolvedRefs.length || refs.length) + " 条 · 复测 " + retests.length + " 次"));
+		if (tab === "evidence") {
+			return h("div", null, chips,
+				h("p", null, "以下记录均已存在；打开不会重新执行请求。"),
+				h("h3", null, "依据引用"),
+				(resolvedRefs.length || refs.length) ? h("div", { className: "saker-wb-linklist" }, (resolvedRefs.length ? resolvedRefs : refs).map(function (ref, index) {
+					var openType = (ref.openRef && ref.openRef.type) || (ref.openKind === "http" ? "execution" : ref.openKind === "material" ? "material" : "");
+					var openId = (ref.openRef && ref.openRef.id) || ref.executionId || ref.materialId || ref.id;
+					var canOpenReceipt = openType === "execution";
+					var canOpenMaterial = openType === "material";
+					var canOpenRequest = openType === "request";
+					return h("div", { key: String(ref.kind || "ref") + ":" + String(ref.id || "") + ":" + String(ref.revision || index), className: "saker-wb-linkrow" },
+						h("span", { className: "saker-wb-chip " + (canOpenReceipt || canOpenMaterial || canOpenRequest ? "ok" : ref.location === "ambiguous" ? "warn" : "bad") },
+							wbEvidenceRefKindLabel(ref.kind)),
+						h("span", { className: "saker-wb-cell-main" },
+							h("span", null, ref.label || ref.id || "—"),
+							h("span", { className: "saker-wb-sub" }, " · " + (ref.reason || ref.reasonCode || (canOpenRequest ? "可打开请求原件" : canOpenReceipt ? "可读取回执" : canOpenMaterial ? "可读取文件" : "原件不可用")))),
+						canOpenRequest && props.onOpenRequest ? h("button", { type: "button", className: "saker-wb-btn",
+							onClick: function () { props.onOpenRequest({ kind: "request", ownerSessionId: ref.openRef.ownerSessionId, id: ref.openRef.id, revision: ref.openRef.revision || "" }); } }, "打开请求")
+							: canOpenReceipt && props.onOpenEvidence ? h("button", { type: "button", className: "saker-wb-btn",
+							onClick: function () { props.onOpenEvidence({ id: openId, rootId: (ref.openRef && ref.openRef.ownerSessionId) || data.sessionId || props.selected.rootId }); } }, "查看回执")
+							: canOpenMaterial && props.onOpenMaterial ? h("button", { type: "button", className: "saker-wb-btn",
+								onClick: function () { props.onOpenMaterial({ id: openId, materialId: openId, rootId: (ref.openRef && ref.openRef.ownerSessionId) || data.sessionId, kind: "file", label: ref.label }); } }, "打开文件")
+								: null);
+				})) : h("div", { className: "saker-wb-empty" }, "没有可读依据引用。"),
+				h("h3", null, "HTTP 回执" + (Number(data.receiptTotal) > receipts.length ? "（显示 " + receipts.length + " / " + data.receiptTotal + "）" : "")),
+				receipts.length ? h("div", { className: "saker-wb-linklist" }, receipts.map(function (receipt) {
+					return h("div", { key: receipt.id, className: "saker-wb-linkrow" },
+						h("span", { className: "saker-wb-chip " + (receipt.current && receipt.integrityValid ? "ok" : "warn") },
+							receipt.status != null ? "HTTP " + receipt.status : "回执"),
+						h("span", { className: "saker-wb-cell-main" }, receipt.id + (receipt.current === false ? " · 已失效" : "")),
+						props.onOpenEvidence ? h("button", { type: "button", className: "saker-wb-btn",
+							onClick: function () { props.onOpenEvidence(receipt); } }, "查看回执") : null);
+				})) : h("p", { className: "saker-wb-sub" }, "没有返回可直接打开的回执；这不等于原件已阅读。"));
+		}
+		if (tab === "history") {
+			var selectable = reviewSelectableRefs();
+			var reviewHistory = (Array.isArray(data.reviewHistory) ? data.reviewHistory : []).slice();
+			var seenReviewSeq = new Set(reviewHistory.map(function (item) { return String(item.reviewSeq); }));
+			historyExtra.forEach(function (item) {
+				if (seenReviewSeq.has(String(item.reviewSeq))) return;
+				seenReviewSeq.add(String(item.reviewSeq));
+				reviewHistory.push(item);
+			});
+			return h("div", null, chips,
+				h("h3", null, "依据复核"),
+				h("p", { className: "saker-wb-sub" },
+					data.reviewHead ? (data.reviewHead.decisionLabel + " · " + wbTime(data.reviewHead.createdAt)
+						+ (data.reviewHead.current ? " · 当前依据仍匹配" : " · 原判断保留，当前依据不可复核"))
+						: (data.headNote || "尚未记录人工依据复核。打开详情或切换页签不会代替你作出判断。")),
+				data.reviewHead && data.reviewHead.note ? h("div", { className: "saker-wb-callout" }, data.reviewHead.note) : null,
+				reviewNotice ? h("div", { className: "saker-wb-callout", role: "status" }, reviewNotice) : null,
+				h("div", { style: { display: "flex", gap: "8px", flexWrap: "wrap", margin: "8px 0" } },
+					h("button", { type: "button", className: "saker-wb-btn", onClick: function () { setReviewOpen(!reviewOpen); } },
+						reviewOpen ? "收起复核表单" : (data.reviewHead ? "更正或补充依据复核" : "记录依据复核")),
+					props.onRetry ? h("button", { type: "button", className: "saker-wb-btn", disabled: reviewBusy, onClick: props.onRetry }, "刷新原件状态") : null),
+				reviewOpen ? h("div", { style: { display: "grid", gap: "8px", padding: "12px", border: "1px solid var(--dsw-alias-border-l1,#d8dce6)", borderRadius: "10px", margin: "8px 0" } },
+					h("label", { className: "saker-wb-sub" }, "结论",
+						h("select", { value: reviewDecision, onChange: function (event) { setReviewDecision(event.target.value); }, style: { display: "block", width: "100%" } },
+							h("option", { value: "supported" }, "依据足以支持"),
+							h("option", { value: "insufficient" }, "依据不足"),
+							h("option", { value: "superseded" }, "已更正先前判断"))),
+					h("label", { className: "saker-wb-sub" }, "复核说明（1–2000 字）",
+						h("textarea", { value: reviewNote, maxLength: 2000, rows: 3, style: { display: "block", width: "100%" },
+							placeholder: "写明看到的原件、适用范围和还缺什么；正文里的“已验证”不会替你复核。",
+							onChange: function (event) { setReviewNote(event.target.value); } })),
+					selectable.length ? h("div", null,
+						h("div", { className: "saker-wb-sub" }, "这次实际核对的原件（" + selectable.length + " 条可打开）"),
+						selectable.map(function (ref) {
+							var key = reviewRefKey(ref);
+							return h("label", { key: key, className: "saker-wb-sub", style: { display: "block" } },
+								h("input", { type: "checkbox", checked: reviewRefs.indexOf(key) >= 0, onChange: function () { toggleReviewRef(ref); } }),
+								" " + (ref.kind || "ref") + " " + (ref.id || "") + (ref.revision ? ":" + ref.revision : "") + " · " + (ref.quality || "unknown"));
+						}))
+						: h("p", { className: "saker-wb-sub" }, "当前没有可打开的原件；只能记录“依据不足”。"),
+					h("div", { style: { display: "flex", gap: "8px" } },
+						h("button", { type: "button", className: "saker-wb-btn", disabled: reviewBusy, onClick: saveEvidenceReview },
+							reviewBusy ? "保存中…" : "保存复核"),
+						h("button", { type: "button", className: "saker-wb-btn", disabled: reviewBusy,
+							onClick: function () { setReviewOpen(false); } }, "取消"))) : null,
+				reviewHistory.length ? h("div", { className: "saker-wb-linklist" }, reviewHistory.map(function (item, index) {
+					return h("div", { key: String(item.reviewSeq || index), className: "saker-wb-history" },
+						h("small", null, (item.decisionLabel || item.decision) + " · " + wbTime(item.createdAt)
+							+ (item.superseded ? " · 已更正" : "") + (item.current === false && !item.superseded ? " · 依据已变化" : "")),
+						h("p", null, item.note || "无说明"));
+				})) : h("div", { className: "saker-wb-empty" }, "暂无已保存的复核记录。"),
+				historyCursor ? h("div", { style: { margin: "8px 0" } },
+					h("button", { type: "button", className: "saker-wb-btn", disabled: historyLoading, onClick: loadMoreHistory },
+						historyLoading ? "读取更早记录…" : "加载更早的复核记录")) : null,
+				historyTotal > reviewHistory.length
+					? h("p", { className: "saker-wb-sub" }, "已显示 " + reviewHistory.length + " / " + historyTotal + " 条；可继续加载更早记录。") : null,
+				h("h3", null, "复测记录"),
+				retests.length ? h("div", { className: "saker-wb-linklist" }, retests.map(function (item, index) {
+					return h("div", { key: String(item.id || index), className: "saker-wb-history" },
+						h("small", null, item.at ? wbTime(item.at) : "时间未知"),
+						h("p", null, item.note || item.result || "无说明"));
+				})) : h("div", { className: "saker-wb-empty" }, "还没有复测记录。"),
+				h("div", { className: "saker-wb-callout" }, "复测需要明确发起；打开详情或切换页签不会发送目标请求。"));
+		}
+		return h("div", null, chips,
+			h("p", { className: "saker-wb-summary" }, data.summary || data.description || "没有可读摘要。"),
+			h("dl", { className: "saker-wb-metadl" },
+				h("dt", null, "任务"), h("dd", null, owner || "未记录"),
+				h("dt", null, "目标"), h("dd", null, data.target || "未知"),
+				h("dt", null, "验证状态"), h("dd", null, wbVerificationLabel(data.verificationState)),
+				h("dt", null, "范围"), h("dd", null, "当前发现所属任务；未记录的版本和环境保持未知"),
+				h("dt", null, "更新时间"), h("dd", null, wbTime(data.updatedAt))),
+			data.description ? h("section", { className: "saker-wb-detailsec" }, h("h3", null, "结论与影响"),
+				h("p", null, data.description), data.impact ? h("p", null, data.impact) : null) : null,
+			data.poc ? h("section", { className: "saker-wb-detailsec" }, h("h3", null, "复现过程"), h("pre", null, data.poc)) : null,
+			data.requestPacket || data.responsePacket ? h("section", { className: "saker-wb-detailsec" },
+				h("h3", null, "已保存原文（历史快照，只读）"),
+				h("p", { className: "saker-wb-sub" }, "这是发现记录中旧版保存的请求/响应正文，秘密字段已遮蔽；与可验证回执分开，不会重放请求。"),
+				data.requestPacket ? h("details", null, h("summary", null, "请求原文"), h("pre", { className: "saker-wb-original" }, data.requestPacket)) : null,
+				data.responsePacket ? h("details", null, h("summary", null, "响应原文"), h("pre", { className: "saker-wb-original" }, data.responsePacket)) : null) : null,
+			state.error ? h(SakerInspectorError, { message: "本次刷新失败：" + state.error, stale: true, onRetry: props.onRetry }) : null);
+	}
+	return h(SakerDetailFrame, {
+		label: "发现详情",
+		eyebrow: (props.selected.id || "发现") + " · 发现",
+		title: data.title || "发现详情",
+		headingRef: props.headingRef,
+		onClose: props.onClose,
+		back: props.back,
+		tabs: h(SakerDetailTabs, { active: tab, onChange: props.onTab, items: [
+				{ id: "summary", label: "摘要" }, { id: "evidence", label: "依据" }, { id: "history", label: "验证记录" }] }),
+		footer: h("div", { className: "saker-wb-row" },
+			props.onConversation ? h("button", { type: "button", className: "saker-wb-btn", onClick: props.onConversation }, "返回原会话") : null,
+			props.onOpenTask ? h("button", { type: "button", className: "saker-wb-btn", onClick: props.onOpenTask }, "打开任务") : null,
+		props.onRetest ? h("button", { type: "button", className: "saker-wb-btn", disabled: props.retestBusy, onClick: props.onRetest }, "发起复测") : null,
+			receipts[0] && props.onOpenEvidence ? h("button", { type: "button", className: "saker-wb-btn primary",
+				onClick: function () { props.onOpenEvidence(receipts[0]); } }, "查看首个回执") : null),
+	}, body());
+}
+function SakerExecutionInspector(props) {
+	var state = props.state || {};
+	var data = state.data || {};
+	var hasData = !!state.data;
+	var tab = props.tab || "summary";
+	var title = props.selected.summary || (data.request ? String(data.request).split(/\r?\n/)[0] : "") ||
+		(props.selected.kind === "http" ? "执行回执" : props.selected.kind === "model" ? "模型回合" :
+			props.selected.kind === "attempt" ? "工作尝试" : "角色实例");
+	function body() {
+		if (!hasData && state.loading) return h(SakerInspectorLoading, { label: "读取执行详情…" });
+		if (state.error && !hasData) return h(SakerInspectorError, { message: "读取执行详情失败：" + state.error, onRetry: props.onRetry });
+		if (!hasData) return h("div", { className: "saker-wb-empty" }, "这条执行记录不可用或已被移除。");
+		var summary = h("div", null,
+			h("div", { className: "saker-wb-chiprow" },
+				h("span", { className: "saker-wb-chip" }, wbExecutionKindLabel(data.kind || props.selected.kind)),
+				h("span", { className: "saker-wb-chip " + (data.error ? "bad" : data.status == null ? "" : data.status >= 200 && data.status < 400 ? "ok" : "warn") },
+					data.status != null ? "HTTP " + data.status : (data.status === undefined ? wbNodeStateLabel(data.state) : "—")),
+				data.identity ? h("span", { className: "saker-wb-chip" }, "身份 " + data.identity) : null),
+			h("dl", { className: "saker-wb-metadl" },
+				h("dt", null, "记录 ID"), h("dd", null, data.id || props.selected.id),
+				h("dt", null, "时间"), h("dd", null, data.at ? wbTime(data.at) : "未知"),
+				h("dt", null, "来源"), h("dd", null, data.source || props.selected.source || "未记录"),
+				h("dt", null, "结果"), h("dd", null, data.error ? "读取失败" : wbNodeStateLabel(data.outcome || data.state || "未记录")),
+				h("dt", null, "请求大小"), h("dd", null, data.bytes != null ? data.bytes + " 字节（已截取 " + (data.capturedBytes || 0) + "）" : "未记录"),
+				h("dt", null, "身份"), h("dd", null, data.identity || "记录未提供；不按默认账号猜测"),
+				h("dt", null, "完整性"), h("dd", null, data.requestSha256 || data.responseSha256 ? "已有请求/响应摘要" : "未记录摘要")),
+			data.error ? h("div", { className: "saker-wb-error" }, data.error) : null,
+			data.record ? h("section", { className: "saker-wb-detailsec" }, h("h3", null, "结构化记录"), h("pre", null, data.record)) : null);
+		if (tab === "request") {
+			return h("div", null,
+				h("p", null, "只读原文，秘密字段已由后端遮蔽。"),
+				data.request ? h("pre", { className: "saker-wb-original" }, data.request) : h("div", { className: "saker-wb-empty" }, "这条记录没有可读请求原文。"));
+		}
+		if (tab === "response") {
+			return h("div", null,
+				h("p", null, "响应预览不会重放请求；二进制或空正文按记录显示。"),
+				data.responseHead ? h("h3", null, "响应头") : null,
+				data.responseHead ? h("pre", { className: "saker-wb-original" }, data.responseHead) : null,
+				data.responseBody ? h("h3", null, "响应正文") : null,
+				data.responseBody ? h("pre", { className: "saker-wb-original" }, data.responseBody) : null,
+				!data.responseHead && !data.responseBody ? h("div", { className: "saker-wb-empty" }, "这条记录没有可读响应原文。") : null,
+				data.responseBodyEncoding ? h("small", { className: "saker-wb-sub" }, "正文编码：" + data.responseBodyEncoding) : null);
+		}
+		if (tab === "source") {
+			return h("div", null,
+				h("p", null, "来源与引用只描述记录归属；不会把浏览记录当成已阅读原文。"),
+				h("dl", { className: "saker-wb-metadl" },
+					h("dt", null, "范围"), h("dd", null, props.selected.rootId || "未记录"),
+					h("dt", null, "来源"), h("dd", null, data.source || "未记录"),
+					h("dt", null, "请求摘要"), h("dd", null, data.requestSha256 || "未知"),
+					h("dt", null, "响应摘要"), h("dd", null, data.responseSha256 || "未知"),
+					h("dt", null, "引用"), h("dd", null, (data.refs || []).map(function (ref) { return ref.kind + ":" + ref.id; }).join("、") || "未知")),
+				state.error ? h(SakerInspectorError, { message: "本次刷新失败：" + state.error, stale: true, onRetry: props.onRetry }) : null);
+		}
+		return summary;
+	}
+	return h(SakerDetailFrame, {
+		label: "执行详情",
+		eyebrow: (props.selected.id || "执行") + " · 只读记录",
+		title: title,
+		headingRef: props.headingRef,
+		onClose: props.onClose,
+		back: props.back,
+		tabs: h(SakerDetailTabs, { active: tab, onChange: props.onTab, items: [
+			{ id: "summary", label: "摘要" }, { id: "request", label: "请求" },
+			{ id: "response", label: "响应" }, { id: "source", label: "来源" }] }),
+		footer: h("div", { className: "saker-wb-row" },
+			props.onConversation ? h("button", { type: "button", className: "saker-wb-btn", onClick: props.onConversation }, "返回原会话") : null,
+			props.onOpenTask ? h("button", { type: "button", className: "saker-wb-btn", onClick: props.onOpenTask }, "打开任务") : null),
+	}, body());
+}
+function SakerMaterialInspector(props) {
+	var state = props.state || {};
+	var data = state.data || {};
+	var hasData = !!state.data;
+	var tab = props.tab || "summary";
+	var isRequest = String(data.kind || props.selected.materialKind || "") === "request";
+	var title = isRequest ? (data.endpoint || props.selected.summary || props.selected.id)
+		: (data.name || props.selected.summary || props.selected.id);
+	function body() {
+		if (!hasData && state.loading) return h(SakerInspectorLoading, { label: isRequest ? "读取请求原件…" : "读取本地文件…" });
+		if (state.error && !hasData) return h(SakerInspectorError, { message: (isRequest ? "读取请求原件失败：" : "读取文件失败：") + state.error, onRetry: props.onRetry });
+		if (!hasData) return h("div", { className: "saker-wb-empty" }, isRequest ? "这条请求原件不可用或已移除。" : "这条文件引用不可用或已移除。");
+		if (isRequest) {
+			if (tab === "original") {
+				return h("div", null,
+					data.historical ? h("div", { className: "saker-wb-callout" }, "这是历史版本原件；保存时的字节仍可读，须核对当前身份和基线后使用。") : null,
+					h("h4", null, "请求原文"), h("pre", { className: "saker-wb-original" }, data.request || "没有可读请求原文。"),
+					h("h4", null, "响应原文"), h("pre", { className: "saker-wb-original" }, data.response || "没有可读响应原文。"),
+					h("div", { className: "saker-wb-callout" }, "原文已按保存时的字节读取并遮蔽密钥；打开不会发送请求。"));
+			}
+			if (tab === "source") {
+				return h("div", null,
+					h("dl", { className: "saker-wb-metadl" },
+						h("dt", null, "任务"), h("dd", null, data.ownerSessionId || props.selected.rootId || "未记录"),
+						h("dt", null, "请求 ID"), h("dd", null, String(data.id || props.selected.id)),
+						h("dt", null, "版本"), h("dd", null, data.revision || "未记录"),
+						h("dt", null, "历史版本"), h("dd", null, data.historical ? "是，按归档记录读取" : "否，当前任务上下文"),
+						h("dt", null, "端点"), h("dd", null, data.endpoint || "未记录"),
+						h("dt", null, "账号"), h("dd", null, data.authContext || "未记录"),
+						h("dt", null, "请求已确认"), h("dd", null, data.valid === true ? "是" : "未记录"),
+						h("dt", null, "内容指纹"), h("dd", null, data.requestDigest || "未记录"),
+						h("dt", null, "关联检查"), h("dd", null, String((data.relatedChecks || []).length) + " 项")),
+					h("div", { className: "saker-wb-callout" }, "请求原件只读；关联检查只表示保存时的上下文，不证明影响成立。"));
+			}
+			return h("div", null,
+				h("div", { className: "saker-wb-chiprow" },
+					h("span", { className: "saker-wb-chip" }, "请求"),
+					h("span", { className: "saker-wb-chip " + (data.historical ? "warn" : "ok") }, data.historical ? "历史版本" : "当前版本"),
+					h("span", { className: "saker-wb-chip " + (data.valid === true ? "ok" : "") }, data.valid === true ? "已确认原件" : "未记录确认")),
+				h("dl", { className: "saker-wb-metadl" },
+					h("dt", null, "端点"), h("dd", null, data.endpoint || "未记录"),
+					h("dt", null, "账号"), h("dd", null, data.authContext || "未记录"),
+					h("dt", null, "版本"), h("dd", null, data.revision || "未记录"),
+					h("dt", null, "关联检查"), h("dd", null, String((data.relatedChecks || []).length) + " 项"),
+					h("dt", null, "内容指纹"), h("dd", null, data.requestDigest || "未记录")),
+				state.error ? h(SakerInspectorError, { message: "本次刷新失败：" + state.error, stale: true, onRetry: props.onRetry }) : null);
+		}
+		if (tab === "original") {
+			return h("div", null,
+				data.missing ? h("div", { className: "saker-wb-error" }, "索引仍在，但本地文件缺失或不可读；不会伪造原文。") : null,
+				data.preview ? h("pre", { className: "saker-wb-original" }, data.preview) : h("div", { className: "saker-wb-empty" }, "没有可读正文。"),
+				data.truncated && data.nextOffset !== null && data.nextOffset !== undefined
+					? h("div", { className: "saker-wb-bandfoot" },
+						h("span", { className: "saker-wb-sub" }, "已展示到第 " + data.offset + " 字节"),
+						h("button", { type: "button", className: "saker-wb-btn", onClick: function () { props.onLoadMore(data.nextOffset); } }, "读取下一段"))
+					: null);
+		}
+		if (tab === "source") {
+			return h("div", null,
+				h("dl", { className: "saker-wb-metadl" },
+					h("dt", null, "任务"), h("dd", null, props.selected.rootId || "未记录"),
+					h("dt", null, "文件 ID"), h("dd", null, data.id || props.selected.id),
+					h("dt", null, "来源"), h("dd", null, data.source || "未记录"),
+					h("dt", null, "站点"), h("dd", null, data.site || "未记录"),
+					h("dt", null, "摘要"), h("dd", null, data.digest || "未记录"),
+					h("dt", null, "大小"), h("dd", null, data.totalBytes != null ? data.totalBytes + " 字节" : "未知")),
+				h("div", { className: "saker-wb-callout" }, "打开文件只会读取原文，不写入模型上下文，也不会重新导入。"));
+		}
+		return h("div", null,
+			h("div", { className: "saker-wb-chiprow" },
+				h("span", { className: "saker-wb-chip" }, wbGraphKindLabel(data.kind || "file")),
+				h("span", { className: "saker-wb-chip " + (data.missing ? "bad" : "ok") }, data.missing ? "文件缺失" : "已索引")),
+			h("dl", { className: "saker-wb-metadl" },
+				h("dt", null, "名称"), h("dd", null, data.name || title),
+				h("dt", null, "来源"), h("dd", null, data.source || "未记录"),
+				h("dt", null, "大小"), h("dd", null, data.totalBytes != null ? data.totalBytes + " 字节" : "未知"),
+				h("dt", null, "导入格式"), h("dd", null, data.importSummary?.format || "未记录")),
+			data.importSummary ? h("section", { className: "saker-wb-detailsec" }, h("h3", null, "导入摘要"),
+				h("p", null, "条目 " + (data.importSummary.entries ?? "未知") + " · 坏记录 " + (data.importSummary.broken ?? 0))) : null,
+			state.error ? h(SakerInspectorError, { message: "本次刷新失败：" + state.error, stale: true, onRetry: props.onRetry }) : null);
+	}
+	return h(SakerDetailFrame, {
+		label: isRequest ? "请求详情" : "文件详情",
+		eyebrow: (data.id || props.selected.id) + (isRequest ? " · 本地请求" : " · 本地文件"),
+		title: title,
+		headingRef: props.headingRef,
+		onClose: props.onClose,
+		back: props.back,
+		tabs: h(SakerDetailTabs, { active: tab, onChange: props.onTab, items: [
+			{ id: "summary", label: "摘要" }, { id: "original", label: "原文" }, { id: "source", label: "来源" }] }),
+		footer: props.onOpenTask ? h("button", { type: "button", className: "saker-wb-btn", onClick: props.onOpenTask }, "打开任务") : null,
+	}, body());
+}
+function SakerAssetInspector(props) {
+	var row = props.row || {};
+	var tab = props.tab || "summary";
+	var title = row.url || row.endpoint || row.name || row.id || "资产与文件";
+	var requests = row.relatedRequests || [];
+	var checks = row.relatedChecks || [];
+	var receipts = row.relatedReceipts || [];
+	function body() {
+		if (tab === "source") {
+			return h("div", null,
+				h("p", null, "来源来自当前任务的资产、请求或文件记录；没有返回的字段保持未知。"),
+				h("dl", { className: "saker-wb-metadl" },
+					h("dt", null, "任务"), h("dd", null, props.selected.rootId || "未记录"),
+					h("dt", null, "类型"), h("dd", null, row.kind || "文件"),
+					h("dt", null, "标识"), h("dd", null, row.id || "未知"),
+					h("dt", null, "范围"), h("dd", null, row.inScope === true ? "范围内" : row.inScope === false ? "范围外" : "未记录"),
+					h("dt", null, "账号"), h("dd", null, row.authContext || "未记录"),
+					h("dt", null, "格式"), h("dd", null, row.format || "未记录")));
+		}
+		return h("div", null,
+			h("div", { className: "saker-wb-chiprow" },
+				h("span", { className: "saker-wb-chip" }, row.kind || "文件"),
+				h("span", { className: "saker-wb-chip " + (row.inScope === false ? "warn" : "ok") },
+					row.inScope === true ? "范围内" : row.inScope === false ? "范围外" : "未记录范围")),
+			h("dl", { className: "saker-wb-metadl" },
+				h("dt", null, "对象"), h("dd", null, title),
+				h("dt", null, "标识"), h("dd", null, row.id || "未知"),
+				h("dt", null, "状态"), h("dd", null, row.reachable === true ? "已观察可达" : row.valid === true ? "请求已确认" : "未记录"),
+				h("dt", null, "账号"), h("dd", null, row.authContext || "未记录"),
+				h("dt", null, "大小"), h("dd", null, row.bytes != null ? row.bytes + " 字节" : "未记录")),
+			requests.length ? h("section", { className: "saker-wb-detailsec" }, h("h3", null, "关联 HTTP 请求"),
+				requests.map(function (request) {
+					return h("div", { key: request.id, className: "saker-wb-linkrow" },
+						h("span", { className: "saker-wb-cell-main" }, request.endpoint || request.id),
+						props.onFindRequest ? h("button", { type: "button", className: "saker-wb-btn",
+							onClick: function () { props.onFindRequest(request); } }, "在执行记录中查找") : null);
+				})) : null,
+			checks.length ? h("section", { className: "saker-wb-detailsec" }, h("h3", null, "检查项"),
+				checks.map(function (check) {
+					return h("div", { key: check.id, className: "saker-wb-linkrow" },
+						h("span", { className: "saker-wb-chip " + (check.status === "not-hit" ? "ok" : check.status === "blocked" ? "bad" : "warn") }, wbNodeStateLabel(check.status)),
+						h("span", { className: "saker-wb-cell-main" }, check.title || check.id),
+						h("span", { className: "saker-wb-sub" }, check.endpoint || ""));
+				})) : null,
+			receipts.length ? h("section", { className: "saker-wb-detailsec" }, h("h3", null, "HTTP 回执"),
+				h("div", { className: "saker-wb-linklist" }, receipts.map(function (receipt) {
+					return h("div", { key: receipt.id, className: "saker-wb-linkrow" },
+						h("span", { className: "saker-wb-chip " + (receipt.status >= 200 && receipt.status < 400 ? "ok" : "warn") },
+							receipt.status != null ? "HTTP " + receipt.status : "回执"),
+						h("span", { className: "saker-wb-cell-main" }, receipt.id),
+						props.onOpenReceipt ? h("button", { type: "button", className: "saker-wb-btn",
+							onClick: function () { props.onOpenReceipt(receipt, row); } }, "查看回执") : null);
+				}))) : null,
+			!requests.length && !checks.length && !receipts.length ? h("div", { className: "saker-wb-empty" }, "这条记录没有可直接打开的关联请求；不会生成伪造入口。") : null);
+	}
+	return h(SakerDetailFrame, {
+		label: "资产与文件详情",
+		eyebrow: wbGraphKindLabel(row.kind) + " · 只读记录",
+		title: title,
+		headingRef: props.headingRef,
+		onClose: props.onClose,
+		back: props.back,
+		tabs: h(SakerDetailTabs, { active: tab, onChange: props.onTab, items: [
+			{ id: "summary", label: "摘要" }, { id: "source", label: "来源" }] }),
+		footer: props.onOpenTask ? h("div", { className: "saker-wb-row" },
+			h("button", { type: "button", className: "saker-wb-btn", onClick: props.onOpenTask }, "查看任务资产")) : null,
+	}, body());
+}
+function SakerGraphInspector(props) {
+	var node = props.selected.node || {};
+	return h(SakerDetailFrame, {
+		label: "测试路径节点详情",
+		eyebrow: (props.selected.id || "节点") + " · 测试路径",
+		title: node.title || node.id || "测试路径节点",
+		headingRef: props.headingRef,
+		onClose: props.onClose,
+		back: props.back,
+		tabs: h("div", { className: "saker-wb-chiprow" }, h("span", { className: "saker-wb-chip" }, wbGraphKindLabel(node.kind))),
+		footer: props.onOpenNode ? h("button", { type: "button", className: "saker-wb-btn primary",
+			onClick: function () { props.onOpenNode(node); } }, "查看对应记录") : null,
+	}, h("div", null,
+		h("dl", { className: "saker-wb-metadl" },
+			h("dt", null, "标识"), h("dd", null, node.id || props.selected.id),
+			h("dt", null, "类型"), h("dd", null, wbGraphKindLabel(node.kind)),
+			h("dt", null, "状态"), h("dd", null, wbNodeStateLabel(node.state)),
+			h("dt", null, "来源"), h("dd", null, (node.sourceRefs || []).map(function (ref) { return ref.kind + ":" + ref.id; }).join("、") || "未记录")),
+		node.sourceRefs ? h("section", { className: "saker-wb-detailsec" }, h("h3", null, "来源引用"),
+			h("pre", null, JSON.stringify(node.sourceRefs, null, 2))) : null,
+		h("div", { className: "saker-wb-callout" }, "只有真实引用会画成边；孤立项保持单列。")));
+}
+function SakerHandoffPanel(props) {
+	var state = props.state || {};
+	var data = state.data || {};
+	var root = props.task?.root || {};
+	var overview = props.task?.overview || {};
+	var gaps = overview.gaps || [];
+	return h("section", { className: "saker-wb-page saker-wb-handoff" },
+		h("div", { className: "saker-wb-intro" },
+			h("div", null, h("div", { className: "saker-wb-eyebrow" }, "测试任务 / 导出报告"),
+				h("h1", { className: "saker-wb-page-title", tabIndex: -1, ref: props.headingRef }, "导出报告"),
+				h("p", { className: "saker-wb-page-sub" }, "预览报告包内容；预览和取消都不会重新执行任何测试动作。")),
+			h("div", { className: "saker-wb-row" },
+				props.onOpenFindings ? h("button", { type: "button", className: "saker-wb-btn", onClick: props.onOpenFindings }, "查看任务发现") : null,
+				props.onOpenAssets ? h("button", { type: "button", className: "saker-wb-btn", onClick: props.onOpenAssets }, "查看资产与文件") : null,
+				h("button", { type: "button", className: "saker-wb-btn", onClick: props.onClose }, "关闭"),
+				h("button", { type: "button", className: "saker-wb-btn primary", disabled: !data.snapshot || props.state.loading || props.downloading,
+				onClick: props.onDownload }, props.downloading ? "生成中…" : "下载报告包"))),
+			state.loading ? h(SakerInspectorLoading, { label: "正在生成报告预览…" }) : null,
+		state.error ? h(SakerInspectorError, { message: "报告预览读取失败：" + state.error, onRetry: props.onRetry }) : null,
+		data.preview || data.files ? h("div", { className: "saker-wb-taskgrid" },
+			h("section", { className: "saker-wb-band" },
+				h("div", { className: "saker-wb-bandhead" }, h("h2", null, "范围与身份"), h("span", { className: "saker-wb-chip" }, wbBusinessLabel(root.businessState))),
+				h("dl", { className: "saker-wb-metadl" },
+					h("dt", null, "任务"), h("dd", null, wbRootTitle(root)),
+					h("dt", null, "范围"), h("dd", null, data.scope || root.targetSummary || root.title || "未记录"),
+					h("dt", null, "身份"), h("dd", null, (data.identities || []).length ? (data.identities || []).join("、") +
+						(data.identityUnknown ? " · 另有 " + data.identityUnknown + " 条未记录身份" : "") : "未记录身份"),
+					h("dt", null, "结论"), h("dd", null, "有效 " + (data.confirmedFindings || 0) + " 条"),
+					h("dt", null, "引用质量"), h("dd", null, Object.keys(data.qualityCounts || {}).length
+						? Object.keys(data.qualityCounts).map(function (key) { return wbEvidenceQualityLabel(key) + " " + data.qualityCounts[key]; }).join(" · ")
+						: "没有可解析引用"),
+					h("dt", null, "人工复核"), h("dd", null, data.userEvidenceReviews && data.userEvidenceReviews.total
+						? "当前判断 " + (data.userEvidenceReviews.current || 0) + " 条 · 待刷新 " + (data.userEvidenceReviews.stale || 0)
+							+ " 条 · 共 " + (data.userEvidenceReviews.records || 0) + " 次记录"
+						: "未记录人工依据复核"),
+					h("dt", null, "证据缺口"), h("dd", null, (data.gaps || gaps).length ? (data.gaps || gaps).map(function (gap) { return gap.endpoint + "：" + (gap.missing || []).join("、"); }).join("；") : "当前查询未返回具体缺口"),
+					h("dt", null, "未覆盖"), h("dd", null, "未记录的版本、环境和检查范围保持未知")),
+				h("div", { className: "saker-wb-callout" }, "下载是独立动作；关闭预览不会改变任务或会话。")),
+			h("section", { className: "saker-wb-band" },
+				h("div", { className: "saker-wb-bandhead" }, h("h2", null, "报告包内容"), h("small", null, (data.files || []).length + " 个文件")),
+				data.incompleteRecords ? h("div", { className: "saker-wb-notice warn" }, "另有 " + data.incompleteRecords + " 条记录证据或复核未齐，未计入有效成果。") : null,
+				h("div", { className: "saker-wb-filelist" }, (data.files || []).map(function (file) {
+					return h("div", { key: file, className: "saker-wb-file" }, file);
+				})),
+				h("div", { className: "saker-wb-bandfoot" }, h("small", null,
+					"检查 " + (data.checkedCount || 0) + " 项 · 普通结果 " + (data.ordinaryReports || 0) + " 份")),
+				h("details", { className: "saker-wb-advanced" }, h("summary", null, "查看报告说明"),
+					data.previewTruncated ? h("div", { className: "saker-wb-sub" }, "预览只展示前 120,000 字符；下载包仍是完整内容。") : null,
+					h("pre", { className: "saker-wb-original" }, data.preview || "报告包中没有 findings.md 文本预览。")))) : null,
+		!state.loading && !state.error ? h("div", { className: "saker-wb-mocknote" }, "预览完成；下载会保存同一份 ZIP，不会重新生成，也不会执行测试。") : null);
+}
+function SakerRootsTable(props) {
+	var rows = props.rows || [];
+	if (!rows.length) return h("div", { className: "saker-wb-empty" }, props.emptyText || "还没有任务。回到原生会话输入目标即可开始；工作台不会自动启动模型。");
+	return h("table", { className: "saker-wb-table" },
+		h("thead", null, h("tr", null, ["任务", "控制状态", "结果", "清理", "最后活动"].map(function (label, index) {
+			return h("th", { key: label, className: index >= 3 ? "saker-col-secondary" : "" }, label);
+		}))),
+		h("tbody", null, rows.map(function (row) {
+			return h("tr", { key: row.rootId, tabIndex: 0, onClick: function () { props.onOpen && props.onOpen(row.rootId); },
+				onKeyDown: function (event) { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); props.onOpen && props.onOpen(row.rootId); } } },
+				h("td", null, h("div", { className: "saker-wb-cell-main" },
+					/按当前会话|^$/.test(String(row.title || "")) && row.targetSummary ? row.targetSummary : row.title),
+					h("div", { className: "saker-wb-cell-sub" }, [row.taskKind || "", row.targetSummary && row.targetSummary !== row.title ? row.targetSummary : "",
+						row.rootId ? "会话 " + row.rootId.slice(-8) : ""].filter(Boolean).join(" · "))),
+				h("td", null, h("span", { className: "saker-wb-chip " + wbStateTone(row.controlState) }, wbStateLabel(row.controlState))),
+				h("td", null, "验证 " + (row.outcomeSummary?.verified || 0) + " · 待确认 " + (row.outcomeSummary?.pending || 0)),
+				h("td", { className: "saker-col-secondary" }, row.cleanupState === "clear" ? "已核对" : row.cleanupState === "pending" ? "清理中" : "待确认"),
+				h("td", { className: "saker-col-secondary" }, wbTime(row.updatedAt)));
+		})));
+}
+function SakerFindingDetail(props) {
+	if (!props.selected) return null;
+	var state = props.state || {};
+	var data = state.data || {};
+	var refs = data.verificationBasis || data.evidenceRefs || [];
+	var retests = data.retests || [];
+	var receipts = data.receipts || [];
+	return h("div", { className: "saker-wb-card", style: { marginTop: "12px" } },
+		h("div", { className: "saker-wb-row", style: { alignItems: "flex-start" } },
+			h("div", { style: { flex: 1, minWidth: 0 } }, h("h3", { style: { margin: 0 } }, "发现详情"),
+				h("div", { className: "saker-wb-sub" }, (data.findingId || props.selected) + " · " + (data.target || "无目标"))),
+			h("button", { className: "saker-wb-btn", onClick: props.onClose }, "关闭")),
+		state.loading ? "读取中…" : h("div", null,
+			state.error ? h("div", { className: "saker-wb-error", role: "alert" },
+				"读取发现详情失败（" + (props.selected || "当前发现") + "）：" + state.error,
+				state.data ? h("div", { className: "saker-wb-sub", style: { marginTop: "4px" } }, "下方仍是同一发现的上一份成功数据；失败没有替换它。") : null,
+				h("button", { className: "saker-wb-btn", style: { marginTop: "8px" }, onClick: props.onRetry }, "重试")) : null,
+			state.data ? h("div", null,
+				h("div", { className: "saker-wb-row", style: { flexWrap: "wrap", margin: "8px 0" } },
+					h("span", { className: "saker-wb-chip " + (data.verificationState === "verified" ? "ok" : "warn") }, wbVerificationLabel(data.verificationState)),
+					h("span", { className: "saker-wb-chip " + (data.severity === "critical" || data.severity === "high" ? "bad" : "") }, data.severity || "未评级"),
+					h("span", { className: "saker-wb-sub" }, "依据 " + refs.length + " 条 · 复测 " + retests.length + " 次")),
+				h("p", { style: { margin: "4px 0" } }, data.summary || ""),
+				h("div", { className: "saker-wb-row", style: { flexWrap: "wrap", margin: "8px 0" } },
+					props.onOpenConversation ? h("button", { className: "saker-wb-btn", onClick: props.onOpenConversation }, "返回原会话") : null,
+			h("button", { className: "saker-wb-btn", onClick: props.onRetest }, "发起复测"),
+					props.onOpenEvidence && receipts[0] ? h("button", { className: "saker-wb-btn", onClick: function () { props.onOpenEvidence({ id: receipts[0].id, kind: "request" }); } }, "打开首条原件") : null),
+				data.description ? h("div", null, h("h4", null, "结论与影响"), h("p", null, data.description), data.impact ? h("p", null, data.impact) : null) : null,
+				data.poc ? h("div", null, h("h4", null, "复现过程"), h("pre", null, data.poc)) : null,
+				data.evidence ? h("div", null, h("h4", null, "证据说明"), h("p", null, data.evidence)) : null,
+				data.requestPacket || data.responsePacket ? h("div", null, h("h4", null, "请求 / 响应原文（秘密已遮蔽）"),
+					data.requestPacket ? h("pre", null, data.requestPacket) : null,
+					data.responsePacket ? h("pre", null, data.responsePacket) : null) : null,
+				h("h4", null, "依据引用"), refs.length ? h("div", { style: { display: "grid", gap: "8px" } }, refs.map(function (ref, index) {
+					var match = receipts.find(function (receipt) { return String(receipt.requestId) === String(ref.id); });
+					return h("div", { key: String(ref.id || index), className: "saker-wb-row" },
+						h("span", { className: "saker-wb-chip" }, ref.kind || "ref"),
+						h("span", { style: { flex: 1, minWidth: 0, overflowWrap: "anywhere" } }, ref.id || "—"),
+						props.onOpenEvidence && match ? h("button", { className: "saker-wb-btn", onClick: function () { props.onOpenEvidence({ id: match.id, kind: "request" }); } }, "打开回执") : null);
+				})) : h("p", { className: "saker-wb-sub" }, "没有可读依据引用。"),
+				receipts.length ? h("div", null, h("h4", null, "执行回执"), h("div", { style: { display: "grid", gap: "8px" } }, receipts.map(function (receipt) {
+					return h("div", { key: receipt.id, className: "saker-wb-row" },
+						h("span", { className: "saker-wb-chip " + (receipt.current && receipt.integrityValid ? "ok" : "warn") }, receipt.status != null ? "HTTP " + receipt.status : "回执"),
+						h("span", { style: { flex: 1, minWidth: 0, overflowWrap: "anywhere" } }, receipt.id + (receipt.current === false ? " · 已失效" : "")),
+						props.onOpenEvidence ? h("button", { className: "saker-wb-btn", onClick: function () { props.onOpenEvidence({ id: receipt.id, kind: "request" }); } }, "查看") : null);
+				}))) : null,
+				h("h4", null, "复测历史"), retests.length ? h("div", { style: { display: "grid", gap: "8px" } }, retests.map(function (item, index) {
+					return h("div", { key: String(item.id || index), className: "saker-wb-card", style: { margin: 0 } },
+						h("div", { className: "saker-wb-sub" }, item.at ? wbTime(item.at) : "时间未知"),
+						h("p", { style: { margin: "4px 0" } }, item.note || item.result || "无说明"));
+				})) : h("p", { className: "saker-wb-sub" }, "还没有复测记录。")) : null));
+}
+function SakerListToolbar(props) {
+	var dirty = !!(props.text || props.dirty);
+	var composing = useRef(false);
+	var draftState = useState(null), draft = draftState[0], setDraft = draftState[1];
+	var shown = composing.current ? (draft == null ? (props.text || "") : draft) : (props.text || "");
+	return h("div", { className: "saker-wb-toolbar" },
+		h("input", { className: "saker-wb-search", type: "search", value: shown, placeholder: props.placeholder || "搜索",
+			"aria-label": props.placeholder || "搜索",
+			onChange: function (event) {
+				var value = event.target.value;
+				if (composing.current || (event.nativeEvent && event.nativeEvent.isComposing)) { setDraft(value); return; }
+				setDraft(null);
+				props.onText(value);
+			},
+			onCompositionStart: function () { composing.current = true; setDraft(props.text || ""); },
+			onCompositionEnd: function (event) { composing.current = false; setDraft(null); props.onText(event.target.value); } }),
+		props.filters || null,
+		dirty ? h("button", { className: "saker-wb-btn", onClick: props.onClear || function () { props.onText(""); } }, "清除") : null,
+		h("span", { className: "saker-wb-spacer" }),
+		h("span", { className: "saker-wb-sub", "aria-live": "polite" }, props.loadedLabel || ""));
+}
+function SakerPager(props) {
+	var page = props.page;
+	if (!page) return null;
+	var total = Number(page.total) || 0;
+	var loaded = Number(props.loaded) || 0;
+	return h("div", { className: "saker-wb-pager" },
+		h("button", { className: "saker-wb-btn", disabled: !props.hasPrev, onClick: props.onPrev }, "上一页"),
+		h("span", null, "当前 " + loaded + " 条 · 共 " + total + " 条" + (page.hasMore ? " · 还有下一页" : "")),
+		h("button", { className: "saker-wb-btn", disabled: !page.nextCursor, onClick: props.onNext }, "下一页"));
+}
+function SakerQueryError(props) {
+	if (!props.state || !props.state.error) return null;
+	var scope = props.scope || "全部任务";
+	return h("div", { className: "saker-wb-error", role: "alert" },
+		h("div", null, "读取“" + (props.label || "数据") + "”失败（范围：" + scope + "）：" + props.state.error),
+		props.state.data ? h("div", { className: "saker-wb-sub", style: { marginTop: "4px" } },
+			"下方内容是该范围上一次成功读取的数据，不是本次结果；失败没有替换它。") : null,
+		props.onRetry ? h("div", { style: { marginTop: "8px" } }, h("button", { className: "saker-wb-btn", onClick: props.onRetry }, "重试")) : null);
+}
+function SakerExecutionDetail(props) {
+	if (!props.selected) return null;
+	var state = props.state || {};
+	var data = state.data || {};
+	return h("div", { className: "saker-wb-card saker-wb-detail-card" },
+		h("div", { className: "saker-wb-row" }, h("h3", { style: { flex: 1, marginTop: 0 } }, props.title || "执行详情"),
+			h("span", { className: "saker-wb-chip" }, props.selected.kind || data.kind || "http"),
+			h("button", { className: "saker-wb-btn", onClick: props.onClose }, "关闭")),
+		state.loading ? h("div", { className: "saker-wb-sub" }, "读取中…") :
+			state.error ? h("div", { className: "saker-wb-error", role: "alert" }, "读取执行详情失败：" + state.error,
+				h("button", { className: "saker-wb-btn", style: { marginLeft: "8px" }, onClick: props.onRetry }, "重试")) :
+				state.data ? h("div", null,
+					h("div", { className: "saker-wb-sub" }, "id：" + (data.id || props.selected.id) + " · 状态：" +
+						(data.status ?? data.outcome ?? data.state ?? "—") + (data.identity ? " · 身份：" + data.identity : "")),
+					data.request ? h("h4", null, "请求原文") : null,
+					data.request ? h("pre", null, data.request) : null,
+					data.responseHead ? h("h4", null, "响应头") : null,
+					data.responseHead ? h("pre", null, data.responseHead) : null,
+					data.responseBody ? h("h4", null, "响应正文") : null,
+					data.responseBody ? h("pre", null, data.responseBody) : null,
+					data.error ? h("div", { className: "saker-wb-error" }, data.error) : null,
+					data.record ? h("pre", null, data.record) : null,
+					h("div", { className: "saker-wb-row", style: { marginTop: "8px" } },
+						props.onConversation ? h("button", { className: "saker-wb-btn", onClick: props.onConversation }, "返回原会话") : null,
+		props.onBack ? h("button", { className: "saker-wb-btn", onClick: props.onBack }, "返回测试任务") : null)) : null);
+}
+function SakerAssetDetail(props) {
+	if (!props.row) return null;
+	var row = props.row;
+	var requests = row.relatedRequests || [];
+	var checks = row.relatedChecks || [];
+	return h("div", { className: "saker-wb-card saker-wb-detail-card" },
+		h("div", { className: "saker-wb-row" }, h("h3", { style: { flex: 1, marginTop: 0 } }, row.url || row.endpoint || row.name || row.id),
+			h("span", { className: "saker-wb-chip" }, row.kind || "material")),
+		h("div", { className: "saker-wb-sub" }, "id：" + (row.id || "—") + " · " + (row.inScope === true ? "范围内" : row.inScope === false ? "范围外" : "") +
+			(row.reachable === true ? " · 可达" : "") + (row.authContext ? " · 账号 " + row.authContext : "")),
+		requests.length ? h("div", null, h("h4", null, "关联 HTTP 请求"),
+			requests.map(function (request) {
+				return h("div", { key: request.id, className: "saker-wb-row" },
+					h("span", { className: "saker-wb-cell-main" }, request.endpoint || request.id),
+					props.onOpenRequest ? h("button", { className: "saker-wb-btn", onClick: function () { props.onOpenRequest(request, row); } }, "查看回执") : null);
+			})) : null,
+		checks.length ? h("div", null, h("h4", null, "检查项"),
+			checks.map(function (check) {
+				return h("div", { key: check.id, className: "saker-wb-row" },
+					h("span", { className: "saker-wb-chip " + (check.status === "not-hit" ? "ok" : check.status === "blocked" ? "bad" : "warn") }, check.status || "未测"),
+					h("span", { className: "saker-wb-cell-main" }, check.title || check.id),
+					h("span", { className: "saker-wb-sub" }, check.endpoint || ""));
+			})) : null,
+		!requests.length && !checks.length ? h("p", { className: "saker-wb-sub" }, "这条记录没有可直接打开的请求回执；检查项和请求会随真实执行出现。") : null,
+		h("div", { className: "saker-wb-row", style: { marginTop: "8px" } },
+			props.onOpenTask ? h("button", { className: "saker-wb-btn", onClick: props.onOpenTask }, "查看任务资产") : null,
+			h("button", { className: "saker-wb-btn", onClick: props.onClose }, "关闭")));
+}
+function SakerKnowledgePage(props) {
+	var sessionId = props.rootId || "";
+	var textState = useState(""), text = textState[0], setText = textState[1];
+	var offsetState = useState(0), offset = offsetState[0], setOffset = offsetState[1];
+	var rowsState = useState([]), rows = rowsState[0], setRows = rowsState[1];
+	var loadingState = useState(false), loading = loadingState[0], setLoading = loadingState[1];
+	var errorState = useState(""), error = errorState[0], setError = errorState[1];
+	var nextState = useState(null), nextOffset = nextState[0], setNextOffset = nextState[1];
+	var selectedState = useState(null), selected = selectedState[0], setSelected = selectedState[1];
+	var detailState = useState(null), detail = detailState[0], setDetail = detailState[1];
+	var requestSeq = useRef(0);
+	var debouncedState = useState(""), debounced = debouncedState[0], setDebounced = debouncedState[1];
+	useEffect(function () {
+		var timer = setTimeout(function () { setDebounced(text.trim()); setOffset(0); }, 220);
+		return function () { clearTimeout(timer); };
+	}, [text]);
+	useEffect(function () {
+		if (!sessionId) { setRows([]); setNextOffset(null); setLoading(false); setError(""); return; }
+		var current = ++requestSeq.current;
+		setLoading(true); setError("");
+		api("knowledge.list", { sessionId: sessionId, query: debounced, limit: 30, offset: offset })
+			.then(function (value) {
+				if (current !== requestSeq.current) return;
+				if (!value || value.ok === false) throw Error((value && value.error) || "读取知识库失败");
+				setRows(value.rows || []); setNextOffset(value.nextOffset ?? null);
+			})
+			.catch(function (failure) { if (current === requestSeq.current) setError(wbErrorText(failure)); })
+			.finally(function () { if (current === requestSeq.current) setLoading(false); });
+	}, [sessionId, debounced, offset, props.tick]);
+	useEffect(function () { setSelected(null); setDetail(null); setOffset(0); }, [sessionId]);
+	function openEntry(row) {
+		setSelected(row); setDetail(null);
+		api("knowledge.read", { sessionId: sessionId, sourceId: row.sourceId, maxBytes: 8192 })
+			.then(function (value) {
+				if (!value || value.ok === false) throw Error((value && value.error) || "读取资料失败");
+				setDetail(value);
+			})
+			.catch(function (failure) { setDetail({ error: wbErrorText(failure) }); });
+	}
+	if (!sessionId) return h("div", { className: "saker-wb-empty" }, "先选择一个测试任务，再查看该项目导入的文档；正文只会在你打开时读取。");
+	var content = detail && detail.error ? h("div", { className: "saker-wb-error" }, detail.error) :
+		detail ? h("div", null, h("div", { className: "saker-wb-sub" }, (selected.title || selected.sourceLabel) + " · " + (selected.location || "")),
+			selected.review ? h("div", { className: "saker-wb-callout" },
+				"来源：" + (selected.review.sourceStateLabel || "来源待核")
+				+ (selected.review.verification ? " · " + selected.review.verification : "")
+				+ (selected.review.conditions ? " · 适用条件：" + selected.review.conditions : "")
+				+ (selected.review.sources ? " · 引用：" + selected.review.sources : "")) : null,
+			h("pre", null, detail.text || detail.section || detail.content || JSON.stringify(detail, null, 2).slice(0, 8000))) :
+			h("div", { className: "saker-wb-sub" }, "选一条资料，读取它的真实章节；列表不会预加载全文。");
+  return h("div", { className: "saker-wb-split saker-knowledge" },
+		h("div", { className: "saker-wb-main" },
+			h(SakerListToolbar, { text: text, onText: setText, placeholder: "搜索标题、位置或来源",
+				loadedLabel: loading ? "读取中…" : "显示 " + rows.length + " 条" + (nextOffset !== null ? " · 还有更多" : "") }),
+			error ? h("div", { className: "saker-wb-error", role: "alert" }, "读取知识库失败：" + error) : null,
+			loading && !rows.length ? h("div", { className: "saker-wb-empty" }, "读取中…") : null,
+			!loading && !rows.length ? h("div", { className: "saker-wb-empty" }, text ? "没有匹配的文档。清空搜索或更换关键词。" : "这个项目还没有导入文档；可在会话中导入后回到这里查看。") : null,
+			h("div", { className: "saker-wb-cards" }, rows.map(function (row) {
+				return h("button", { key: row.docId, type: "button", className: "saker-wb-card saker-wb-cardbtn" + (selected && selected.docId === row.docId ? " active" : ""),
+					onClick: function () { openEntry(row); } },
+					h("div", { className: "saker-wb-row" }, h("b", { style: { flex: 1 } }, row.title || row.sourceLabel || row.sourceId),
+						row.review && row.review.sourceState && row.review.sourceState !== "source-indexed"
+							? h("span", { className: "saker-wb-chip " + (row.review.sourceState === "source-unverified" ? "warn" : "") }, row.review.sourceStateLabel)
+							: null,
+						h("span", { className: "saker-wb-chip" }, row.applicability || "unknown")),
+					h("div", { className: "saker-wb-sub" }, (row.location || "—") + " · " + (row.sourceKind || row.status || "") +
+						(row.updatedAt ? " · " + wbTime(row.updatedAt) : "")));
+			})),
+			h(SakerPager, { page: nextOffset !== null ? { total: offset + rows.length + 1, hasMore: true, nextCursor: "next" } : { total: offset + rows.length, hasMore: false },
+				loaded: rows.length, hasPrev: offset > 0, onPrev: function () { setOffset(Math.max(0, offset - 30)); }, onNext: function () { if (nextOffset !== null) setOffset(nextOffset); } })),
+		h("aside", { className: "saker-wb-detail" },
+			h("div", { className: "saker-wb-row" }, h("h3", { style: { flex: 1, margin: 0 } }, selected ? (selected.title || "文档正文") : "文档正文"),
+				selected ? h("button", { className: "saker-wb-btn", onClick: function () { setSelected(null); setDetail(null); } }, "关闭") : null),
+			content));
+}
+function SakerFindingsTable(props) {
+	var rows = props.rows || [];
+	if (!rows.length) return h("div", { className: "saker-wb-empty" }, "当前范围没有发现。未测缺口不是发现。");
+	var showRoot = props.showRoot !== false;
+	// 日常 1280 同时打开宿主栏和 Saker 文字栏时，主区只有约 780px。
+	// 任务列原来放整段会话 UUID，会挤到目标列只剩半行；这里把可读任务名并入次行，
+	// 完整 ID 和长目标仍可在详情里看，主表优先保证标题、状态、严重度和目标。
+	var compact = props.compact === true;
+	var columns = compact ? ["发现", "验证状态", "严重度"] : ["发现", "验证状态", "严重度", "目标", "更新时间"];
+	var widths = compact ? ["58%", "20%", "22%"] : ["37%", "14%", "10%", "29%", "10%"];
+	return h("table", { className: "saker-wb-table" },
+		h("colgroup", null, widths.map(function (width, index) {
+			return h("col", { key: index, style: { width: width }, className: !compact && index >= 3 ? "saker-col-secondary" : "" });
+		})),
+		h("thead", null, h("tr", null, columns.map(function (label, index) {
+			return h("th", { key: label, className: !compact && index === columns.length - 1 ? "saker-col-secondary" : "" }, label);
+		}))),
+		h("tbody", null, rows.map(function (row) {
+			var findingId = row.findingId || row.id;
+			var ownerId = row.sessionId || row.rootId || props.rootId || "";
+			var ownerLabel = props.rootLabel ? props.rootLabel(ownerId) : "";
+			var subline = compact
+				? [row.target ? "目标 " + row.target : "", showRoot && ownerLabel ? "任务 " + ownerLabel : "", row.summary || ""].filter(Boolean).join(" · ")
+				: (showRoot && ownerLabel ? "任务 " + ownerLabel + " · " : "") + (row.summary || row.findingId);
+			var selectionKey = "finding:" + String(row.sessionId || row.rootId || props.rootId || "") + ":" + findingId;
+			return h("tr", { key: String(row.sessionId || row.rootId || "") + "/" + findingId, tabIndex: 0,
+				"data-saker-row": selectionKey, className: props.selectedKey === selectionKey ? "selected" : "",
+				onClick: function () { props.onSelect && props.onSelect(findingId, row.sessionId || row.rootId); },
+				onKeyDown: function (event) { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); props.onSelect && props.onSelect(findingId, row.sessionId || row.rootId); } } },
+				h("td", null, h("div", { className: "saker-wb-cell-main" }, row.title),
+					h("div", { className: "saker-wb-cell-sub" + (compact ? " saker-wb-clamp-2" : "") }, subline)),
+				h("td", null, h("span", { className: "saker-wb-chip " + (row.verificationState === "verified" ? "ok" : row.verificationState === "candidate" ? "warn" : "") }, wbVerificationLabel(row.verificationState))),
+				h("td", null, ({ critical: "严重", high: "高危", medium: "中危", low: "低危" })[row.severity] || row.severity || "未定级"),
+				compact ? null : h("td", { className: "saker-wb-clamp-2" }, row.target || "—"),
+				compact ? null : h("td", { className: "saker-col-secondary" }, wbTime(row.updatedAt)));
+		})));
+}
+function SakerTrafficTable(props) {
+	var rows = props.rows || [];
+	if (!rows.length) return h("div", { className: "saker-wb-empty" }, "还没有可观测回执。回执数不是全部网络请求数。");
+	return h("table", { className: "saker-wb-table" },
+		h("colgroup", null, ["12%", "36%", "8%", "12%", "18%", "14%"].map(function (width, index) {
+			return h("col", { key: index, style: { width: width }, className: index >= 4 ? "saker-col-secondary" : "" });
+		})),
+		h("thead", null, h("tr", null, ["时间", "请求", "状态", "账号", "来源", "有效性"].map(function (label, index) {
+			return h("th", { key: label, className: index >= 4 ? "saker-col-secondary" : "" }, label);
+		}))),
+		h("tbody", null, rows.map(function (row) {
+			var selectionKey = "http:" + row.rootId + ":" + row.id;
+			return h("tr", { key: row.rootId + "/" + row.id, tabIndex: 0,
+				"data-saker-row": selectionKey, className: props.selectedKey === selectionKey ? "selected" : "",
+				onClick: function () { props.onSelect && props.onSelect(row); },
+				onKeyDown: function (event) { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); props.onSelect && props.onSelect(row); } } },
+				h("td", null, wbTime(row.at)), h("td", null, h("div", { className: "saker-wb-cell-main" }, (row.method || "—") + " " + (row.url || "")), h("div", { className: "saker-wb-cell-sub" }, row.id)),
+				h("td", null, row.status || "—"), h("td", null, row.identity || "—"),
+				h("td", { className: "saker-col-secondary" }, row.source || "—"),
+				h("td", null, h("span", { className: "saker-wb-chip " + (row.integrityValid ? "ok" : "bad") }, row.integrityValid ? "完整" : "失效")));
+		})));
+}
+function SakerAssetsTable(props) {
+	var rows = props.rows || [];
+	if (!rows.length) return h("div", { className: "saker-wb-empty" }, "当前范围没有资产或文件记录。");
+	var showRoot = props.showRoot === true;
+	var labels = (showRoot ? ["测试任务", "类型", "对象", "条件", "来源/版本"] : ["类型", "对象", "条件", "来源/版本"]);
+	var widths = showRoot ? ["15%", "8%", "30%", "20%", "27%"] : ["10%", "34%", "24%", "32%"];
+	return h("table", { className: "saker-wb-table" },
+		h("colgroup", null, widths.map(function (width, index) {
+			return h("col", { key: index, style: { width: width }, className: index >= widths.length - 1 ? "saker-col-secondary" : "" });
+		})),
+		h("thead", null, h("tr", null, labels.map(function (label, index) {
+			return h("th", { key: label, className: index >= labels.length - 1 ? "saker-col-secondary" : "" }, label);
+		}))),
+		h("tbody", null, rows.map(function (row, index) {
+			var selectionKey = (row.kind === "material" ? "material:" : "asset:") + String(row.rootId || props.rootId || "") + ":" + String(row.id || index);
+			return h("tr", { key: String(row.rootId || "") + "/" + row.kind + (row.id || index), tabIndex: 0,
+				"data-saker-row": selectionKey, className: props.selectedKey === selectionKey ? "selected" : "",
+				onClick: function () { props.onSelect && props.onSelect(row); },
+				onKeyDown: function (event) { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); props.onSelect && props.onSelect(row); } } },
+				showRoot ? h("td", null, h("div", { className: "saker-wb-cell-sub" }, props.rootLabel ? props.rootLabel(row.rootId) : (row.rootId || "—"))) : null,
+				h("td", null, h("span", { className: "saker-wb-chip" }, wbGraphKindLabel(row.kind))),
+				h("td", null, h("div", { className: "saker-wb-cell-main" }, row.url || row.endpoint || row.name || row.id),
+					h("div", { className: "saker-wb-cell-sub" }, row.id)),
+				h("td", null, row.kind === "asset" ? (row.inScope ? "范围内" : "范围外") + (row.reachable ? " · 可达" : "") :
+					row.kind === "request" ? (row.valid ? "已确认" : "待确认") + " · 账号 " + (row.authContext || "—") : "—"),
+				h("td", { className: "saker-col-secondary" }, row.revision || row.format || "—"));
+		})));
+}
+function SakerModulesPage(props) {
+	var rootId = props.rootId || "";
+	var textState = useState(""), text = textState[0], setText = textState[1];
+	var debouncedState = useState(""), debounced = debouncedState[0], setDebounced = debouncedState[1];
+	var categoryState = useState(""), category = categoryState[0], setCategory = categoryState[1];
+	var subcategoryState = useState(""), subcategory = subcategoryState[0], setSubcategory = subcategoryState[1];
+	var sourceState = useState(""), source = sourceState[0], setSource = sourceState[1];
+	var statusState = useState(""), status = statusState[0], setStatus = statusState[1];
+	var modeState = useState("all"), mode = modeState[0], setMode = modeState[1];
+	var limitState = useState(20), limit = limitState[0], setLimit = limitState[1];
+	var cursorState = useState(""), cursor = cursorState[0], setCursor = cursorState[1];
+	var stackState = useState([]), stack = stackState[0], setStack = stackState[1];
+	var resultState = useState(null), result = resultState[0], setResult = resultState[1];
+	var loadingState = useState(false), loading = loadingState[0], setLoading = loadingState[1];
+	var errorState = useState(""), error = errorState[0], setError = errorState[1];
+	var selectedState = useState(""), selected = selectedState[0], setSelected = selectedState[1];
+	var detailState = useState(null), detail = detailState[0], setDetail = detailState[1];
+	var detailRootState = useState(""), detailRoot = detailRootState[0], setDetailRoot = detailRootState[1];
+	var detailLoadingState = useState(false), detailLoading = detailLoadingState[0], setDetailLoading = detailLoadingState[1];
+	var detailSeq = useRef(0);
+	var copyState = useState(null), copyDraft = copyState[0], setCopyDraft = copyState[1];
+	var favState = useState(function () {
+		try { return JSON.parse(localStorage.getItem("saker.module.favorites") || "[]"); } catch (errorValue) { return []; }
+	}), favorites = favState[0], setFavorites = favState[1];
+	var recentState = useState(function () {
+		try { return JSON.parse(localStorage.getItem("saker.module.recent") || "[]"); } catch (errorValue) { return []; }
+	}), recent = recentState[0], setRecent = recentState[1];
+	useEffect(function () {
+		var timer = setTimeout(function () { setDebounced(text.trim()); }, 200);
+		return function () { clearTimeout(timer); };
+	}, [text]);
+	useEffect(function () {
+		setSelected(""); setDetail(null); setDetailRoot(""); setCopyDraft(null); setCursor(""); setStack([]); setSubcategory("");
+	}, [rootId]);
+	useEffect(function () {
+		var live = true;
+		setLoading(true); setError("");
+		api("workbench.query", { kind: "modules.list", context: { rootId: rootId },
+			filter: { text: debounced, categoryId: category, subcategoryId: subcategory, source: source, status: status },
+			page: { limit: mode === "all" ? limit : 100, cursor: mode === "all" ? cursor : "" } })
+			.then(function (response) { if (live) { setResult({ rootId: rootId, response: response }); setLoading(false); } })
+			.catch(function (errorValue) { if (live) { setError(wbErrorText(errorValue)); setLoading(false); } });
+		return function () { live = false; };
+	}, [rootId, debounced, category, subcategory, source, status, limit, cursor, mode, props.tick]);
+	var initial = result && result.rootId === rootId ? result.response.data : null;
+	var shownDetail = detail && detailRoot === rootId ? detail : null;
+	var taxonomy = (initial && initial.taxonomy) || (props.meta && props.meta.taxonomy) || { primaryCategories: [] };
+	var items = (initial && initial.items) || (Array.isArray(props.rows) ? props.rows : (props.rows && props.rows.items)) || [];
+	var facet = (initial && initial.facetCounts && initial.facetCounts.categories) || {};
+	var subFacet = (initial && initial.facetCounts && initial.facetCounts.subcategories) || {};
+	var pageInfo = (initial && initial.page) || { hasMore: false, nextCursor: null, total: items.length };
+	var cats = [{ id: "", title: "全部分类", count: pageInfo.total || items.length }].concat((taxonomy.primaryCategories || []).map(function (item) {
+		return { id: item.id, title: item.title, count: facet[item.id] || 0 };
+	}));
+	function favoriteKey(item) { return String(item.id || "") + "@" + String(item.version || ""); }
+	function isFavorite(item) {
+		var key = favoriteKey(item);
+		return favorites.some(function (entry) { return typeof entry === "string" ? entry === item.id : entry && entry.key === key; });
+	}
+	function isRecent(item) { return recent.some(function (entry) { return entry && entry.key === favoriteKey(item); }); }
+	function rememberRecent(item) {
+		var key = favoriteKey(item);
+		var next = [{ key: key, id: item.id, version: item.version, title: item.title, at: Date.now() }]
+			.concat(recent.filter(function (entry) { return entry && entry.key !== key; })).slice(0, 24);
+		setRecent(next);
+		try { localStorage.setItem("saker.module.recent", JSON.stringify(next)); } catch (errorValue) { /* 最近使用失败不影响模块库 */ }
+	}
+	function openModule(item) {
+		var seq = ++detailSeq.current;
+		setSelected(item.id); setCopyDraft(null);
+		setDetailLoading(true); setDetail(null); setDetailRoot(rootId); rememberRecent(item);
+		api("workbench.query", { kind: "modules.detail", context: { rootId: rootId,
+			moduleRef: item.moduleRef || { id: item.id, version: item.version, ownerKey: item.ownerKey } } })
+			.then(function (response) {
+				if (seq !== detailSeq.current) return;
+				setDetail(response.data); setDetailLoading(false);
+			})
+			.catch(function (errorValue) {
+				if (seq !== detailSeq.current) return;
+				setDetail({ title: item.title, error: wbErrorText(errorValue) }); setDetailLoading(false);
+			});
+	}
+	function toggleFavorite(item) {
+		var key = favoriteKey(item);
+		var exists = isFavorite(item);
+		var next = exists ? favorites.filter(function (entry) { return (typeof entry === "string" ? entry !== item.id : entry && entry.key !== key); })
+			: favorites.concat([{ key: key, id: item.id, version: item.version, title: item.title, family: item.family || item.familyLabel || "" }]);
+		setFavorites(next);
+		try { localStorage.setItem("saker.module.favorites", JSON.stringify(next)); } catch (errorValue) { /* 本地偏好失败不影响模块库 */ }
+	}
+	var catsView = h("div", { className: "saker-mod-cats" },
+		cats.map(function (item) {
+			return h("button", { key: item.id || "all", type: "button", className: "saker-mod-cat" + (category === item.id ? " active" : ""),
+				onClick: function () { setCategory(item.id); setSubcategory(""); setCursor(""); setStack([]); } },
+				h("span", { style: { color: "inherit" } }, item.title), h("span", null, String(item.count || 0)));
+		}),
+		(category ? ((taxonomy.primaryCategories || []).find(function (entry) { return entry.id === category; })?.subcategories || []) : []).length
+			? h("div", { className: "saker-mod-subcats" },
+				[["", "全部子类"]].concat(((taxonomy.primaryCategories || []).find(function (entry) { return entry.id === category; })?.subcategories || [])).map(function (sub) {
+					var subId = sub.id || "";
+					return h("button", { key: subId || "all-sub", type: "button", className: "saker-mod-subcat" + (subcategory === subId ? " active" : ""),
+						onClick: function () { setSubcategory(subId); setCursor(""); setStack([]); } },
+						sub.title || "全部子类", h("span", null, String(subId ? (subFacet[category + "/" + subId] || 0) : (facet[category] || 0))));
+				})) : null);
+	var search = h("div", { className: "saker-mod-search" },
+		h("input", { value: text, placeholder: "搜索名称、别名、工具或用途", "aria-label": "搜索测试模块",
+			onChange: function (event) { setText(event.target.value); setCursor(""); setStack([]); } }),
+		h("select", { "aria-label": "模块视图", value: mode, onChange: function (event) { setMode(event.target.value); setCursor(""); setStack([]); } },
+			h("option", { value: "all" }, "全部模块"), h("option", { value: "favorites" }, "收藏"), h("option", { value: "recent" }, "最近使用")),
+		h("select", { "aria-label": "按来源筛选模块", value: source, onChange: function (event) { setSource(event.target.value); setCursor(""); setStack([]); } },
+			h("option", { value: "" }, "全部来源"), h("option", { value: "builtin" }, "内置"), h("option", { value: "personal" }, "个人"), h("option", { value: "custom" }, "本任务草稿")),
+		h("select", { "aria-label": "按可用状态筛选模块", value: status, onChange: function (event) { setStatus(event.target.value); setCursor(""); setStack([]); } },
+			h("option", { value: "" }, "全部状态"), h("option", { value: "available" }, "可用"), h("option", { value: "partial" }, "部分可用"), h("option", { value: "blocked" }, "缺少依赖")),
+		h("select", { "aria-label": "每页模块数", value: limit, onChange: function (event) { setLimit(Number(event.target.value)); setCursor(""); setStack([]); } },
+			h("option", { value: 20 }, "20 / 页"), h("option", { value: 50 }, "50 / 页"), h("option", { value: 100 }, "100 / 页")),
+		text || source || status || category ? h("button", { className: "saker-wb-btn", onClick: function () {
+			setText(""); setSource(""); setStatus(""); setCategory(""); setSubcategory("");
+		} }, "清除") : null);
+	var visibleItems = items;
+	if (mode === "favorites") visibleItems = items.filter(isFavorite);
+	if (mode === "recent") {
+		var order = new Map(recent.map(function (entry, index) { return [entry.key, index]; }));
+		visibleItems = items.filter(isRecent).sort(function (a, b) {
+			return (order.get(favoriteKey(a)) ?? 999) - (order.get(favoriteKey(b)) ?? 999);
+		});
+	}
+	var list = h("div", { className: "saker-mod-list" }, search,
+		loading ? h("div", { className: "saker-wb-empty" }, "读取中…") : null,
+		error ? h(SakerQueryError, { state: { error: error, data: initial }, label: "测试模块", scope: rootId ? "当前测试任务" : "个人与内置", onRetry: function () { setCursor(""); setStack([]); } }) : null,
+		!loading && !error && !visibleItems.length ? h("div", { className: "saker-wb-empty" },
+			mode === "favorites" ? "还没有收藏模块。在模块卡片右上角点星号收藏。" :
+				mode === "recent" ? "还没有最近使用的模块。" :
+					debounced || category ? "没有匹配的模块。清除搜索或换一个分类。" : "模块库为空。") : null,
+		h("div", { className: "saker-mod-grid" }, visibleItems.map(function (item) {
+			return h("div", { key: item.id + "@" + item.version, className: "saker-mod-item" + (selected === item.id ? " active" : ""),
+				role: "button", tabIndex: 0, onClick: function () { openModule(item); },
+				onKeyDown: function (event) {
+					if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openModule(item); return; }
+					if (["ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft"].includes(event.key)) {
+						event.preventDefault();
+						var nodes = Array.prototype.slice.call(event.currentTarget.parentElement.querySelectorAll(".saker-mod-item"));
+						var index = nodes.indexOf(event.currentTarget);
+						var next = ["ArrowDown", "ArrowRight"].includes(event.key) ? index + 1 : index - 1;
+						if (nodes[next] && nodes[next].focus) nodes[next].focus();
+					}
+				} },
+				h("div", { className: "saker-mod-item-main" },
+					h("div", { className: "saker-wb-row" }, h("div", { className: "saker-mod-item-title", style: { flex: 1 } }, item.title),
+						h("span", { className: "saker-wb-chip " + (item.runtimeStatus === "available" ? "ok" : item.runtimeStatus === "blocked" ? "bad" : "warn") }, item.statusLabel || (item.runtimeStatus === "available" ? "可用" : item.runtimeStatus === "blocked" ? "缺少依赖" : "部分可用"))),
+					h("div", { className: "saker-mod-item-sub" }, item.userSummary || item.outputSummary || item.familyLabel || ""),
+					h("div", { className: "saker-wb-sub", style: { marginTop: "4px" } }, (item.familyLabel || item.family || "自定义") + " · v" + item.version + (item.tools && item.tools.length ? " · " + item.tools.slice(0, 4).join(" / ") : "") + (item.archived ? " · 已归档" : ""))),
+				h("button", { type: "button", className: "saker-mod-fav" + (isFavorite(item) ? " on" : ""),
+					"aria-label": isFavorite(item) ? "取消收藏" : "收藏模块",
+					onClick: function (event) { event.stopPropagation(); toggleFavorite(item); } }, isFavorite(item) ? "★" : "☆"));
+		})),
+		h("div", { className: "saker-mod-pager" },
+			h("button", { className: "saker-wb-btn", disabled: !stack.length || mode !== "all", onClick: function () {
+				var previous = stack[stack.length - 1] || "";
+				setStack(stack.slice(0, -1)); setCursor(previous);
+			} }, "上一页"),
+			h("span", null, "显示 " + visibleItems.length + " 项 · 共 " + String(pageInfo.total || items.length) + " 项"),
+			h("button", { className: "saker-wb-btn", disabled: !pageInfo.nextCursor || mode !== "all", onClick: function () {
+				setStack(stack.concat([cursor])); setCursor(pageInfo.nextCursor);
+			} }, "下一页")));
+	var detailView = h("div", { className: "saker-mod-detail" },
+		h("div", { className: "saker-wb-row", style: { marginBottom: "8px" } },
+			h("h3", { style: { flex: 1, margin: 0 } }, (shownDetail && shownDetail.title) || "模块详情"),
+			h("button", { className: "saker-wb-btn", onClick: function () { setSelected(""); setDetail(null); setCopyDraft(null); } }, "关闭")),
+		detailLoading ? h("div", { className: "saker-wb-sub" }, "读取中…") :
+			!shownDetail ? h("div", { className: "saker-wb-sub" }, "选一个模块，查看它的适用问题、专家做法、输入输出和退出判据。") :
+				shownDetail.error ? h("div", { className: "saker-wb-error" }, shownDetail.error) :
+					h("div", null,
+						h("div", { className: "saker-wb-row" },
+							h("div", { className: "saker-wb-sub", style: { flex: 1 } }, (shownDetail.familyLabel || shownDetail.family) + " · v" + shownDetail.version + " · " + (shownDetail.source || "builtin")),
+							h("span", { className: "saker-wb-chip " + (shownDetail.runtimeStatus === "available" ? "ok" : shownDetail.runtimeStatus === "blocked" ? "bad" : "warn") }, shownDetail.statusLabel || shownDetail.runtimeStatus || "未评估")),
+						h("p", null, shownDetail.userSummary || shownDetail.outputSummary || "没有摘要；展开高级说明查看定义。"),
+						h("div", { className: "saker-wb-row", style: { margin: "8px 0", flexWrap: "wrap" } },
+							h("button", { type: "button", className: "saker-wb-btn primary", disabled: detailLoading || !props.rootId || shownDetail.runtimeStatus === "blocked",
+								onClick: function () { props.run("module.prefer", { moduleSnapshotRef: detail.moduleRef || { id: detail.id, version: detail.version, digest: detail.digest, ownerKey: detail.ownerKey }, operation: "auto", sessionRef: props.rootId }, null, { rootId: props.rootId, sessionId: props.rootId }); } }, "优先用于下一项"),
+							h("button", { type: "button", className: "saker-wb-btn", disabled: detailLoading, onClick: function () {
+								setCopyDraft({ id: String(detail.id || "module").toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64) + "-copy-" + Date.now().toString(36).slice(-4),
+									title: (detail.title || detail.id) + "（副本）" });
+							} }, "复制修改"),
+							h("button", { type: "button", className: "saker-wb-btn", disabled: detailLoading, onClick: function () {
+								props.run("module.save", { moduleSnapshotRef: detail.moduleRef || { id: detail.id, version: detail.version, digest: detail.digest, ownerKey: detail.ownerKey } }, null, { rootId: props.rootId, sessionId: props.rootId });
+							} }, "另存为个人模块"),
+							h("span", { className: "saker-wb-sub" }, props.rootId ? "只影响下一次测试，不会发送目标请求。" : "先打开测试任务才能设置偏好；复制和另存为不需要任务。")),
+						copyDraft ? h("div", { className: "saker-wb-card", style: { margin: "8px 0" } },
+							h("h4", { style: { marginTop: 0 } }, "复制为我的模块"),
+							h("label", { className: "saker-wb-field" }, "新模块 ID", h("input", { value: copyDraft.id,
+								onChange: function (event) { setCopyDraft(Object.assign({}, copyDraft, { id: event.target.value })); } })),
+							h("label", { className: "saker-wb-field" }, "名称", h("input", { value: copyDraft.title,
+								onChange: function (event) { setCopyDraft(Object.assign({}, copyDraft, { title: event.target.value })); } })),
+							h("div", { className: "saker-wb-row" },
+								h("button", { className: "saker-wb-btn primary", disabled: !copyDraft.id || !copyDraft.title,
+									onClick: function () {
+										props.run("module.define", {
+											id: copyDraft.id, title: copyDraft.title, destination: "personal",
+											purpose: detail.purpose || detail.userSummary || detail.title,
+											instructions: detail.instructions || detail.purpose || detail.title,
+											inputs: detail.inputs || [], outputs: detail.outputs || [], operations: detail.operations || ["auto"],
+											deliverable: detail.deliverable || detail.outputSummary || "",
+											categoryId: detail.categoryId || "", subcategoryId: detail.subcategoryId || "",
+											family: detail.family || "custom", userSummary: detail.userSummary || "",
+											outputSummary: detail.outputSummary || "", searchAliases: detail.searchAliases || [],
+										}, function () { setCopyDraft(null); });
+									} }, "保存为我的模块"),
+								h("button", { className: "saker-wb-btn", onClick: function () { setCopyDraft(null); } }, "取消"))) : null,
+						h("h4", null, "依赖检查"), detail.capabilities && detail.capabilities.length ? h("div", { style: { display: "grid", gap: "8px" } }, detail.capabilities.map(function (cap) {
+							return h("div", { key: cap.key, className: "saker-wb-row" },
+								h("span", { className: "saker-wb-chip " + (cap.status === "verified" ? "ok" : cap.status === "missing" ? "bad" : "warn") }, cap.status === "verified" ? "已验证" : cap.status === "present" ? "仅二进制" : "缺失"),
+								h("span", { style: { flex: 1 } }, cap.label || cap.key), cap.tool ? h("span", { className: "saker-wb-sub" }, cap.tool) : null);
+						})) : h("p", { className: "saker-wb-sub" }, "没有依赖记录。"),
+						detail.missingPrerequisites && detail.missingPrerequisites.length ? h("div", { className: "saker-wb-notice" }, h("span", null, "缺项：" + detail.missingPrerequisites.map(function (item) { return item.message; }).join("；"))) : null,
+						h("details", { className: "saker-wb-advanced" }, h("summary", null, "高级：完整说明与输入输出"),
+							h("h4", null, "适用问题与做法"), h("pre", null, detail.purpose || ""),
+							h("h4", null, "执行说明"), h("pre", null, detail.instructions || ""),
+							h("h4", null, "输入 / 产物"), h("pre", null, JSON.stringify({ inputs: detail.inputs || [], outputs: detail.outputs || [], operations: detail.operations || [] }, null, 2)),
+							h("h4", null, "交付"), h("pre", null, detail.deliverable || ""))));
+	var libraryTabState = useState("modules"), libraryTab = libraryTabState[0], setLibraryTab = libraryTabState[1];
+	return h("div", { className: "saker-modlib" },
+		h("div", { className: "saker-wb-tabs", role: "tablist" },
+			h("button", { type: "button", className: "saker-wb-tab" + (libraryTab === "modules" ? " active" : ""), onClick: function () { setLibraryTab("modules"); } }, "模块库"),
+			h("button", { type: "button", className: "saker-wb-tab" + (libraryTab === "methods" ? " active" : ""), onClick: function () { setLibraryTab("methods"); } }, "我的流程")),
+		libraryTab === "methods" ? h(SakerMethodCombos, { rootId: rootId, tick: props.tick, run: props.run })
+			: h("div", { className: "saker-mod" }, catsView, list, selected ? detailView : null));
+}
+function SakerMethodsList(props) {
+	var rows = props.rows || [];
+	if (!rows.length) return h("div", { className: "saker-wb-empty" }, "没有可用的测试流程。");
+	return h("div", { style: { display: "grid", gap: "8px" } }, rows.map(function (row) {
+		return h("div", { className: "saker-wb-card", key: row.methodId },
+			h("div", { className: "saker-wb-row" }, h("h3", { style: { margin: 0, flex: 1 } }, row.title),
+				h("span", { className: "saker-wb-chip" + (row.selected ? " ok" : "") }, row.selected ? "当前" : row.scope)),
+			h("div", { className: "saker-wb-sub" }, row.description || "无说明"),
+			h("div", { className: "saker-wb-sub", style: { marginTop: "4px" } }, row.nodeCount + " 个动作 · 版本 " + row.version),
+			h("div", { style: { marginTop: "8px" } }, h("button", { className: "saker-wb-btn", disabled: !props.rootId,
+				onClick: function () { props.run("method.select", { methodRef: { id: row.methodId } }); } }, "用于下一次测试")));
+	}));
+}
+function SakerMethodCombos(props) {
+	var textState = useState(""), text = textState[0], setText = textState[1];
+	var cursorState = useState(""), cursor = cursorState[0], setCursor = cursorState[1];
+	var stackState = useState([]), stack = stackState[0], setStack = stackState[1];
+	var query = useWorkbenchQuery("methods.list", { rootId: props.rootId || "" }, props.tick || 0, true,
+		{ filter: { text: text }, page: { limit: 50, cursor: cursor } });
+	var rows = query.data || [];
+	return h("div", { className: "saker-combos" },
+		h(SakerListToolbar, { text: text, onText: function (value) { setText(value); setCursor(""); setStack([]); }, placeholder: "搜索我的测试流程",
+			loadedLabel: query.loading ? "读取中…" : "显示 " + rows.length + " 个流程" }),
+		h(SakerQueryError, { state: query, label: "我的测试流程", scope: props.rootId ? "当前测试任务" : "个人与内置", onRetry: function () { setCursor(""); setStack([]); } }),
+		!query.loading && !rows.length ? h("div", { className: "saker-wb-empty" }, "还没有保存的测试流程。进入任务后，在流程编辑器里另存为个人流程即可。") : null,
+		h("div", { className: "saker-wb-cards" }, rows.map(function (row) {
+			return h("div", { key: row.methodId + "@" + row.version, className: "saker-wb-card" },
+				h("div", { className: "saker-wb-row" }, h("b", { style: { flex: 1 } }, row.title),
+					h("span", { className: "saker-wb-chip" + (row.selected ? " ok" : "") }, row.selected ? "当前" : (row.scope === "personal" ? "个人" : row.scope === "session" ? "本任务" : "内置"))),
+				h("div", { className: "saker-wb-sub" }, row.description || "无说明"),
+				h("div", { className: "saker-wb-sub", style: { marginTop: "4px" } }, row.nodeCount + " 个动作 · v" + row.version),
+				h("div", { style: { marginTop: "8px" } }, h("button", { className: "saker-wb-btn", disabled: !props.rootId || !props.run,
+					onClick: function () { props.run("method.select", { methodRef: { id: row.methodId } }); } }, "用于下一次测试")));
+		})),
+		h(SakerPager, { page: query.meta && query.meta.page, loaded: rows.length, hasPrev: stack.length > 0,
+			onPrev: function () { if (!stack.length) return; setStack(stack.slice(0, -1)); setCursor(stack[stack.length - 1] || ""); },
+			onNext: function () { var page = query.meta && query.meta.page; if (page && page.nextCursor) { setStack(stack.concat([cursor])); setCursor(page.nextCursor); } } }));
+}
+function SakerRolesPage(props) {
+	var rows = props.rows || [];
+	var textState = useState(""), text = textState[0], setText = textState[1];
+	var createState = useState(false), createOpen = createState[0], setCreateOpen = createState[1];
+	var form = useState({ title: "", objective: "", responsibilities: "", deliverable: "", roleId: "" });
+	var draft = form[0], setDraft = form[1];
+	var selectedState = useState(null), selected = selectedState[0], setSelected = selectedState[1];
+	var detailState = useState(null), detail = detailState[0], setDetail = detailState[1];
+	var detailErrorState = useState(""), detailError = detailErrorState[0], setDetailError = detailErrorState[1];
+	var versionState = useState(0), version = versionState[0], setVersion = versionState[1];
+	var workState = useState([]), workRows = workState[0], setWorkRows = workState[1];
+	var workPickState = useState(""), workPick = workPickState[0], setWorkPick = workPickState[1];
+	var detailSeq = useRef(0);
+	useEffect(function () { setSelected(null); setDetail(null); setVersion(0); }, [props.rootId]);
+	useEffect(function () {
+		if (!selected) { setDetail(null); return; }
+		var seq = ++detailSeq.current;
+		setDetailError("");
+		api("workbench.query", { kind: "roles.detail", context: { rootId: props.rootId || "", roleId: selected.roleId, version: version || selected.version } })
+			.then(function (response) {
+				if (seq !== detailSeq.current) return;
+				if (!response || response.ok === false) throw Error((response && response.error) || "读取角色失败");
+				setDetail(response.data);
+			})
+			.catch(function (failure) { if (seq === detailSeq.current) setDetailError(wbErrorText(failure)); });
+	}, [selected && selected.roleId, version, props.rootId, props.tick]);
+	useEffect(function () {
+		if (!props.rootId) { setWorkRows([]); return; }
+		var live = true;
+		api("workbench.query", { kind: "work.list", context: { rootId: props.rootId }, page: { limit: 100 } })
+			.then(function (response) { if (live && response && response.ok !== false) setWorkRows(response.data || []); })
+			.catch(function () { if (live) setWorkRows([]); });
+		return function () { live = false; };
+	}, [props.rootId, props.tick]);
+	function field(key, label, textarea) {
+		return h("label", { key: key }, label, h(textarea ? "textarea" : "input", { value: draft[key],
+			onChange: function (event) { setDraft(Object.assign({}, draft, { [key]: event.target.value })); } }));
+	}
+	function beginCreate(source) {
+		setCreateOpen(true);
+		setDraft(source ? {
+			roleId: source.roleId, title: (source.title || "") + "（新版本）", objective: source.objective || "",
+			responsibilities: source.responsibilities || "", deliverable: source.deliverable || "",
+		} : { title: "", objective: "", responsibilities: "", deliverable: "", roleId: "" });
+	}
+	var visible = rows.filter(function (row) {
+		if (!text.trim()) return true;
+		var needle = text.toLowerCase();
+		return [row.title, row.objective, row.responsibilities, row.deliverable, row.roleId, row.scope]
+			.some(function (value) { return String(value || "").toLowerCase().includes(needle); });
+	});
+	var formView = createOpen ? h("div", { className: "saker-wb-card" },
+		h("h3", null, draft.roleId ? "创建新版本" : (props.rootId ? "创建本轮临时角色" : "创建个人角色")),
+		h("div", { className: "saker-wb-form" }, field("title", "名称"), field("objective", "要解决的问题", true),
+			field("responsibilities", "职责与边界", true), field("deliverable", "交付标准", true),
+			h("div", { className: "saker-wb-row" },
+				h("button", { className: "saker-wb-btn primary", disabled: !draft.title || !draft.objective,
+					onClick: function () {
+						var body = Object.assign({}, draft);
+						if (!body.roleId) delete body.roleId;
+						props.run("role.define", body, function () {
+							setDraft({ title: "", objective: "", responsibilities: "", deliverable: "", roleId: "" }); setCreateOpen(false);
+						});
+					} }, draft.roleId ? "保存新版本" : (props.rootId ? "保存为本轮角色" : "保存到个人角色库")),
+				h("button", { className: "saker-wb-btn", onClick: function () { setCreateOpen(false); } }, "取消"))),
+		!props.rootId ? h("div", { className: "saker-wb-sub", style: { marginTop: "4px" } }, "当前没有进入任务：保存后会进入个人角色库；定义本身不会启动实例。") : null) : null;
+	var detailView = selected ? h("div", { className: "saker-wb-card saker-wb-detail-card" },
+		h("div", { className: "saker-wb-row" }, h("h3", { style: { flex: 1, marginTop: 0 } }, selected.title),
+			h("button", { className: "saker-wb-btn", onClick: function () { setSelected(null); } }, "关闭")),
+		detailError ? h("div", { className: "saker-wb-error" }, detailError) :
+			!detail ? h("div", { className: "saker-wb-sub" }, "读取中…") :
+				h("div", null,
+					h("div", { className: "saker-wb-sub" }, "v" + detail.version + " · " + (detail.scope === "global" ? "个人" : "本任务") + " · " + (detail.roleId || "")),
+					h("p", null, detail.objective || ""),
+					h("h4", null, "职责与边界"), h("p", null, detail.responsibilities || "—"),
+					h("h4", null, "交付标准"), h("p", null, detail.deliverable || "—"),
+					h("h4", null, "版本"),
+					h("div", { className: "saker-wb-row", style: { flexWrap: "wrap" } },
+						(selected.versions || []).map(function (item) {
+							return h("button", { key: item.version, className: "saker-wb-btn" + (Number(version || selected.version) === Number(item.version) ? " primary" : ""),
+								onClick: function () { setVersion(item.version); } }, "v" + item.version + (item.scope === "global" ? " · 个人" : ""));
+						})),
+					h("h4", null, "当前实例"),
+					(selected.instances || []).length ? (selected.instances || []).map(function (instance) {
+						return h("div", { key: instance.childId, className: "saker-wb-row" },
+							h("span", { className: "saker-wb-chip " + (instance.settlement ? "warn" : "") }, wbNodeStateLabel(instance.state)),
+							h("span", { className: "saker-wb-cell-main" }, instance.workId || instance.childId),
+							h("span", { className: "saker-wb-sub" }, instance.settlement ? instance.settlement.label : instance.updatedAt ? wbTime(instance.updatedAt) : ""));
+					}) : h("p", { className: "saker-wb-sub" }, "这个版本还没有派过实例。定义不等于启动实例。"),
+					h("div", { className: "saker-wb-row", style: { marginTop: "8px", flexWrap: "wrap" } },
+						h("button", { className: "saker-wb-btn", onClick: function () { beginCreate(detail); } }, "复制为新版本"),
+						h("button", { className: "saker-wb-btn", onClick: function () {
+							props.run("role.save", { roleRef: { id: detail.roleId, version: detail.version }, alias: detail.title }, null,
+								{ rootId: props.rootId || "" });
+						} }, "保存到个人角色库")),
+					props.rootId && workRows.length ? h("div", { className: "saker-wb-card", style: { marginTop: "8px" } },
+						h("h4", { style: { marginTop: 0 } }, "派给具体工作"),
+						h("select", { "aria-label": "选择工作项", value: workPick, onChange: function (event) { setWorkPick(event.target.value); } },
+							h("option", { value: "" }, "选择一项工作"),
+							workRows.map(function (work) { return h("option", { key: work.workId, value: work.workId }, work.title || work.question || work.workId); })),
+						h("div", { style: { marginTop: "8px" } },
+							h("button", { className: "saker-wb-btn primary", disabled: !workPick,
+								onClick: function () {
+									props.run("work.assign", { roleSnapshotRef: { id: detail.roleId, version: detail.version }, workRef: { id: workPick } }, null,
+										{ rootId: props.rootId });
+								} }, "派工"))) : null)) : null;
+	return h("div", { className: "saker-roles" },
+		h("div", { className: "saker-wb-toolbar" },
+			h("input", { className: "saker-wb-search", type: "search", value: text, placeholder: "搜索角色名称、职责或 ID",
+				"aria-label": "搜索角色", onChange: function (event) { setText(event.target.value); } }),
+			h("button", { className: "saker-wb-btn primary", onClick: function () { beginCreate(null); } }, "新建角色"),
+			h("span", { className: "saker-wb-spacer" }),
+			h("span", { className: "saker-wb-sub" }, "显示 " + visible.length + " / 共 " + rows.length + " 个角色")),
+		formView,
+		!rows.length ? h("div", { className: "saker-wb-empty" }, "还没有保存的角色。定义角色只是写清职责，不会启动实例。") : null,
+		!visible.length && rows.length ? h("div", { className: "saker-wb-empty" }, "没有匹配的角色。清除搜索后再试。") : null,
+		h("div", { className: "saker-roles-layout" },
+			h("div", { className: "saker-wb-cards saker-roles-cards" }, visible.map(function (row) {
+				return h("button", { key: row.roleId + "@" + row.version, type: "button",
+					className: "saker-wb-card saker-wb-cardbtn" + (selected && selected.roleId === row.roleId ? " active" : ""),
+					onClick: function () { setSelected(row); setVersion(row.version); setWorkPick(""); } },
+					h("div", { className: "saker-wb-row" }, h("b", { style: { flex: 1 } }, row.title),
+						h("span", { className: "saker-wb-chip" }, "v" + row.version + " · " + (row.scope === "global" ? "个人" : "本任务" + (row.ownerSession ? " " + String(row.ownerSession).slice(-8) : "")))),
+					h("div", { className: "saker-wb-sub" }, row.objective || "无说明"),
+					h("div", { className: "saker-wb-sub", style: { marginTop: "4px" } }, "版本 " + (row.versions || []).length + " · 实例 " + (row.instances || []).length));
+			})),
+			selected ? h("aside", { className: "saker-roles-detailpane" }, detailView) : null));
+}
+function SakerCapabilitiesTable(props) {
+	var rows = props.rows || [];
+	if (!rows.length) return h("div", { className: "saker-wb-empty" }, "当前 Host 未暴露工具，或会话尚未加载。");
+	return h("table", { className: "saker-wb-table" },
+		h("thead", null, h("tr", null, ["工具", "用途", "来源", "当前状态"].map(function (label, index) {
+			return h("th", { key: label, className: index === 2 ? "saker-col-secondary" : "" }, label);
+		}))),
+		h("tbody", null, rows.map(function (row) {
+			return h("tr", { key: row.id }, h("td", null, row.name), h("td", null, h("div", { className: "saker-wb-cell-sub" }, row.purpose || "—")),
+				h("td", { className: "saker-col-secondary" }, row.source), h("td", null, h("span", { className: "saker-wb-chip" }, row.status)));
+		})));
+}
+function SakerAttentionList(props) {
+	var rows = props.rows || [];
+	if (!rows.length) return h("div", { className: "saker-wb-empty" }, "没有待办事项。");
+	return h("div", { style: { display: "grid", gap: "8px" } }, rows.map(function (row) {
+		return h("div", { className: "saker-wb-card", key: row.id, role: "button", tabIndex: 0,
+			onClick: function () { row.rootId && props.onOpen && props.onOpen(row.rootId); },
+			onKeyDown: function (event) { if ((event.key === "Enter" || event.key === " ") && row.rootId) { event.preventDefault(); props.onOpen && props.onOpen(row.rootId); } } },
+			h("div", { className: "saker-wb-row" }, h("span", { className: "saker-wb-chip warn" }, wbAttentionKindLabel(row.kind)), h("b", null, row.title || row.kind)),
+			h("div", null, row.reason), row.evidence ? h("div", { className: "saker-wb-sub" }, "依据：" + row.evidence) : null,
+			h("div", { className: "saker-wb-sub" }, "下一步：" + row.next));
+	}));
+}
+function SakerLogsList(props) {
+	var rows = props.rows || [];
+	if (!rows.length) return h("div", { className: "saker-wb-empty" }, "当前范围没有执行日志；先选择一个测试任务查看。");
+	return h("div", { style: { display: "grid", gap: "4px" } }, rows.map(function (row, index) {
+		return h("div", { key: index, className: "saker-wb-card", style: { padding: "8px" } },
+			h("div", { className: "saker-wb-row" }, h("span", { className: "saker-wb-chip" }, row.kind), h("span", { className: "saker-wb-sub" }, wbTime(row.at))),
+			h("div", { className: "saker-wb-cell-sub" }, String(row.record || "").slice(0, 300)));
+	}));
+}
+function SakerGraph(props) {
+	var graph = props.graph || { nodes: [], edges: [] };
+	var allNodes = graph.nodes || [];
+	var allEdges = graph.edges || [];
+	var limitState = useState(300), limit = limitState[0], setLimit = limitState[1];
+	var scaleState = useState(1), scale = scaleState[0], setScale = scaleState[1];
+	var panState = useState({ x: 0, y: 0 }), pan = panState[0], setPan = panState[1];
+	var dragState = useState(null), drag = dragState[0], setDrag = dragState[1];
+	var searchState = useState(""), search = searchState[0], setSearch = searchState[1];
+	var selectedState = useState(null), selected = selectedState[0], setSelected = selectedState[1];
+	var neighborhoodState = useState(false), neighborhood = neighborhoodState[0], setNeighborhood = neighborhoodState[1];
+	var focusState = useState(""), focusId = focusState[0], setFocusId = focusState[1];
+	var sizeState = useState({ width: 0, height: 560 }), canvasSize = sizeState[0], setCanvasSize = sizeState[1];
+	var canvasRef = useRef(null);
+	var composingSearch = useRef(false);
+	var useGraphEffect = typeof useEffect === "function" ? useEffect : function () {};
+	var neighborhoodIds = null;
+	if (neighborhood && selected) {
+		neighborhoodIds = {};
+		neighborhoodIds[selected.id] = true;
+		allEdges.forEach(function (edge) {
+			if (edge.from === selected.id) neighborhoodIds[edge.to] = true;
+			if (edge.to === selected.id) neighborhoodIds[edge.from] = true;
+		});
+	}
+	var nodes = neighborhoodIds ? allNodes.filter(function (node) { return neighborhoodIds[node.id]; }) : allNodes.slice(0, limit);
+	var visibleIds = {};
+	nodes.forEach(function (node) { visibleIds[node.id] = true; });
+	var edges = allEdges.filter(function (edge) { return visibleIds[edge.from] && visibleIds[edge.to]; });
+	var kindOrder = ["root", "work", "workflow", "step", "attempt", "asset", "endpoint", "check", "receipt", "finding", "material"];
+	var groups = {};
+	kindOrder.forEach(function (kind) { groups[kind] = []; });
+	nodes.forEach(function (node) { if (!groups[node.kind]) groups[node.kind] = []; groups[node.kind].push(node); });
+	var nodeWidth = 220, nodeHeight = 58, columnWidth = 250, rowHeight = 76;
+	var pos = {}, column = 0, tallest = 0;
+	var rowsPerColumn = Math.max(8, Math.min(20, Math.ceil(Math.sqrt(Math.max(1, nodes.length)))));
+	Object.keys(groups).forEach(function (kind) {
+		var list = groups[kind];
+		if (!list.length) return;
+		list.forEach(function (node, index) {
+			var row = index % rowsPerColumn, groupColumn = Math.floor(index / rowsPerColumn);
+			pos[node.id] = { x: (column + groupColumn) * columnWidth + 16, y: row * rowHeight + 18, kind: kind };
+		});
+		tallest = Math.max(tallest, Math.min(list.length, rowsPerColumn) * rowHeight + 24);
+		column += Math.max(1, Math.ceil(list.length / rowsPerColumn));
+	});
+	var width = Math.max(460, column * columnWidth + 24);
+	var height = Math.max(220, tallest + 16);
+	var needle = search.trim().toLowerCase();
+	var matches = needle ? allNodes.filter(function (node) { return [node.title, node.kind, node.state, node.id].some(function (value) { return String(value || "").toLowerCase().includes(needle); }); }) : [];
+	var edgeKinds = [];
+	edges.forEach(function (edge) { if (edgeKinds.indexOf(edge.kind) < 0) edgeKinds.push(edge.kind || "related"); });
+	var kindColors = { root: "#4176e6", work: "#7a5af8", workflow: "#0f8b8d", step: "#2f8a58", attempt: "#a05a2c",
+		asset: "#276fbf", endpoint: "#6a6f7a", check: "#b58a00", receipt: "#2f7d8a", finding: "#c62828", material: "#7b5ea7" };
+	function viewport() {
+		return { width: Number(canvasSize.width) || 900, height: Number(canvasSize.height) || 560 };
+	}
+	function clampPan(x, y, nextScale) {
+		var box = viewport();
+		return {
+			x: Math.min(80, Math.max(Math.min(0, box.width - width * nextScale - 80), x)),
+			y: Math.min(80, Math.max(Math.min(0, box.height - height * nextScale - 80), y)),
+		};
+	}
+	function focusNode(node, nextScale) {
+		var point = pos[node && node.id];
+		if (!point) return;
+		var appliedScale = Number(nextScale) || Math.max(1, scale), box = viewport();
+		setScale(appliedScale);
+		setPan(clampPan(box.width / 2 - (point.x + nodeWidth / 2) * appliedScale,
+			box.height / 2 - (point.y + nodeHeight / 2) * appliedScale, appliedScale));
+	}
+	function fitGraph() {
+		var box = viewport();
+		var fitted = Math.min((box.width - 32) / Math.max(1, width), (box.height - 32) / Math.max(1, height), 1.25);
+		fitted = Math.max(0.12, Number(fitted.toFixed(3)));
+		setScale(fitted);
+		setPan(clampPan((box.width - width * fitted) / 2, (box.height - height * fitted) / 2, fitted));
+	}
+	function locateMatch(node) {
+		if (!node) return;
+		var index = Math.max(0, allNodes.findIndex(function (item) { return item.id === node.id; }));
+		if (index >= limit || neighborhood) {
+			setNeighborhood(false);
+			setLimit(Math.max(limit, index + 1));
+		}
+		setFocusId(node.id);
+	}
+	useGraphEffect(function () {
+		var element = canvasRef.current;
+		if (!element || typeof ResizeObserver === "undefined") return;
+		var observer = new ResizeObserver(function (entries) {
+			var rect = entries && entries[0] ? entries[0].contentRect : null;
+			if (!rect) return;
+			setCanvasSize({ width: Math.max(1, rect.width), height: Math.max(240, Math.min(560, rect.height)) });
+		});
+		observer.observe(element);
+		return function () { try { observer.disconnect(); } catch (_error) {} };
+	}, []);
+	useGraphEffect(function () {
+		if (!focusId) return;
+		var target = allNodes.find(function (node) { return node.id === focusId; });
+		if (!target || !pos[focusId]) return;
+		setSelected(target);
+		props.onSelect && props.onSelect(target);
+		focusNode(target, Math.max(1, scale));
+		setFocusId("");
+	}, [focusId, limit, neighborhood, scale]);
+	if (!allNodes.length) return h("div", { className: "saker-wb-empty" }, props.emptyText || "还没有可绘制的真实引用。路径图不会替代测试流程或任务结构。");
+	function applySearch(next) {
+		var needleValue = String(next || "").trim().toLowerCase();
+		setSearch(next);
+		if (needleValue) {
+			var match = allNodes.find(function (node) {
+				return [node.title, node.kind, node.state, node.id].some(function (value) {
+					return String(value || "").toLowerCase().includes(needleValue);
+				});
+			});
+			locateMatch(match);
+		}
+	}
+	return h("div", { className: "saker-graph" },
+		h("div", { className: "saker-graph-toolbar" },
+			h("input", { className: "saker-wb-search", type: "search", value: search, placeholder: "在图里搜索节点",
+				"aria-label": "搜索图节点",
+				onChange: function (event) {
+					if (composingSearch.current || (event.nativeEvent && event.nativeEvent.isComposing)) { setSearch(event.target.value); return; }
+					applySearch(event.target.value);
+				},
+				onCompositionStart: function () { composingSearch.current = true; },
+				onCompositionEnd: function (event) { composingSearch.current = false; applySearch(event.target.value); } }),
+			h("button", { className: "saker-wb-btn", onClick: function () { setScale(function (value) { return Math.min(2.2, Number((value + 0.15).toFixed(2))); }); } }, "放大"),
+			h("button", { className: "saker-wb-btn", onClick: function () { setScale(function (value) { return Math.max(0.45, Number((value - 0.15).toFixed(2))); }); } }, "缩小"),
+			h("button", { className: "saker-wb-btn", onClick: fitGraph }, "适合视图"),
+			selected ? h("button", { className: "saker-wb-btn", onClick: function () { setNeighborhood(!neighborhood); } }, neighborhood ? "显示全图" : "仅看选中邻域") : null,
+			matches.length ? h("button", { className: "saker-wb-btn", onClick: function () { locateMatch(matches[0]); } }, "定位首个命中") : null,
+			h("span", { className: "saker-wb-sub" }, "缩放 " + Math.round(scale * 100) + "% · 拖动平移" + (needle ? " · 命中 " + matches.length : ""))),
+		h("div", { className: "saker-graph-legend", "aria-label": "图例" },
+			Object.keys(groups).filter(function (kind) { return groups[kind].length; }).map(function (kind) {
+				return h("span", { key: kind, className: "saker-graph-legend-item" },
+					h("i", { style: { background: kindColors[kind] || "#6a6f7a" } }), wbGraphKindLabel(kind) + " " + groups[kind].length);
+			}),
+			edgeKinds.length ? h("span", { className: "saker-graph-legend-item" }, "关系：" + edgeKinds.join(" / ")) : null),
+		h("div", { className: "saker-graph-canvas", tabIndex: 0, ref: canvasRef,
+			onMouseDown: function (event) { if (event.button === 0 && !event.target.closest("g")) setDrag({ x: event.clientX, y: event.clientY, px: pan.x, py: pan.y }); },
+			onMouseMove: function (event) { if (!drag) return; setPan({ x: drag.px + event.clientX - drag.x, y: drag.py + event.clientY - drag.y }); },
+			onMouseUp: function () { setDrag(null); }, onMouseLeave: function () { setDrag(null); } },
+			h("svg", { viewBox: "0 0 " + width + " " + height, width: width, height: height, role: "img", "aria-label": "关系图",
+				style: { minWidth: width, minHeight: height, transform: "translate(" + pan.x + "px," + pan.y + "px) scale(" + scale + ")", transformOrigin: "0 0" } },
+				h("defs", null, h("marker", { id: "saker-graph-arrow", viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 6, markerHeight: 6, orient: "auto-start-reverse" },
+					h("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: "var(--dsh-border,rgba(127,127,127,.75))" }))),
+				edges.map(function (edge, index) {
+					var a = pos[edge.from], b = pos[edge.to];
+					if (!a || !b) return null;
+					var x1 = a.x + nodeWidth, y1 = a.y + nodeHeight / 2, x2 = b.x, y2 = b.y + nodeHeight / 2;
+					return h("g", { key: "e" + index },
+						h("line", { x1: x1, y1: y1, x2: x2, y2: y2, "marker-end": "url(#saker-graph-arrow)" },
+							h("title", null, edge.kind || "related")),
+						edges.length <= 4 && scale >= 1.1 ? h("text", { x: (x1 + x2) / 2, y: (y1 + y2) / 2 - 4, className: "saker-graph-edge-label" }, edge.kind || "related") : null);
+				}),
+				nodes.map(function (node) {
+					var p = pos[node.id];
+					var hit = needle && matches.some(function (item) { return item.id === node.id; });
+					return h("g", { key: node.id, transform: "translate(" + p.x + "," + p.y + ")", role: "button", tabIndex: 0,
+						className: "saker-graph-node" + (hit ? " is-hit" : "") + (selected && selected.id === node.id ? " is-selected" : ""),
+						onClick: function () { setSelected(node); props.onSelect && props.onSelect(node); },
+						onKeyDown: function (event) { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelected(node); props.onSelect && props.onSelect(node); } } },
+						h("rect", { width: nodeWidth, height: nodeHeight, rx: 6, fill: "var(--dsh-bg-primary,Canvas)", stroke: kindColors[node.kind] || "var(--dsh-border,rgba(127,127,127,.45))", strokeWidth: hit || (selected && selected.id === node.id) ? 2 : 1 }),
+						h("rect", { width: 4, height: nodeHeight, rx: 2, fill: kindColors[node.kind] || "#6a6f7a" }),
+						h("foreignObject", { x: 9, y: 4, width: nodeWidth - 18, height: 20 },
+							h("div", { xmlns: "http://www.w3.org/1999/xhtml", className: "saker-graph-node-title", title: String(node.title || node.id) },
+								String(node.title || node.id))),
+						h("text", { x: 10, y: nodeHeight - 12, className: "saker-graph-node-sub" },
+							String(node.subtitle || [wbGraphKindLabel(node.kind), wbNodeStateLabel(node.state)].filter(Boolean).join(" · ")).slice(0, 44)));
+				})),
+			!nodes.length ? h("div", { className: "saker-wb-empty" }, "当前过滤没有节点。") : null),
+		allNodes.length > limit ? h("div", { className: "saker-wb-notice" },
+			h("span", null, "共 " + allNodes.length + " 个节点，当前显示前 " + limit + " 个；没有静默丢弃。"),
+			h("button", { className: "saker-wb-btn", onClick: function () { setLimit(allNodes.length); } }, "展开全部")) : null,
+		matches.length ? h("div", { className: "saker-wb-notice" },
+			h("span", null, "共命中 " + matches.length + " 个节点。搜索范围包含尚未显示、尚未展开的全部图数据。"),
+			h("button", { className: "saker-wb-btn", onClick: function () { locateMatch(matches[0]); } }, "定位并展开")) : null,
+		selected ? h("div", { className: "saker-graph-detail" },
+			h("div", { className: "saker-wb-row" }, h("b", { style: { flex: 1 } }, selected.title || selected.id),
+				h("span", { className: "saker-wb-chip" }, selected.kind),
+				h("button", { className: "saker-wb-btn", onClick: function () { setSelected(null); } }, "关闭")),
+			h("div", { className: "saker-wb-sub" }, "id：" + selected.id + " · 状态：" + (selected.state || "—")),
+			props.onOpenNode ? h("div", { style: { marginTop: "8px" } }, h("button", { className: "saker-wb-btn", onClick: function () { props.onOpenNode(selected); } }, "打开对应原件")) : null) : null);
+}
+//#endregion
 
 function injectVisibleConversationView(ctx, field, register) {
 	var settings = ctx.configForms && ctx.configForms.get
@@ -4473,8 +9399,20 @@ function injectVisibleConversationView(ctx, field, register) {
 
 function apply(ctx) {
 	ctx.effect(function () { return installStyles(); }, "dsh-redteam-results: styles");
+	ctx.effect(function () { return installWorkbenchStyles(); }, "dsh-redteam-results: workbench styles");
+	ctx.slots.inject("main", function () {
+		return ctx.slots.register({ name: "main", key: "saker-workbench", label: function () { return "Saker 安全工作台"; } }, function (props) {
+			return h(SakerWorkbenchPage, Object.assign({}, props, { ctx: ctx }));
+		});
+	});
+	ctx.slots.inject("sidebar.panellist", function () {
+		return ctx.slots.register({ name: "sidebar.panellist", id: "saker-workbench", order: 12, label: function () { return "Saker"; } }, SakerWorkbenchIcon);
+	});
 	ctx.effect(function () { return installChatSetupStyles(); }, "dsh-redteam-results: chat setup styles");
+	ctx.effect(function () { return installCurationStyles(); }, "dsh-redteam-results: curation styles");
+	ctx.effect(function () { return installDesignSystemStyles(); }, "dsh-redteam-results: design system overrides");
 	ctx.slots.inject('conversation.input.dock',function(){return ctx.slots.register({name:'conversation.input.dock',id:'saker-chat-setup',order:-20},ChatSetupEntry);});
+	ctx.slots.inject('conversation.chat.assistant-actions',function(){return ctx.slots.register({name:'conversation.chat.assistant-actions',id:'saker-curation-action',order:80},CurationAction);});
 	ctx.inject(['sessions'], function (scope) {
 		injectVisibleConversationView(ctx, "showRedteamResults", function () {
 			return ctx.slots.register({ name: "conversation.view", id: "saker-results", order: 55,
@@ -4491,5 +9429,5 @@ function apply(ctx) {
 	});
 }
 
-module.exports = { name: "dsh-redteam-results-client", inject: ["slots", "configForms", "connection"], apply: apply, ChatSetup: ChatSetup };
+module.exports = { name: "dsh-redteam-results-client", inject: ["slots", "configForms", "connection", "uiWorkspace", "sessions"], apply: apply, ChatSetup: ChatSetup };
 return module.exports; } });

@@ -3,6 +3,8 @@ import { readTaskContext } from './task-context.js';
 import { parseReproduction, deliveryMaterialDigest } from './delivery.js';
 import { readEffectVerification } from './effect-verifications.js';
 import { readImpactReview } from './impact-reviews.js';
+import { resolveEvidenceRef } from './evidence-resolve.js';
+import { readFindingEvidenceReviews } from './finding-evidence-reviews.js';
 
 // This derived DTO is never accepted by finding register/update parameters.
 // Existing claimed verification remains history; current host evidence is read separately.
@@ -52,6 +54,14 @@ export function attachDeliveryEvidence(store, sessionId, finding) {
     row.executionEvidence.impactReason = review.reason;
   }
   const evidenceRefs = Array.isArray(row.evidenceRefs) ? row.evidenceRefs : [];
+  row.evidenceRefQuality = evidenceRefs.map(ref => resolveEvidenceRef(store, sessionId, ref));
+  try {
+    const review = readFindingEvidenceReviews(store, sessionId, row, row.evidenceRefQuality, { historyLimit: 1 });
+    row.userEvidenceReview = review.reviewHead
+      ? { ...review.reviewHead, headState: review.headState, headNote: review.headNote, reviewTotal: review.reviewTotal }
+      : { decision: '', decisionLabel: '未记录', headState: review.headState, headNote: review.headNote, reviewTotal: 0 };
+  } catch { row.userEvidenceReview = null; }
+  const taskContext = readTaskContext(store, sessionId);
   const reproductionRefs = Array.isArray(row.reproduction)
     ? []
     : (() => { try { return parseReproduction(row.reproduction)?.verification?.evidenceIds || [] } catch { return [] } })();
@@ -60,9 +70,18 @@ export function attachDeliveryEvidence(store, sessionId, finding) {
     const id = String(ref?.id || '');
     if (!id) return false;
     try {
+      if (kind === 'request') {
+        const [requestId, revision] = id.split(':');
+        return !!taskContext?.requests?.some(item => item.id === requestId
+          && (!revision || item.revision === revision));
+      }
+      if (kind === 'asset') return !!taskContext?.assets?.some(item => item.id === id || item.url === id);
+      if (kind === 'execution') return !!store.db.prepare('SELECT 1 FROM execution_receipts WHERE session_id=? AND id=?').get(sessionId, id);
+      if (kind === 'browser') return !!store.db.prepare('SELECT 1 FROM browser_receipts WHERE session_id=? AND id=?').get(sessionId, id);
+      if (kind === 'source') return !!store.db.prepare('SELECT 1 FROM project_sources WHERE session_id=? AND source_id=? LIMIT 1').get(sessionId, id)
+        || !!store.db.prepare('SELECT 1 FROM business_materials WHERE session_id=? AND id=?').get(sessionId, id);
       if (store.db.prepare('SELECT 1 FROM business_materials WHERE session_id=? AND id=?').get(sessionId, id)) return true;
       if (store.db.prepare('SELECT 1 FROM execution_receipts WHERE session_id=? AND id=?').get(sessionId, id)) return true;
-      if (kind === 'source' && store.db.prepare('SELECT 1 FROM project_sources WHERE session_id=? AND source_id=? LIMIT 1').get(sessionId, id)) return true;
     } catch { return false; }
     return false;
   };

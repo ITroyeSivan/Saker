@@ -14,8 +14,12 @@ const args = argsJson ? JSON.parse(argsJson) : {};
 const store = openStore(dbPath);
 let payload;
 try {
-  if (action === 'claim') payload = claimWork(store, args.parentSession, args);
-  else if (action === 'heartbeat') payload = heartbeatWork(store, args.key, args);
+  if (action === 'claim') payload = claimWork(store, args.parentSession, {
+    ...args, ownerPid: args.ownerPid ?? process.pid, ownerRuntime: args.ownerRuntime ?? 'work-lease-worker',
+  });
+  else if (action === 'heartbeat') payload = heartbeatWork(store, args.key, {
+    ...args, ownerPid: args.ownerPid ?? process.pid, ownerRuntime: args.ownerRuntime ?? 'work-lease-worker',
+  });
   else if (action === 'complete') payload = completeWork(store, args.key, args);
   else if (action === 'release') payload = releaseWork(store, args.key, args);
   else if (action === 'expire') payload = expireWorkLeases(store, args.parentSession, args.now);

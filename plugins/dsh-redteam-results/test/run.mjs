@@ -6,6 +6,12 @@ import os from "node:os";
 import path from "node:path";
 import { openStore, registerFinding, updateFinding, removeFinding, getFinding, allFindings, listFindings, listFindingsAll, computeStats, computeStatsAll, modeCounts, modeCountsAll, groupByTarget, groupByTargetAll, setMeta, getMeta, ledgerOverviewAll, secondReviewError, secondReviewVerdict, SECOND_RATINGS, RATING_SCALE, REGISTER_STATUSES, MODE_STATUSES } from "../lib/store.js";
 import { verifyMessage, findingAdmissionError, isTrustedRequest, dispatch, checkCsrf, apply, contractEnvelope } from "../lib/index.js";
+import { DEFAULT_WORKFLOWS, workflowById } from "../lib/workflow/defaults.js";
+import { compileWorkflow, stepPrompt } from "../lib/workflow/compiler.js";
+import { normalizeDefinition, validateDefinition } from "../lib/workflow/schema.js";
+import { advanceWorkflowRun, createWorkflowRun, readWorkflowRun, saveWorkflowDefinition,
+	deleteWorkflowDefinition, listWorkflowDefinitions, readWorkflowDefinition, selectWorkflow,
+	selectedWorkflow, selectedWorkflowPrompt } from "../lib/workflow/store.js";
 
 // 二次复核成对参数：verified 是各模式通用的「验证类终态」，首次流转须在同一次调用里
 // 同时给出独立二次评级与足量依据——上游用例原先只流转状态，此处统一以 ...RV 补齐。
@@ -864,6 +870,90 @@ ok("二次评级词表与刻度自洽：info 低于 low，五档齐备", () => {
 	assert.ok(RATING_SCALE.info < RATING_SCALE.low, "info 必须低于 low");
 	assert.ok(RATING_SCALE.critical > RATING_SCALE.high);
 	assert.equal(Object.keys(RATING_SCALE).length, SECOND_RATINGS.length, "两表须一一对应");
+});
+
+ok("默认工作流编译：五段网站方法保留顺序、工具能力和语义哈希", () => {
+	const workflow = workflowById("web-default");
+	assert.ok(workflow, "web-default must exist");
+	const compiled = compileWorkflow(workflow, { liveTools: ["saker_material", "redteam_execution", "saker_browser", "oob_probe", "tool_pack", "pwsh"] });
+	assert.equal(compiled.nodes.length, 5);
+	assert.deepEqual(compiled.nodes.map(node => node.id), ["target", "inspect", "hypothesis", "verify", "evidence"]);
+	assert.match(compiled.prompt, /当前步骤|工具|完成条件/);
+	assert.match(stepPrompt({ nodes: compiled.nodes, currentIndex: 0 }), /收集目标与入口/);
+	assert.equal(compiled.semanticHash.length, 64);
+});
+
+ok("默认工作流编译：缺失工具明确标 missing，不假装已接入", () => {
+	const compiled = compileWorkflow(workflowById("web-default"), { liveTools: ["redteam_execution"] });
+	const missing = compiled.nodes.flatMap(node => node.capabilities).filter(item => item.status === "missing");
+	assert.ok(missing.length > 0, "missing tools must be visible");
+	assert.ok(missing.every(item => item.note.includes("工具面")));
+});
+
+ok("默认工作流编译：重复节点/未知后继必须失败", () => {
+	const duplicate = normalizeDefinition({ id: "bad", title: "bad", nodes: [
+		{ id: "a", title: "A", instruction: "A" }, { id: "a", title: "B", instruction: "B" },
+	] });
+	assert.equal(validateDefinition(duplicate).ok, false);
+	const forward = normalizeDefinition({ id: "bad2", title: "bad", nodes: [
+		{ id: "a", title: "A", instruction: "A", next: "c" }, { id: "b", title: "B", instruction: "B" },
+	] });
+	assert.equal(validateDefinition(forward).ok, false);
+});
+
+ok("工作流运行状态：只推进当前步骤，证据和完成状态落库", () => {
+	const store = openStore(":memory:");
+	const workflow = workflowById("web-default");
+	const compiled = compileWorkflow(workflow, { liveTools: ["saker_material", "redteam_execution", "saker_browser"] });
+	const run = createWorkflowRun(store, "workflow-test", { workflow, compiled, target: "http://127.0.0.1:9", goal: "test" });
+	assert.equal(run.state, "running");
+	assert.equal(run.current_index, 0);
+	assert.throws(() => advanceWorkflowRun(store, run, { stepId: "inspect", status: "done", note: "x" }), /current workflow step/);
+	const next = advanceWorkflowRun(store, run, { stepId: "target", status: "done", note: "已读取目标",
+		artifacts: [{ kind: "observation", title: "入口", detail: "目标首页返回正常，已记录入口清单。" }] });
+	assert.equal(next.current_index, 1);
+	assert.equal(next.data.nodes[0].status, "done");
+	assert.equal(next.data.nodes[0].artifacts[0].kind, "observation");
+	assert.deepEqual(next.data.nodes[0].evidenceRefs, []);
+	assert.equal(readWorkflowRun(store, "workflow-test", run.run_id).current_index, 1);
+	// 真实 Host 返回的是数据库行（nodes 在 data 下、索引叫 current_index），
+	// 不能只接受内存编译结果的形状。
+	assert.match(stepPrompt(readWorkflowRun(store, "workflow-test", run.run_id)), /了解网站与账号/);
+	store.db.close();
+});
+
+ok("自定义工作流：本次/个人保存、选择、预览和删除互不污染", () => {
+	const store = openStore(":memory:");
+	const base = {
+		title: "客户登录检查",
+		description: "先看登录入口，再做正常与异常对照。",
+		mode: "pentest",
+		nodes: [
+			{ id: "entry", title: "找登录入口", instruction: "从已有页面和请求定位登录入口。", tools: ["saker_browser"], output: "登录入口和身份" },
+			{ id: "compare", title: "做对照", instruction: "用正常和异常输入各请求一次并保存回执。", tools: ["redteam_execution"], output: "两条可复查回执" },
+			{ id: "record", title: "记录结论", instruction: "分开记录观察到的事实和不能确认的推断。", tools: [], output: "结论与缺口" },
+		],
+	};
+	const session = saveWorkflowDefinition(store, base, { scope: "session", sessionId: "workflow-editor" });
+	assert.match(session.id, /^custom-/);
+	assert.equal(session.source, "session");
+	assert.equal(session.version, "1");
+	const personal = saveWorkflowDefinition(store, base, { scope: "personal", sessionId: "workflow-editor" });
+	assert.equal(personal.source, "personal");
+	const list = listWorkflowDefinitions(store, "workflow-editor");
+	assert.ok(list.some(item => item.id === session.id && item.source === "session"));
+	assert.ok(list.some(item => item.id === personal.id && item.source === "personal"));
+	const selected = selectWorkflow(store, "workflow-editor", session.id);
+	assert.equal(selected.id, session.id);
+	assert.match(selectedWorkflowPrompt(store, "workflow-editor"), /客户登录检查.*3步.*自定义/);
+	const read = readWorkflowDefinition(store, session.id, "workflow-editor");
+	assert.equal(read.nodes.length, 3);
+	const compiled = compileWorkflow(read, { liveTools: ["saker_browser", "redteam_execution"] });
+	assert.match(compiled.prompt, /找登录入口/);
+	assert.throws(() => deleteWorkflowDefinition(store, "web-default", { sessionId: "workflow-editor" }), /内置方法/);
+	deleteWorkflowDefinition(store, session.id, { scope: "session", sessionId: "workflow-editor" });
+	assert.equal(selectedWorkflow(store, "workflow-editor").id, "web-default");
+	assert.equal(readWorkflowDefinition(store, session.id, "workflow-editor"), null);
 });
 
 

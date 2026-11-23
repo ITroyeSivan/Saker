@@ -1,5 +1,5 @@
 const SECRET_KEY = /^(?:authorization|proxy-authorization|cookie|set-cookie|x-api-key|api-key|x-auth-token|password|passwd|pwd|secret|client_secret|api[_-]?key|access[_-]?token|refresh[_-]?token|token|session|sessionid)$/i;
-const SECRET_KEY_EMBEDDED = /(?:password|passwd|pwd|secret|client_secret|api[_-]?key|access[_-]?token|refresh[_-]?token|token|session|cookie|authorization)/i;
+const SECRET_KEY_EMBEDDED = /(?:password|passwd|pwd|secret|client_secret|api[_-]?key|access[_-]?token|refresh[_-]?token|token|cookie|authorization)/i;
 
 export function redactHeaders(headers) {
   const out = {};

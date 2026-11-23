@@ -10,7 +10,8 @@ export const WORK_LEASE_SCHEMA = `
 CREATE TABLE IF NOT EXISTS work_leases (
  work_key TEXT PRIMARY KEY, parent_session TEXT NOT NULL, worker TEXT NOT NULL,
  generation INTEGER NOT NULL, state TEXT NOT NULL, expires_at INTEGER NOT NULL,
- heartbeat_at INTEGER NOT NULL, record TEXT NOT NULL, updated_at TEXT NOT NULL);
+ heartbeat_at INTEGER NOT NULL, owner_pid INTEGER NOT NULL DEFAULT 0,
+ owner_runtime TEXT NOT NULL DEFAULT '', record TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_work_leases_parent ON work_leases(parent_session, state);
 `;
 
@@ -28,7 +29,8 @@ function read(store, key) {
   try { record = parseRowRecord({ record: row.record }, { table: 'work_leases', id: key }); }
   catch { record = { history: [], result: null }; }
   return { ...record, workKey: row.work_key, parentSession: row.parent_session, worker: row.worker,
-    generation: row.generation, state: row.state, expiresAt: row.expires_at, heartbeatAt: row.heartbeat_at };
+    generation: row.generation, state: row.state, expiresAt: row.expires_at, heartbeatAt: row.heartbeat_at,
+    ownerPid: Number(row.owner_pid || 0), ownerRuntime: String(row.owner_runtime || '') };
 }
 /** 依赖资料 ID 列表：去重、去空、限长，避免把任意输入整段塞进租约记录。 */
 function normalizeMaterialIds(value) {
@@ -42,9 +44,10 @@ function normalizeMaterialIds(value) {
   return out;
 }
 function write(store, key, row) {
-  store.db.prepare('INSERT INTO work_leases(work_key,parent_session,worker,generation,state,expires_at,heartbeat_at,record,updated_at) VALUES(?,?,?,?,?,?,?,?,?) '
-    + 'ON CONFLICT(work_key) DO UPDATE SET worker=excluded.worker,generation=excluded.generation,state=excluded.state,expires_at=excluded.expires_at,heartbeat_at=excluded.heartbeat_at,record=excluded.record,updated_at=excluded.updated_at')
+  store.db.prepare('INSERT INTO work_leases(work_key,parent_session,worker,generation,state,expires_at,heartbeat_at,owner_pid,owner_runtime,record,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?) '
+    + 'ON CONFLICT(work_key) DO UPDATE SET worker=excluded.worker,generation=excluded.generation,state=excluded.state,expires_at=excluded.expires_at,heartbeat_at=excluded.heartbeat_at,owner_pid=excluded.owner_pid,owner_runtime=excluded.owner_runtime,record=excluded.record,updated_at=excluded.updated_at')
     .run(key, row.parentSession, row.worker, row.generation, row.state, row.expiresAt, row.heartbeatAt,
+      Number(row.ownerPid || 0), String(row.ownerRuntime || ''),
       JSON.stringify({ history: row.history ?? [], result: row.result ?? null, materialIds: normalizeMaterialIds(row.materialIds) }), new Date().toISOString());
   return read(store, key);
 }
@@ -53,7 +56,33 @@ const inTx = (store, work) => { store.db.exec('BEGIN IMMEDIATE'); try { const ou
 // 租约按父任务隔离：同一目标+问题在不同任务里是不同的工作，不能互相撞键。
 const scopedKey = (parentSession, key) => String(parentSession) + ':' + key;
 
-/** 领取或接手：无人持有、已释放或已过期时接手并把 generation+1；同一 worker 在租约内续租；其他持有者未过期时拒绝。 */
+/**
+ * 过期只说明“需要核对”，不说明旧进程已经退出。只有确认旧 owner PID
+ * 不存在时才允许接手；同进程/活进程/权限无法确认时一律拒绝，避免两个
+ * 工作者同时操作同一目标。legacy 没有 owner PID 的记录也按未确认处理。
+ */
+function ownerLiveness(row) {
+  const pid = Number(row.ownerPid || 0);
+  if (!Number.isSafeInteger(pid) || pid < 1) return { known: false, gone: false };
+  try {
+    process.kill(pid, 0);
+    return { known: true, gone: false };
+  } catch (error) {
+    return { known: true, gone: error?.code === 'ESRCH' };
+  }
+}
+
+function ownerPid(value) {
+  const pid = Number(value === undefined ? process.pid : value);
+  return Number.isSafeInteger(pid) && pid >= 0 ? pid : 0;
+}
+
+function ownerRuntime(value) {
+  return String(value || 'node').trim().slice(0, 120) || 'node';
+}
+
+/** 领取或接手：无人持有、已释放或确认旧 owner 已退出时接手并把 generation+1；
+ * 同一 worker 在租约内续租；其他持有者未过期或无法确认旧进程已退出时拒绝。 */
 export function claimWork(store, parentSession, input = {}) {
   const prefix = String(parentSession) + ':';
   const key = typeof input.workKey === 'string' && input.workKey.startsWith(prefix)
@@ -63,11 +92,42 @@ export function claimWork(store, parentSession, input = {}) {
   const now = Number.isFinite(input.now) ? input.now : Date.now();
   return inTx(store, () => {
     const current = read(store, key);
-    if (current && current.state === 'claimed' && current.worker !== input.worker && current.expiresAt > now) {
-      throw Object.assign(new Error('工作已被其他工作者领取，且租约未过期'), { code: 'work-lease-held', details: { worker: current.worker, expiresAt: current.expiresAt } });
+    if (current && current.state === 'done') {
+      throw Object.assign(new Error('工作已完成，不能重新领取；请创建后继工作'), { code: 'work-lease-completed', details: { workKey: key } });
+    }
+    if (current && current.state === 'claimed' && current.worker !== input.worker) {
+      if (current.expiresAt > now) {
+        throw Object.assign(new Error('工作已被其他工作者领取，且租约未过期'), { code: 'work-lease-held', details: { worker: current.worker, expiresAt: current.expiresAt } });
+      }
+      const liveness = ownerLiveness(current);
+      if (!liveness.gone && input.takeoverConfirmed !== true) {
+        throw Object.assign(new Error('租约已过期但旧工作者进程仍未确认退出；拒绝同时接手'), {
+          code: 'work-lease-owner-unconfirmed',
+          details: { worker: current.worker, ownerPid: current.ownerPid || 0, ownerKnown: liveness.known },
+        });
+      }
+    }
+    if (current && current.state === 'expired' && current.worker !== input.worker && input.takeoverConfirmed !== true) {
+      const liveness = ownerLiveness(current);
+      if (!liveness.gone) {
+        throw Object.assign(new Error('租约已过期但旧工作者进程仍未确认退出；拒绝同时接手'), {
+          code: 'work-lease-owner-unconfirmed',
+          details: { worker: current.worker, ownerPid: current.ownerPid || 0, ownerKnown: liveness.known },
+        });
+      }
+    }
+    if (current && current.state === 'cleanup-failed' && current.worker !== input.worker && input.takeoverConfirmed !== true) {
+      const liveness = ownerLiveness(current);
+      if (!liveness.gone) {
+        throw Object.assign(new Error('旧工作者清理未确认；拒绝同时接手'), {
+          code: 'work-lease-owner-unconfirmed',
+          details: { worker: current.worker, ownerPid: current.ownerPid || 0, ownerKnown: liveness.known },
+        });
+      }
     }
     const generation = current ? (current.state === 'claimed' && current.worker === input.worker ? current.generation : current.generation + 1) : 1;
     return write(store, key, { parentSession, worker: input.worker, generation, state: 'claimed', expiresAt: now + ttlMs, heartbeatAt: now,
+      ownerPid: ownerPid(input.ownerPid), ownerRuntime: ownerRuntime(input.ownerRuntime),
       history: current?.history ?? [], result: current?.result ?? null,
       materialIds: input.materialIds !== undefined ? input.materialIds : (current?.materialIds ?? []) });
   });
@@ -104,7 +164,8 @@ export function heartbeatWork(store, key, input = {}) {
     if (current.worker !== input.worker || current.generation !== input.generation) {
       throw Object.assign(new Error('租约已转移，本次续租无效'), { code: 'work-lease-lost', details: { generation: current.generation, worker: current.worker } });
     }
-    return write(store, key, { ...current, expiresAt: now + ttlMs, heartbeatAt: now });
+    return write(store, key, { ...current, expiresAt: now + ttlMs, heartbeatAt: now,
+      ownerPid: ownerPid(input.ownerPid), ownerRuntime: ownerRuntime(input.ownerRuntime) });
   });
 }
 
@@ -114,6 +175,10 @@ export function completeWork(store, key, input = {}) {
   return inTx(store, () => {
     const current = read(store, key);
     if (!current) throw new Error('工作不存在');
+    if (current.state === 'released' || current.state === 'expired') {
+      const history = [...(current.history || []), { generation: input.generation, worker: input.worker, result: input.result ?? null, at: now, superseded: true }].slice(-20);
+      return { ...write(store, key, { ...current, history }), superseded: true };
+    }
     if (current.generation !== input.generation || current.worker !== input.worker) {
       const history = [...(current.history || []), { generation: input.generation, worker: input.worker, result: input.result ?? null, at: now, superseded: true }].slice(-20);
       return { ...write(store, key, { ...current, history }), superseded: true };
@@ -128,6 +193,7 @@ export function releaseWork(store, key, input = {}) {
     const current = read(store, key);
     if (!current) throw new Error('工作不存在');
     if (current.generation !== input.generation || current.worker !== input.worker) return { ...current, superseded: true };
+    if (current.state === 'done') return { ...current, superseded: false, alreadyDone: true };
     return write(store, key, { ...current, state: 'released', expiresAt: now });
   });
 }
@@ -135,15 +201,22 @@ export function releaseWork(store, key, input = {}) {
 /** 把过期未续租的 claimed 工作标为 expired，供后续接手（不自动重放副作用）。 */
 export function expireWorkLeases(store, parentSession, now = Date.now()) {
   const rows = store.db.prepare('SELECT work_key FROM work_leases WHERE parent_session=? AND state=? AND expires_at<=?').all(parentSession, 'claimed', now);
-  for (const row of rows) store.db.prepare('UPDATE work_leases SET state=?,updated_at=? WHERE work_key=?').run('expired', new Date().toISOString(), row.work_key);
-  return rows.map(row => row.work_key);
+  const expired = [];
+  for (const row of rows) {
+    const lease = read(store, row.work_key);
+    if (lease && !ownerLiveness(lease).gone) continue;
+    store.db.prepare('UPDATE work_leases SET state=?,updated_at=? WHERE work_key=?').run('expired', new Date().toISOString(), row.work_key);
+    expired.push(row.work_key);
+  }
+  return expired;
 }
 
 export function listWorkLeases(store, parentSession) {
   return store.db.prepare('SELECT work_key FROM work_leases WHERE parent_session=? ORDER BY updated_at DESC').all(parentSession)
     .map(row => { const lease = read(store, row.work_key);
       return { workKey: row.work_key, worker: lease.worker, generation: lease.generation, state: lease.state,
-        expiresAt: lease.expiresAt, heartbeatAt: lease.heartbeatAt, result: lease.result, history: lease.history?.length ?? 0,
+        expiresAt: lease.expiresAt, heartbeatAt: lease.heartbeatAt, ownerPid: lease.ownerPid, ownerRuntime: lease.ownerRuntime,
+        result: lease.result, history: lease.history?.length ?? 0,
         materialIds: normalizeMaterialIds(lease.materialIds) }; });
 }
 

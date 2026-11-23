@@ -13,12 +13,8 @@ const variants = [
     "if(value!==undefined && (!integer(value)||value<1))",
     'competition limits accept one field', 'model-budget.js'],
   ['limit-change-resets-time',
-    'const budgetStartedAt = requestedMinutes === null || requestedMinutes === undefined\n'
-      + '      ? undefined\n'
-      + '      : (priorBudget.startedAt || nowIso())',
-    'const budgetStartedAt = requestedMinutes === null || requestedMinutes === undefined\n'
-      + '      ? undefined\n'
-      + '      : nowIso()',
+    'if (requestedMinutes === null || requestedMinutes === undefined) delete nextBudget.startedAt',
+    'if (requestedMinutes !== null && requestedMinutes !== undefined) nextBudget.startedAt = nowIso()',
     'competition limits accept one field', 'scene-context.js'],
   ['pause-does-not-block-dispatch',
     'if (settings?.continuationPaused)', 'if (false)',

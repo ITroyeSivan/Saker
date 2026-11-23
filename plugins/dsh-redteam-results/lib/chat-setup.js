@@ -16,7 +16,7 @@ export function chatDefaults(store) {
 export function saveChatDefaults(store, input) {
   if (!Number.isInteger(input.workers) || input.workers < 0 || input.workers > MAX_SITE_WORKERS) throw Error('子代理上限应为0–'+MAX_SITE_WORKERS+'的整数');
   const previous = chatDefaults(store) || {};
-  const record = { interaction: normalizeInteraction(input.interaction), reporting: reportingFor(input), workers: input.workers, explain: input.explain === true };
+  const record = { interaction: normalizeInteraction(input.interaction), reporting: reportingFor(input), workers: input.workers, workersExplicit: true, explain: input.explain === true };
   // v6 5.5：存为默认偏好也保存测试内容偏好；空数组表示“只分析已添加内容，不再访问网站”。
   if (input.content !== undefined) record.content = normalizeTestContent(input.content);
   for (const [key, label] of [['workerModel', '协作模型'], ['reviewModel', '独立复核模型'], ['reportModel', '明确写报告时使用']]) {

@@ -28,6 +28,19 @@ import type { ServerEntry, StudioSection } from './types.ts'
 export const META_TOOL_SEARCH = 'mcp_search'
 export const META_TOOL_CALL = 'mcp_call'
 
+/** Models sometimes pass `args` as a JSON string even though the schema says object. */
+export function normalizeToolArguments(value: unknown): Record<string, unknown> | null {
+  if (value === undefined || value === null) return {}
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value)
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown> : null
+    } catch { return null }
+  }
+  return typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+}
+
 /** Re-list a catalog once it is older than this, so `tools/list_changed` needs no handler. */
 export const CATALOG_TTL_MS = 5 * 60_000
 /** Default `mcp_search` result count. */
@@ -555,8 +568,10 @@ export class ProxyRegistry {
         error: `server「${name}」没有工具「${toolName}」${near.length === 0 ? '' : `；名字接近的有：${near.join(', ')}`}（先用 ${META_TOOL_SEARCH} 确认名字）`,
       }
     }
+    const toolArgs = normalizeToolArguments(args)
+    if (toolArgs === null) return { ok: false, text: '', error: `${META_TOOL_CALL} 的 args 必须是 JSON 对象` }
     try {
-      const result = await mount.channel.request('tools/call', { name: toolName, arguments: args ?? {} }, server.toolCallTimeoutMs)
+      const result = await mount.channel.request('tools/call', { name: toolName, arguments: toolArgs }, server.toolCallTimeoutMs)
       const payload = (result ?? {}) as {
         content?: ReadonlyArray<{ type?: unknown; text?: unknown }>
         structuredContent?: unknown

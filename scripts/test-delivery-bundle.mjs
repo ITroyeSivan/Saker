@@ -163,6 +163,17 @@ try {
     const bundle = await dispatch({}, store, 'delivery.bundle', { sessionId: 's1' });
     assert.equal(bundle.confirmedFindings, 0); assert.equal(bundle.checkedCount, 1);
     assert(zipContents(Buffer.from(bundle.archive, 'base64'))['delivery/checked.tsv'].includes('未测'));
+    const preview = await dispatch({}, store, 'delivery.bundle', { sessionId: 's1', preview: true });
+    assert.equal(preview.archive, null);
+    assert.equal(typeof preview.snapshot, 'string');
+    assert.equal(preview.snapshot.length, 64);
+    assert.ok(preview.fileIndex.every(item => item.path.startsWith('delivery/') && /^[0-9a-f]{64}$/.test(item.sha256)));
+    const downloaded = await dispatch({}, store, 'delivery.bundle', { sessionId: 's1', expectedSnapshot: preview.snapshot });
+    assert.equal(typeof downloaded.archive, 'string');
+    saveChecks(store, 's1', [{ ...check, status: 'blocked', reason: 'preview stale fixture' }]);
+    await assert.rejects(dispatch({}, store, 'delivery.bundle', { sessionId: 's1', expectedSnapshot: preview.snapshot }),
+      /内容已变化/);
+    saveChecks(store, 's1', [check]);
     assert.equal((await dispatch({}, store, 'delivery.bundle', { sessionId: 'other' })).confirmedFindings, 0);
     await assert.rejects(dispatch({}, store, 'delivery.bundle', {}), /sessionId/);
     const tools = new Map();

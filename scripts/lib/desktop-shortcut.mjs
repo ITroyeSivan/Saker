@@ -20,7 +20,7 @@ export function deployDesktopLauncherAssets({ toolsDirectory, config }) {
   return { launcher, cookiePruner, configPath }
 }
 
-export function refreshDesktopShortcut({ desktopDirectory, workspace, userDataDirectory, home = process.env.DSH_HOME || join(homedir(), '.dsh') }) {
+export function refreshDesktopShortcut({ desktopDirectory, workspace, userDataDirectory, launcherDirectory, home = process.env.DSH_HOME || join(homedir(), '.dsh') }) {
   if (process.platform !== 'win32') throw new Error('Desktop shortcut maintenance currently supports Windows only.')
   const desktop = resolve(desktopDirectory)
   const executable = join(desktop, 'DeepSeek Harness.exe')
@@ -34,7 +34,7 @@ export function refreshDesktopShortcut({ desktopDirectory, workspace, userDataDi
   const sameHome = previous.home && resolve(previous.home).toLowerCase() === resolve(home).toLowerCase()
   const persistent = sameHome ? previous : {}
   const launchWorkspace = resolve(workspace || persistent.workspace || defaultWorkspace)
-  const toolsDirectory = join(launchWorkspace, '_ref', 'tools')
+  const toolsDirectory = resolve(launcherDirectory || (sameHome ? join(launchWorkspace, '_ref', 'tools') : join(home, 'saker-desktop-launcher')))
   mkdirSync(toolsDirectory, { recursive: true })
   const configPath = join(toolsDirectory, 'saker-desktop-launch.json')
   const old = existsSync(configPath) ? JSON.parse(readFileSync(configPath, 'utf8').replace(/^\uFEFF/, '')) : {}
@@ -48,6 +48,8 @@ export function refreshDesktopShortcut({ desktopDirectory, workspace, userDataDi
   }
   const cftPath = old.cftPath || persistent.cftPath || ''
   if (cftPath) config.cftPath = cftPath
+  const labConfig = old.labConfig || persistent.labConfig || ''
+  if (labConfig) config.labConfig = labConfig
   const assets = deployDesktopLauncherAssets({ toolsDirectory, config })
   const quote = value => "'" + value.replaceAll("'", "''") + "'"
   const script = `$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); $desktop=[Environment]::GetFolderPath('Desktop'); if(-not $desktop){throw 'Windows Desktop folder unavailable'}; $shell=New-Object -ComObject WScript.Shell; $link=$shell.CreateShortcut((Join-Path $desktop 'Saker (dsh Desktop).lnk')); $link.TargetPath=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'; $link.Arguments=${quote('-NoLogo -NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -File "' + assets.launcher + '"')}; $link.WorkingDirectory=${quote(config.workspace)}; $link.IconLocation=${quote(executable + ',0')}; $link.Description='Saker / dsh Desktop'; $link.Save(); $check=$shell.CreateShortcut($link.FullName); if($check.TargetPath -ne $link.TargetPath -or $check.Arguments -ne $link.Arguments){throw 'Shortcut verification failed'}; Write-Output $link.FullName`

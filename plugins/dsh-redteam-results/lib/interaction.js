@@ -43,9 +43,9 @@ export function requiresCheckpoint(value) { return ['confirm-data-change', 'conf
 export function interactionPrompt(value, child = false, reporting) {
   const mode = normalizeInteraction(value);
   const text = mode === 'confirm-step'
-    ? '每个检查步骤前问我：先说明本步骤要检查什么，确认后执行该步骤内必要调用；不为底层每条请求重复弹窗。步骤、范围、影响或身份有实质变化时重新确认。用redteam_task checkpoint等待桌面确认，不自行进入下一步。'
+    ? '每个检查步骤前问我：先说明本步骤要检查什么，确认后执行该步骤内必要调用；不为底层每条请求重复弹窗。步骤、范围、影响或身份有实质变化时重新确认。用 ask_user_question 提供“继续 / 停止”选项并等待用户选择；不自行进入下一步。'
     : mode === 'confirm-data-change'
-      ? '改动网站数据前问我：已授权读取和分析继续；提交、修改或删除业务数据前先确认当前操作及预计影响。用redteam_task checkpoint等待确认，不自行改动数据。'
+      ? '改动网站数据前问我：已授权读取和分析继续；提交、修改或删除业务数据前先用 ask_user_question 说明当前操作、预计影响和“继续 / 停止”选项，等待用户选择；不自行改动数据。'
       : '自行推进：在已确认的范围和操作权限内自行选择有依据的下一步，连续研究；缺账号或关键信息时集中询问，不要求用户反复说继续。';
   const reports = normalizeReporting(reporting ?? reportingFor({ interaction: mode }));
   const reportText = reports === 'step' ? '进度汇报：每完成一个检查步骤时给一句进展。'

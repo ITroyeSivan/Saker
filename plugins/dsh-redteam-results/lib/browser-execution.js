@@ -4,7 +4,7 @@
 // HTTP(S) URL，等页面加载完，再在页面里求值 `window.__sakerProbe`——载荷必须是被执行过才会把它
 // 设成复核 marker。仅回显文本、被转义、被 CSP 拦下都不会让这个值出现；本地 file: 环境直接拒绝。
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -101,6 +101,7 @@ export async function runBrowserExecution({ url, marker, timeoutMs = 15000, exec
 export function recordBrowserReceipt(store, sessionId, receipt) {
   if (!receipt || receipt.source !== 'host-browser-execution') throw new Error('host browser receipt required');
   const record = { id: 'browser-' + randomUUID(), ...receipt };
+  record.recordSha256 = browserReceiptDigest(record);
   store.db.prepare('INSERT INTO browser_receipts (session_id,id,record) VALUES (?,?,?)').run(sessionId, record.id, JSON.stringify(record));
   return record;
 }
@@ -108,5 +109,13 @@ export function recordBrowserReceipt(store, sessionId, receipt) {
 export function readBrowserReceipt(store, sessionId, id) {
   const row = store.db.prepare('SELECT record FROM browser_receipts WHERE session_id=? AND id=?').get(sessionId, String(id || ''));
   if (!row) throw new Error('browser receipt not found in current session');
-  return JSON.parse(row.record);
+  const record = JSON.parse(row.record);
+  const integrityValid = typeof record.recordSha256 === 'string'
+    && record.recordSha256 === browserReceiptDigest(record);
+  return { ...record, integrityValid };
+}
+
+export function browserReceiptDigest(record) {
+  const { recordSha256, ...content } = record || {};
+  return createHash('sha256').update(JSON.stringify(content)).digest('hex');
 }

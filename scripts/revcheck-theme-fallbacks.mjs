@@ -17,9 +17,9 @@ const digest = () => createHash('sha256').update(fs.readFileSync(client)).digest
 const before = digest();
 
 const variants = [
-  { id: 'off-token-font-size', append: 'const __tokenProbe = { fontSize: 11 };\n', failure: /字号不在 5\.7 令牌/ },
-  { id: 'off-token-css-font-size', append: 'const __cssProbe = ".dsh-probe{font-size:11px}";\n', failure: /字号不在 5\.7 令牌/ },
-  { id: 'off-token-font-shorthand', append: 'const __shorthandProbe = ".dsh-probe{font:11px/16px monospace}";\n', failure: /字号不在 5\.7 令牌/ },
+  { id: 'off-token-font-size', append: 'const __tokenProbe = { fontSize: 10 };\n', failure: /字号不在共享令牌/ },
+  { id: 'off-token-css-font-size', append: 'const __cssProbe = ".dsh-probe{font-size:10px}";\n', failure: /字号不在共享令牌/ },
+  { id: 'off-token-font-shorthand', append: 'const __shorthandProbe = ".dsh-probe{font:10px/16px monospace}";\n', failure: /字号不在共享令牌/ },
   { id: 'undefined-host-var-near-white', append: "const __bgProbe = { background: 'var(--dsw-not-a-real-variable, #ffffff)' };\n", failure: /浅底浅字/ },
 ];
 

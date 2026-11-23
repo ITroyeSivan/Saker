@@ -54,6 +54,8 @@ $env:TEMP = $settings.tempDirectory
 $env:TMP = $settings.tempDirectory
 $env:TMPDIR = $settings.tempDirectory
 $env:DSH_HOME = $settings.home
+if ($settings.nodeExecutable) { $env:SAKER_NODE = [string]$settings.nodeExecutable }
+if ($settings.labConfig) { $env:SAKER_LAB_CONFIG = [string]$settings.labConfig }
 if ($settings.cftPath) { $env:SAKER_CFT_PATH = [string]$settings.cftPath }
 Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
 # The current dsh host rejects socks5h in ALL_PROXY during startup. Preserve
@@ -79,6 +81,19 @@ if (-not $settings.nodeExecutable -or -not (Test-Path -LiteralPath ([string]$set
 }
 $launchArguments = @('--user-data-dir="' + $settings.userDataDirectory + '"')
 if ($DebugPort -gt 0) { $launchArguments += '--remote-debugging-port=' + $DebugPort }
+# Follow Windows display scaling by default. An explicit ``interfaceScale`` in
+# the launch config is the only way to override it; no DPI auto-cap is applied.
+$interfaceScale = $null
+$hasInterfaceScale = @($settings.PSObject.Properties.Name) -contains 'interfaceScale'
+if ($hasInterfaceScale) {
+  $configuredScale = $settings.interfaceScale
+  if ($null -ne $configuredScale -and [string]$configuredScale -ne '' -and [double]$configuredScale -gt 0) {
+    $interfaceScale = [double]$configuredScale
+  }
+}
+if ($null -ne $interfaceScale) {
+  $launchArguments += '--force-device-scale-factor=' + $interfaceScale.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+}
 $launched = Start-Process -FilePath $executable -ArgumentList $launchArguments -WorkingDirectory $settings.workspace -WindowStyle Normal -PassThru
 
 # The shortcut itself runs hidden. On Windows the Electron window can inherit

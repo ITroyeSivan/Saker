@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { parseDocumentIsolated } from './project-document-parser.js'
+import { indexKnowledgeEntry } from './knowledge-index.js'
 
 const nowIso = () => new Date().toISOString()
 const parse = row => { try { return row ? JSON.parse(row.record) : null } catch { return null } }
@@ -60,6 +61,7 @@ export async function importKnowledgeBuffer(store, sessionId, input) {
     }
   }
   const digest = createHash('sha256').update(buffer).digest('hex')
+  const projectKey = String(input.projectKey || sessionId)
   const sourceId = String(input.sourceId || 'knowledge-' + digest.slice(0, 16))
   const previous = store.db.prepare('SELECT record FROM competition_knowledge WHERE session_id=? AND source_id=? ORDER BY revision DESC LIMIT 1').get(sessionId, sourceId)
   const current = parse(previous)
@@ -83,8 +85,23 @@ export async function importKnowledgeBuffer(store, sessionId, input) {
   store.db.prepare('INSERT INTO competition_knowledge(session_id,source_id,revision,record,updated_at) VALUES(?,?,?,?,?) '
     + 'ON CONFLICT(session_id,source_id,revision) DO UPDATE SET record=excluded.record,updated_at=excluded.updated_at')
     .run(sessionId, sourceId, revision, JSON.stringify(record), at)
+  let indexState = 'pending-index'
+  let indexError = ''
+  try {
+    indexKnowledgeEntry({
+      projectKey, sourceId, sourceKind: 'local',
+      sourceLabel: record.title, sourceUrl: record.sourceUrl, title: record.title,
+      location: record.path, text, product: input.product, version: input.version,
+      applicability: input.applicability || 'unknown', sourceDate: input.sourceDate,
+      status: parseState === 'ready' ? 'ready' : 'pending-index',
+      metadata: { digest, bytes: buffer.length, revision, parseState, license: record.license },
+    })
+    indexState = parseState === 'ready' ? 'ready' : 'pending-index'
+  } catch (error) {
+    indexError = String(error.message || error)
+  }
   const { text: _text, ...view } = record
-  return view
+  return { ...view, indexState, ...(indexError ? { indexError } : {}) }
 }
 
 export function searchKnowledge(store, sessionId, { query = '', limit = 5, cursor = '' } = {}) {

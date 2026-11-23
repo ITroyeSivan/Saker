@@ -47,16 +47,15 @@ try {
     assert.match(error.message, /bad-flow/);
   });
 
-  await test('a corrupt worker row blocks the quota change instead of being skipped', () => {
+  await test('lowering a worker ceiling does not need to scan existing workers and cannot kill them', () => {
     startTaskPolicy(store, 'worker-parent', { mode: 'regular', budget: { toolCalls: 10 } });
     store.db.exec(SITE_WORKER_SCHEMA);
     store.db.prepare('INSERT OR REPLACE INTO site_workers (parent_session, child_id, site, record) VALUES (?,?,?,?)')
       .run('worker-parent', 'child-1', 'https://fixture.test', '{"broken"');
-    const error = capture(() => setTaskWorkers(store, 'worker-parent', 0, 'desktop-user'));
-    assert(error instanceof CorruptRecordError, 'expected the typed error, got ' + error);
-    assert.equal(error.table, 'site_workers');
-    assert.equal(error.rowKey, 'parent_session');
-    assert.equal(error.rowId, 'worker-parent');
+    setTaskWorkers(store, 'worker-parent', 0, 'desktop-user');
+    assert.equal(readTaskPolicy(store, 'worker-parent').workerLimit, 0);
+    assert(store.db.prepare('SELECT 1 FROM site_workers WHERE child_id=?').get('child-1'),
+      'the corrupt existing row is not silently treated as released or removed');
   });
 
   await test('the shared worker predicate and round archiving surface a corrupt row', () => {

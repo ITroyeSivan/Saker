@@ -211,8 +211,8 @@ await test('R02 mixed domain, URL and IP intersections cannot widen protocol or 
   const services = {
     subagents: {
       async listDescendants() { return [] },
-      async startActivation() {
-        return { result: Promise.resolve({ stopReason: 'completed', output: [] }), dispose: async () => {} }
+      async startActivation(spec) {
+        return { childId: spec.childId, result: Promise.resolve({ stopReason: 'completed', output: [] }), dispose: async () => {} }
       },
       async drainChildren() {},
     },
@@ -328,9 +328,9 @@ await test('U04 uncapped workers inherit no artificial ceiling, distinct questio
   const services = {
     subagents: {
       async listDescendants() { return [] },
-      async startActivation() {
+      async startActivation(spec) {
         starts += 1
-        return { result: Promise.resolve({ stopReason: 'completed', output: [] }), dispose: async () => {} }
+        return { childId: spec.childId, result: Promise.resolve({ stopReason: 'completed', output: [] }), dispose: async () => {} }
       },
       async drainChildren() {},
     },
@@ -356,7 +356,7 @@ await test('U04 uncapped workers inherit no artificial ceiling, distinct questio
     })
     assert.notEqual(first.childId, second.childId)
     assert.equal(starts, 2)
-    assert.equal(readTaskPolicy(store, first.childId).budget.toolCalls, null)
+    assert.equal(readTaskPolicy(store, first.childId).budget.toolCalls, 60)
 
     start(store, 'materials', { target: 'https://app.example.test', budget: { workers: 1 } })
     saveTaskContext(store, 'materials', {
@@ -386,9 +386,9 @@ await test('R05 material workers use exactly the selected authorized assets and 
   const services = {
     subagents: {
       async listDescendants() { return [] },
-      async startActivation() {
+      async startActivation(spec) {
         starts += 1
-        return { result: Promise.resolve({ stopReason: 'completed', output: [] }), dispose: async () => {} }
+        return { childId: spec.childId, result: Promise.resolve({ stopReason: 'completed', output: [] }), dispose: async () => {} }
       },
       async drainChildren() {},
     },
@@ -466,9 +466,9 @@ await test('R06 selected material identity, digest revisions and exact repeats s
   const services = {
     subagents: {
       async listDescendants() { return [] },
-      async startActivation() {
+      async startActivation(spec) {
         starts += 1
-        return { result: Promise.resolve({ stopReason: 'completed', output: [] }), dispose: async () => {} }
+        return { childId: spec.childId, result: Promise.resolve({ stopReason: 'completed', output: [] }), dispose: async () => {} }
       },
       async drainChildren() {},
     },

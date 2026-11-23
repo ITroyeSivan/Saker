@@ -31,12 +31,25 @@ for (const dir of dirs) {
   copyFileSync(artifact, join(destination, name))
   manifest.push({ name: pkg.name, version: pkg.version, artifact: dir === root ? name : `plugins/${dir.split(/[\\/]/).at(-1)}/${name}`, sha256: createHash('sha256').update(readFileSync(artifact)).digest('hex') })
 }
+const manifestSha256 = createHash('sha256').update(JSON.stringify(manifest)).digest('hex')
+const buildId = manifestSha256.slice(0, 12)
+const builtAt = new Date().toISOString()
 // 图片按目录整体带走：写死清单曾漏掉新增截图，交付包的 README 就成了坏图。
 const media = readdirSync(join(root, 'docs', 'media'), { withFileTypes: true })
   .filter(entry => entry.isFile())
   .map(entry => `docs/media/${entry.name}`)
   .sort()
-for (const file of ['scripts/install-desktop.mjs', 'scripts/restore-desktop.mjs', 'scripts/update-desktop-shortcut.mjs', 'scripts/lib/product-plugins.mjs', 'scripts/lib/desktop-artifacts.mjs', 'scripts/lib/desktop-backup.mjs', 'scripts/lib/desktop-shortcut.mjs', 'scripts/lib/desktop-launch.ps1', 'scripts/lib/desktop-prune-auth-cookies.mjs', 'docs/getting-started.md', 'docs/plugin-list.md', 'docs/features.md', 'docs/boundaries.md', 'docs/development.md', 'docs/release-format.md', ...media, 'benchmarks/task-effects/README.md', `docs/release-v${version}.md`]) {
+const shippedScriptLib = [
+  'scripts/lib/product-plugins.mjs',
+  'scripts/lib/desktop-artifacts.mjs',
+  'scripts/lib/desktop-backup.mjs',
+  'scripts/lib/desktop-shortcut.mjs',
+  'scripts/lib/desktop-shortcut-policy.mjs',
+  'scripts/lib/desktop-process.mjs',
+  'scripts/lib/desktop-launch.ps1',
+  'scripts/lib/desktop-prune-auth-cookies.mjs',
+]
+for (const file of ['scripts/install-desktop.mjs', 'scripts/restore-desktop.mjs', 'scripts/update-desktop-shortcut.mjs', ...shippedScriptLib, 'docs/getting-started.md', 'docs/plugin-list.md', 'docs/features.md', 'docs/boundaries.md', 'docs/development.md', 'docs/release-format.md', ...media, 'benchmarks/task-effects/README.md', `docs/release-v${version}.md`]) {
   const destination = join(payload, file)
   mkdirSync(dirname(destination), { recursive: true })
   copyFileSync(join(root, file), destination)
@@ -48,9 +61,48 @@ const missingMedia = [...new Set([...readme.matchAll(/docs\/media\/[A-Za-z0-9._-
 if (missingMedia.length) throw new Error(`Release README references media that is not shipped: ${missingMedia.join(', ')}`)
 // Copy only user documentation, never recursive development directories.
 writeFileSync(join(payload, 'packages.json'), JSON.stringify(manifest, null, 2) + '\n')
+writeFileSync(join(payload, 'build-info.json'), JSON.stringify({
+  schema: 'saker.desktop-build/1',
+  name: 'Saker Desktop',
+  version,
+  buildId,
+  builtAt,
+  packageCount: manifest.length,
+  manifestSha256,
+}, null, 2) + '\n')
 const zip = payload + '.zip'
 const quote = x => "'" + x.replaceAll("'", "''") + "'"
 const script = `$ErrorActionPreference='Stop'; Get-ChildItem -LiteralPath ${quote(payload)} | Compress-Archive -DestinationPath ${quote(zip)} -Force`
 const result = spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { encoding: 'utf8', windowsHide: true, env: process.env })
 if (result.error || result.status !== 0) throw result.error || new Error('Desktop release ZIP creation failed: ' + result.stderr)
-console.log(JSON.stringify({ version, packages: manifest.length, directory: payload, zip }, null, 2))
+const zipSha256 = createHash('sha256').update(readFileSync(zip)).digest('hex')
+const rootArtifact = manifest[0]
+const resultsArtifact = manifest.find(item => item.name === '@dsh-external/dsh-redteam-results')
+if (!rootArtifact || !resultsArtifact) throw new Error('Release manifest is missing the root or results package')
+const checksumName = zip.split(/[\\/]/).at(-1) + '.sha256'
+writeFileSync(join(output, checksumName), `${zipSha256.toLowerCase()}  ${zip.split(/[\\/]/).at(-1)}\n`)
+const checksumLines = [
+  `${zipSha256}  ${zip.split(/[\\/]/).at(-1)}`,
+  `${rootArtifact.sha256.toUpperCase()}  ${rootArtifact.artifact.split('/').at(-1)}`,
+  `${resultsArtifact.sha256.toUpperCase()}  ${resultsArtifact.artifact.split('/').at(-1)}`,
+]
+const sumsPath = join(output, 'SHA256SUMS.txt')
+const prior = existsSync(sumsPath) ? readFileSync(sumsPath, 'utf8').split(/\r?\n/).filter(Boolean) : []
+const names = new Set(checksumLines.map(line => line.split(/\s{2,}/).at(-1)))
+const merged = prior.filter(line => !names.has(line.split(/\s{2,}/).at(-1))).concat(checksumLines)
+writeFileSync(sumsPath, merged.join('\n') + '\n')
+writeFileSync(join(output, 'LATEST.json'), JSON.stringify({
+  schema: 'saker.desktop-latest/1',
+  version,
+  buildId,
+  builtAt,
+  zip: zip.split(/[\\/]/).at(-1),
+  zipSha256,
+  checksum: checksumName,
+  manifestSha256,
+  rootArtifact: rootArtifact.artifact.split('/').at(-1),
+  rootSha256: rootArtifact.sha256,
+  resultsArtifact: resultsArtifact.artifact.split('/').at(-1),
+  resultsSha256: resultsArtifact.sha256,
+}, null, 2) + '\n')
+console.log(JSON.stringify({ version, buildId, manifestSha256, zipSha256, checksum: checksumName, packages: manifest.length, directory: payload, zip }, null, 2))

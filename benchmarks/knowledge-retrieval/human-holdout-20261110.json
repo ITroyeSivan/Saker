@@ -1,0 +1,263 @@
+{
+  "schema": "saker-human-holdout/1",
+  "frozenAt": "2026-11-10T00:00:00.000Z",
+  "provenance": "Queries and section labels were hand-authored from the named public repository documentation files. Labels were fixed before running the evaluator; the retrieval implementation did not generate queries or labels.",
+  "documents": [
+    "preset/code-audit/refs/crypto/crypto-misuse-audit.md",
+    "preset/code-audit/refs/components/log4j.md",
+    "preset/code-audit/refs/config/kubernetes-security.md",
+    "preset/code-audit/refs/lang/java-audit/java-file-upload-audit.md",
+    "preset/code-audit/refs/lang/php-audit/php-ssrf-audit.md",
+    "preset/code-audit/refs/components/shiro.md",
+    "preset/code-audit/refs/components/fastjson.md",
+    "preset/code-audit/refs/lang/java-audit/java-deser-gadget-chains.md",
+    "preset/code-audit/refs/lang/dotnet-deser-audit.md",
+    "preset/code-audit/refs/config/container-security-scanning.md",
+    "preset/code-audit/refs/lang/php-audit/php-deser-audit.md",
+    "preset/code-audit/refs/lang/java-audit/java-auth-audit.md"
+  ],
+  "cases": [
+    {
+      "id": "crypto-jwt-none",
+      "queryClass": "exact-artifact",
+      "query": "JWT alg=none 算法混淆",
+      "expectedPath": "preset/code-audit/refs/crypto/crypto-misuse-audit.md",
+      "expectedHeading": "2.1 JWT `alg=none` / 算法混淆"
+    },
+    {
+      "id": "crypto-hmac-length",
+      "queryClass": "en-natural",
+      "query": "HMAC length extension secret message",
+      "expectedPath": "preset/code-audit/refs/crypto/crypto-misuse-audit.md",
+      "expectedHeading": "2.3 Length Extension（HMAC 误用）"
+    },
+    {
+      "id": "crypto-node-sinks",
+      "queryClass": "en-keyword",
+      "query": "Node.js crypto signature verification sinks",
+      "expectedPath": "preset/code-audit/refs/crypto/crypto-misuse-audit.md",
+      "expectedHeading": "1.2 Node.js / JavaScript"
+    },
+    {
+      "id": "log4j-overview",
+      "queryClass": "zh-natural",
+      "query": "Log4Shell 漏洞影响哪些 Log4j2 版本",
+      "expectedPath": "preset/code-audit/refs/components/log4j.md",
+      "expectedHeading": "1. VULNERABILITY OVERVIEW"
+    },
+    {
+      "id": "log4j-dns",
+      "queryClass": "en-keyword",
+      "query": "Log4j JNDI DNS exfiltration detection",
+      "expectedPath": "preset/code-audit/refs/components/log4j.md",
+      "expectedHeading": "3.1 DNS Exfiltration (Detection)"
+    },
+    {
+      "id": "log4j-post-8u191",
+      "queryClass": "exact-artifact",
+      "query": "post-JDK 8u191 exploitation",
+      "expectedPath": "preset/code-audit/refs/components/log4j.md",
+      "expectedHeading": "5. POST-JDK 8u191 EXPLOITATION"
+    },
+    {
+      "id": "log4j-patch",
+      "queryClass": "en-natural",
+      "query": "which Log4j patch levels fix JNDI lookup",
+      "expectedPath": "preset/code-audit/refs/components/log4j.md",
+      "expectedHeading": "8.1 Patch Levels"
+    },
+    {
+      "id": "k8s-sa-token",
+      "queryClass": "mixed",
+      "query": "Kubernetes ServiceAccount Token 提取",
+      "expectedPath": "preset/code-audit/refs/config/kubernetes-security.md",
+      "expectedHeading": "1.3 ServiceAccount Token 提取"
+    },
+    {
+      "id": "k8s-rbac-matrix",
+      "queryClass": "zh-natural",
+      "query": "K8s 高危 RBAC Role 权限矩阵",
+      "expectedPath": "preset/code-audit/refs/config/kubernetes-security.md",
+      "expectedHeading": "2.1 高危 Role 权限矩阵"
+    },
+    {
+      "id": "k8s-privesc",
+      "queryClass": "en-natural",
+      "query": "Kubernetes RBAC privilege escalation abuse",
+      "expectedPath": "preset/code-audit/refs/config/kubernetes-security.md",
+      "expectedHeading": "2.2 提权利用"
+    },
+    {
+      "id": "java-upload-scan",
+      "queryClass": "zh-natural",
+      "query": "Java 文件上传审计 快速扫描 入口",
+      "expectedPath": "preset/code-audit/refs/lang/java-audit/java-file-upload-audit.md",
+      "expectedHeading": "阶段1: 快速扫描（优先执行）"
+    },
+    {
+      "id": "java-upload-points",
+      "queryClass": "zh-natural",
+      "query": "检查 Java 上传点 文件名 保存路径",
+      "expectedPath": "preset/code-audit/refs/lang/java-audit/java-file-upload-audit.md",
+      "expectedHeading": "2.3 上传点检查"
+    },
+    {
+      "id": "java-upload-decompile",
+      "queryClass": "exact-artifact",
+      "query": "反编译阶段 CRITICAL 上传类",
+      "expectedPath": "preset/code-audit/refs/lang/java-audit/java-file-upload-audit.md",
+      "expectedHeading": "反编译阶段（CRITICAL）"
+    },
+    {
+      "id": "java-upload-conditions",
+      "queryClass": "en-natural",
+      "query": "upload execution conditions avoid false positive",
+      "expectedPath": "preset/code-audit/refs/lang/java-audit/java-file-upload-audit.md",
+      "expectedHeading": "执行条件分析（CRITICAL - 避免误报）"
+    },
+    {
+      "id": "php-ssrf-sink",
+      "queryClass": "en-keyword",
+      "query": "PHP SSRF sink file_get_contents curl_exec",
+      "expectedPath": "preset/code-audit/refs/lang/php-audit/php-ssrf-audit.md",
+      "expectedHeading": "SSRF Sink（必做）"
+    },
+    {
+      "id": "php-ssrf-imds",
+      "queryClass": "mixed",
+      "query": "SSRF IMDSv1 IMDSv2 是否可达",
+      "expectedPath": "preset/code-audit/refs/lang/php-audit/php-ssrf-audit.md",
+      "expectedHeading": "A.2 IMDSv1 vs IMDSv2 判据（决定 SSRF 是否可达）"
+    },
+    {
+      "id": "php-ssrf-pandoc",
+      "queryClass": "exact-artifact",
+      "query": "CVE-2025-51591 Pandoc SSRF",
+      "expectedPath": "preset/code-audit/refs/lang/php-audit/php-ssrf-audit.md",
+      "expectedHeading": "A.4 CVE-2025-51591 Pandoc SSRF（EC2 IMDS 锚点）"
+    },
+    {
+      "id": "shiro-default-keys",
+      "queryClass": "en-keyword",
+      "query": "Shiro rememberMe default keys",
+      "expectedPath": "preset/code-audit/refs/components/shiro.md",
+      "expectedHeading": "2.1 Common Default Keys"
+    },
+    {
+      "id": "shiro-padding-oracle",
+      "queryClass": "en-natural",
+      "query": "Shiro CBC padding oracle attack",
+      "expectedPath": "preset/code-audit/refs/components/shiro.md",
+      "expectedHeading": "2.3 Padding Oracle Attack"
+    },
+    {
+      "id": "shiro-path-bypass",
+      "queryClass": "exact-artifact",
+      "query": "Shiro path traversal authentication bypass",
+      "expectedPath": "preset/code-audit/refs/components/shiro.md",
+      "expectedHeading": "5.1 Path Traversal Bypass"
+    },
+    {
+      "id": "fastjson-autotype",
+      "queryClass": "en-keyword",
+      "query": "Fastjson AutoType status check",
+      "expectedPath": "preset/code-audit/refs/components/fastjson.md",
+      "expectedHeading": "1.2 AutoType Status Check"
+    },
+    {
+      "id": "fastjson-1247",
+      "queryClass": "exact-artifact",
+      "query": "Fastjson 1.2.47 cache based bypass",
+      "expectedPath": "preset/code-audit/refs/components/fastjson.md",
+      "expectedHeading": "2.5 Fastjson 1.2.47 — Cache-Based Bypass (Most Reliable)"
+    },
+    {
+      "id": "fastjson-ldap-gadget",
+      "queryClass": "en-natural",
+      "query": "Fastjson LDAP local gadget chain post JDK",
+      "expectedPath": "preset/code-audit/refs/components/fastjson.md",
+      "expectedHeading": "3.1 LDAP → Local Gadget Chain",
+      "retained": true
+    },
+    {
+      "id": "java-deser-cc2",
+      "queryClass": "mixed",
+      "query": "CommonsCollections2 TemplatesImpl PriorityQueue",
+      "expectedPath": "preset/code-audit/refs/lang/java-audit/java-deser-gadget-chains.md",
+      "expectedHeading": "1.2 CC2：TemplatesImpl + PriorityQueue + commons-collections4",
+      "retained": true
+    },
+    {
+      "id": "java-deser-cc6",
+      "queryClass": "exact-artifact",
+      "query": "CC6 HashSet HashMap TiedMapEntry",
+      "expectedPath": "preset/code-audit/refs/lang/java-audit/java-deser-gadget-chains.md",
+      "expectedHeading": "1.6 CC6：HashSet/HashMap + TiedMapEntry（JDK 8+ 最常用）",
+      "retained": true
+    },
+    {
+      "id": "java-deser-jackson",
+      "queryClass": "mixed",
+      "query": "Jackson default typing TemplatesImpl 本地链",
+      "expectedPath": "preset/code-audit/refs/lang/java-audit/java-deser-gadget-chains.md",
+      "expectedHeading": "4.2 Jackson default typing → TemplatesImpl",
+      "retained": true
+    },
+    {
+      "id": "dotnet-viewstate",
+      "queryClass": "en-natural",
+      "query": "ViewState machine key deserialization criteria",
+      "expectedPath": "preset/code-audit/refs/lang/dotnet-deser-audit.md",
+      "expectedHeading": "2.2 源码/配置判据",
+      "retained": true
+    },
+    {
+      "id": "dotnet-entrypoints",
+      "queryClass": "zh-natural",
+      "query": ".NET 反序列化 危险入口总览",
+      "expectedPath": "preset/code-audit/refs/lang/dotnet-deser-audit.md",
+      "expectedHeading": "0. .NET 反序列化入口总览（危险模式识别）",
+      "retained": true
+    },
+    {
+      "id": "container-sbom",
+      "queryClass": "en-keyword",
+      "query": "SBOM generation container image analysis",
+      "expectedPath": "preset/code-audit/refs/config/container-security-scanning.md",
+      "expectedHeading": "1.2 SBOM 生成与分析",
+      "retained": true
+    },
+    {
+      "id": "container-supply-chain",
+      "queryClass": "zh-natural",
+      "query": "容器供应链投毒攻击",
+      "expectedPath": "preset/code-audit/refs/config/container-security-scanning.md",
+      "expectedHeading": "2.1 供应链投毒攻击",
+      "retained": true
+    },
+    {
+      "id": "php-deser-phar",
+      "queryClass": "mixed",
+      "query": "PHP phar:// 反序列化 检测入口",
+      "expectedPath": "preset/code-audit/refs/lang/php-audit/php-deser-audit.md",
+      "expectedHeading": "附 A：phar:// 反序列化检测入口清单",
+      "retained": true
+    },
+    {
+      "id": "java-auth-bypass",
+      "queryClass": "mixed",
+      "query": "Java 鉴权 URI 获取方法差异绕过",
+      "expectedPath": "preset/code-audit/refs/lang/java-audit/java-auth-audit.md",
+      "expectedHeading": "6.1.1 URI获取方法差异绕过（CRITICAL）",
+      "retained": true
+    }
+  ],
+  "negativeCases": [
+    { "id": "neg-quantum-smoothie", "query": "quantum entanglement banana smoothie" },
+    { "id": "neg-car-engine", "query": "如何修复汽车发动机" },
+    { "id": "neg-macos-icons", "query": "macOS Finder icon cache rebuild" },
+    { "id": "neg-random-token", "query": "QZXV9274_NONEXISTENT_SECURITY_TOKEN" },
+    { "id": "neg-world-cup", "query": "2026 世界杯 赛程" },
+    { "id": "neg-cooking", "query": "红烧牛肉 家常做法" }
+  ]
+}

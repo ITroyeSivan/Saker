@@ -23,6 +23,7 @@ function harness(component, props={}, override={}) {
   let cursor=0;const state=[],effects=[],calls=[],downloads=[],timers=[];
   const useState=initial=>{const i=cursor++;if(!(i in state))state[i]=initial;return [state[i],next=>{state[i]=typeof next==='function'?next(state[i]):next;}];};
   const React={createElement:(type,props,...children)=>({type,props:props||{},children}),useState,
+    Component:class { constructor(props){this.props=props||{};this.state={};} setState(next){this.state={...this.state,...(typeof next==='function'?next(this.state):next)};} },
     useRef:initial=>{const i=cursor++;if(!(i in state))state[i]={current:initial};return state[i];},
     useCallback:fn=>fn,useEffect:fn=>effects.push(fn)};
   const document={createElement:tag=>({style:{},click(){},remove(){},tagName:tag}),head:{appendChild(){}},body:{appendChild(){}},addEventListener(){},removeEventListener(){}};
@@ -53,7 +54,7 @@ try {
     }
     assert.equal(reads,5);
     await assert.rejects(dispatch(cold,store,'project.start',{sessionId:'current'}),/请选择当前可用的Saker 会话/);
-    assert.equal((await dispatch(cold,store,'knowledge.toggle',{sessionId:'current',enabled:false})).code,'feature_removed');
+    await assert.rejects(dispatch(cold,store,'knowledge.toggle',{sessionId:'current',enabled:false}),/请选择当前可用/);
     assert.equal(reads,5,'retired features and execution mutations cannot borrow a read-only header');
   });
   await test('cold read rejects wrong presets and missing sessions and releases its observation',async()=>{
@@ -85,10 +86,10 @@ try {
     assert(ui.find(n=>n.type==='button'&&n.children.includes('全部 1')));
   });
   // R06：四个入口由宿主 conversation.view 直接注册，工作区不再自带标签栏与「更多记录」下拉。
-  await test('task workspace opens the execution tab directly and keeps other tabs lazy',async()=>{
+  await test('task workspace opens the current research questions directly and keeps other tabs lazy',async()=>{
     const ui=harness('ResultsView');await ui.mount();await ui.flush();
-    assert(ui.find(n=>n.type?.name==='ExecutionPanel'),'默认进入执行记录');
-    for(const name of ['ModePage','MaterialsPanel','BigScreen','TaskPanel','ContextPanel','ResearchPanel','MethodPackagesPanel'])assert(!ui.find(n=>n.type?.name===name),'eagerly mounted '+name);
+    assert(ui.find(n=>n.type?.name==='ResearchView'),'默认进入正在验证的问题');
+    for(const name of ['ExecutionPanel','ModePage','MaterialsPanel','BigScreen','TaskPanel','ContextPanel','ResearchPanel','MethodPackagesPanel'])assert(!ui.find(n=>n.type?.name===name),'eagerly mounted '+name);
     assert(!ui.calls.some(call=>call.endpoint==='counts.session'||call.endpoint==='counts.all'),'未打开发现页时不读计数');
     assert(!nodes(ui.render()).some(n=>n.props?.['aria-label']==='更多记录'),'不再有第二套「更多记录」导航');
   });
@@ -129,7 +130,7 @@ try {
     assert(text.includes('网站与端口')&&text.includes('请求'),'both asset and request rows are shown');
     assert(text.includes('current.invalid'),'the asset host is listed');
     // 「模型是否读过」（v6 第 5.4 节）：没读过就显示尚未读取，读过显示已收到对应片段。
-    assert(text.includes('AI 是否读过')&&text.includes('尚未读取'),'列表标出模型是否读过');
+ assert(text.includes('模型是否读过')&&text.includes('尚未读取'),'列表标出模型是否读过');
     assert(!ui.calls.some(call=>call.endpoint==='redteam_task'||String(call.endpoint).includes('model')),'listing materials must not start a task or model call');
     const viewBtn=nodes(table).find(n=>n.type==='button'&&n.children.includes('查看'));assert(viewBtn,'每行有查看入口');
     await viewBtn.props.onClick();await ui.flush();
@@ -183,10 +184,10 @@ try {
     const ui=harness('ExecutionPanel');await ui.mount();await flush();
     assert(ui.calls.some(call=>call.endpoint==='execution.list'),'loads through execution.list');
     const text=JSON.stringify(ui.render());
-    assert(text.includes('已返回'),'the call result is shown');
-    assert(text.includes('工具调用 1')&&text.includes('模型调用 1'),'usage is summarised');
+    assert(text.includes('已完成'),'the call result is shown');
+ assert(text.includes('工具 1 次')&&text.includes('模型 1 次'),'usage is summarised in user-facing words');
     assert(text.includes('r1:v1'),'the row references the request original instead of copying it');
-    assert(text.includes('身份')&&text.includes('user-a'),'执行记录带身份引用（v6 第 8.1 节）');
+    assert(text.includes('账号')&&text.includes('user-a'),'执行记录带账号引用（v6 第 8.1 节）');
     // 任务引用（v6 第 8.1 节）：按回执完成时间落到所属轮次；渠道就是回执自带的 source。
     store.db.prepare('INSERT OR REPLACE INTO task_rounds(session_id,started_at,record) VALUES(?,?,?)').run('current',1699999999000,JSON.stringify({endedAt:1700000001000}));
     const ledger=await dispatch(ctx,store,'execution.list',{sessionId:'current',result:'all',page:1,pageSize:50});
@@ -222,7 +223,7 @@ try {
       assert(source.includes('className: "dsh-rtr-detail-head"') && source.includes('React.createElement(Btn, { onClick: function () { props.onClose(); } }, "关闭")'),
         '详情顶部有固定的关闭按钮');
       assert(source.includes('"复核/复测"') && source.includes('"导出这条发现"'),'详情底部操作按 5.3 的叫法');
-      assert(source.includes('dsh-rtr-st-retesting') && source.includes('"查看运行记录"'),'复测中有状态标记与运行记录入口');
+ assert(source.includes('dsh-rtr-st-retesting') && source.includes('"查看执行记录"'),'复测中有状态标记与执行记录入口');
       assert(source.includes('dsh-rtr-packets') && source.includes('@media(max-width:720px){.dsh-rtr-packets'),
         '原文请求/响应双栏，窄屏改成上下栏');
       assert(source.includes('maskSecrets(f.requestPkt || "（未保存）")') && source.includes('"展开原始内容"') && source.includes('"重新遮蔽"'),
@@ -273,7 +274,7 @@ try {
     assert.equal(listCall.payload.pageSize,50,'发现页每页 50 条（v6 第 5.3 节）');
     const emptyHtml=JSON.stringify(empty.render());
     assert(emptyHtml.includes('测试中发现的异常会保存在这里'),'首次空页说明异常会保存在这里');
-    assert(emptyHtml.includes('添加测试资料'),'首次空页带添加测试资料入口');
+    assert(emptyHtml.includes('添加资料'),'首次空页带添加资料入口');
     await assert.rejects(dispatch(ctx,store,'counts.session',{}),/sessionId required/);
     const grouped=await dispatch(ctx,store,'findings.groups',{sessionId:'current',mode:'pentest'});
     assert.equal(grouped.groups.length,1);assert.equal(grouped.stats.total,1);assert(grouped.meta);

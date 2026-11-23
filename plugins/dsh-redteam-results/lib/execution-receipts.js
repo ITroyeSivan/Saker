@@ -11,6 +11,7 @@ import { sameEndpointPath } from './endpoint-binding.js';
 import { acquireTargetSlot } from './request-pacing.js';
 import { resolveTaskIdentity, identityDenial, identityRequestHeaders } from './identity-binding.js';
 import { taskScopeIncludesUrl } from './task-scope.js';
+import { requestCredentialHeaders } from './request-import.js';
 
 export const EXECUTION_RECEIPT_SCHEMA = `CREATE TABLE IF NOT EXISTS execution_receipts (
  session_id TEXT NOT NULL, id TEXT NOT NULL, record TEXT NOT NULL,
@@ -185,7 +186,10 @@ export async function executeRecordedRequest(store, sessionId, input, jobStep, s
   const authSource = input.authSource === 'request' ? 'request' : input.authSource === 'account' ? 'account' : '';
   let identityHeaders = identityRequestHeaders(parsed, identity, { authSource });
   if (identityHeaders?.conflict) throw Object.assign(new Error(identityHeaders.error), { code: 'identity-header-conflict' });
+  let materialHeaders = requestCredentialHeaders(store, sessionId, row, parsed, { authSource });
+  if (materialHeaders) identityHeaders = materialHeaders;
   let identitySource = identityHeaders?.source || (identity?.matched ? 'request' : 'anonymous');
+  let credentialRef = materialHeaders?.credentialRef || '';
   const recheck = input.purpose === 'baseline' && task?.needsBaselineRecheck === true;
   const firstContact = input.purpose === 'first-contact';
   const exploration = firstContact || (!recheck && (typeof input.hypothesisId !== 'string' || !input.hypothesisId.trim()));
@@ -250,23 +254,29 @@ export async function executeRecordedRequest(store, sessionId, input, jobStep, s
       releaseExecutionReservation(store, sessionId);
       throw new Error(identityReason);
     }
-    const latestHeaders = identityRequestHeaders(parsed, identity, { authSource });
+    let latestHeaders = identityRequestHeaders(parsed, identity, { authSource });
     if (latestHeaders?.conflict) {
       releaseExecutionReservation(store, sessionId);
       throw Object.assign(new Error(latestHeaders.error), { code: 'identity-header-conflict' });
     }
+    const latestMaterial = requestCredentialHeaders(store, sessionId, row, parsed, { authSource });
+    if (latestMaterial) latestHeaders = latestMaterial;
     identityHeaders = latestHeaders;
     identitySource = latestHeaders?.source || (identity?.matched ? 'request' : 'anonymous');
+    credentialRef = latestMaterial?.credentialRef || credentialRef;
     result = await exchange({ ...parsed, headers: latestHeaders?.headers || parsed.headers }, timeoutMs, maxBytes, signal);
   }
   finally { releaseSlot(); }
   const record = { id: 'execution-' + randomUUID(), source: 'host-http-execution', hypothesisId: direction.id,
     requestId: row.id, requestRevision: row.revision, endpoint: row.endpoint, authContext: row.authContext,
+    identityLabel: row.authContext, identityBound: identity?.matched === true,
+    ...(row.identityHint ? { identityHint: row.identityHint } : {}),
     ...(typeof input.callId === 'string' && input.callId ? { callId: input.callId } : {}),
     ...(identity?.matched && identitySource === 'account' ? { identity: { accountId: identity.accountId, name: identity.name,
       credentialRevision: identity.credentialRevision, status: identity.status, source: identitySource } } : {}),
     ...(identity?.matched && identitySource === 'request' ? { selectedIdentityRef: identity.name } : {}),
     identitySource,
+    ...(credentialRef ? { credentialRef, credentialSource: 'request-material' } : {}),
     ...(identityHeaders?.source === 'account' ? { identitySecretApplied: identityHeaders.kind } : {}),
     ...(selectedMethod ? { methodId: selectedMethod.id, methodVersion: selectedMethod.version, methodBasis: executionMethodBasis(selectedMethod) } : {}),
     ...(requirement.modules.length ? { contentRequirement: requirement.modules } : {}),
@@ -448,4 +458,39 @@ export function executionReceiptSummary(record) {
     ...(record.identitySecretApplied ? { note: '本次派发按身份“' + (record.identity?.name || '') + '”另存的秘密补了 '
       + record.identitySecretApplied + ' 认证头；回执里的请求原文不含秘密。' } : {}),
     detail: 'redteam_execution action=detail id=' + record.id };
+}
+
+/**
+ * 子任务复制父任务上下文时，被 context.requests[].responseReceiptId 引用的回执
+ * 也要一起带过去。回执是宿主抓到的原始报文，跨会话复制的是同一份字节，
+ * 不是模型手抄；否则子会话保存上下文会因"回执不存在"直接失败。
+ * 缺回执时明确报错，不静默丢弃证据，也不让模型靠重试碰运气。
+ */
+export function copyExecutionReceipts(store, fromSessionId, toSessionId, ids) {
+  requiredSession(fromSessionId, 'fromSessionId');
+  requiredSession(toSessionId, 'toSessionId');
+  if (fromSessionId === toSessionId) return 0;
+  const list = [...new Set((Array.isArray(ids) ? ids : [])
+    .map(id => typeof id === 'string' ? id.trim() : '')
+    .filter(Boolean))];
+  if (!list.length) return 0;
+  const select = store.db.prepare('SELECT record FROM execution_receipts WHERE session_id=? AND id=?');
+  const insert = store.db.prepare('INSERT OR IGNORE INTO execution_receipts (session_id,id,record) VALUES (?,?,?)');
+  const missing = [];
+  let copied = 0;
+  for (const id of list) {
+    const row = select.get(fromSessionId, id);
+    if (!row) { missing.push(id); continue; }
+    copied += Number(insert.run(toSessionId, id, row.record).changes || 0);
+  }
+  if (missing.length) {
+    throw new Error('父任务上下文引用的执行回执在父会话中不存在：' + missing.join(', ')
+      + '。请重新执行对应请求取得回执，或移除请求里过期的 responseReceiptId 后再启动子角色；不要原样重试。');
+  }
+  return copied;
+}
+
+function requiredSession(value, label) {
+  if (typeof value !== 'string' || !value.trim()) throw new Error(label + ' is required');
+  return value;
 }

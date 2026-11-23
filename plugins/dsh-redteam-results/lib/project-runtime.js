@@ -430,12 +430,29 @@ export function captureProjectNativeEvent(store, sessionId, event) {
   const visible = textOfContent(event.data?.message?.content ?? event.data?.content).trim();
   if (!visible || !run.currentCheckId) return null;
   const check = readProjectCheck(store, sessionId, run.runId, run.currentCheckId);
-  if (!check || check.executionState !== 'running') return null;
+  // 首项在模型一次工具都没调时仍是 pending；如果这轮明确回答“缺条件无法执行”，
+  // 也要允许落库为 blocked，否则检查会永远停在 pending、运行停在 preparing/paused。
+  if (!check || !['running', 'pending'].includes(check.executionState)) return null;
   const nativeActions = listProjectActions(store, sessionId, run.runId)
     .filter(action => action.checkId === check.checkId
       && action.attemptId === check.activeAttempt?.attemptId
       && !!(action.evidenceRef || action.requestRef || action.pageRef));
-  if (!nativeActions.length) return null;
+  if (!nativeActions.length) {
+    // 没有原生执行：如果本轮明确说明“缺目标/身份/授权、无法执行”，
+    // 这是一条合法的 blocked 结论，必须落库，不能让检查永远停在 pending。
+    const blocked = /(无法|不能|缺少|未完成|不可执行|需要.{0,12}(目标|身份|授权|账号)|未提供|没有.{0,8}(目标|身份|回执))/.test(visible);
+    if (!blocked) return null;
+    const recordedBlocked = recordProjectCheck(store, sessionId, run.runId, check.checkId, {
+      executionState: 'ended',
+      verdict: 'blocked',
+      checkedContent: visible.slice(0, 20000),
+      gaps: '缺少执行条件：本轮没有产生原生执行回执。',
+      actionRefs: check.actionRefs || [],
+      evidenceRefs: check.evidenceRefs || [],
+    });
+    return { associated: true, checkId: recordedBlocked.checkId, verdict: recordedBlocked.verdict,
+      actionRefs: recordedBlocked.actionRefs, evidenceRefs: recordedBlocked.evidenceRefs };
+  }
   const successful = nativeActions.some(action => action.executionState === 'completed');
   const failed = !successful && nativeActions.some(action => action.executionState === 'failed');
   const recorded = recordProjectCheck(store, sessionId, run.runId, check.checkId, {

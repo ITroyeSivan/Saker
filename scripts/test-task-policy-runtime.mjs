@@ -1,16 +1,30 @@
 import './test-home-isolation.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { openStore, registerFinding, updateFinding } from '../plugins/dsh-redteam-results/lib/store.js';
 import { saveTaskContext } from '../plugins/dsh-redteam-results/lib/task-context.js';
 import { createResearch } from '../plugins/dsh-redteam-results/lib/research.js';
 import { startTaskPolicy, readTaskPolicy, taskPolicyStatus, taskExecutionGuard, updateTaskProgress } from '../plugins/dsh-redteam-results/lib/task-policy.js';
+import { executeDirectRequest } from '../plugins/dsh-redteam-results/lib/execution-receipts.js';
+import { interactionPrompt } from '../plugins/dsh-redteam-results/lib/interaction.js';
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'saker-task-policy-'));
 process.env.DSH_HOME = home;
 const results = await import('../plugins/dsh-redteam-results/lib/index.js');
 let store = openStore(path.join(home, 'redteam-results', 'results.db'));
+const harnessServer = http.createServer((_request, response) => {
+  response.writeHead(200, { 'content-type': 'application/json' });
+  response.end('{"ok":true}');
+});
+await new Promise((resolve, reject) => {
+  harnessServer.once('error', reject);
+  harnessServer.listen(0, '127.0.0.1', resolve);
+});
+const harnessPort = harnessServer.address().port;
+const harnessOrigin = `http://127.0.0.1:${harnessPort}`;
+const outsideOrigin = `http://127.0.0.1:${harnessPort === 9 ? 10 : 9}`;
 const disposers = [], tools = new Map(), guards = [];
 results.apply({ tools: { register: tool => tools.set(tool.name, tool), guard: fn => guards.push(fn) },
   effect: fn => { const dispose = fn(); if (typeof dispose === 'function') disposers.push(dispose); }, webServer: { register: () => () => {} } });
@@ -66,6 +80,25 @@ try {
     assert.equal(readTaskPolicy(store, 'other').question, '按当前会话中的用户请求执行');
     assert.equal(readTaskPolicy(store, 'other').used.toolCalls, 0, 'a pre-dispatch scope denial does not consume the operation budget');
     assert.equal(readTaskPolicy(store, 'actual').used.toolCalls, 2);
+  });
+  await test('本地读取不会先建立空目标策略，第一个目标请求才建立范围', async () => {
+    const sid = 'boundary-order';
+    assert.equal(taskExecutionGuard(store, sid, 'pwsh', Date.now(), { args: { command: 'git show HEAD' } }), undefined);
+    assert.equal(readTaskPolicy(store, sid), null, 'a local git read must not create a task');
+    assert.equal(taskExecutionGuard(store, sid, 'saker_component', Date.now(), { args: { action: 'observe' } }), undefined);
+    assert.equal(readTaskPolicy(store, sid), null, 'a component read must not create a task');
+    const receipt = await executeDirectRequest(store, sid, { url: harnessOrigin + '/version', method: 'GET' });
+    assert.equal(receipt.status, 200);
+    assert.equal(readTaskPolicy(store, sid).target, harnessOrigin + '/');
+    await assert.rejects(() => executeDirectRequest(store, sid, { url: outsideOrigin + '/version', method: 'GET' }), /outside the current task scope/);
+  });
+  await test('确认偏好指向宿主原生提问工具，不引用已隐藏的 checkpoint 工具', () => {
+    for (const mode of ['confirm-step', 'confirm-data-change']) {
+      const text = interactionPrompt(mode, false, 'end');
+      assert.match(text, /ask_user_question/, mode + ' must use the host question panel');
+      assert.doesNotMatch(text, /redteam_task|saker_task/, mode + ' must not name a retired checkpoint tool');
+    }
+    assert.match(interactionPrompt('auto', false, 'end'), /自行推进/);
   });
   await test('method-orchestration and abstract-workbench tools are retired, refused for every session, and never counted as local work', () => {
     // 批次 A：这些工具已退出运行，任何会话都不再当作本地登记放行。
@@ -124,6 +157,7 @@ try {
   });
 } finally {
   for (const dispose of disposers.reverse()) await dispose();
+  await new Promise(resolve => harnessServer.close(resolve));
   store.close(); fs.rmSync(home, { recursive: true, force: true });
 }
 process.exitCode = failed ? 1 : 0;

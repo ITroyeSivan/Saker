@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import { checkRegistered, configuredToolPaths, hasBin, registerableDefs, resolveToolBin, resolveToolInvocation, RATE_DEFAULTS, buildNucleiArgs, buildHttpxArgs, summarizeHttpxResults, runScan, governPreview, spillOutput, breakerCheck, breakerRecord, runGoverned, persistScanRecords, listScanJobs, ffufParse, apply } from "../lib/index.js";
 import { TOOL_DEFS, buildArgs, tiersLine } from "../lib/registry.js";
 import { parseAssetPayload } from "../lib/ingest.js";
+import { parseAdExport } from "../lib/ad-export.js";
 import { readOobConfig, runOobProbe } from "../lib/oob-probe.js";
 
 const F = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), "fixture");
@@ -27,6 +28,51 @@ const expect = (n, c, d) => { if (c) console.log(`ok   ${n}`); else { failed++; 
 	let rejected = false;
 	try { apply({ tools: { register() {} } }, { exposedTools: ["httpx_prob"] }); } catch { rejected = true; }
 	expect("misspelled scanner allowlist entry fails fast", rejected);
+}
+
+// TLS probe is a read-only handshake tool and must keep the asset-baseline gate.
+{
+	const tools = new Map();
+	apply({ tools: { register(def) { tools.set(def.name, def); } } }, { exposedTools: ["tls_probe"] });
+	const tlsProbe = tools.get("tls_probe");
+	expect("tls_probe registers with target/workspace contract", Boolean(tlsProbe) && tlsProbe.parameters.target.required === true && tlsProbe.parameters.workspace.required === true);
+	const empty = await tlsProbe.execute({ target: "", workspace: F }, { agent: { session: { header: { cwd: F } } } });
+	expect("tls_probe rejects empty target", empty.ok === false && /target/.test(empty.error));
+	const unregistered = await tlsProbe.execute({ target: "https://not-in-baseline.invalid:443", workspace: F }, { agent: { session: { header: { cwd: F } } } });
+	expect("tls_probe keeps the asset-baseline gate", unregistered.ok === false && /未登记/.test(unregistered.error));
+}
+
+// Seatbelt is a fixed read-only local posture check: no extra flags, no remote/user groups.
+{
+	const def = TOOL_DEFS.seatbelt;
+	const built = buildArgs(def, {});
+	expect("seatbelt_posture fixes the read-only system group", def?.name === "seatbelt_posture"
+		&& JSON.stringify(built.argv) === JSON.stringify(["-group=system", "-q"]));
+	let rejected = false;
+	try { buildArgs(def, { extra: "-group=user" }); } catch { rejected = true; }
+	expect("seatbelt_posture rejects extra flags", rejected);
+}
+
+// SharpHound/Adalanche exports are normalized as candidate evidence, never as confirmed exploitation.
+{
+	const sharphound = parseAdExport(JSON.stringify({
+		data: [
+			{ ObjectIdentifier: "S-1-5-21-1", ObjectType: "User", Properties: { name: "svc-sql", samaccountname: "svc-sql", hasspn: true, dontreqpreauth: true, admincount: true } },
+			{ ObjectIdentifier: "S-1-5-21-2", ObjectType: "Computer", Properties: { name: "WEB01", unconstraineddelegation: true }, Aces: [{ PrincipalSID: "S-1-5-21-9", RightName: "GenericAll" }] },
+		], meta: { type: "users" },
+	}), { source: "sharphound" });
+	expect("SharpHound users/computers normalize with candidate observations",
+		sharphound.counts.objects === 2 && sharphound.counts.byType.user === 1 && sharphound.counts.byType.computer === 1
+		&& sharphound.observations.some(item => item.kind === "kerberoastable")
+		&& sharphound.observations.some(item => item.kind === "asrep-roastable")
+		&& sharphound.observations.some(item => item.kind === "path-candidate"));
+	const adalanche = parseAdExport(JSON.stringify({
+		nodes: [{ id: "u1", type: "User", name: "alice" }],
+		edges: [{ type: "AdminTo", from: "u1", to: "c1" }, { type: "MemberOf", from: "u1", to: "g1" }],
+	}), { source: "adalanche" });
+	expect("Adalanche edges are counted as path candidates, not proof",
+		adalanche.counts.objects === 1 && adalanche.counts.edges === 2 && adalanche.counts.candidatePaths === 1
+		&& adalanche.warnings.some(item => /不等于可利用/.test(item)));
 }
 
 // Deferred tools are registered on the active Agent scope only after an explicit pack load.
@@ -95,6 +141,26 @@ const expect = (n, c, d) => { if (c) console.log(`ok   ${n}`); else { failed++; 
 	expect("模型回执包含产品指纹而不含页面正文", summary.includes("title=TongWeb") && summary.includes("tech-hints=TongWeb, Java") && summary.includes("server=TongWeb/7.0") && !summary.includes("private body"));
 	expect("互相矛盾的指纹字段保留为独立证据", summary.includes("title=Apache Tomcat/8.5.99") && summary.includes("tech-hints=Apache HTTP Server") && summary.includes("server=Apache, Tomcat/8.5.99"));
 	expect("大量目标的回执最多显示 20 行并说明其余证据在 JSON 中", (summary.match(/^- HTTP /gm) || []).length === 20 && summary.includes("另有 3 条只在完整 JSON 证据中"));
+}
+
+{
+	const tools = new Map();
+	apply({ tools: { register(def) { tools.set(def.name, def); } } }, { exposedTools: ["ad_export_ingest"] });
+	const tool = tools.get("ad_export_ingest");
+	const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "saker-ad-export-"));
+	try {
+		const result = await tool.execute({
+			workspace,
+			source: "sharphound",
+			text: JSON.stringify({ data: [{ ObjectIdentifier: "u1", ObjectType: "User", Properties: { name: "alice", hasspn: true } }], meta: { type: "users" } }),
+		}, { agent: { session: { header: { cwd: workspace } } } });
+		const artifact = result.ok ? path.join(workspace, result.artifact) : "";
+		expect("ad_export_ingest writes a normalized artifact and evidence row",
+			result.ok && result.counts.objects === 1 && fs.existsSync(artifact)
+			&& fs.readFileSync(path.join(workspace, "evidence-index.md"), "utf8").includes(result.evidenceId));
+	} finally {
+		fs.rmSync(workspace, { recursive: true, force: true });
+	}
 }
 
 // ── 资产导入纯函数：JSON/CSV/文本三条路都归一，不依赖任何扫描器 ──
@@ -467,6 +533,45 @@ expect("binwalk 默认只识别、不自动提取", b.argv.includes("--term") &&
 	});
 	expect("配置入口失效时从工具根目录找回正确套件脚本",
 		rootInvocation?.file === nestedSecretsdump && rootInvocation.prefix.includes(nestedSecretsdump));
+	const nodeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "scan-webcrack-"));
+	const webBin = path.join(nodeRoot, "node_modules", ".bin");
+	const webPkg = path.join(nodeRoot, "node_modules", "webcrack", "src");
+	fs.mkdirSync(webBin, { recursive: true });
+	fs.mkdirSync(webPkg, { recursive: true });
+	fs.writeFileSync(path.join(webBin, "webcrack.cmd"), '@echo off\r\n"%dp0%\\..\\webcrack\\src\\cli-wrapper.js" %*\r\n');
+	fs.writeFileSync(path.join(webPkg, "cli-wrapper.js"), "const fs=require('fs');const path=require('path');const a=process.argv.slice(2);const o=a[a.indexOf('-o')+1];const i=a[a.length-1];fs.mkdirSync(o,{recursive:true});fs.writeFileSync(path.join(o,'deobfuscated.js'),'// fake\\n'+fs.readFileSync(i,'utf8'));\n");
+	const webInvocation = resolveToolInvocation("webcrack", "", { roots: [nodeRoot] });
+	expect("Windows .cmd Node 包装器解析到真实 JS 入口",
+		webInvocation?.bin === process.execPath && webInvocation.file.endsWith(path.join("webcrack", "src", "cli-wrapper.js")));
+	const webTools = new Map();
+	apply({
+		tools: { register(def) { webTools.set(def.name, def); } },
+		settings: { get() { return { roots: [nodeRoot] }; } },
+	}, { exposedTools: ["js_deobfuscate"] });
+	const webWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "scan-web-ws-"));
+	fs.writeFileSync(path.join(webWorkspace, "sample.js"), 'var x="hello";console.log(x);\n');
+	const webResult = await webTools.get("js_deobfuscate").execute(
+		{ workspace: webWorkspace, file: "sample.js" },
+		{ agent: { session: { header: { cwd: webWorkspace } } } },
+	);
+	expect("js_deobfuscate 产出文件与 hash 总结",
+		webResult.ok && webResult.outputs.some(file => file.path.endsWith("deobfuscated.js"))
+		&& fs.existsSync(path.join(webWorkspace, webResult.artifact)), webResult.error ?? "");
+	fs.rmSync(nodeRoot, { recursive: true, force: true });
+	fs.rmSync(webWorkspace, { recursive: true, force: true });
+	const noLab = new Map();
+	delete process.env.SAKER_LAB_CONFIG;
+	apply({ tools: { register(def) { noLab.set(def.name, def); } } }, { exposedTools: ["version_reproduce"] });
+	expect("version_reproduce 在缺少 lab 配置时不注册", !noLab.has("version_reproduce"));
+	const labRoot = fs.mkdtempSync(path.join(os.tmpdir(), "scan-lab-"));
+	const labConfig = path.join(labRoot, "lab.json");
+	fs.writeFileSync(labConfig, JSON.stringify({ vmx: "x", vmrun: "x", host: "127.0.0.1", user: "saker", sshKey: "x" }));
+	process.env.SAKER_LAB_CONFIG = labConfig;
+	const withLab = new Map();
+	apply({ tools: { register(def) { withLab.set(def.name, def); } } }, { exposedTools: ["version_reproduce"] });
+	expect("version_reproduce 在有 lab 配置时注册", withLab.has("version_reproduce"));
+	delete process.env.SAKER_LAB_CONFIG;
+	fs.rmSync(labRoot, { recursive: true, force: true });
 	const asyncWs = fs.mkdtempSync(path.join(os.tmpdir(), "scan-async-"));
 	const ffufOut = path.join(asyncWs, "ffuf.json");
 	fs.writeFileSync(ffufOut, JSON.stringify({ results: [

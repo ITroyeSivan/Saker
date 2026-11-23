@@ -101,6 +101,6 @@ assert(tools.length >= 50, `expected the reduced default product tool surface, c
 console.log(`ok ${loaded.length} product plugins registered ${tools.length} tool schemas for the real compiler`);
 assert(tools.every(tool => tool.parameters?.type === 'object' && tool.parameters?.properties),
   'defineTool must compile every registered parameter set to a root object schema');
-assert(tools.some(tool => tool.name === 'operation_task'));
+assert(!tools.some(tool => tool.name === 'operation_task'), 'retired stage-gate operation tools must not enter the model surface');
 assert(tools.some(tool => tool.name === 'redteam_task'));
 console.log(`ok official Desktop defineTool compiled ${tools.length} task/gate/results parameter schemas`);

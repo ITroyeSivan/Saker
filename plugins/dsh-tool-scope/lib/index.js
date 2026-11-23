@@ -236,7 +236,9 @@ export function apply(ctx, config = {}) {
         schema: { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } },
         render: (_args, v) => [{ type: 'text', text: v.ok
           ? (v.packs ? `工具包：${v.packs.map((p) => `${p.id}=${p.loaded ? '已加载' : '收起'}(${p.tools})`).join('；') || '无'}`
-            : `工具包 ${v.pack}：${v.loaded ? '已加载' : '已收起'}`)
+            : (v.loaded
+              ? `工具包 ${v.pack}：已加载。下一步直接按工具名调用${v.tools && v.tools.length ? '：' + v.tools.slice(0, 12).join('、') + (v.tools.length > 12 ? ` 等 ${v.tools.length} 个` : '') : ''}；这些是本机工具，不是 MCP server，不要用 mcp_call。`
+              : `工具包 ${v.pack}：已收起`))
           : `工具包操作失败：${v.error}` }],
       },
       execute(args, exec) {
@@ -266,13 +268,16 @@ export function apply(ctx, config = {}) {
         const known = state.toolNames
         if (!pack || !packTools(known, pack).length) return Promise.resolve({ ok: false, error: `当前模式无此工具包：${args.pack ?? '(empty)'}` })
         if (args.action === 'load') {
+          state.loadedPacks.add(pack.id)
+          // refreshPacks() hides every not-yet-loaded pack with tools.restrict.
+          // Loading must release that specific restriction; otherwise the check
+          // reports "loaded" while the tools stay hidden from the model.
           const entry = state.packDisposers.get(pack.id)
           if (entry) {
             try { entry.dispose() } catch { /* already released by agent teardown */ }
             state.packDisposers.delete(pack.id)
           }
-          state.loadedPacks.add(pack.id)
-          return Promise.resolve({ ok: true, pack: pack.id, loaded: true })
+          return Promise.resolve({ ok: true, pack: pack.id, loaded: true, tools: packTools(known, pack) })
         }
         if (args.action === 'unload') {
           state.loadedPacks.delete(pack.id)

@@ -630,6 +630,18 @@ async function diagnoseServer(server) {
 import { defineTool } from "@deepseek-ai/dsh-tools";
 var META_TOOL_SEARCH = "mcp_search";
 var META_TOOL_CALL = "mcp_call";
+function normalizeToolArguments(value) {
+  if (value === void 0 || value === null) return {};
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  return typeof value === "object" && !Array.isArray(value) ? value : null;
+}
 var CATALOG_TTL_MS = 5 * 6e4;
 var SEARCH_DEFAULT_LIMIT = 8;
 var SEARCH_MAX_LIMIT = 30;
@@ -996,8 +1008,10 @@ var ProxyRegistry = class {
         error: `server\u300C${name2}\u300D\u6CA1\u6709\u5DE5\u5177\u300C${toolName}\u300D${near.length === 0 ? "" : `\uFF1B\u540D\u5B57\u63A5\u8FD1\u7684\u6709\uFF1A${near.join(", ")}`}\uFF08\u5148\u7528 ${META_TOOL_SEARCH} \u786E\u8BA4\u540D\u5B57\uFF09`
       };
     }
+    const toolArgs = normalizeToolArguments(args);
+    if (toolArgs === null) return { ok: false, text: "", error: `${META_TOOL_CALL} \u7684 args \u5FC5\u987B\u662F JSON \u5BF9\u8C61` };
     try {
-      const result = await mount.channel.request("tools/call", { name: toolName, arguments: args ?? {} }, server.toolCallTimeoutMs);
+      const result = await mount.channel.request("tools/call", { name: toolName, arguments: toolArgs }, server.toolCallTimeoutMs);
       const payload = result ?? {};
       const text = (payload.content ?? []).filter((block) => typeof block?.text === "string").map((block) => String(block.text)).join("\n");
       if (payload.isError === true) return { ok: false, text, error: text === "" ? `\u5DE5\u5177\u300C${toolName}\u300D\u8FD4\u56DE\u9519\u8BEF` : text };

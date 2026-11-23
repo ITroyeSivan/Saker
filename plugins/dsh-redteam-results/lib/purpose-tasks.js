@@ -6,6 +6,7 @@ import { writeTaskPolicy, ownedPurposeTasks } from './task-policy-record.js';
 import { siteWorkerView, hostWorkerLimit } from './site-workers.js';
 import { reserveWorkerSlot, releaseWorkerSlot } from './worker-admission.js';
 import { readTaskContext } from './task-context.js';
+import { resolveHostRuntime, startHostActivation, releaseHostChild } from './host-bridge.js';
 
 const PURPOSE = Object.freeze({
   review: { label: '复核结果', question: '独立复核当前发现与证据', toolCalls: 6, modelCalls: 4, minutes: 5 },
@@ -15,11 +16,7 @@ const PURPOSE = Object.freeze({
 export function createPurposeTasks(ctx, getStore) {
   const active = new Map();
   const service = key => ctx[key] || ctx.get?.(key);
-  const runtime = () => {
-    const subagents = service('subagents');
-    if (!subagents?.startActivation) throw new Error('Desktop native activation lifecycle unavailable');
-    return subagents;
-  };
+  const runtime = () => resolveHostRuntime({ subagents: service('subagents'), agents: service('agents') });
 
   async function run(parentAgent, purpose, signal) {
     if (!PURPOSE[purpose]) throw new Error('purpose must be review or report');
@@ -31,7 +28,7 @@ export function createPurposeTasks(ctx, getStore) {
     const limit = Math.min(state.policy.workerLimit ?? 0, hostWorkerLimit(ctx));
     const siteActive = siteWorkerView(store, parentId).active;
     const token = randomUUID();
-    if (!reserveWorkerSlot(parentId, limit, siteActive, token)) {
+    if (!reserveWorkerSlot(store, parentId, limit, siteActive, token, { ownerRuntime: 'purpose-task' })) {
       throw new Error('worker limit reached; finish or release another subtask before starting ' + purpose);
     }
     const entry = { childId: token, parentId, parentAgent, controller: new AbortController() };
@@ -40,7 +37,7 @@ export function createPurposeTasks(ctx, getStore) {
     try {
       return await runAdmitted(parentAgent, purpose, entry, signal);
     } finally {
-      releaseWorkerSlot(parentId, token);
+      releaseWorkerSlot(store, parentId, token);
       if (!readTaskPolicy(store, token)) active.delete(token);
       entry.finished = true;
       entry.settled();
@@ -99,7 +96,7 @@ export function createPurposeTasks(ctx, getStore) {
         'redteam_delivery', 'redteam_execution', 'redteam_research'],
     }, 'purpose-task-starting', { childId, purpose });
     // Persisted ownership takes over the reservation without an asynchronous gap.
-    releaseWorkerSlot(parentId, childId);
+    releaseWorkerSlot(store, parentId, childId);
     const context = readTaskContext(store, parentId);
     const counts = { findings: store.db.prepare("SELECT count(*) AS n FROM findings WHERE session_id=? AND mode='pentest'").get(parentId).n,
       requests: context?.requests?.length || 0, assets: context?.assets?.length || 0,
@@ -110,14 +107,14 @@ export function createPurposeTasks(ctx, getStore) {
     const prompt = access + (purpose === 'review'
       ? '独立复核已有事实，不扩大授权范围。确需新发目标请求时遵守父任务当前范围、只读、确认和预算限制。最后直接回答结论（确认/挑战/条件不足）、事实、影响、缺项和下一步；不要调用redteam_task action=report。'
       : '整理已有内容为报告草稿；禁止新发任何目标请求。最后直接输出报告要点和缺项，不调用redteam_task action=report。');
-    const subagents = runtime();
+    const host = runtime();
     let activation;
     try {
-      activation = await subagents.startActivation({
-        provider: 'spawn', childId, label: spec.label,
-        signal: AbortSignal.any([entry.controller.signal, AbortSignal.timeout(spec.minutes * 60 * 1000), ...(signal ? [signal] : [])]), delivery: 'caller',
-        request: { parent: parentAgent, maxDepth: 1, prompt: [{ type: 'text', text: prompt }],
-          ...(childAgentOptions ? { agentOptions: childAgentOptions } : {}) },
+      activation = await startHostActivation(host, {
+        provider: 'spawn', childId, label: spec.label, name: 'saker-' + childId.slice(0, 8),
+        signal: AbortSignal.any([entry.controller.signal, AbortSignal.timeout(spec.minutes * 60 * 1000), ...(signal ? [signal] : [])]),
+        delivery: 'caller', parent: parentAgent, maxDepth: 1, prompt: [{ type: 'text', text: prompt }],
+        ...(childAgentOptions ? { agentOptions: childAgentOptions } : {}),
       });
     } catch (error) {
       const nested = Array.isArray(error?.errors) ? error.errors.map(item => item?.message || String(item)).join('; ') : '';
@@ -163,13 +160,9 @@ export function createPurposeTasks(ctx, getStore) {
     entry.cleanup = (async () => {
       try {
         markChild(getStore(), entry.childId, 'closing');
-        if (entry.activation) await entry.activation.dispose();
-        else {
-          const agents = service('agents'), subagents = runtime();
-          if (!agents?.get || !subagents.drainChildren) throw new Error('native cleanup confirmation unavailable');
-          await subagents.drainChildren(entry.parentAgent, [entry.childId]);
-        }
-        if (service('agents')?.get?.(entry.childId)) throw new Error('native child remains live after release');
+        await releaseHostChild(runtime(), {
+          activation: entry.activation, childId: entry.childId, parent: entry.parentAgent,
+        });
         markChild(getStore(), entry.childId, 'released');
         active.delete(entry.childId);
         return true;
@@ -209,10 +202,7 @@ export function createPurposeTasks(ctx, getStore) {
       for (const row of ownedPurposeTasks(getStore(), parentId)) {
         if (row.activationState === 'released' || (childId && row.childId !== childId) || active.has(row.childId)) continue;
         try {
-          const agents = service('agents'), subagents = runtime();
-          if (!agents?.get || !subagents.drainChildren) throw new Error('native cleanup confirmation unavailable');
-          await subagents.drainChildren(parentAgent, [row.childId]);
-          if (agents.get(row.childId)) throw new Error('native child remains live after release');
+          await releaseHostChild(runtime(), { childId: row.childId, parent: parentAgent });
           markChild(getStore(), row.childId, 'released');
         } catch (error) { markChild(getStore(), row.childId, 'cleanup-failed', String(error?.message || error)); }
       }

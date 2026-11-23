@@ -124,11 +124,16 @@ try {
     assert.throws(() => startTaskPolicy(store, 'over-limit', { mode: 'regular', budget: { toolCalls: 5, workers: 17 } }), /0 and 16/);
   });
 
-  await test('default worker ceiling is zero until the user explicitly enables collaboration', () => {
+  await test('new bounded tasks default to two managed workers unless the user saves a tighter preference', () => {
     chooseTaskMode(store, 'default-workers', 'regular');
-    assert.equal(chosenTaskOptions(store, 'default-workers').workers, 0);
+    assert.equal(chosenTaskOptions(store, 'default-workers').workers, 2);
     const policy = startTaskPolicy(store, 'default-workers-direct', { mode: 'regular', budget: { toolCalls: 5 } });
-    assert.equal(policy.workerLimit, 0);
+    assert.equal(policy.workerLimit, 2);
+    const bounded = startTaskPolicy(store, 'default-bounded-budget', { mode: 'regular' });
+    assert.equal(bounded.budget.minutes, 15);
+    assert.equal(bounded.budget.toolCalls, 60);
+    assert.equal(bounded.budget.modelCalls, 48);
+    assert.equal(bounded.workerLimit, 2);
   });
 
   await test('one task keeps one operation budget and does not reset time, question, target or materials', () => {
@@ -204,7 +209,7 @@ try {
     const source = fs.readFileSync(new URL('../plugins/dsh-redteam-results/lib/client.js', import.meta.url), 'utf8');
     const { builtinTemplates, promptFields } = await import('../plugins/dsh-redteam-results/lib/prompt-templates.js');
     const catalog = builtinTemplates();
-    assert.equal(catalog.length, 50);
+    assert.equal(catalog.length, 62);
     const snippet = source.slice(source.indexOf('function promptSubstitute('), source.indexOf('function ChatSetup('));
     const clipboard = [], values = [];
     let cursor = 0, fail = false;
@@ -229,7 +234,7 @@ try {
       pick.props.onClick();
       const selected = await tree(mode);
       selected.find(node => node.props['aria-label'] === '目标地址').props.onChange({ target: { value: 'https://example.test' } });
-      const full = (await tree(mode)).find(node => node.props['aria-label'] === '提示词全文').props.value;
+  const full = (await tree(mode)).find(node => node.props['aria-label'] === '指令正文').props.value;
       assert(full.includes('https://example.test'));
       await (await tree(mode)).find(node => node.type === 'button' && node.children.includes('复制')).props.onClick();
       assert.equal(clipboard.at(-1), full);

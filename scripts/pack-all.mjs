@@ -15,6 +15,16 @@ import { dirname, join, resolve } from 'node:path'
 import { productPluginDirectories } from './lib/product-plugins.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+// lib/client.js is a generated artifact; rebuild it before packing so the
+// published plugin always matches src/client.
+const clientBuild = spawnSync(process.execPath, [join(root, 'scripts', 'build-client.mjs')], { cwd: root, encoding: 'utf8' })
+if (clientBuild.status !== 0) {
+  console.error(clientBuild.stdout || '')
+  console.error(clientBuild.stderr || '')
+  console.error('pack-all: client build failed')
+  process.exit(1)
+}
+console.log('OK   client build')
 let ok = 0
 let fail = 0
 

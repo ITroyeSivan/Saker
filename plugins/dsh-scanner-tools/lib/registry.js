@@ -492,6 +492,18 @@ export const TOOL_DEFS = {
 		defaults: [],
 		limits: { timeoutMs: 600_000, previewChars: 6000 },
 		guard: { active: true, targetParam: "target" }
+	},
+	seatbelt: {
+		id: "seatbelt", bin: "Seatbelt", name: "seatbelt_posture", kind: "host-posture",
+		summary: "主机只读配置采集（Seatbelt -group=system -q；仅当前 Host 本机，不采集凭据/浏览器/远程）。",
+		hint: "调用固定为 Seatbelt 的 system 只读组：系统信息、补丁、防火墙、 Defender、服务、计划任务、本地组与共享等配置线索。结果只是观察，不等于提权；不接受额外参数、remote、user、slack 或 chromium 组。",
+		params: {},
+		tiers: optionalToolTiers("Seatbelt", "主机配置检查工具", "现有配置导出/手工只读命令", "导出系统与安全配置后用材料解析核对"),
+		args: { flags: {}, combined: {}, switches: {} },
+		defaults: ["-group=system", "-q"],
+		limits: { timeoutMs: 180_000, previewChars: 6000 },
+		guard: { active: false },
+		allowExtra: false
 	}
 };
 
@@ -718,6 +730,7 @@ export function buildArgs(def, params = {}) {
 		if (params[k] === undefined || params[k] === "") continue;
 		if (!known.has(k)) throw new Error(`未知参数 ${k}（已知：${[...known].filter((x) => x !== "workspace" && x !== "extra").join("/")}/extra）`);
 	}
+	if (params.extra && def.allowExtra === false) throw new Error("该工具不接受额外参数");
 	for (const [k, spec] of Object.entries(def.args?.combined ?? {})) {
 		let v = params[k];
 		if (v === undefined || v === "") v = spec.def;

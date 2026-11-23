@@ -178,7 +178,7 @@ await test('a worker can investigate another authorized asset with a different r
       async startActivation(input) {
         starts.push(input)
         live.set(input.childId, {})
-        return { result: Promise.resolve({ stopReason: 'completed', output: [] }), dispose: async () => { live.delete(input.childId) } }
+        return { childId: input.childId, result: Promise.resolve({ stopReason: 'completed', output: [] }), dispose: async () => { live.delete(input.childId) } }
       },
       async drainChildren(_parent, ids) { for (const id of ids) live.delete(id) },
     },
@@ -243,17 +243,20 @@ await test('shrinking the parent scope immediately narrows an existing child sco
   } finally { store.close() }
 })
 
-await test('defaults are optional and the UI exposes local status, assets and pending diffs', () => {
+await test('new bounded defaults are visible and the UI exposes local status, assets and pending diffs', () => {
   const store = openStore(':memory:')
   try {
     const policy = startTaskPolicy(store, 'optional', { mode: 'regular', target: 'example.test' })
-    assert.equal(policy.budget.toolCalls, null)
-    assert.equal(policy.budget.deadline, null)
+    assert.equal(policy.budget.toolCalls, 60)
+    assert.equal(policy.budget.minutes, 15)
+    assert.equal(policy.budget.modelCalls, 48)
+    assert.equal(policy.workerLimit, 2)
+    assert(Number.isInteger(policy.budget.deadline))
     assert.equal(policy.budget.unmeteredToolCalls, null)
   } finally { store.close() }
   const client = readFileSync(join(root, 'plugins/dsh-redteam-results/lib/client.js'), 'utf8')
   assert.match(client, /测试范围（网址、域名、IP\/CIDR，选填）/)
-  assert.match(client, /范围：.*资产.*已发请求\/回执.*运行助手.*待你确认/s)
+ assert.match(client, /范围：.*资产.*已发请求\/回执.*并行任务.*待你处理/s)
   assert.match(client, /查看资产/)
   assert.match(client, /待确认的任务变更/)
   assert.doesNotMatch(client, /calls:'30'|minutes:'15'|unmetered:'0'/)

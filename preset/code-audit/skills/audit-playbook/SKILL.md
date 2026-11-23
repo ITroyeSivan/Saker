@@ -307,7 +307,7 @@ L1验证:GET /toLogin 期望:任务调度中心
 
 ## 报告模板
 
-- 覆盖声明（operation_scope 已登记时必带）：报告含「覆盖：M/N」一行，与 operation-state 台账实测一致（报告门算术对账，虚报/漏报拦门）；未测项列入未覆盖清单并注明原因（不在范围/超预算/未授权等）。
+- 覆盖声明：报告含「覆盖：M/N」一行，与 `audit-coverage-matrix.md` 实测一致（报告门算术对账，虚报/漏报拦门）；未测项列入未覆盖清单并注明原因（不在范围/超预算/未授权等）。
 
 ### SARIF 机器可读导出（CI 集成场景）
 
@@ -565,7 +565,7 @@ trivy config --config-policy ./policy --namespaces user <dir>
 |---|---|---|---|
 | 总控（主会话） | — | 代码库 → 深度分级决策 / 面映射把关 / 三路派工 / 收尾 | 用户未选深度时按三级默认提议 |
 | **前置识别员** | 单个 spawn | 代码库 → 框架/依赖识别 + 已知漏洞核对 + 深度建议 | 通用框架先核已知漏洞（禁 0→1 盲审）；产出决定后续矩阵规模 |
-| **面映射员** | 单个 spawn | 源码 → 入口清单（route-mapper 法）+ sink 面（sink 大表反查） | 产物落盘 `surface-map.md`（含入口/sink/深度分级三标记），**Gate A1 的核心**，结构校验走 stage_gate A1 |
+| **面映射员** | 单个 spawn | 源码 → 入口清单（route-mapper 法）+ sink 面（sink 大表反查） | 产物落盘 `surface-map.md`（含入口/sink/深度分级三标记），**Gate A1 的核心**；结构核对以本文件门禁表为准 |
 | 审计工人扇出 | workflow（per 模块/per 语言） | 模块 + 该模块可达 sink 清单 → 候选 finding | sink 优先、只带该语言手册+sink 表（信息裁剪）；平均用力是大忌 |
 | 扫描命中复核组 | workflow（per 命中） | semgrep/trivy/osv 每个命中 → 真实调用链或丢弃 | **扫描器输出≠报告**（persona 义务）的并行落地 |
 | 供应链审计员 | 独立 spawn | SBOM → 版本核对 → 组件级 finding | 独立线（数据源不同：依赖而非代码） |
@@ -575,7 +575,7 @@ trivy config --config-policy ./policy --namespaces user <dir>
 | 报告员 | spawn | gate-pass findings → 六字段 + 待人工验证清单汇总 | 调用链标注反编译来源（如适用） |
 
 ## 本任务覆盖与证据
-- **目标重申（防漂移）**：开战先 `operation_scope` 登记审计对象分母（仓库/模块清单）；每阶段开始与每次派单开头核对当前作业模块在登记范围内——对未登记模块/未登记仓库作业=漂移，立即停手回锚（信封 target 行同源注入）；多仓库任务逐仓库核对当前对象。
+- **目标重申（防漂移）**：开战先在 `audit-coverage-matrix.md` 头部登记审计对象分母（仓库/模块清单）；每阶段开始与每次派单开头核对当前作业模块在登记范围内——对未登记模块/未登记仓库作业=漂移，立即停手回锚；多仓库任务逐仓库核对当前对象。
 - **任务口径（用户指定优先）**：用户显式指定测试范围（如「测 SQL 注入和 XSS」）时，指定项为最高优先级——只执行指定项并逐项回写点亮（图谱终态），未指定项不补测不欠账，转全流程须用户明示；用户未指定具体项（仅给目标/全量委托）时，按本模式全流程矩阵推进。
 
 - 测过的项目和结论只在本任务覆盖记录中保存一次，发现引用原始证据；不重复登记图谱。
@@ -610,13 +610,13 @@ trivy config --config-policy ./policy --namespaces user <dir>
 | 门 | 校验物 | 通过判据 |
 |---|---|---|
 | **Gate A1 面映射** | 框架识别 + 入口清单 + sink 面 + 深度分级 | 无面映射不开深审；快速扫描级可轻量化（仅 sink 清单） |
-| **Gate A2 双链一致** | 审计工人链 vs 追踪员链（调用 `stage_gate` 时以**统一双链台账** `artifacts/audit-chains.md` 作 `file` 参数——每 finding 一节，节内含 entry/sink 行与分档标记） | 两条 entry→sink 链一致才进复核；不一致 → 退回重追，仍不一致标「未决」（见三要素判据） |
-| 语义门禁：复核 gate-pass（无 stage_gate 编号） | 复核记录（+关键项跨 harness 复核建议项） | 无复核记录的报告条目拒收 |
+| **Gate A2 双链一致** | 审计工人链 vs 追踪员链，统一写入 `artifacts/audit-chains.md`——每 finding 一节，节内含 entry/sink 行与分档标记 | 两条 entry→sink 链一致才进复核；不一致 → 退回重追，仍不一致标「未决」（见三要素判据） |
+| 语义门禁：复核 gate-pass | 复核记录（+关键项跨 harness 复核建议项） | 无复核记录的报告条目拒收 |
 | **Gate A3 覆盖度** | audit-coverage-matrix.md + scan-reconcile.md（扫描命中对账表落盘文件名） | 每格每命中都有终态；无终态格子/对账不守恒 = 报告不完整退回 |
 
-> **结构校验走运行时门禁工具**：需要开工门禁清单时直接调 `gates_list`（mode=code-audit）读门禁与 canonical 文件名；产物齐后调 `stage_gate(mode, stage, workspace[, file])` 做结构校验（判定自动落 `<workspace>/gate-log.md`）。旧会话里若还看到 route-boost 信封，只当历史说明；缺失时不影响本流程。**校验物与标记以下表为准，不要去找插件源码文件。** 结构 PASS ≠ 全过——manual 项（语义）由复核员判定。
+> **结构校验以本文件门禁表为准**：审计员/复核员直接核对落盘文件与表格标记，不再调用旧 `gates_list`/`stage_gate`。产物缺失或标记不齐时退回补产物；结构 PASS ≠ 全过——manual 项（语义）由复核员判定。旧会话里若还看到 route-boost 信封或 gate-log，只当历史说明。
 
-> **覆盖记录（operation-state 扩展，与门禁同源）**：用 `operation_goal` 登记任务目标和完成标准后，先用 `operation_constraints` 登记用户约束（deny/allow 每行一条，带匹配词的 deny 命中 bash/fetch 即拦；约束每轮都会带进上下文，防压缩丢失），再用 `operation_scope` 登记本次覆盖范围——每行一个目标单元（资产/路由/模块/账号/题目；「id: 标签」可固定 id；**只登记目标明确点到或确实必需的面，绝不擅自扩大**）；每测完一项用 `operation_progress tested=<id> evidence=<evidence 编号/矩阵行/输出文件>` 记录，重复记录会刷新证据。范围登记后，报告会按「覆盖：已测/总数」核对——没测完可以照实声明，虚报或漏报会被拦。开新方向（派单/追线/阶段切换）前用 `operation_intent` 登记依据（anchor=boot 开局 / criterion 完成标准 / scope 范围 / finding 本次发现 / chain 攻击链节点 + id）：方向必须有已确认的证据作依据；结束时用 `operation_progress intent_done/intent_blocked/intent_dropped`（受阻或放弃要写原因）；未结束的方向会拦住报告落盘。
+> **覆盖记录（文件即台账）**：在 `audit-coverage-matrix.md` 登记任务目标、完成标准、用户约束和本次覆盖范围——每行一个目标单元（资产/路由/模块/账号/题目；只登记目标明确点到或确实必需的面，绝不擅自扩大）；每测完一项就在对应格写 `已审/N-A/未完成` 并附证据编号或文件。开新方向（派单/追线/阶段切换）前在该文件写一句依据（开局/完成标准/范围/本次发现/攻击链节点）；受阻或放弃写明原因。报告按「覆盖：已测/总数」核对，虚报或漏报退回。
 >
 > | 门 | 结构校验物（canonical 名 + 必含标记） |
 > |---|---|---|

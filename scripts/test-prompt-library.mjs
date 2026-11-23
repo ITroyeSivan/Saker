@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { runInNewContext } from 'node:vm';
 import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
 import { builtinTemplates, promptFields, validateTemplate, searchTemplates, renderTemplate, missingRequired, importTemplates } from '../plugins/dsh-redteam-results/lib/prompt-templates.js';
 import { listUserTemplates, upsertUserTemplate, deleteUserTemplate, saveAsTemplate, readDraft, listDrafts, saveDraft } from '../plugins/dsh-redteam-results/lib/prompt-store.js';
@@ -15,7 +16,7 @@ const test = (name, work) => { try { work(); console.log('ok   ' + name); } catc
 try {
   test('the built-in catalog preserves legacy IDs, adds scene templates, and keeps fields bounded', () => {
     const list = builtinTemplates();
-    assert.equal(list.length, 50, '36 legacy templates plus the three-scene additions');
+    assert.equal(list.length, 62, 'preserve existing templates and include concrete discovery workflows');
     assert.equal(list.filter(t => t.id === 'U01').length, 1);
     for (const t of list) validateTemplate(t, { builtin: true });
     // required must stay 0–2 so the editor only asks for the key fields.
@@ -26,10 +27,10 @@ try {
     const p01 = list.find(t => t.id === 'P01');
     assert(p01, 'document test template must exist');
     assert.deepEqual(p01.required, ['materials']);
-    assert.match(p01.text, /先读全测试要求/);
+    assert.match(p01.text, /先读全要求/);
     const n01 = list.find(t => t.id === 'N01');
     assert.equal(n01.title, '检查指定漏洞或 EXP');
-    assert.match(n01.text, /读取实际公告和必要代码/);
+    assert.match(n01.text, /公告和 PoC 的实际代码/);
     assert(promptFields().cve.label.includes('链接'));
     const a06 = list.find(t => t.id === 'A06');
     assert.doesNotMatch(a06.text, /知识片段|知识来源|知识更新额度/);
@@ -44,7 +45,20 @@ try {
     assert(searchTemplates('EXP').some(t => t.id === 'N01'), 'EXP must reach the direct vulnerability template');
     assert(searchTemplates('文档').some(t => t.id === 'P01'), '文档 must reach the document test template');
     assert.equal(searchTemplates('知识').some(t => ['F06', 'A06'].includes(t.id)), false, 'retired knowledge search must not resurface old guidance');
-    assert.equal(searchTemplates('').length, 50);
+    assert.equal(searchTemplates('').length, 62);
+  });
+  test('common entries stay short while search reaches specialist discovery examples', () => {
+    const source=fs.readFileSync(new URL('../plugins/dsh-redteam-results/lib/client.js',import.meta.url),'utf8');
+    const fn=source.slice(source.indexOf('function promptVisibleRows('),source.indexOf('function ChatPromptEditor('));
+    const box={};runInNewContext(fn,box);const rows=builtinTemplates({scene:'free'});
+    const visible=box.promptVisibleRows(rows,'common','',[]);
+    assert(visible.length<rows.length&&visible.some(t=>t.id==='R08'));
+    assert(box.promptVisibleRows(rows,'common','零结果',[]).some(t=>t.id==='R13'));
+    assert(box.promptVisibleRows(rows,'common','证书',[]).some(t=>t.id==='R10'));
+    assert(box.promptVisibleRows(rows,'common','',['R13'])[0].id==='R13');
+    assert(!builtinTemplates({scene:'competition'}).some(t=>t.id==='R08'));
+    assert.match(rows.find(t=>t.id==='R08').text,/别把所有被动查询都锁在现有域名里/);
+    assert.match(rows.find(t=>t.id==='R14').text,/第三方托管/);
   });
   test('render substitutes provided values, falls back to defaults, and reports missing required fields', () => {
     const s01 = builtinTemplates().find(t => t.id === 'S01');

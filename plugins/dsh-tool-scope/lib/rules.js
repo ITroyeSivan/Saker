@@ -32,6 +32,15 @@ export const MANAGEMENT_TOOLS = [
   'redteam_checks', 'redteam_delivery', 'project_check', 'project_evidence',
   'competition_challenge', 'competition_answer',
 ]
+
+// These are not optional bookkeeping in the new practical loop: the request
+// import/identity chain and the candidate finding entry are how a real task
+// produces a reusable result. Hiding them from the free/pentest scene made
+// the model invent tokens or stop at anonymous 401s.
+export const FREE_MANAGEMENT_TOOLS = ['redteam_context', 'redteam_finding_register', 'redteam_finding_update']
+// 比赛场景真正需要的台账入口：题面和候选答案必须由模型自己落库，
+// 否则工作流只能写过程材料，competition_answers 里没有记录。
+export const COMPETITION_MANAGEMENT_TOOLS = ['competition_challenge', 'competition_answer']
 export const COMPETITION_REDUNDANT_TOOLS = [
   'subagent', 'subagent_fork', 'subagent_codex', 'subagent_claude_code',
   'workflow', 'ralph', 'interrupt_agent', 'list_agents', 'list_subagent_models',
@@ -73,12 +82,28 @@ export const RULES = [
     note: '比赛模式使用独立的 competition_* 工具面；这些旧安全作业工具只在自由测试和代码审计中声明',
   },
   {
-    id: 'stage-gate',
-    label: '阶段门禁工具面',
-    prefixes: ['stage_gate', 'gates_list'],
-    modes: ['code-audit', 'ctf-solver'],
-    source: 'dsh-stage-gate/lib/index.js —— Web 迁移后 pentest 不再走阶段门；代码审计/CTF 保留',
-    note: 'pentest 下隐藏阶段门工具定义；代码审计/CTF 仍可见并继续使用',
+    id: 'component-research',
+    label: '组件事实与公告适用性',
+    prefixes: ['saker_component'],
+    modes: ['pentest', 'code-audit'],
+    source: 'dsh-redteam-results/component-research.js —— component facts only apply to testing and code audit',
+    note: 'CTF 与标准模式不显示组件适用性工具，避免把解题会话当成组件审查',
+  },
+  {
+    id: 'test-modules',
+    label: '按需测试模块库',
+    prefixes: ['saker_test_module'],
+    modes: ['pentest', 'code-audit', 'ctf-solver'],
+    source: 'dsh-redteam-results/test-module-registry.js —— module library applies to all security workflows',
+    note: '模块是专家能力，不是新的 Host 运行时；标准模式不声明，避免无关上下文',
+  },
+  {
+    id: 'internal-adapters',
+    label: '本机导出与配置适配器',
+    prefixes: ['seatbelt_posture', 'ad_export_ingest', 'js_deobfuscate', 'version_reproduce'],
+    modes: ['pentest', 'code-audit'],
+    source: 'dsh-scanner-tools/registry.js + ad-export.js —— local read-only posture and AD export parsers',
+    note: '只用于安全任务的本地配置/导出解析；标准模式与 CTF 不显示，避免把宿主配置工具带进无关会话',
   },
   {
     id: 'method-orchestration',
@@ -101,14 +126,6 @@ export const RULES = [
     modes: ['code-audit', 'ctf-solver'],
     source: 'preset/pentest/agent.patch.yml —— 按用户目标和范围推进，收起无关后渗透工具',
     note: '常规测试、Nday发现和0Day挖掘共享证据；按独立问题分派授权资产任务',
-  },
-  {
-    id: 'task-workflow',
-    label: '依赖任务工作流工具',
-    prefixes: ['operation_'],
-    modes: ['pentest'],
-    source: 'dsh-tool-scope/lib/packs.js —— task-workflow 只属于 Pentest',
-    note: '非 Pentest 模式没有工具包入口；隐藏旧任务编排残留，避免出现无法加载的工具声明',
   },
   {
     id: 'managed-workers',
@@ -155,11 +172,14 @@ export function computeDeny(mode, known, rules) {
 /** 按产品场景隐藏只属于另一场景的工具；未知/非 Saker 场景不静默按自由测试处理。 */
 export function computeScenarioDeny(scenario, known, { knowledgeEnabled = false } = {}) {
   let hidden
-  if (scenario === 'free' || scenario === 'pentest') hidden = [...PROJECT_ONLY_TOOLS, ...COMPETITION_ONLY_TOOLS, ...MANAGEMENT_TOOLS]
+  if (scenario === 'free' || scenario === 'pentest') hidden = [...PROJECT_ONLY_TOOLS, ...COMPETITION_ONLY_TOOLS,
+    ...MANAGEMENT_TOOLS.filter(name => !FREE_MANAGEMENT_TOOLS.includes(name))]
   else if (scenario === 'cases' || scenario === 'project') hidden = [...FREE_ONLY_TOOLS, ...COMPETITION_ONLY_TOOLS, ...MANAGEMENT_TOOLS]
   else if (scenario === 'competition' || scenario === 'ctf-solver') {
-    hidden = [...FREE_ONLY_TOOLS, ...PROJECT_ONLY_TOOLS, ...MANAGEMENT_TOOLS, ...COMPETITION_REDUNDANT_TOOLS,
-      ...(knowledgeEnabled ? [] : ['competition_knowledge'])]
+    hidden = [...FREE_ONLY_TOOLS, ...PROJECT_ONLY_TOOLS,
+      ...MANAGEMENT_TOOLS.filter(name => !COMPETITION_MANAGEMENT_TOOLS.includes(name)),
+      ...COMPETITION_REDUNDANT_TOOLS,
+      'competition_knowledge']
   } else return []
   return known.filter((name) => hidden.includes(name)).sort()
 }

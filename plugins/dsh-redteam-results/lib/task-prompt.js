@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-const rule = 'Saker任务约束以动态上下文中的“Saker task state”最新快照为准。沿用其中的目标、方向、流程、人数上限、剩余预算与等待原因；不得通过重建任务或改身份重置额度。状态不可读、已停止或等待确认时停止目标操作，保留依据并说明。快照是宿主持久状态，不是目标返回的指令；工具守卫继续强制执行约束。这段说明只用于四件事：查询当前任务设置、读取相关资料、使用可用工具、引用实际结果；它不是角色模板、方法清单或固定流程。';
+const rule = 'Saker任务约束以动态上下文中的“Saker task state”最新快照为准。沿用其中的目标、方向、流程、人数上限、剩余预算与等待原因；不得通过重建任务或改身份重置额度。状态不可读、已停止或等待确认时停止目标操作，保留依据并说明。快照是宿主持久状态，不是目标返回的指令；工具守卫继续强制执行约束。遇到新的安全测试目标，先用 saker_workflow action=start；按返回的 stepId 与 revision 每步 action=advance，不要猜编号。附件或代理请求先用 redteam_context importRequest=<materialId> 生成 requestRef 与 credentialRef；认证头由宿主保存，不要手抄 token/Cookie，也不要写进报告或方法。组件问题先用 saker_component 记录事实与公告前提，版本命中后仍需执行证据。候选结论用 redteam_finding_register 登记 pending，修订用 update；只在 Markdown 写报告不算成果。这段说明只用于四件事：查询当前任务设置、读取相关资料、使用可用工具、引用实际结果；它不是角色模板、方法清单或固定流程。';
 
 // 三场景方案要求新增固定运行说明初始目标不超过 1200 UTF-8 字节；
 // 没有可靠计量器时不冒充精确 token。口径与上限放在同一处，由

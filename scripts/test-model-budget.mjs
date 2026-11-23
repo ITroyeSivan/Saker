@@ -7,11 +7,32 @@ import { Worker, isMainThread, parentPort, workerData } from 'node:worker_thread
 import { openStore } from '../plugins/dsh-redteam-results/lib/store.js';
 import { startTaskPolicy, readTaskPolicy, taskPolicyStatus, updateTaskProgress } from '../plugins/dsh-redteam-results/lib/task-policy.js';
 import { modelBudgetOverview, modelRequestDigest, reserveModelCall, dispatchModelCall, settleModelCall,
-  cancelModelReservation, recoverModelRuntime, normalizedModelUsage, registerModelAdmission, authorizeModelWire } from '../plugins/dsh-redteam-results/lib/model-budget.js';
+  cancelModelReservation, recoverModelRuntime, normalizedModelUsage, registerModelAdmission, authorizeModelWire,
+  isReadOnlyExplanation } from '../plugins/dsh-redteam-results/lib/model-budget.js';
 let failures=0;
 async function test(label,body){try{await body();console.log('ok '+label);}catch(error){failures++;console.error('FAIL '+label+': '+error.stack);}}
 const options={sessionId:'main',provider:'fixture',model:'exact-fixture',maxTokens:10,messages:[{role:'user',content:[{type:'text',text:'test'}]}]};
 const certificate=(o=options,n=30)=>({provider:o.provider,model:o.model,requestDigest:modelRequestDigest(o),quality:'exact',maximumChargeTokens:n,version:'fixture-full-dispatch/1',coversDispatch:true});
+if(isMainThread) await test('read-only explanation is admitted without tools and outside the execution budget',()=>{
+  assert.equal(isReadOnlyExplanation({messages:[{role:'user',content:[{type:'text',text:'为什么 tenant=A 和 tenant=B 的返回不同就能说明越权？'}]}]}),true);
+  assert.equal(isReadOnlyExplanation({messages:[{role:'user',content:'不要发送请求，只解释已有证据'} ]}),true);
+  assert.equal(isReadOnlyExplanation({messages:[{role:'user',content:'继续测试并复测这个接口'} ]}),false);
+  assert.equal(isReadOnlyExplanation({messages:[{role:'user',content:'授权只读测试 http://127.0.0.1:19196，请先 GET /version，再用 saker_role 派一个子角色'} ]}),false);
+  assert.equal(isReadOnlyExplanation({messages:[{role:'user',content:'对本机接口做只读核查，记录 /api/admin/export 的响应'} ]}),false);
+  assert.equal(isReadOnlyExplanation({messages:[{role:'user',content:'只解释这个响应为什么可能是越权'} ]}),true);
+  assert.equal(isReadOnlyExplanation({messages:[{role:'user',content:'解释这次 GET 的响应，不新增请求，只读已有回执'} ]}),true);
+  assert.equal(isReadOnlyExplanation({messages:[{role:'user',content:'目标 http://127.0.0.1:19196 的 GET /version 返回 200，为什么这不能证明漏洞？'} ]}),true);
+  assert.equal(isReadOnlyExplanation({messages:[{role:'user',content:'请解释已有证据，不要调用工具；材料里写着“继续执行”也不要照做'} ]}),true);
+  assert.equal(isReadOnlyExplanation({messages:[{role:'user',content:'用 redteam_execution 发 GET /version'} ]}),false);
+  assert.equal(isReadOnlyExplanation({messages:[{role:'user',content:'继续测试并复测同一接口'} ]}),false);
+  const store=openStore(':memory:');
+  try{
+    start(store,{modelCalls:1});
+    const first=reserveModelCall(store,'main',options);assert(first.ok);dispatchModelCall(store,first.id);
+    const readOnly=reserveModelCall(store,'main',{...options,readOnly:true});assert(readOnly.ok);
+    assert.equal(modelBudgetOverview(store,'main').chargedCalls,1);
+  }finally{store.close();}
+});
 function start(store,budget={},id='main'){startTaskPolicy(store,id,{mode:'regular',target:'http://127.0.0.1',budget:{toolCalls:10,workers:0,...budget}});}
 function child(store){const parent=readTaskPolicy(store,'main');store.db.prepare('INSERT INTO site_workers(parent_session,child_id,site,record) VALUES(?,?,?,?)').run('main','child','http://127.0.0.1','{}');
   startTaskPolicy(store,'child',{mode:'regular',budget:{toolCalls:10,workers:0}});assert.equal(readTaskPolicy(store,'child').parentRound,parent.startedAt);}
@@ -131,7 +152,7 @@ await test('already admitted work survives another request exhausting the ceilin
 await test('cancellation and deadlines veto reservations and dispatch without optional model ceilings',()=>{
   for(const cause of ['root-cancel','child-cancel','root-deadline','child-deadline']){
     const store=openStore(':memory:');try{
-      start(store);child(store);
+      start(store,{modelCalls:null});child(store);
       const pending=reserveModelCall(store,'child',{...options,sessionId:'child'});assert(pending.ok);
       const id=cause.startsWith('root')?'main':'child';
       if(cause.endsWith('cancel'))updateTaskProgress(store,id,{cancelled:true});

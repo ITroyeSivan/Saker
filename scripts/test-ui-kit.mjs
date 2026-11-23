@@ -13,7 +13,7 @@ import { productPluginDirectories } from './lib/product-plugins.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXPECTED_COMPONENTS = ['Button', 'Input', 'Select', 'Badge', 'DataTable', 'Drawer', 'InlineNotice', 'EmptyState'];
-const EXPECTED_FONTS = ['12', '13', '14', '16'];
+const EXPECTED_FONTS = ['11', '12', '13', '14', '16'];
 const EXPECTED_SPACING = ['0', '4', '8', '12', '16', '24'];
 
 let failed = 0;
@@ -22,7 +22,7 @@ const check = (ok, message) => { if (ok) console.log('ok   ' + message); else { 
 check(UI_KIT.source.includes('5.7'), '共享组件层标注了来源（方案 5.7）');
 check(COMPONENTS.length === EXPECTED_COMPONENTS.length && EXPECTED_COMPONENTS.every((name, i) => COMPONENTS[i] === name),
   '组件清单是 8 项：' + EXPECTED_COMPONENTS.join(' / '));
-check([...FONT_SIZES].sort((a, b) => a - b).join(',') === EXPECTED_FONTS.join(','), '字号令牌 12/13/14/16');
+check([...FONT_SIZES].sort((a, b) => a - b).join(',') === EXPECTED_FONTS.join(','), '字号令牌 11/12/13/14/16（11 仅用于工具型密集列表）');
 check(LINE_HEIGHT === '1.5', '行高令牌 1.5');
 check([...SPACING].sort((a, b) => a - b).join(',') === EXPECTED_SPACING.join(','), '间距令牌 0/4/8/12/16/24');
 check(RADIUS.control === '6px' && RADIUS.drawer === '12px', '圆角令牌：控件 6px / 抽屉 12px');

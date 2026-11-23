@@ -6,14 +6,6 @@
 
 export const PACKS = [
   {
-    id: 'task-workflow',
-    label: '依赖任务与恢复',
-    prefixes: ['operation_'],
-    modes: ['pentest', 'ctf-solver'],
-    defaultVisible: false,
-    hint: '需要持久队列、取消恢复或完整任务账本时加载；复用现有任务状态，不要求先建研究流程',
-  },
-  {
     id: 'asset-discovery',
     label: '目标识别与资产查询',
     prefixes: ['asset_search', 'asset_candidate_search', 'asset_ingest', 'subfinder_enum', 'httpx_probe', 'whatweb_fingerprint', 'wafw00f_detect'],
@@ -24,7 +16,7 @@ export const PACKS = [
   {
     id: 'active-scan',
     label: '主动扫描器',
-    prefixes: ['nmap_portscan', 'dirsearch_dirs', 'ffuf_fuzz', 'nuclei_scan', 'afrog_scan', 'sqlmap_inject', 'katana_crawl', 'gau_urls'],
+    prefixes: ['nmap_portscan', 'dirsearch_dirs', 'ffuf_fuzz', 'nuclei_scan', 'afrog_scan', 'sqlmap_inject', 'katana_crawl', 'gau_urls', 'tls_probe'],
     modes: ['pentest', 'ctf-solver'],
     defaultVisible: false,
     hint: 'Nmap、目录/内容发现、Nuclei、Afrog、SQLMap 与爬取；按用户要求加载，执行时仍受范围和真实参数限制',

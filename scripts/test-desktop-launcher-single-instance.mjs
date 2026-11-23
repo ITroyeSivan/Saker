@@ -68,6 +68,19 @@ await test('the launcher restores the Electron window started by a hidden shortc
     'window selection must target the Electron main window, not the hidden message window');
 });
 
+await test('the launcher follows Windows scaling unless explicitly overridden', () => {
+  assert.doesNotMatch(source, /AppliedDPI/,
+    'the launcher must not silently cap the user display scaling');
+  assert.doesNotMatch(source, /1\.5/,
+    'no hard-coded default scale may be forced');
+  assert.match(source, /interfaceScale/,
+    'an explicit interfaceScale remains available as an opt-in override');
+  assert.match(source, /--force-device-scale-factor=/,
+    'the override must be applied to this Electron process only');
+  assert.doesNotMatch(source, /Set-ItemProperty|reg\.exe|reg add/,
+    'the launcher must not modify Windows display settings');
+});
+
 await test('the deployed launcher matches the repo template', () => {
   if (!existsSync(deployed)) { console.log('   （未部署副本，跳过一致性比对）'); return }
   assert.equal(hash(deployed), hash(template),

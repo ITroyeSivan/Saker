@@ -6,6 +6,7 @@
 // 回退前会跑档案自检：配置副本必须逐字节对得上记录，数据副本必须认得出格式。
 //
 // 用法: node scripts/restore-desktop.mjs --backup "<home>/backups/desktop-...>" [--home "<.dsh>"] [--apply]
+import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -59,9 +60,30 @@ const bundles = plan.plan.rebuild.bundles
 const productBundles = bundles.filter((name) => name.startsWith('@dsh-external/') || name === 'dsh-saker')
 console.log(`匹配构建：${Object.keys(plan.plan.rebuild.dependencies).length} 个依赖；已启用 ${productBundles.length} 个 Saker 包`
   + (bundles.length > productBundles.length ? `（另有 ${bundles.length - productBundles.length} 个宿主 bundle）` : ''))
+const profileDir = plan.plan.profile
+const localBuildProblems = []
+for (const [name, spec] of Object.entries(plan.plan.rebuild.dependencies)) {
+  if (!name.startsWith('@dsh-external/') && name !== 'dsh-saker') continue
+  if (typeof spec !== 'string' || !spec.startsWith('file:')) continue
+  const target = resolve(profileDir, spec.slice(5))
+  if (!existsSync(target)) {
+    localBuildProblems.push(`${name}：回退构建待准备（${target} 不存在）`)
+    continue
+  }
+  const expected = /-([0-9a-f]{64})\.tgz$/i.exec(target)
+  if (expected && createHash('sha256').update(readFileSync(target)).digest('hex') !== expected[1].toLowerCase()) {
+    localBuildProblems.push(`${name}：持久包摘要不符（${target}）`)
+  }
+}
+if (localBuildProblems.length) console.log('回退构建检查：\n  ' + localBuildProblems.join('\n  '))
+else console.log('回退构建检查：11 个本地包均存在')
 if (!apply) {
   console.log('以上只是方案，没有写任何文件。确认无误后加 --apply 执行回退。')
   process.exit(0)
+}
+if (localBuildProblems.length) {
+  console.error('回退构建不完整，已拒绝写入；原配置、数据和当前构建未改变。')
+  process.exit(1)
 }
 
 // 应用还在跑的时候盖配置会被它重新写回去，所以这里直接拒绝。

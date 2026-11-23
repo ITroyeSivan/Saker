@@ -2,6 +2,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { writeTaskPolicy, ownedPurposeTasks, childAllowedTools } from './task-policy-record.js';
 import { readTaskContext, saveTaskContext } from './task-context.js';
+import { copyExecutionReceipts } from './execution-receipts.js';
+import { resolveHostRuntime, createSubagentRunTracker, startHostActivation, releaseHostChild } from './host-bridge.js';
 import { startTaskPolicy, taskPolicyStatus, readTaskPolicy, archiveTaskRound, effectivePolicy } from './task-policy.js';
 import { normalizeTaskFlow } from './task-flow.js';
 import { copySiteMaterials } from './business-materials.js';
@@ -40,6 +42,19 @@ const localPathTarget = value => {
   return /^file:/i.test(text) || /^[a-z]:[\\/]/i.test(text) || /^\\\\/.test(text)
     || /^\.{0,2}[\\/]/.test(text)
 }
+function lastAssistantText(agent) {
+  try {
+    const read = index => agent?.session?.eventAt ? agent.session.eventAt(index) : agent?.session?.events?.[index]
+    const length = Number.isSafeInteger(agent?.session?.seq) ? agent.session.seq : (agent?.session?.events?.length || 0)
+    for (let index = length - 1; index >= 0; index--) {
+      const event = read(index)
+      if (event?.type !== 'assistant/message') continue
+      const text = event.data?.message?.content?.filter(block => block.type === 'text').map(block => block.text).join('\n').trim()
+      if (text) return text.slice(0, 4000)
+    }
+  } catch { /* corrupted/partial child log remains unknown */ }
+  return ''
+}
 export function siteWorkerRows(store, parentId) {
   return store.db.prepare('SELECT record FROM site_workers WHERE parent_session=? ORDER BY rowid').all(parentId)
     .map(row => parseRowRecord(row, { table: 'site_workers', key: 'parent_session', id: parentId }));
@@ -69,18 +84,42 @@ export function siteWorkerView(store, parentId) {
     workers: rows.filter(row => row.state !== 'released').concat(rows.filter(row => row.state === 'released').slice(-8)).map(({ childId, site, question, focus, assistPurpose, state, report, error }) => ({ childId, site, question, focus, assistPurpose, state,
       ...(report === undefined ? {} : { report }), ...(error === undefined ? {} : { error }) })), more: Math.max(0, rows.filter(row => row.state === 'released').length - 8) };
 }
+
+/**
+ * A desktop restart loses in-memory Host agents. Keep the durable worker rows
+ * honest: an active/starting row whose child agent is no longer running must
+ * become cleanup-unconfirmed, not stay "running" forever. Queued roles have no
+ * site_workers row and are intentionally left to the user's explicit resume.
+ */
+export function reconcileOrphanedSiteWorkers(store, parentId, isLive = () => false) {
+  let changed = 0
+  for (const row of siteWorkerRows(store, parentId)) {
+    if (!activeStates.has(row.state) || row.state === 'cleanup-failed') continue
+    if (isLive(row.childId)) continue
+    row.state = 'cleanup-failed'
+    row.error = 'Desktop restarted while the child Host agent was not running; cleanup unconfirmed, outcome unknown, no automatic replay'
+    row.restartRecoveredAt = Date.now()
+    save(store, row)
+    changed += 1
+  }
+  return { changed }
+}
 export function createSiteWorkers(ctx, getStore) {
   const service = key => ctx[key] || ctx.get?.(key), parents = new Map(), locks = new Set(), closing = new Map(), reportTimers = new Map();
   const childToolScopes = new Map();
   const childScopeFailures = new Map();
   const activations = new Map();
+  const runTracker = createSubagentRunTracker(ctx);
+  let settledHandler = null;
+  const notifySettled = (row, state) => {
+    try { settledHandler?.(row, state); }
+    catch (error) { ctx.logger?.warn?.('worker settle: %s', error?.message || error); }
+  };
   const runtime = () => {
     const subagents = service('subagents'), agents = service('agents');
-    const activation = !!(subagents?.startActivation && subagents?.drainChildren && subagents?.listDescendants && agents?.get);
-    const legacy = !!(subagents?.startContinuable && subagents?.drainContinuableChildren && subagents?.listDescendants && agents?.get);
-    if (!activation && !legacy)
+    if (!subagents?.listDescendants || !agents?.get)
       throw new Error('Desktop native lifecycle controls unavailable; use the main agent');
-    return { subagents, agents, api: activation ? 'activation' : 'legacy' };
+    return { ...resolveHostRuntime({ subagents, agents }), api: 'activation' };
   };
   const parentIdOf = agent => {
     if (!agent?.session?.id || agent.session.header?.parentSession || siteWorkerParent(getStore(), agent.session.id)) throw new Error('only the main agent may manage workers');
@@ -108,7 +147,7 @@ export function createSiteWorkers(ctx, getStore) {
     const rows = siteWorkerRows(store, parentId).filter(row => !childId || row.childId === childId);
     if (childId && !rows.length) throw new Error('worker not owned by this task');
     if (!rows.length) return siteWorkerView(store, parentId);
-    const { subagents, agents, api } = runtime();
+    const { subagents, agents, shape } = runtime();
     for (const row of rows) {
       clearTimeout(reportTimers.get(row.childId)); reportTimers.delete(row.childId);
       if (closing.has(row.childId)) { await closing.get(row.childId); continue; }
@@ -116,19 +155,22 @@ export function createSiteWorkers(ctx, getStore) {
       row.state = 'closing'; row.reason = text(reason, 'reason'); save(store, row);
       const release = (async () => { try {
         if (row.startupRollbackUncertain && row.runnerPid === process.pid) throw new Error('startup rollback was uncertain; restart Desktop before releasing this reservation');
-        if (api === 'activation') {
-          await activations.get(row.childId)?.dispose();
-          await subagents.drainChildren(agent, [row.childId]);
+        if (!row.report) {
+          const childAgent = agents.get(row.childId);
+          const summary = childAgent ? lastAssistantText(childAgent) : '';
+          if (summary) row.report = { state: 'completed', summary, at: Date.now(), source: 'child-session-final-message' };
         }
-        else await subagents.drainContinuableChildren(agent, [row.childId]);
-        if (agents.get(row.childId)) throw new Error('native child remains live after release');
+        await releaseHostChild({ subagents, agents, shape }, {
+          activation: activations.get(row.childId), childId: row.childId, parent: agent,
+        });
         const latest = siteWorkerRows(store, parentId).find(item => item.childId === row.childId);
         if (latest.report) row.report = latest.report;
         row.state = 'released'; row.releasedAt = Date.now(); delete row.error;
         activations.delete(row.childId);
         if (row.workKey) { try { releaseWork(store, row.workKey, { worker: row.childId, generation: row.generation }); } catch { /* 租约可能已被接手 */ } }
-      } catch (error) { row.state = 'cleanup-failed'; row.error = String(error.message || error); }
-      finally { save(store, row); releaseWorkerSlot(parentId, row.childId); } })();
+        notifySettled(row, 'released');
+      } catch (error) { row.state = 'cleanup-failed'; row.error = String(error.message || error); notifySettled(row, 'cleanup-failed'); }
+      finally { save(store, row); releaseWorkerSlot(store, parentId, row.childId); } })();
       closing.set(row.childId, release);
       try { await release; } finally { closing.delete(row.childId); }
     }
@@ -140,13 +182,30 @@ export function createSiteWorkers(ctx, getStore) {
     locks.add(parentId);
     const childId = randomUUID();
     try {
-      const { subagents, agents, api } = runtime(), store = getStore(), state = taskPolicyStatus(store, parentId);
+      const { subagents, agents, shape } = runtime(), store = getStore(), state = taskPolicyStatus(store, parentId);
       if (!state.configured || state.stopped) throw new Error('an active bounded task is required');
       const focus = input.focus ?? state.policy.mode;
       if (!['regular', 'nday', '0day'].includes(focus)) throw new Error('invalid worker focus')
       const materialOnly = !input.site || String(input.site).trim() === 'task-materials'
       let site = materialOnly ? 'task-materials' : workerScope(input.site)
       const question = text(input.question, 'question', 4000), reason = text(input.reason, 'necessity', 2000);
+      const roleInfo = input.role && typeof input.role === 'object' && !Array.isArray(input.role)
+        ? {
+            roleId: String(input.role.roleId || '').slice(0, 160),
+            roleVersion: Number(input.role.roleVersion) || 0,
+            title: String(input.role.title || '').slice(0, 160),
+            objective: String(input.role.objective || '').slice(0, 4000),
+            responsibilities: String(input.role.responsibilities || '').slice(0, 6000),
+            deliverable: String(input.role.deliverable || '').slice(0, 3000),
+            capabilities: Array.isArray(input.role.capabilities)
+              ? input.role.capabilities.map(value => String(value).slice(0, 300)).slice(0, 32) : [],
+            logicalParent: String(input.role.logicalParent || '').slice(0, 200),
+            depth: Math.max(1, Math.min(2, Number(input.role.depth) || 1)),
+            workId: String(input.role.workId || '').slice(0, 160),
+            delegationRequestId: String(input.role.delegationRequestId || '').slice(0, 200),
+            handoffContext: String(input.role.handoffContext || '').slice(0, 4000),
+          }
+        : null;
       if (!['large-site-materials', 'independent-site-research'].includes(input.need)) throw new Error('specific delegation need required');
       const context = readTaskContext(store, parentId) || { assets: [], requests: [], checks: [] };
       const effective = effectivePolicy(store, state.policy);
@@ -229,7 +288,7 @@ export function createSiteWorkers(ctx, getStore) {
       // a second shell there would only widen the tool table.
       const competitionWorker = state.policy.sceneId === 'competition' || state.policy.scenario === 'competition'
         || agent.session.header?.agentPreset === 'ctf-solver';
-      const baseWorkerTool = name => /^(?:read|glob|grep|skill|saker_material|saker_browser|project_document|project_request|competition_challenge|competition_execution|redteam_execution|oob_probe)$/.test(name);
+      const baseWorkerTool = name => /^(?:read|glob|grep|skill|saker_material|saker_browser|project_document|project_request|competition_challenge|competition_execution|redteam_execution|saker_role|oob_probe)$/.test(name);
       const generalWorkerTool = name => /^(?:pwsh|powershell|exec_command|run_shell|run_code|bash|sh|write|edit|read_image|view_image|web_fetch|web_search)$/.test(name);
       const needed = name => baseWorkerTool(name) || (!competitionWorker && generalWorkerTool(name));
       // `run_code` is the PTC transport, not a registered business capability.
@@ -250,27 +309,32 @@ export function createSiteWorkers(ctx, getStore) {
         ...relevantRequests.map(request => String(request.id) + ':' + String(request.revision)),
         ...materialRecords.map(record => 'file:' + record.id),
       ];
-      const lease = claimWork(store, parentId, { workKey: leaseKey, worker: childId, ttlMs: 15 * 60 * 1000, materialIds });
-      if (!reserveWorkerSlot(parentId, workerLimit, inventory.count, childId)) {
+      const lease = claimWork(store, parentId, {
+        workKey: leaseKey, worker: childId, ttlMs: 15 * 60 * 1000, materialIds,
+        ownerPid: process.pid, ownerRuntime: 'site-worker',
+      });
+      if (!reserveWorkerSlot(store, parentId, workerLimit, inventory.count, childId, { ownerRuntime: 'site-worker' })) {
         releaseWork(store, lease.workKey, { worker: childId, generation: lease.generation });
         throw new Error('worker limit reached, including concurrent reservations');
       }
       const row = { parentId, childId, site, focus, question, reason, state: 'starting', createdAt: Date.now(), runnerPid: process.pid,
-        deliveryMode: api === 'activation' ? 'parent' : 'continuable',
+        deliveryMode: 'parent',
         allowedTools: allow, assistPurpose: input.assistPurpose || '',
-        workKey: lease.workKey, generation: lease.generation };
+        workKey: lease.workKey, generation: lease.generation, ...(roleInfo ? { role: roleInfo } : {}) };
       try { save(store, row); }
       catch (error) {
-        releaseWorkerSlot(parentId, childId);
+        releaseWorkerSlot(store, parentId, childId);
         releaseWork(store, lease.workKey, { worker: childId, generation: lease.generation });
         throw error;
       }
       parents.set(parentId, agent);
-      releaseWorkerSlot(parentId, childId);
+      releaseWorkerSlot(store, parentId, childId);
       try {
       const childAssets = scopedAssets
       const belongs = endpoint => { try { return assetOrigins.has(new URL(endpoint).origin) } catch { return false } };
-      saveTaskContext(store, childId, { ...context, assets: childAssets, requests: context.requests.filter(request => belongs(request.endpoint)), checks: context.checks.filter(check => belongs(check.endpoint)) });
+      const childRequests = context.requests.filter(request => belongs(request.endpoint));
+      copyExecutionReceipts(store, parentId, childId, childRequests.map(request => request.responseReceiptId).filter(Boolean));
+      saveTaskContext(store, childId, { ...context, assets: childAssets, requests: childRequests, checks: context.checks.filter(check => belongs(check.endpoint)) });
       if (!materialOnly) copySiteMaterials(store, parentId, childId, site);
       if (materialOnly) {
         for (const record of materialRecords) {
@@ -299,6 +363,16 @@ export function createSiteWorkers(ctx, getStore) {
       writeTaskPolicy(store, childId, childPolicy, 'worker-deadline-set', { workId: childId });
       const prompt = utf8Prefix([
         'Saker assist brief',
+        ...(roleInfo ? [
+          'Dynamic role: ' + roleInfo.title + ' v' + roleInfo.roleVersion,
+          'Role objective: ' + roleInfo.objective,
+          'Role responsibilities: ' + roleInfo.responsibilities,
+          'Role deliverable: ' + roleInfo.deliverable,
+          'Logical parent: ' + (roleInfo.logicalParent || 'root') + ' (depth ' + roleInfo.depth + ')',
+          'Work item: ' + roleInfo.workId,
+          'Requested capabilities: ' + (roleInfo.capabilities.length ? roleInfo.capabilities.join(', ') : 'use the authorized task tools'),
+          ...(roleInfo.handoffContext ? ['Handoff context: ' + roleInfo.handoffContext] : []),
+        ] : []),
         'Parent objective: ' + utf8Prefix(state.policy.question || '', 900),
         'Assigned goal: ' + question,
         'Purpose: ' + (input.assistPurpose || focus),
@@ -316,27 +390,26 @@ export function createSiteWorkers(ctx, getStore) {
       ].join('\n'), 4096);
         // v6 5.5：用户给站点子代理选了模型时覆盖 provider/model；未选则沿用当前会话模型。
         const workerModel = input.modelOptions === undefined ? state.policy?.workerModel : input.modelOptions;
-        if (api === 'activation') {
-          // 0.2.1：原生 API 用 startActivation；toolFilter 已移除，工具面由 agent/created
-          // 监听器按 row.allowedTools 做 per-agent restrict，执行守卫仍在 ctx.tools.guard。
-          const activation = await subagents.startActivation({ provider: 'spawn', childId, label: question.slice(0, 70), signal, delivery: 'parent',
-            request: { parent: agent, maxDepth: 1, prompt: [{ type: 'text', text: prompt }],
-              ...(workerModel ? { agentOptions: { ...workerModel } } : {}) } });
-          activations.set(childId, activation);
-          Promise.resolve(activation.result).catch(error => {
-            const current = siteWorkerRows(getStore(), parentId).find(item => item.childId === childId);
-            if (current && current.state !== 'released') {
-              current.error = 'activation result failed: ' + String(error?.message || error); save(getStore(), current);
-              return cleanup(agent, childId, 'activation failed');
-            }
-          }).catch(error => ctx.logger?.warn?.('worker cleanup: %s', error.message));
-        } else {
-          const legacyAllow = allow.filter(name => !INTERNAL_CAPABILITIES.has(name) && !/^recorded-/.test(name));
-          const legacyDeny = deny.filter(name => !INTERNAL_CAPABILITIES.has(name) && !/^recorded-/.test(name));
-          await subagents.startContinuable({ provider: 'spawn', childId, label: question.slice(0, 70), signal,
-            request: { parent: agent, maxDepth: 1, toolFilter: { allow: legacyAllow, deny: legacyDeny }, prompt: [{ type: 'text', text: prompt }],
-              ...(workerModel ? { agentOptions: { ...workerModel } } : {}) } });
+        // One activation path. The bridge flattens rc.2 and only keeps the rc.1
+        // request wrapper while the migration baseline still needs it.
+        const activation = await startHostActivation({ subagents, agents, shape }, {
+          provider: 'spawn', childId, label: question.slice(0, 70), name: 'saker-' + childId.slice(0, 8),
+          signal, delivery: 'parent', parent: agent, maxDepth: 1, prompt: [{ type: 'text', text: prompt }],
+          ...(workerModel ? { agentOptions: { ...workerModel } } : {}),
+        });
+        activations.set(childId, activation);
+        const run = runTracker.get(childId);
+        if (run?.runId) {
+          const latestRun = siteWorkerRows(store, parentId).find(item => item.childId === childId);
+          if (latestRun) { latestRun.activationRunId = run.runId; save(store, latestRun); }
         }
+        Promise.resolve(activation.result).catch(error => {
+          const current = siteWorkerRows(getStore(), parentId).find(item => item.childId === childId);
+          if (current && current.state !== 'released') {
+            current.error = 'activation result failed: ' + String(error?.message || error); save(getStore(), current);
+            return cleanup(agent, childId, 'activation failed');
+          }
+        }).catch(error => ctx.logger?.warn?.('worker cleanup: %s', error.message));
         const scopeFailure = childScopeFailures.get(childId);
         if (scopeFailure) {
           await cleanup(agent, childId, 'tool scope initialization failed');
@@ -347,7 +420,7 @@ export function createSiteWorkers(ctx, getStore) {
         if (!agents.get(childId)) await cleanup(agent, childId, 'confirm native settlement after admission');
         return { childId, ...siteWorkerView(store, parentId) };
       } catch (error) {
-        releaseWorkerSlot(parentId, childId);
+        releaseWorkerSlot(store, parentId, childId);
         row.state = 'cleanup-failed'; row.error = String(error.message || error); row.startupRollbackUncertain = error instanceof AggregateError; save(store, row);
         await cleanup(agent, childId, 'startup failed'); throw error;
       }
@@ -374,7 +447,9 @@ export function createSiteWorkers(ctx, getStore) {
       if (row.site !== 'task-materials' && (!taskTermInPolicy(state.policy, row.site) || !context?.assets.some(asset => belongs(asset.url))))
         throw new Error('continuation scope must remain in the current authorized task');
       archiveTaskRound(store, row.childId, 'parent-round-continuation');
-      saveTaskContext(store, row.childId, { ...context, assets: context.assets.filter(asset => belongs(asset.url)), requests: context.requests.filter(request => belongs(request.endpoint)), checks: context.checks.filter(check => belongs(check.endpoint)) });
+      const continuedRequests = context.requests.filter(request => belongs(request.endpoint));
+      copyExecutionReceipts(store, parentId, row.childId, continuedRequests.map(request => request.responseReceiptId).filter(Boolean));
+      saveTaskContext(store, row.childId, { ...context, assets: context.assets.filter(asset => belongs(asset.url)), requests: continuedRequests, checks: context.checks.filter(check => belongs(check.endpoint)) });
       copySiteMaterials(store, parentId, row.childId, row.site);
       row.focus = state.policy.flow?.kind === 'regular-with-nday' ? (row.focus || state.policy.mode) : state.policy.mode;
       const remaining = state.policy.budget.toolCalls === null ? null
@@ -465,9 +540,12 @@ export function createSiteWorkers(ctx, getStore) {
     const target = localPathTarget(requestedTarget) ? '' : requestedTarget;
     const state = taskPolicyStatus(getStore(), parentIdOf(agent));
     if (!state.configured || state.stopped) throw new Error('an active bounded task is required');
-    const modelOptions = input?.modelTier === 'review' || purpose === 'review'
+    const requestedModel = input?.modelOptions && typeof input.modelOptions === 'object'
+      && !Array.isArray(input.modelOptions) && input.modelOptions.provider && input.modelOptions.model
+      ? input.modelOptions : null;
+    const modelOptions = requestedModel || (input?.modelTier === 'review' || purpose === 'review'
       ? state.policy.reviewModel || state.policy.workerModel || null
-      : state.policy.workerModel || null;
+      : state.policy.workerModel || null);
     return delegate(agent, {
       focus: state.policy.mode,
       question: goal,
@@ -479,6 +557,7 @@ export function createSiteWorkers(ctx, getStore) {
       tools: Array.isArray(input?.tools) ? input.tools : undefined,
       modelOptions,
       assistPurpose: purpose,
+      role: input?.role,
     }, signal);
   }
   // 0.2.1 的 startActivation 不再接受 toolFilter。worker 的工具面在 agent/created
@@ -550,7 +629,15 @@ export function createSiteWorkers(ctx, getStore) {
     if (parentId) {
       clearTimeout(reportTimers.get(agent.session.id)); reportTimers.delete(agent.session.id);
       const row = siteWorkerRows(store, parentId).find(row => row.childId === agent.session.id);
-      if (row.state !== 'cleanup-failed') { row.state = 'released'; row.releasedAt = Date.now(); save(store, row); }
+      if (row.state !== 'cleanup-failed') {
+        if (!row.report) {
+          const summary = lastAssistantText(agent);
+          row.report = { state: summary ? 'completed' : 'blocked',
+            summary: summary || '子任务结束，未留下文字总结；请查看子会话的实际证据，不据此确认漏洞。',
+            at: Date.now(), source: 'child-session-final-message' };
+        }
+        row.state = 'released'; row.releasedAt = Date.now(); save(store, row); notifySettled(row, 'released');
+      }
     }
     if (parents.has(agent.session.id)) { parents.delete(agent.session.id); return cleanup(agent, undefined, 'parent disposed'); }
   });
@@ -601,6 +688,7 @@ export function createSiteWorkers(ctx, getStore) {
       catch (error) { ctx.logger?.warn?.('worker status: %s', error.message); }
     }
   }, 2000); timer.unref?.();
-  return { delegate, assist, send, report, cleanup, async status(agent, signal) { const id = parentIdOf(agent); parents.set(id, agent); await reconcile(agent, signal); return siteWorkerView(getStore(), id); },
-    async dispose() { clearInterval(timer); for (const timeout of reportTimers.values()) clearTimeout(timeout); reportTimers.clear(); await Promise.allSettled([...parents.values()].map(parent => cleanup(parent, undefined, 'plugin unloaded'))); } };
+  return { delegate, assist, send, report, cleanup, setSettledHandler(handler) { settledHandler = typeof handler === 'function' ? handler : null; },
+    async status(agent, signal) { const id = parentIdOf(agent); parents.set(id, agent); await reconcile(agent, signal); return siteWorkerView(getStore(), id); },
+    async dispose() { clearInterval(timer); runTracker.dispose(); for (const timeout of reportTimers.values()) clearTimeout(timeout); reportTimers.clear(); await Promise.allSettled([...parents.values()].map(parent => cleanup(parent, undefined, 'plugin unloaded'))); } };
 }

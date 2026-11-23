@@ -113,7 +113,12 @@ try {
   server.closeAllConnections?.();
   await new Promise(resolve => server.close(resolve));
   store.close();
-  fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 });
+  try {
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 });
+  } catch (error) {
+    if (!['EPERM', 'EBUSY', 'ENOTEMPTY'].includes(error.code)) throw error;
+    try { fs.renameSync(home, home + '-cleanup-' + Date.now()); } catch { /* leave for temp reaper */ }
+  }
 }
 
 console.log(failed ? failed + ' failed' : 'all passed');

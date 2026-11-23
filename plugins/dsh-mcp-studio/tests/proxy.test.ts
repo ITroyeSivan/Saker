@@ -18,6 +18,7 @@ import { after, describe, it } from 'node:test'
 import {
   applyToolHint,
   decideExposure,
+  normalizeToolArguments,
   paramHint,
   ProxyRegistry,
   rankTools,
@@ -34,6 +35,17 @@ import {
   SEARCH_MAX_LIMIT,
   type ToolMeta,
 } from '../src/proxy.ts'
+
+describe('mcp_call arguments', () => {
+  it('accepts an object and a JSON string, rejects arrays and malformed JSON', () => {
+    assert.deepEqual(normalizeToolArguments({ url: 'http://x' }), { url: 'http://x' })
+    assert.deepEqual(normalizeToolArguments('{"url":"http://x"}'), { url: 'http://x' })
+    assert.deepEqual(normalizeToolArguments('{}'), {})
+    assert.deepEqual(normalizeToolArguments(undefined), {})
+    assert.equal(normalizeToolArguments('[1,2]'), null)
+    assert.equal(normalizeToolArguments('not-json'), null)
+  })
+})
 import { catalogOfSize, SECRET, startHttpServer, TOOLS } from './fixtures/mcp-test-server.mjs'
 import { handshake, listTools, openChannel } from '../src/transport.ts'
 import type { ServerEntry, StudioSection } from '../src/types.ts'

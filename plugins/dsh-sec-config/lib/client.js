@@ -7,7 +7,7 @@ window.__ModuleLoader__.load({ id: '@dsh-external/dsh-sec-config', factory: (req
 var module = { exports: {} }; var exports = module.exports;
 'use strict';
 /* SAKER-UI-KIT:BEGIN */
-var SAKER_UI_KIT_CSS = "/* 5.7 共享组件层：Button / Input / Select / Badge / DataTable / Drawer / InlineNotice / EmptyState\n   单一来源：shared/ui-kit/ui-kit.css（令牌见 shared/ui-kit/ui-kit.json）。\n   由 scripts/sync-ui-kit.mjs 注入到各产品插件；插件里的同类尺寸规则应删除，避免双写。 */\n.saker-ui-btn{height:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px}\n.saker-ui-input{height:36px;border-radius:6px}\n.saker-ui-select{height:32px;border-radius:6px}\n.saker-ui-table td{height:38px}\n.saker-ui-badge{border-radius:6px;font-size:12px;line-height:1.5}\n.saker-ui-drawer{border-radius:12px}\n.saker-ui-notice{border-radius:6px;font-size:13px;line-height:1.5}\n.saker-ui-empty{border-radius:6px;font-size:13px;line-height:1.5}\n/* 现有插件类别名：与 canonical 类共用同一套尺寸 */\n.dsh-chat-panel-head button,.dsh-chat-actions button,.dsh-chat-task-status button,.dsh-task-nav button,.dsh-task-actions button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-prompt-io button,.dsh-prompt-more,.dsh-prompt-scopes button,.dsh-prompt-modes button,.dsh-prompt-foot button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-tools button,.dsh-materials-types button,.dsh-materials-foot button,.dsh-materials-table td button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-new button,.dsh-materials-import-actions button,.dsh-execution-tools>button,.dsh-test-content-actions button,.dsh-rtr-btn{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-task-nav select,.dsh-materials-tools select,.dsh-rtr-select{height:32px}\n.dsh-prompt-saveas input,.dsh-prompt-list input[type=search],.dsh-prompt-field input{height:36px}\n.dsh-materials-tools input[type=search],.dsh-materials-import input,.dsh-task-field input,.dsh-rtr-search{height:36px}\n.dsh-materials-table td{height:38px}\n.dsh-chat-setup svg,.dsh-task-workspace svg{width:16px;height:16px}\n.dsh-hnt-btn,.dsh-hnt-tab{height:32px}\n.dsh-hnt-input{height:36px}\n.dsh-hnt-select{height:32px}\n.dsh-mcs-btn,.dsh-mcs-iconbtn,.dsh-mcs-toolscount--btn{height:32px}\n.dsh-mcs-field input,.dsh-mcs-pairrow input,.dsh-mcs-search{height:36px}\n.dsh-mcs-field select,.dsh-mcs-seg button{height:32px}\n.dsh-sp-chip.is-btn{height:32px}\n.dsh-mg-chip{height:32px}\n/* 内联 style 插件（sec-config / skill-browse）：根容器打 data-saker-ui，\n   控件尺寸由共享层统一给，插件自己的 helper 不再写 height。 */\n[data-saker-ui] button{height:32px}\n[data-saker-ui] input:not([type=checkbox]):not([type=radio]):not([type=file]){height:36px}";
+var SAKER_UI_KIT_CSS = "/* 5.7 共享组件层：Button / Input / Select / Badge / DataTable / Drawer / InlineNotice / EmptyState\n   单一来源：shared/ui-kit/ui-kit.css（令牌见 shared/ui-kit/ui-kit.json）。\n   由 scripts/sync-ui-kit.mjs 注入到各产品插件；插件里的同类尺寸规则应删除，避免双写。 */\n.saker-ui-btn{height:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px}\n.saker-ui-input{height:36px;border-radius:6px}\n.saker-ui-select{height:32px;border-radius:6px}\n.saker-ui-table td{height:38px}\n.saker-ui-badge{border-radius:6px;font-size:var(--dsh-content-font-size-secondary,13px);line-height:1.5}\n.saker-ui-drawer{border-radius:12px}\n.saker-ui-notice{border-radius:6px;font-size:var(--dsh-content-font-size-secondary,13px);line-height:1.5}\n.saker-ui-empty{border-radius:6px;font-size:var(--dsh-content-font-size-secondary,13px);line-height:1.5}\n/* 现有插件类别名：与 canonical 类共用同一套尺寸 */\n.dsh-chat-panel-head button,.dsh-chat-actions button,.dsh-chat-task-status button,.dsh-task-nav button,.dsh-task-actions button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-prompt-io button,.dsh-prompt-more,.dsh-prompt-scopes button,.dsh-prompt-modes button,.dsh-prompt-foot button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-tools button,.dsh-materials-types button,.dsh-materials-foot button,.dsh-materials-table td button{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-materials-new button,.dsh-materials-import-actions button,.dsh-execution-tools>button,.dsh-test-content-actions button,.dsh-rtr-btn{height:32px;display:inline-flex;align-items:center;justify-content:center}\n.dsh-task-nav select,.dsh-materials-tools select,.dsh-rtr-select{height:32px}\n.dsh-prompt-saveas input,.dsh-prompt-list input[type=search],.dsh-prompt-field input{height:36px}\n.dsh-materials-tools input[type=search],.dsh-materials-import input,.dsh-task-field input,.dsh-rtr-search{height:36px}\n.dsh-materials-table td{height:38px}\n.dsh-chat-setup svg,.dsh-task-workspace svg{width:16px;height:16px}\n.dsh-hnt-btn,.dsh-hnt-tab{height:32px}\n.dsh-hnt-input{height:36px}\n.dsh-hnt-select{height:32px}\n.dsh-mcs-btn,.dsh-mcs-iconbtn,.dsh-mcs-toolscount--btn{height:32px}\n.dsh-mcs-field input,.dsh-mcs-pairrow input,.dsh-mcs-search{height:36px}\n.dsh-mcs-field select,.dsh-mcs-seg button{height:32px}\n.dsh-sp-chip.is-btn{height:32px}\n.dsh-mg-chip{height:32px}\n/* 内联 style 插件（sec-config / skill-browse）：根容器打 data-saker-ui，\n   控件尺寸由共享层统一给，插件自己的 helper 不再写 height。 */\n[data-saker-ui] button{height:32px}\n[data-saker-ui] input:not([type=checkbox]):not([type=radio]):not([type=file]){height:36px}";
 /* SAKER-UI-KIT:END */
 (function(){try{if(document.getElementById('saker-ui-kit-style'))return;var st=document.createElement('style');st.id='saker-ui-kit-style';st.textContent=SAKER_UI_KIT_CSS;document.head.appendChild(st);}catch(e){}})();
 var React = require('react');
@@ -66,12 +66,12 @@ function errText(res, fallback) {
 }
 
 function fieldStyle() {
-  return { display: 'block', width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l1, #d9d9de)', background: 'var(--dsw-alias-bg-base, #fff)', color: 'var(--dsw-alias-label-primary, #1a1a1a)', fontSize: 13, boxSizing: 'border-box' };
+  return { display: 'block', width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l1, #d9d9de)', background: 'var(--dsw-alias-bg-base, #fff)', color: 'var(--dsw-alias-label-primary, #1a1a1a)', fontSize:'inherit', boxSizing: 'border-box' };
 }
 function labelStyle() { return { display: 'block', margin: '12px 0 4px', fontSize: 12, color: 'var(--dsw-alias-label-tertiary, #6e6e73)' }; }
 function groupStyle() { return { marginBottom: 16 }; }
-function groupTitleStyle() { return { fontSize: 13, fontWeight: 600, margin: '0 0 4px', color: 'var(--dsw-alias-label-primary, #1a1a1a)' }; }
-function btnStyle(primary) { return { padding: '8px 16px', borderRadius: 6, border: '1px solid ' + (primary ? 'transparent' : 'var(--dsw-alias-border-l1,#d9d9de)'), background: primary ? 'var(--dsw-alias-state-business-primary,#4c6ef5)' : 'transparent', color: primary ? '#fff' : 'var(--dsw-alias-label-primary,#1a1a1a)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }; }
+function groupTitleStyle() { return { fontSize:'inherit', fontWeight: 600, margin: '0 0 4px', color: 'var(--dsw-alias-label-primary, #1a1a1a)' }; }
+function btnStyle(primary) { return { padding: '8px 16px', borderRadius: 6, border: '1px solid ' + (primary ? 'transparent' : 'var(--dsw-alias-border-l1,#d9d9de)'), background: primary ? 'var(--dsw-alias-state-business-primary,#4c6ef5)' : 'transparent', color: primary ? '#fff' : 'var(--dsw-alias-label-primary,#1a1a1a)', fontSize:'inherit', fontWeight: 600, cursor: 'pointer' }; }
 function msgStyle(ok) { return { marginTop: 8, fontSize: 12, color: ok ? '#1a7f37' : '#d1242f' }; }
 
 function Input(props) {
@@ -291,7 +291,7 @@ function ToolLibrary(props) {
   children.push(el('div', { key: 'roots', style: { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 8 } }, rootRow));
   children.push(el('div', { key: 'cft', style: { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', margin: '8px 0 12px', padding: '8px 10px', border: '1px solid var(--dsw-alias-border-l1,#d9d9de)', borderRadius: 6 } },
     el('div', { style: { flex: '0 0 150px' } },
-      el('div', { style: { fontWeight: 600, fontSize: 13 } }, 'Chrome for Testing'),
+      el('div', { style: { fontWeight: 600, fontSize:'inherit' } }, 'Chrome for Testing'),
       el('div', { style: miniHint }, '浏览器可执行文件')),
     el('div', { style: { flex: 1, minWidth: 260 } },
       el('input', {
@@ -338,7 +338,7 @@ function ToolLibrary(props) {
     var rows = grouped[c] || [];
     var kids = rows.map(function (e) {
           var checked = startup[e.key]?.configuredPath === e.path ? startup[e.key] : null;
-          return el('div', { key: e.key, style: { display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', fontSize: 13 } },
+          return el('div', { key: e.key, style: { display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', fontSize:'inherit' } },
             el('span', { style: { flex: '0 0 150px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, e.name || e.key),
             el('span', { title: e.path, style: { flex: 1, color: 'var(--dsw-alias-label-tertiary,#6e6e73)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 } }, e.path),
             el('select', { value: e.category, style: { fontSize: 12 }, onChange: function (ev) { setEntryCat(e.key, ev.target.value); } }, cats.map(function (cc) { return el('option', { key: cc, value: cc }, cc); })),
@@ -354,7 +354,7 @@ function ToolLibrary(props) {
   // 5) 手动导入
   var m = S.manual;
   children.push(el('div', { key: 'manual', style: { borderTop: '1px solid var(--dsw-alias-border-l1,#d9d9de)', marginTop: 12, paddingTop: 8 } },
-    el('div', { style: { fontWeight: 600, fontSize: 13, margin: '8px 0' } }, '按分类手动导入（工具分散在不同目录/已单独安装时用这个）'),
+    el('div', { style: { fontWeight: 600, fontSize:'inherit', margin: '8px 0' } }, '按分类手动导入（工具分散在不同目录/已单独安装时用这个）'),
     el('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' } },
       el('select', { value: m.cat, style: { fontSize: 12, maxWidth: 150 }, onChange: function (ev) { up({ manual: Object.assign({}, m, { cat: ev.target.value }) }); } }, cats.map(function (c) { return el('option', { key: c, value: c }, c); })),
       el('div', { style: { width: 170 } }, el(Input, { value: m.name, placeholder: '工具名（字母数字下划线）', onChange: function (v) { up({ manual: Object.assign({}, m, { name: v }) }); } })),
@@ -370,7 +370,7 @@ function ToolLibrary(props) {
   catKids.push(el(Input, { key: 'inp', value: S.newCat, placeholder: '自定义分类名', onChange: function (v) { up({ newCat: v }); } }));
   catKids.push(el('button', { key: 'addc', type: 'button', style: rowBtnStyle(), onClick: addCategory }, '添加分类'));
   children.push(el('div', { key: 'cats', style: { borderTop: '1px solid var(--dsw-alias-border-l1,#d9d9de)', marginTop: 12, paddingTop: 8 } },
-    el('div', { style: { fontWeight: 600, fontSize: 13, margin: '8px 0' } }, '分类管理'),
+    el('div', { style: { fontWeight: 600, fontSize:'inherit', margin: '8px 0' } }, '分类管理'),
     el('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' } }, catKids)));
   if (S.msg) children.push(el('div', { key: 'msg', style: msgStyle(S.msgOk === true) }, S.msg));
   return el('div', null, children);
@@ -479,7 +479,7 @@ function ConfigForm(props) {
       React.createElement('label', { style: labelStyle() }, 'Token（保存后仅显示 ***）'),
       React.createElement(Input, { type: 'password', value: dnslog.token || '', placeholder: dnslog.token === '***' ? '已设置，留空保持不变' : 'dnslog token', onChange: function (val) { setPath(['dnslog', 'token'], val); } })),
     React.createElement(Group, { title: '内存马后端（只允许自建，禁止公共 party.mem.mk）' },
-      React.createElement('label', { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 8 } },
+      React.createElement('label', { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize:'inherit', marginBottom: 8 } },
         React.createElement('input', { type: 'checkbox', checked: !!memshell.enabled, onChange: function (e) { setPath(['memshell', 'enabled'], e.target.checked); } }),
         '启用自建 memshell backend'),
       React.createElement('label', { style: labelStyle() }, '后端地址'),
@@ -651,7 +651,7 @@ function ModelLink(props) {
     });
   }
 
-  if (st.status === 'loading') return React.createElement('div', { style: { fontSize: 13 } }, '加载中…');
+  if (st.status === 'loading') return React.createElement('div', { style: { fontSize:'inherit' } }, '加载中…');
   if (st.status === 'error') return null;
   var v = st.value;
 
@@ -832,7 +832,7 @@ function EndpointProfiles(props) {
     });
   }
 
-  if (st.status === 'loading') return React.createElement('div', { style: { fontSize: 13 } }, '端点档案加载中…');
+  if (st.status === 'loading') return React.createElement('div', { style: { fontSize:'inherit' } }, '端点档案加载中…');
   if (st.status === 'error') return null;
   var v = st.value;
   var rows = (v.profiles && v.profiles.length) ? v.profiles.map(function (p) { return { p: p, saved: true }; })
@@ -852,7 +852,7 @@ function EndpointProfiles(props) {
       style: { display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderBottom: '1px solid var(--dsw-alias-border-l1,#f0f0f2)' },
     },
       React.createElement('div', { style: { flex: 1, minWidth: 0 } },
-        React.createElement('div', { style: { fontSize: 13, fontWeight: 600, color: 'var(--dsw-alias-label-primary,#1a1a1a)' } },
+        React.createElement('div', { style: { fontSize:'inherit', fontWeight: 600, color: 'var(--dsw-alias-label-primary,#1a1a1a)' } },
           p.name,
           ' ',
           React.createElement('span', { style: { fontSize: 12, fontWeight: 400, color: 'var(--dsw-alias-label-tertiary,#6e6e73)' } }, '· ' + kindLabel(p.kind)),
@@ -897,7 +897,7 @@ function EndpointProfiles(props) {
         onClick: captureBaseline,
       }, busy === 'baseline' ? '记录中…' : '把当前生效地址记为初始地址')),
     React.createElement('div', { style: { marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--dsw-alias-border-l1,#e4e4e7)' } },
-      React.createElement('div', { style: { fontSize: 13, fontWeight: 600, marginBottom: 4 } }, '新增/更新档案'),
+      React.createElement('div', { style: { fontSize:'inherit', fontWeight: 600, marginBottom: 4 } }, '新增/更新档案'),
       React.createElement('label', { style: labelStyle() }, '档案名（同 id 即更新；新档案填个新的名字即可）'),
       React.createElement(Input, {
         value: form.name, placeholder: '例如：OpenCode Go（代理）',
@@ -1039,8 +1039,8 @@ function Page(props) {
   }
   useEffect(load, []);
 
-  if (state.status === 'loading') return React.createElement('div', { style: { fontSize: 13 } }, '加载中…');
-  if (state.status === 'error') return React.createElement('div', { style: { fontSize: 13, color: '#d1242f' } }, '无法读取配置，请检查服务是否运行。');
+  if (state.status === 'loading') return React.createElement('div', { style: { fontSize:'inherit' } }, '加载中…');
+  if (state.status === 'error') return React.createElement('div', { style: { fontSize:'inherit', color: '#d1242f' } }, '无法读取配置，请检查服务是否运行。');
 
   return React.createElement('div', { style: { maxWidth: 620 }, 'data-saker-ui': 'sec-config' },
     React.createElement(ConfigForm, { connection: props.connection, value: state.value, onChange: function (v) { setState({ status: 'ready', value: v }); }, onSaved: load }),

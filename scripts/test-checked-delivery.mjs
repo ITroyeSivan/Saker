@@ -130,7 +130,7 @@ try {
     assert.equal(downloads[0][0], 'checked.tsv');
     assert.equal(downloads[0][1], renderCheckedTsv(readChecks(store, 'states')));
     assert.equal(calls[1][1].sessionId, 'states');
-    await button('导出本会话完整交付包').props.onClick();
+ await button('导出本会话完整报告包').props.onClick();
     assert.equal(archives[0][0], 'saker-delivery.zip');
     assert.equal(Buffer.from(archives[0][1], 'base64').readUInt32LE(0), 0x04034b50);
     failing = true;

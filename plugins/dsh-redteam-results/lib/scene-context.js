@@ -7,7 +7,7 @@ import {
   scenePreset,
   sceneView,
 } from 'dsh-saker/scene-context'
-import { taskTransaction } from './task-policy-record.js'
+import { taskTransaction, bumpSettingsRevision } from './task-policy-record.js'
 
 const fingerprint = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const nowIso = () => new Date().toISOString()
@@ -162,6 +162,7 @@ export function writeSceneContext(store, sessionId, targetScene, input = {}) {
       + 'ON CONFLICT(session_id) DO UPDATE SET scene_id=excluded.scene_id,preset_id=excluded.preset_id,'
       + 'revision=excluded.revision,record=excluded.record,updated_at=excluded.updated_at',
     ).run(id, next.sceneId, next.presetId, next.sceneRevision, JSON.stringify(next), next.updatedAt)
+    bumpSettingsRevision(store, id)
     return { ...publicRecord(next), idempotent: false }
   })
 }
@@ -171,11 +172,13 @@ export function setCompetitionKnowledge(store, sessionId, enabled, input = {}) {
   return taskTransaction(store, () => {
     const current = readSceneContext(store, id, 'ctf-solver')
     if (!current || current.sceneId !== 'competition') throw new Error('competition scene required')
-    const expectedRevision = Number.isSafeInteger(input.expectedRevision) ? input.expectedRevision : current.sceneRevision
-    if (expectedRevision !== current.sceneRevision)
-      throw Object.assign(new Error('scene context changed; refresh before changing knowledge'), {
+    const settingsRevision = Number(store.db.prepare('SELECT revision FROM task_settings_meta WHERE session_id=?')
+      .get(current.rootSession || current.contextId || id)?.revision) || 0
+    const expectedRevision = Number.isSafeInteger(input.expectedRevision) ? input.expectedRevision : settingsRevision
+    if (expectedRevision !== settingsRevision)
+      throw Object.assign(new Error('settings changed; refresh before changing knowledge'), {
         code: 'scene-conflict',
-        details: { expectedRevision, actualRevision: current.sceneRevision },
+        details: { expectedRevision, actualRevision: settingsRevision },
       })
     const row = store.db.prepare('SELECT record FROM scene_contexts WHERE session_id=?').get(id)
     const stored = parseRecord(row) || {
@@ -185,7 +188,7 @@ export function setCompetitionKnowledge(store, sessionId, enabled, input = {}) {
     const next = {
       ...stored,
       knowledgeEnabled: enabled === true,
-      sceneRevision: current.sceneRevision + 1,
+      sceneRevision: current.sceneRevision,
       knowledgeRevision: (Number(stored.knowledgeRevision) || 0) + 1,
       knowledgeUpdatedAt: nowIso(),
       updatedAt: nowIso(),
@@ -194,6 +197,7 @@ export function setCompetitionKnowledge(store, sessionId, enabled, input = {}) {
       'INSERT INTO scene_contexts(session_id,scene_id,preset_id,revision,record,updated_at) VALUES(?,?,?,?,?,?) '
       + 'ON CONFLICT(session_id) DO UPDATE SET record=excluded.record,revision=excluded.revision,updated_at=excluded.updated_at',
     ).run(id, 'competition', 'ctf-solver', next.sceneRevision, JSON.stringify(next), next.updatedAt)
+    bumpSettingsRevision(store, id)
     return publicRecord(next)
   })
 }
@@ -240,19 +244,13 @@ export function setCompetitionPreferences(store, sessionId, input = {}) {
     const requestedMinutes = input.minutes === undefined ? priorBudget.minutes
       : input.minutes === '' || input.minutes === null ? null : Number(input.minutes)
     if (requestedMinutes !== null && requestedMinutes !== undefined
-      && (!Number.isFinite(requestedMinutes) || requestedMinutes <= 0))
-      throw new Error('competition time limit must be a positive number of minutes')
-    // Changing a limit changes the cap, not the accounting round. Existing
-    // elapsed time and used calls remain charged to the same competition.
-    const budgetStartedAt = requestedMinutes === null || requestedMinutes === undefined
-      ? undefined
-      : (priorBudget.startedAt || nowIso())
+      && (!Number.isSafeInteger(requestedMinutes) || requestedMinutes < 1 || requestedMinutes > 10080))
+      throw new Error('competition time limit must be an integer from 1 to 10080 minutes')
     const normalizedLimits = Object.fromEntries(BUDGET_FIELDS
       .map(field => [field, normalizeCompetitionBudgetLimit(input[field], field)])
       .filter(([, value]) => value !== undefined))
     const nextBudget = { ...priorBudget,
       ...(input.minutes !== undefined ? { minutes: requestedMinutes } : {}),
-      ...(budgetStartedAt ? { startedAt: budgetStartedAt } : {}),
       ...normalizedLimits,
     }
     const requestedConcurrency = input.modelConcurrency === undefined
@@ -261,8 +259,6 @@ export function setCompetitionPreferences(store, sessionId, input = {}) {
     if (requestedConcurrency !== null && requestedConcurrency !== undefined
       && (!Number.isSafeInteger(requestedConcurrency) || requestedConcurrency < 1 || requestedConcurrency > 16))
       throw new Error('competition local model concurrency must be an integer from 1 to 16')
-    if (!nextBudget.roundStartedAt && BUDGET_FIELDS.some(field => nextBudget[field] !== null && nextBudget[field] !== undefined))
-      nextBudget.roundStartedAt = nowIso()
     if (requestedMinutes === null || requestedMinutes === undefined) delete nextBudget.startedAt
     const nextPreferences = {
       ...prior,
@@ -286,11 +282,45 @@ export function setCompetitionPreferences(store, sessionId, input = {}) {
     if (modelBudgetBlock) nextPreferences.modelBudgetBlock = modelBudgetBlock
     else delete nextPreferences.modelBudgetBlock
     const next = { ...stored, sceneId: 'competition', presetId: 'ctf-solver',
-      contextId: stored.contextId || id, sceneRevision: current.sceneRevision + 1,
+      contextId: stored.contextId || id, sceneRevision: current.sceneRevision,
       preferences: nextPreferences, updatedAt: nowIso() }
     store.db.prepare('UPDATE scene_contexts SET revision=?,record=?,updated_at=? WHERE session_id=?')
       .run(next.sceneRevision, JSON.stringify(next), next.updatedAt, id)
+    bumpSettingsRevision(store, id)
     return publicRecord(next)
+  })
+}
+
+/**
+ * Set the competition execution clock at the first managed execution or model
+ * admission. Preparing a question, editing a cap or browsing attachments must
+ * not consume the relative time allowance.
+ */
+export function startCompetitionBudget(store, sessionId, at = Date.now()) {
+  const id = String(sessionId || '')
+  return taskTransaction(store, () => {
+    const current = readSceneContext(store, id, 'ctf-solver')
+    if (!current || current.sceneId !== 'competition') return null
+    const root = current.contextId || current.rootSession || id
+    const sceneRow = store.db.prepare('SELECT record FROM scene_contexts WHERE session_id=?').get(root)
+    const stored = parseRecord(sceneRow)
+    if (!stored) return null
+    const preferences = stored.preferences || {}
+    const budget = { ...(preferences.budget || {}) }
+    if (!Number.isInteger(budget.minutes) || budget.minutes < 1
+      || (typeof budget.startedAt === 'string' && Number.isFinite(Date.parse(budget.startedAt))))
+      return current
+    const iso = new Date(at).toISOString()
+    budget.startedAt = iso
+    budget.roundStartedAt ||= iso
+    const next = {
+      ...stored,
+      preferences: { ...preferences, budget, updatedAt: iso },
+      updatedAt: iso,
+    }
+    store.db.prepare('UPDATE scene_contexts SET record=?,updated_at=? WHERE session_id=?')
+      .run(JSON.stringify(next), iso, root)
+    return publicRecord({ ...next, sceneId: 'competition', presetId: 'ctf-solver', rootSession: root })
   })
 }
 

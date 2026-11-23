@@ -2,6 +2,8 @@ import type { ServerEntry, StudioSection } from './types.ts';
 /** Model-facing names of the two meta-tools. */
 export declare const META_TOOL_SEARCH = "mcp_search";
 export declare const META_TOOL_CALL = "mcp_call";
+/** Models sometimes pass `args` as a JSON string even though the schema says object. */
+export declare function normalizeToolArguments(value: unknown): Record<string, unknown> | null;
 /** Re-list a catalog once it is older than this, so `tools/list_changed` needs no handler. */
 export declare const CATALOG_TTL_MS: number;
 /** Default `mcp_search` result count. */

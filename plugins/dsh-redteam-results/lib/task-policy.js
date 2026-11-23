@@ -13,10 +13,12 @@ import { normalizeModelChoice } from './model-choice.js';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
-import { taskTransaction, writeTaskPolicy, childAllowedTools, ownedPurposeTasks } from './task-policy-record.js';
+import { taskTransaction, writeTaskPolicy, childAllowedTools, ownedPurposeTasks, bumpSettingsRevision } from './task-policy-record.js';
 import { normalizeRequestRate, normalizeRequestConcurrency } from './request-pacing.js';
 import { researchNext } from './research.js';
 import { normalizeTaskScope, taskScopeAllowsUrl, taskScopeIncludesUrl, taskScopeAllowsAsset, taskScopeExcluded, taskScopeSummary, taskScopePromptText, taskTermInPolicy } from './task-scope.js';
+import { inheritedDraftBudget } from './task-settings.js';
+import { taskElapsed } from './task-duration.js';
 
 const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
 
@@ -24,9 +26,9 @@ const modes = new Set(['nday', 'regular', '0day']);
 const stops = new Set(['first-high', 'first-rce', 'queue', 'budget']);
 const startModes = new Set(['materials-first', 'auto-recon', 'direct-test']);
 const localTools = new Set(['redteam_task', 'redteam_context', 'redteam_checks', 'redteam_delivery',
-  'redteam_method', 'redteam_research', 'redteam_execution',
+  'redteam_method', 'redteam_research', 'redteam_execution', 'saker_component', 'saker_test_module',
   'redteam_finding_register', 'redteam_finding_update', 'redteam_finding_delete', 'redteam_chain_reconcile',
-  'saker_assist',
+  'saker_assist', 'saker_role', 'seatbelt_posture', 'ad_export_ingest', 'js_deobfuscate', 'version_reproduce',
   'saker_material',
   'read', 'write', 'edit', 'glob', 'grep', 'run_code', 'skill', 'tool_pack',
   'mcp_search', 'exercise_submit', 'get_goal', 'todo_write', 'working_directory', 'ask_user_question',
@@ -51,7 +53,7 @@ const SHELL_COMMAND_KEYS = new Set(['command', 'cmd', 'script', 'code', 'shell',
 const URL_ARGUMENT_KEYS = new Set(['url', 'uri', 'endpoint', 'target', 'base-url', 'baseUrl', 'baseURL',
   'targetUrl', 'target_url', 'requestUrl', 'request_url', 'host', 'hostname']);
 const SHELL_NETWORK_COMMAND = /(?:^|[;&|\r\n]\s*)(?:(?:pwsh|powershell|cmd|bash|sh)(?:\.exe)?(?:\s+(?:-[A-Za-z-]+|\/[A-Za-z]+))*\s*["']?\s*)?(?:curl(?:\.exe)?|wget(?:\.exe)?|Invoke-WebRequest|Invoke-RestMethod|iwr|irm|http(?:\.exe)?|https(?:\.exe)?|nuclei|httpx|ffuf|nmap)\b[^\r\n;&|]*/gim;
-const offlineMcpTools = new Set(['base64_encode', 'base64_decode', 'url_encode', 'url_decode']);
+const offlineMcpTools = new Set(['base64_encode', 'base64_decode', 'url_encode', 'url_decode', 'auto_decode']);
 function offlineToolCall(name, args) {
   if (name !== 'mcp_call') return false;
   try {
@@ -373,17 +375,21 @@ export function pauseTaskPolicy(store, sessionId, input, source = 'submitted-int
   const policy = readTaskPolicy(store, sessionId);
   if (!policy) throw new Error('task policy missing');
   if (!['ip-blocked', 'login-expired', 'normal-access-failed', 'service-unavailable', 'safety-policy', 'tool-policy', 'needs-user'].includes(input?.code)) throw new Error('invalid blocker');
+  const pausedAt = Date.now();
   const blocker = { code: input.code, reason: boundedText(input.reason, 'reason'),
-    evidence: boundedText(input.evidence, 'evidence'), source, recordedAt: Date.now(), conclusion: 'unknown; stop affected requests' };
-  return write(store, sessionId, { ...policy, blocker });
+    evidence: boundedText(input.evidence, 'evidence'), source, recordedAt: pausedAt, conclusion: 'unknown; stop affected requests' };
+  return write(store, sessionId, { ...policy, blocker, pausedAt });
 }
 export function resumeTaskPolicy(store, sessionId, note, source) {
   if (source !== 'desktop-user') throw new Error('resume requires the user to resolve the blocker');
   const policy = readTaskPolicy(store, sessionId);
   if (!policy?.blocker) throw new Error('task is not paused');
   const history = [...(policy.blockerHistory || []), { ...policy.blocker, resolvedAt: Date.now(), resolution: boundedText(note, 'resolution') }].slice(-20);
-  const { blocker, ...rest } = policy;
-  return write(store, sessionId, { ...rest, blockerHistory: history, needsBaselineRecheck: true });
+  const pausedAt = Number(policy.pausedAt || policy.blocker.recordedAt);
+  const pausedElapsedMs = (Number(policy.pausedElapsedMs) || 0)
+    + (Number.isFinite(pausedAt) ? Math.max(0, Date.now() - pausedAt) : 0);
+  const { blocker, pausedAt: ignoredPausedAt, ...rest } = policy;
+  return write(store, sessionId, { ...rest, pausedElapsedMs, blockerHistory: history, needsBaselineRecheck: true });
 }
 export function acceptBaselineRecheck(store, sessionId, receiptId) {
   const policy = readTaskPolicy(store, sessionId);
@@ -423,8 +429,10 @@ export function workerReportedFinished(store, sessionId) {
 export function chosenTaskOptions(store, sessionId) {
   const row = store.db.prepare('SELECT record FROM task_flow_choice WHERE session_id=?').get(sessionId);
   const defaults = chatDefaults(store);
-  return row ? parseRowRecord(row, { table: 'task_flow_choice', id: sessionId })
+  const value = row ? parseRowRecord(row, { table: 'task_flow_choice', id: sessionId })
     : defaults ? { ...defaults, workflow: 'single' } : null;
+  if (value && value.workersExplicit !== true) value.workers = 2;
+  return value;
 }
 /** v6 5.5「给助手选择模型」：站点子代理的 provider/model 覆盖；未选则沿用当前会话模型。 */
 export function normalizeWorkerModel(value) {
@@ -444,6 +452,11 @@ export function chooseTaskMode(store, sessionId, mode, options) {
     requestText: options?.target ?? previous?.requestText,
   });
   assertScopeErrors(scopeData)
+  const workersExplicit = Boolean(options && Object.prototype.hasOwnProperty.call(options, 'workers'))
+    || previous?.workersExplicit === true;
+  const workers = workersExplicit
+    ? integer(options?.workers ?? previous?.workers ?? 0, 'workers', 0, MAX_SITE_WORKERS)
+    : 2;
   const choice = { workflow: 'single',
     scenario: previous?.scenario || 'pentest',
     startMode: normalizeStartMode(options?.startMode ?? previous?.startMode),
@@ -465,13 +478,18 @@ export function chooseTaskMode(store, sessionId, mode, options) {
     allowedOrigins: normalizeAllowedOrigins(options?.allowedOrigins ?? previous?.allowedOrigins),
     requestRatePerMinute: options?.requestRatePerMinute === undefined ? normalizeRequestRate(previous?.requestRatePerMinute) : normalizeRequestRate(options.requestRatePerMinute),
     requestConcurrency: options?.requestConcurrency === undefined ? normalizeRequestConcurrency(previous?.requestConcurrency) : normalizeRequestConcurrency(options.requestConcurrency),
-    // 新任务默认不创建助手；已有用户明确选择的上限继续保留。
-    workers: integer(options?.workers ?? previous?.workers ?? 0, 'workers', 0, MAX_SITE_WORKERS) };
+    modelConcurrency: options?.modelConcurrency === undefined ? (previous?.modelConcurrency ?? null) : options.modelConcurrency,
+    // Desktop settings persist these caps in the draft even before a policy
+    // exists. Re-selecting a focus or mode must not erase them.
+    budget: { ...(previous?.budget || {}), ...(options?.budget || {}) },
+    // 新任务默认允许两个活动子实例；用户明确选择的 0 仍会保留。
+    workers, workersExplicit };
   normalizeTaskFlow('single', mode);
   store.db.exec('BEGIN IMMEDIATE');
   try {
   store.db.prepare('INSERT INTO task_choice (session_id,mode) VALUES (?,?) ON CONFLICT(session_id) DO UPDATE SET mode=excluded.mode').run(sessionId, mode);
   store.db.prepare('INSERT INTO task_flow_choice(session_id,record) VALUES(?,?) ON CONFLICT(session_id) DO UPDATE SET record=excluded.record').run(sessionId, JSON.stringify(choice));
+  if (JSON.stringify(previous || {}) !== JSON.stringify(choice)) bumpSettingsRevision(store, sessionId);
   store.db.exec('COMMIT');
   } catch (error) { store.db.exec('ROLLBACK'); throw error; }
   return mode;
@@ -501,6 +519,11 @@ export function archiveTaskRound(store, sessionId, source, now = Date.now()) {
     store.db.prepare('DELETE FROM task_policy WHERE session_id=?').run(sessionId);
     store.db.prepare('DELETE FROM task_choice WHERE session_id=?').run(sessionId);
     store.db.prepare('DELETE FROM task_flow_choice WHERE session_id=?').run(sessionId);
+    store.db.prepare(`INSERT INTO task_settings_meta
+      (session_id,root_session_id,revision,round_sequence,knowledge_revision,knowledge_enabled,reference_strategy,schema_version,updated_at)
+      VALUES(?,?,0,1,0,0,'web-first',1,?)
+      ON CONFLICT(session_id) DO UPDATE SET round_sequence=round_sequence+1,updated_at=excluded.updated_at`)
+      .run(sessionId, sessionId, new Date(now).toISOString());
     store.db.exec('COMMIT');
   } catch (error) { store.db.exec('ROLLBACK'); throw error; }
   return { archived: true, previousStartedAt: current.startedAt };
@@ -536,26 +559,48 @@ export function startTaskPolicy(store, sessionId, input, now = Date.now()) {
   const inheritedStartMode = parentId ? taskStartMode(readTaskPolicy(store, parentId)) : null;
   // Compatibility field only. New tasks no longer choose a legacy start mode.
   const startMode = parentId ? inheritedStartMode : 'direct-test';
-  const toolCalls = input.budget?.toolCalls === undefined || input.budget?.toolCalls === null || input.budget?.toolCalls === ''
-    ? null
-    : integer(input.budget?.toolCalls, 'budget.toolCalls', 1, 10000);
+  const draftBudget = parentId ? {} : inheritedDraftBudget(store, sessionId);
+  const inheritedLimit = (key, min, max, label, fallback = null) => {
+    const saved = draftBudget[key];
+    const raw = input.budget?.[key];
+    if (saved !== undefined) {
+      if (saved === null) return null;
+      if (raw === undefined) return saved;
+      const value = integer(raw, label, min, max);
+      if (value > saved) throw new Error(`${label} 不能高于用户在桌面保存的上限 ${saved}`);
+      return value;
+    }
+    if (raw === undefined) return parentId ? null : fallback;
+    if (raw === null || raw === '') return null;
+    return integer(raw, label, min, max);
+  };
+  const defaultToolCalls = isProject ? null : 60;
+  const defaultMinutes = isProject ? null : 15;
+  const defaultModelCalls = isProject ? null : 48;
+  const toolCalls = inheritedLimit('toolCalls', 1, 10000, 'budget.toolCalls', defaultToolCalls);
   const discoveryCalls = 0;
   // Optional hard cap for opaque traffic channels. null means "no extra framework cap";
   // tool calls and actual host limits still apply. A value (including 0) is an explicit user cap.
   const parentLimit = parentId ? readTaskPolicy(store, parentId).budget.unmeteredToolCalls ?? null : null;
-  const rawUnmetered = input.budget?.unmeteredToolCalls;
-  const unmeteredToolCalls = rawUnmetered === undefined || rawUnmetered === null || rawUnmetered === ''
-    ? parentLimit
-    : integer(rawUnmetered, 'budget.unmeteredToolCalls', 0, 1000);
+  const unmeteredToolCalls = inheritedLimit('unmeteredToolCalls', 0, 1000, 'budget.unmeteredToolCalls');
   if (parentId && Number.isInteger(unmeteredToolCalls) && Number.isInteger(parentLimit) && unmeteredToolCalls > parentLimit)
     throw new Error('子代理不能提高主任务的未计量流量额度');
-  const minutes = input.budget?.minutes === undefined ? null : integer(input.budget.minutes, 'budget.minutes', 1, 10080);
-  const modelLimits=Object.fromEntries(['modelCalls','tokens'].filter(key=>input.budget?.[key]!==undefined)
-    .map(key=>[key,integer(input.budget[key],'budget.'+key,1,key==='modelCalls'?10000:1000000000000)]));
-  if(parentId && Object.entries(modelLimits).some(([key,value])=>value!==readTaskPolicy(store,parentId)?.budget[key]))
-    throw Error('子代理不能更改主任务共享模型额度');
+  const minutes = inheritedLimit('minutes', 1, 10080, 'budget.minutes', defaultMinutes);
+  const parentModelBudget = parentId ? readTaskPolicy(store, parentId)?.budget || {} : null;
+  const modelLimits = Object.fromEntries(['modelCalls', 'tokens'].map(key => {
+    const value = inheritedLimit(key, 1, key === 'modelCalls' ? 10000 : 1000000000000, 'budget.' + key,
+      key === 'modelCalls' ? defaultModelCalls : null);
+    if (!parentId) return [key, value];
+    const inherited = parentModelBudget[key] ?? null;
+    const supplied = input.budget?.[key];
+    if (supplied !== undefined && supplied !== null && supplied !== ''
+      && Number(supplied) !== inherited)
+      throw Error('子代理不能更改主任务共享模型额度');
+    return [key, inherited];
+  }));
   const question = input.question === undefined ? '' : boundedText(input.question, 'question', 64000);
-  const workerLimit = integer(input.budget?.workers ?? choice?.workers ?? 0, 'budget.workers', 0, MAX_SITE_WORKERS);
+  const workerFallback = parentId || isProject ? 0 : 2;
+  const workerLimit = integer(input.budget?.workers ?? choice?.workers ?? workerFallback, 'budget.workers', 0, MAX_SITE_WORKERS);
   if (parentId && workerLimit !== 0) throw Error('子代理不能再派子代理');
   if (choice && workerLimit > choice.workers) throw new Error('不能提高桌面已选择的子代理上限');
   const recordedParent = store.db.prepare('SELECT parent_session FROM site_workers WHERE child_id=?').get(sessionId)?.parent_session;
@@ -565,6 +610,14 @@ export function startTaskPolicy(store, sessionId, input, now = Date.now()) {
   if (parentSession && flow.kind !== 'single') throw new Error('子代理不能开启独立衔接流程');
   // 动作限制沿用桌面选择；子代理、基线复查与恢复任务都遵守主任务的同一份限制。
   const parentPolicy = parentSession ? readTaskPolicy(store, parentSession) : null;
+  const inheritedConcurrency = parentPolicy?.modelConcurrency ?? draftBudget.modelConcurrency ?? null;
+  const requestedConcurrency = input.modelConcurrency ?? input.budget?.modelConcurrency;
+  const modelConcurrency = requestedConcurrency === undefined || requestedConcurrency === null || requestedConcurrency === ''
+    ? inheritedConcurrency
+    : integer(requestedConcurrency, 'modelConcurrency', 1, 16);
+  if (parentPolicy && Number.isInteger(inheritedConcurrency) && Number.isInteger(modelConcurrency)
+    && modelConcurrency > inheritedConcurrency)
+    throw new Error('子代理不能提高主任务的本地模型并发');
   const projectChoice = isProject ? chosenTaskOptions(store, sessionId) : null;
   const explicitAllowedOrigins = fileOnly ? []
     : parentSession ? normalizeAllowedOrigins(parentPolicy?.allowedOrigins)
@@ -611,8 +664,9 @@ export function startTaskPolicy(store, sessionId, input, now = Date.now()) {
     ...(fileOnly ? { fileOnly: true } : {}),
     ...(parentSession ? { parentRound: readTaskPolicy(store, parentSession)?.startedAt } : {}),
     ...(input.purposeTask === true ? { purposeTask: true } : {}),
-    budget: { toolCalls, discoveryCalls, unmeteredToolCalls,
-      unmeteredExplicit: rawUnmetered !== undefined && rawUnmetered !== null && rawUnmetered !== '',
+    modelConcurrency,
+    budget: { minutes, toolCalls, discoveryCalls, unmeteredToolCalls,
+      unmeteredExplicit: Number.isInteger(unmeteredToolCalls),
       deadline: minutes === null ? null : now + minutes * 60000, ...modelLimits },
     used: { toolCalls: 0, discoveryCalls: 0, unmeteredToolCalls: 0 }, startedAt: now, cancelled: false, planComplete: false, queueComplete: false });
   });
@@ -742,6 +796,7 @@ export function setTaskActionLimits(store, sessionId, input, source) {
     requestConcurrency: input?.requestConcurrency === undefined ? normalizeRequestConcurrency(previous.requestConcurrency) : normalizeRequestConcurrency(input.requestConcurrency) };
   store.db.prepare('INSERT INTO task_flow_choice(session_id,record) VALUES(?,?) ON CONFLICT(session_id) DO UPDATE SET record=excluded.record')
     .run(sessionId, JSON.stringify(choice));
+  if (JSON.stringify(previous || {}) !== JSON.stringify(choice)) bumpSettingsRevision(store, sessionId);
   return choice;
 }
 export function setTaskWorkers(store, sessionId, workers, source) {
@@ -749,10 +804,9 @@ export function setTaskWorkers(store, sessionId, workers, source) {
   const policy = readTaskPolicy(store, sessionId);
   if (!policy || policy.parentSession) throw Error('only a main task can change worker limits');
   const limit = integer(workers, 'workers', 0, MAX_SITE_WORKERS);
-  const active = ownedPurposeTasks(store, sessionId).filter(row => row.activationState !== 'released').length
-    + store.db.prepare('SELECT record FROM site_workers WHERE parent_session=?').all(sessionId)
-      .filter(row => parseRowRecord(row, { table: 'site_workers', key: 'parent_session', id: sessionId }).state !== 'released').length;
-  if (limit < active) throw Error('当前有'+active+'个子代理占用名额，请在任务详情中先关闭，再降低上限');
+  // Lowering the cap stops future dispatch only. Existing helpers keep their
+  // identity and can be stopped individually; saving a preference must never
+  // terminate them or the main task.
   return write(store, sessionId, { ...policy, workerLimit: limit, budget: { ...policy.budget, workers: limit } });
 }
 
@@ -1126,6 +1180,7 @@ export function taskPolicyStatus(store, sessionId, now = Date.now()) {
     observationExhausted: policy.mode === '0day' && !ready && policy.used.discoveryCalls >= policy.budget.discoveryCalls,
     reviewedReproducedFindings: findings.length };
 }
+
 export function takeTaskContinuation(store, sessionId) {
   store.db.exec('BEGIN IMMEDIATE');
   try {
@@ -1386,6 +1441,11 @@ export function taskExecutionGuard(store, sessionId, name, now = Date.now(), { o
         || (choice.mode && modes.has(choice.mode) ? choice.mode : 'regular');
       const target = candidateUrlsFromArgs(args).find(raw =>
         choice.scopeTerms?.include?.some(term => taskTermAllowsUrl(term, raw))) || choice.target || candidateUrlsFromArgs(args)[0] || '';
+      // 本地读取（git show、组件 observe、资料读取）不能先建立一个空目标策略；
+      // 否则之后真正的目标请求会被范围守卫拒绝，而且模型无法把目标补进同一任务。
+      // 只有带目标地址的动作或明确的目标流量工具才开启任务边界。
+      const targetTraffic = isTargetTrafficTool(store, sessionId, name, args, null);
+      if (!target && !targetTraffic) return undefined;
       startTaskPolicy(store, sessionId, {
         mode: selectedMode,
         scenario: choice.scenario === 'project' ? 'pentest' : (choice.scenario || 'pentest'),

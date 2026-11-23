@@ -165,6 +165,8 @@ try{
     for(const name of names)assert.match(taskExecutionGuard(store,'ledger-only',name),/retired_tool/);
     assert.equal(readTaskPolicy(store,'ledger-only'),null);
     assert.match(taskExecutionGuard(store,'ledger-only','httpx_probe'),/target_scope_missing/);
+    assert.equal(taskExecutionGuard(store,'ledger-only','mcp_call',Date.now(),{args:{server:'yakit',tool:'auto_decode',args:{text:'aGVsbG8='}}}),undefined,
+      'a pure offline MCP codec must not require a target scope');
     assert.equal(readTaskPolicy(store,'ledger-only').question,'按当前会话中的用户请求执行');
     parent('ledger-stopped');updateTaskProgress(store,'ledger-stopped',{cancelled:true});
     const before=readTaskPolicy(store,'ledger-stopped');
